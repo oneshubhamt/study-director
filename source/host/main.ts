@@ -1184,7 +1184,7 @@ const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<RichT
   mutationActive:()=>RecoveryAssetMaintenancePause.active()||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
   collect:(operation,options)=>AttachmentStorage.collect(operation,options),
   readRestoreJournal:()=>AppData.restoreJournal.read(),
-  readLibraryClearJournal:()=>AppData.libraryClearJournal.read(),
+  readLibraryClearJournal:async()=>{const value=await AppData.libraryClearJournal.read();return value&&typeof value==='object'&&'state' in value?value as {state:unknown}:null;},
   liveFields:()=>[...document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection')],
   getReferenceRevision:()=>richAssetReferenceRevision,
   getDatasetRevision:async()=>{const daily=await AppData.dailyRecords.datasetRevision(),epoch=await AppData.mutationEpoch.read();return daily===null||!epoch?.token?null:daily+'|'+epoch.token;},
@@ -1266,8 +1266,9 @@ function handleRepositoryDatasetRevisionChanged(){
   if(!document.getElementById('pane-insights')?.classList.contains('on'))return;
   setTimeout(()=>{if(document.getElementById('pane-insights')?.classList.contains('on'))UiTabRegistry.renderTab('insights');},0);
 }
-function persistedActiveSessionUnfinished(session:ActiveSession|null){
-  if(!session||session.deleted===true||!['active','suspended'].includes(session.status||'active'))return false;
+function persistedActiveSessionUnfinished(value:unknown){
+  const session=ActiveSessionCodec.sanitizeCurrent(value);
+  if(!session||!['active','suspended'].includes(session.status||'active'))return false;
   const snapshot=activeSessionSnapshot(session);
   const draft=parseScheduleDraftText(String(session.scheduleText||''));
   if(!snapshot||!draft.ok||!draft.parsed.length)return false;
@@ -1580,11 +1581,11 @@ function saveQuoteDraft(){
   try{const el=document.getElementById('quote-input');if(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement){const value=clampText(el.value,APP_LIMITS.maxQuoteChars);if(el.value!==value)el.value=value;persistProtectedPreferences({quote:value});}}catch(e){}
 }
 const StartupDraftHydration=StartupHostModule.createDraftHydration({document,hydratePlan:()=>PlanData.hydrate(),hydratePreferences:options=>hydrateProtectedPreferences(options),
- capture:AppDiagnostics.capture,markStorageError:markStorageHealthError,projectPlan:options=>PlanRuntime.hydrate(options),renderSavedPlans:()=>PlanRuntime.savedPlans.render(),quote:()=>protectedPreferencesState.quote,quoteChanged:options=>onQuoteChange(options)});
+ capture:AppDiagnostics.capture,markStorageError:markStorageHealthError,projectPlan:options=>PlanRuntime.hydrate(options),renderSavedPlans:()=>PlanRuntime.savedPlans.render(),quote:()=>protectedPreferencesState.quote||'',quoteChanged:options=>onQuoteChange(options)});
 async function hydrateSavedDrafts(options:Parameters<typeof StartupDraftHydration>[0]={}){return StartupDraftHydration(options);}
 type UserDefaultOverrides=Partial<Pick<PersonalPreferences,'studentName'|'practiceTargetMs'|'practiceCueMode'>>;
 function userDefaultsPayload(overrides:UserDefaultOverrides={}){
-  const saved=readUserDefaults()??{},has=(key:keyof UserDefaultOverrides)=>Object.prototype.hasOwnProperty.call(overrides,key);
+  const saved:Partial<NonNullable<ReturnType<typeof readUserDefaults>>>=readUserDefaults()??{},has=(key:keyof UserDefaultOverrides)=>Object.prototype.hasOwnProperty.call(overrides,key);
   const studentName=normalizeStudentName(has('studentName')?overrides.studentName:saved.studentName||getStudentNameFromDisplay());
   const practiceTargetMs=validPracticeMs(has('practiceTargetMs')?overrides.practiceTargetMs:saved.practiceTargetMs,{min:APP_LIMITS.minPracticeTargetMs});
   const practiceCueMode=sanitizePracticeCueMode(has('practiceCueMode')?overrides.practiceCueMode:saved.practiceCueMode);
@@ -1625,7 +1626,7 @@ function scheduleSyncStatus(){
 }
 function connectDriveForProfile(){return SyncStatusHost?SyncStatusHost.connectDriveForProfile():false;}
 function endDriveConnectCard(){return SyncStatusHost?SyncStatusHost.endConnectCard():false;}
-function syncStatusAction(event){return SyncStatusHost?SyncStatusHost.action(event):Promise.resolve(false);}
+function syncStatusAction(event:Parameters<ReturnType<typeof SyncStatusHostModule.createController>['action']>[0]){return SyncStatusHost?SyncStatusHost.action(event):Promise.resolve(false);}
 function renderProfilePanel(...args:Parameters<typeof ProfileViews.renderProfilePanel>){return ProfileViews.renderProfilePanel(...args);}
 function renderProfile(...args:Parameters<typeof ProfileViews.renderProfile>){return ProfileViews.renderProfile(...args);}
 function reportProfileActionError(...args:Parameters<typeof ProfileViews.reportProfileActionError>){return ProfileViews.reportProfileActionError(...args);}
@@ -1827,8 +1828,8 @@ function updateHeaderInfo(){
 /* SHELL, PLUGINS, AND TABS */
 type NavigationUiInput=Parameters<typeof FoundationHostModule.createNavigation>[0];
 const {NAV_HORIZONTAL_MEDIA_QUERY,preferredScrollBehavior,UiTabRegistry,presentTabCommit,prepareTabDeparture,commitTabView,waitForTabReady,goTab}=FoundationHostModule.createNavigation(Object.freeze<NavigationUiInput>({document,window,clampText,controller:()=>NavigationController,
-  library:()=>Object.freeze({settleDiary:()=>LibraryView.settleDiary(),deactivate:options=>LibraryView.deactivate(options),activate:options=>LibraryView.activate(options)}),
-  review:()=>Object.freeze({deactivate:()=>ReviewView.deactivate(),activate:options=>ReviewView.activate(options)}),
+  library:()=>Object.freeze({settleDiary:()=>LibraryView.settleDiary(),deactivate:options=>LibraryView.deactivate(options),activate:options=>LibraryView.activate(options.restoreScroll===undefined?{immediateScroll:options.immediateScroll}:{immediateScroll:options.immediateScroll,restoreScroll:options.restoreScroll})}),
+  review:()=>Object.freeze({deactivate:()=>ReviewView.deactivate(),activate:options=>ReviewView.activate(options.restoreScroll===undefined?{immediateScroll:options.immediateScroll}:{immediateScroll:options.immediateScroll,restoreScroll:options.restoreScroll})}),
   attachments:()=>Object.freeze({close:()=>requireAttachmentLibrary().close(),refresh:()=>requireAttachmentLibrary().refresh()}),reviewEditor:()=>ReviewEditor,
   flushPendingReviewSave:(...args)=>flushPendingReviewSave(...args),setStatus:(...args)=>setStatus(...args),clearPreview:tab=>PreviewRuntime.clearExcept(tab),refreshPnote:(...args)=>refreshPnote(...args),updateCD:(...args)=>updateCD(...args),isLiveTrackableTimer:(...args)=>isLiveTrackableTimer(...args),refreshExecuteIdleDisplay:(...args)=>refreshExecuteIdleDisplay(...args),
   paused:()=>TimerState.paused,updateBreakMeter:(...args)=>updateBreakMeter(...args),renderPacer:()=>PracticePacer.render(),startTimerPresentation:()=>TimerPresentation.start(),stopTimerPresentation:()=>TimerPresentation.stop(),
@@ -1926,7 +1927,7 @@ function shouldIgnoreFullscreenDblClick(target:Element|null){
   return false;
 }
 function handleFullscreenDblClick(ev:MouseEvent){
-  if((window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches)||!appCanMutate()||shouldIgnoreFullscreenDblClick(ev.target))return;
+  if((window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches)||!appCanMutate()||shouldIgnoreFullscreenDblClick(ev.target instanceof Element?ev.target:null))return;
   ev.preventDefault();
   toggleFS();
 }
@@ -1938,7 +1939,7 @@ function clockHMS(d=new Date()){
 }
 function timeLabelFromIso(iso:unknown):string|null{
   if(!iso)return null;
-  try{return clockHM(new Date(iso));}catch(e){return null;}
+  try{return clockHM(new Date(String(iso)));}catch(e){return null;}
 }
 function shortTaskLabel(t:Task|undefined){
   if(!t)return '—';

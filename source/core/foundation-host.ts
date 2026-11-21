@@ -95,7 +95,7 @@ function clampText(value:unknown,max=APP_LIMITS.maxNoteChars){
   return text.length>limit?text.slice(0,limit):text;
 }
 function clampArray<T>(arr:readonly T[]|null|undefined,max:number){return Array.isArray(arr)?(arr as readonly T[]).slice(0,Math.max(0,Number(max)||0)):[];}
-function wipeObject(obj:Record<string,unknown>|null|undefined){Object.keys(obj||{}).forEach(k=>delete obj![k]);}
+function wipeObject(obj:object|null|undefined){if(!obj)return;Object.keys(obj).forEach(key=>{Reflect.deleteProperty(obj,key);});}
 function boundedInt<F extends number|null=number>(value:unknown,options:Partial<BoundedOptions<F>>={}):number|F{
   const min=options.min??0,max=options.max??Number.MAX_SAFE_INTEGER,fallback=options.fallback;
   const n=Number(value);

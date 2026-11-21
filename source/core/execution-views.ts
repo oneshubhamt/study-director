@@ -558,7 +558,7 @@ function updateSessionControls(){
 }
 function timerMetricElements(){return cachedElements(elementCaches.metrics,{actual:'timer-actual-focus',block:'timer-block-focus'});}
 function updateTimerFocusMetrics(metrics:TimerFocusMetrics|null=null){
-  const evidence=metrics?.evidence||SessionEvidenceGateway.snapshot({includeRecords:false});
+  const evidence=metrics?.evidence||SessionEvidenceGateway.snapshot({includeRecords:false}) as TimerViewEvidence;
   const summary=metrics||calculateReviewMetrics(evidence);
   const liveSnapshot=evidence.actualTime||{},els=timerMetricElements();
   setElementText(els['actual'],durationLabel(summary.actualFocusMinutes));

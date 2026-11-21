@@ -14,6 +14,7 @@ import {
 } from './typography';
 import {looksLikeMarkdown,markdownDocument,markdownToHtml} from './markdown';
 import type {MarkdownNode} from './markdown';
+import type {OverlayHandle,OverlayOptions} from '../types/workspace.ts';
 import {normalizeTag,renameTagInInline,renameTagInText,tagMatches,tagsInText} from './tags';
 declare const __SD_WORDGARD_VERSION__:string;
 import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
@@ -38,14 +39,14 @@ type AttachmentUploadDecorationState={pos:number;widget:Widget<HTMLElement>};
 export interface AttachmentPort{upload(file:File,options?:AttachmentUploadOptions):Promise<{id:string;name:string;type:string}>}
 export interface WorkspaceHistoryDescriptor{kind:'focus'|'audio';token:string;key?:string}
 export interface WorkspaceHistoryOptions{kind:'focus'|'audio';key?:string;token?:string|undefined;reopen?:(descriptor:WorkspaceHistoryDescriptor)=>boolean|Promise<boolean>;valid?:()=>boolean}
-export interface WorkspaceOverlayHandle{dialog:HTMLDialogElement;close():boolean;historyToken?:string;forget?:()=>boolean}
-export interface WorkspaceOverlayPort{open(options:{label:string;content:HTMLElement;headerContent?:HTMLElement;className?:string;closeLabel?:string;onBeforeClose?:()=>void;onAfterClose?:()=>void;history?:WorkspaceHistoryOptions}):WorkspaceOverlayHandle|null}
+export type WorkspaceOverlayHandle=OverlayHandle;
+export interface WorkspaceOverlayPort{open(options:OverlayOptions):WorkspaceOverlayHandle|null}
 // Notes, for links to them: the picker, a note's title (null once deleted) and
 // opening one. Tags: showing the notes with one (passive when the click only
 // placed the caret) and the # suggestions, which resolve to the name to write
 // after the # and what follows it.
 export interface TagChoice{text:string;end:string}
-export interface NotePort{pick():Promise<{id:string;label:string}|null>;title(id:string):string|null;open(id:string):void;tag?(name:string,passive:boolean):void;pickTag?(options:{query:string;anchor:{left:number;top:number;bottom:number}|null}):Promise<TagChoice|null>}
+export interface NotePort{pick():Promise<{id:string;label:string}|null>;title(id:string):string|null;open(id:string):void;tag?(name:string,passive:boolean):void;pickTag?(options:{query:string;anchor:{left:number;right:number;top:number;bottom:number}|null}):Promise<TagChoice|null>}
 export interface MountOptions{notes?:NotePort;field:HTMLTextAreaElement;label:string;initialValue:string;maxWords:number;maxBytes:number;assets:AssetStore;attachments?:AttachmentPort;createImageWorker?:()=>Worker;workspaceOverlay?:WorkspaceOverlayPort;surface?:'default'|'reflection'|'execute-note'|'note'|'reconciliation';focusOnMount?:boolean;allowAssetInsert?:boolean;readOnly?:boolean;onAssetBusy?:(busy:boolean)=>void;onStatus?:(message:string)=>void;onDerivedText?:(canonical:string,plain:string)=>void}
 export interface RenderOptions{notes?:NotePort;container:HTMLElement;value:string;label:string;assets:AssetStore;workspaceOverlay?:WorkspaceOverlayPort;eager?:boolean}
 export interface MountedRichTextEditor{getValue():string;setValue(value:string):boolean;setTransientRanges(ranges:readonly MergeRange[]):void;search(query:string,onClear?:()=>void):number;stepSearch(direction:1|-1):{index:number;count:number};clearSearch():void;focus():void;flush():void;destroy():Promise<void>}
@@ -688,8 +689,8 @@ async function mountRichTextEditor(options:MountOptions):Promise<MountedRichText
   // provided the text there has not changed meanwhile.
   const suggestTag=async(from:number,letter:string)=>{
     const notes=options.notes;if(!notes?.pickTag||readOnly||destroyed)return;
-    let anchor:{left:number;top:number;bottom:number}|null=null;
-    try{const selection=window.getSelection(),rect=selection&&selection.rangeCount?selection.getRangeAt(0).getBoundingClientRect():null;if(rect&&(rect.width||rect.height))anchor={left:rect.left,top:rect.top,bottom:rect.bottom}}catch{}
+    let anchor:{left:number;right:number;top:number;bottom:number}|null=null;
+    try{const selection=window.getSelection(),rect=selection&&selection.rangeCount?selection.getRangeAt(0).getBoundingClientRect():null;if(rect&&(rect.width||rect.height))anchor={left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom}}catch{}
     const choice=await notes.pickTag({query:letter,anchor});if(destroyed)return;editor.focus();
     if(!choice||(choice.text===letter&&!choice.end))return;
     const state=editor.state;if(from<1||from+letter.length>state.doc.contentLength)return;

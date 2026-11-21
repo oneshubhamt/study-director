@@ -5,9 +5,11 @@ import type {Task,ScheduleModel,TimeModel} from './domain.ts';
 import type {NoticeCoordinator} from '../source/core/notice-coordinator.ts';
 import type {PlanController} from './plan.ts';
 import type {TimerEngineInput} from './timer-engine.ts';
+import type {ReviewEvidence,ReviewMetrics} from './review.ts';
 export type ExecuteIdleOptions={title?:string;message?:string;force?:boolean};
-export type TimerViewEvidence=ReturnType<ExecutionRuntime['SessionEvidenceGateway']['snapshot']>;
-export type TimerFocusMetrics={evidence:TimerViewEvidence;actualFocusMinutes:number};
+export type TimerViewEvidence=ReviewEvidence;
+export type TimerFocusMetrics=Pick<ReviewMetrics,'evidence'|'actualFocusMinutes'>;
+export type ExecutionRenderKey='schedule'|'badges'|'header'|'realtime'|'recovery';
 export type RecoveryShiftPlan={idx:number;nowEff:number;adjustments:{idx:number;startMin:number;endMin:number}[];overflow:number[];shifted:number;firstStart:number|null};
 export type RecoveryCarryItem={idx:number;t:Task;pct:number;suggested:number;remainingUnits:string|number;note:string;reason:string};
 export interface ExecutionViewInput{
@@ -21,7 +23,7 @@ export interface ExecutionViewInput{
  NativeCapabilities:{syncWake(options:{forceCycle:boolean}):PromiseLike<unknown>}|null;Interactions:SessionActionInput['Interactions'];
  isTrackableBlock:ScheduleModel['isTrackable'];isWorkBlock:ScheduleModel['isWork'];isFixedBlock:ScheduleModel['isFixed'];isSupportBlock:ScheduleModel['isSupport'];
  shortTaskLabel(task:Task):string;clockHMS(now:Date):string;setElementText(element:HTMLElement|null|undefined,value:unknown):unknown;
- textEl<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:unknown):HTMLElementTagNameMap[K];requestRender(...surfaces:string[]):unknown;appCanMutate():boolean;
+ textEl<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:unknown):HTMLElementTagNameMap[K];requestRender(...surfaces:ExecutionRenderKey[]):unknown;appCanMutate():boolean;
  fmtS(value:number):string;studyMinuteToHHMM:TimeModel['studyMinuteToHHMM'];invalidateScheduleDerived(options:{adjustments?:boolean;render?:boolean}):unknown;
  clearFutureUntouchedProgress():unknown;getTaskCompletion(index:number):number;taskTargetValue:ScheduleModel['targetValue'];
  applicableNotesForTask:TimerEngineInput['ports']['reviewEvidence']['applicableNotesForTask'];
