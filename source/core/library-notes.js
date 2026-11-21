@@ -265,7 +265,6 @@ registry.define('library-notes',1,modules=>{
     }
     // A note's actions, for its ⋯ menu and the list's right-click menu. Each
     // runs on the note it was opened for; one that cannot be used says why.
-    // Support Activities keeps its name and is never deleted, so it has none.
     function noteActions(entry){
       const state=noteState(entry),writable=canMutate(),stored=state.stored,unwritten=entry.ephemeral?'Nothing written yet':state.kind==='parent'?'It has nothing of its own':'Nothing written yet';
       const open=run=>()=>{if(entry.key!==selectedNoteKey||selectedTrashKey)selectNote(entry.key);return run();};
@@ -282,8 +281,8 @@ registry.define('library-notes',1,modules=>{
       ].filter(action=>!entry.support||SUPPORT_NOTE_ACTIONS.has(action.id));
     }
     // Support Activities keeps its name and place and is never deleted: its
-    // menu holds what applies to the shared note.
-    const SUPPORT_NOTE_ACTIONS=new Set(['library-note-export-one','library-note-print']);
+    // menu holds what applies to the shared note, notes inside it included.
+    const SUPPORT_NOTE_ACTIONS=new Set(['library-note-new-inside','library-note-export-one','library-note-print']);
     // A deleted note's actions, the same as its Restore and Delete forever.
     function trashActions(item){
       const readOnly=canMutate()?'':'Read-only in this tab';
@@ -310,7 +309,7 @@ registry.define('library-notes',1,modules=>{
     function focusFirstMenuItem(menu){requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});}
     function noteActionsMenu(entry){
       const trigger=textEl('button','library-note-tool ui-btn','⋯');trigger.type='button';trigger.id='library-note-actions';
-      trigger.setAttribute('aria-label',`Actions for ${entry.label}`);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.title='Rename, move or delete this note';
+      trigger.setAttribute('aria-label',`Actions for ${entry.label}`);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.title=entry.support?'New note inside, export or print':'Rename, move or delete this note';
       const menu=document.createElement('div');menu.className='library-note-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label',`Actions for ${entry.label}`);
       const controller=createAnchoredPopover(menu,{align:'end',onClose:()=>trigger.setAttribute('aria-expanded','false')});
       trigger.addEventListener('click',event=>{
@@ -596,7 +595,7 @@ registry.define('library-notes',1,modules=>{
         const syncMessage=writable?'Synced':'Read-only in this tab';
         const sync=textEl('div',`note-sync ui-label${writable?'':' idle'}`,writable?'✓':'—');
         sync.dataset.areaKey=entry.key;sync.setAttribute('role','status');sync.setAttribute('aria-atomic','true');sync.setAttribute('aria-label',syncMessage);sync.tabIndex=0;headTools.append(sync);
-        if(writable&&!entry.support)headTools.append(...noteActionsMenu(entry));
+        if(writable)headTools.append(...noteActionsMenu(entry));
       }
       head.append(noteViewBackButton(),copy,headTools);
       const inherited=document.createElement('div');renderInherited(inherited,entry.key,false,{collapsible:true});
@@ -841,7 +840,7 @@ registry.define('library-notes',1,modules=>{
     // level or inside the open note.
     async function importNotes(files){
       const list=[...(files||[])];if(!list.length||!canMutate())return false;
-      const open=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support&&!entry.ephemeral)||null;
+      const open=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.ephemeral)||null;
       let parent='';
       if(open){
         const where=await choose({title:list.length===1?'Import 1 file':`Import ${list.length} files`,message:'Each file becomes a new note named after it.',cancelLabel:'Cancel',choices:[
@@ -859,11 +858,11 @@ registry.define('library-notes',1,modules=>{
       return made.length>0;
     }
     // Where a note can go, for New and Move: Top level, then every note in the
-    // list's order (except Support Activities and anything excluded), searched
-    // by every word typed. Returns its element and the chosen place's title
-    // key and label ('' for Top level).
+    // list's order (except anything excluded), searched by every word typed.
+    // Returns its element and the chosen place's title key and label ('' for
+    // Top level).
     function notePlacePicker({exclude=()=>false,selected='',onChange=()=>{},label='Place'}={}){
-      const places=[{key:'',label:'',top:true},...noteEntries().filter(entry=>!entry.support&&!exclude(entry))];
+      const places=[{key:'',label:'',top:true},...noteEntries().filter(entry=>!exclude(entry))];
       let chosen=places.find(place=>place.key===selected)||places[0];
       const root=document.createElement('div');root.className='note-place';
       const search=document.createElement('input');search.type='search';search.className='note-place-search ui-field';search.placeholder='Find a place…';search.setAttribute('aria-label',`Search: ${label}`);search.autocomplete='off';
@@ -901,9 +900,7 @@ registry.define('library-notes',1,modules=>{
         setNotesStatus('Notes are at their note limit. Delete a note to make room.',{error:true});
         return false;
       }
-      // Support Activities is one shared note, not a folder: new notes go
-      // inside other notes only.
-      const selected=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support)||null;
+      const selected=noteEntries().find(entry=>entry.key===selectedNoteKey)||null;
       // The name first; the place starts as the open note and Change picks
       // another from the same list Move uses.
       let place=selected?{key:selected.key,label:selected.label}:{key:'',label:''},picker=null;
@@ -1045,30 +1042,37 @@ registry.define('library-notes',1,modules=>{
         const target=destination();if(!target||target.key===entry.key)return [];
         return [entry,...family].map(item=>entries.find(other=>other.key===target.key+item.key.slice(entry.key.length))).filter(other=>other&&other.id&&other.hasNote&&!other.key.startsWith(prefix)&&other.key!==entry.key);
       };
+      // Inside Support Activities the plans keep their Area (no work block's
+      // Area goes there), so the tick box to rename it in them is hidden.
       const result=await requestInput({
         title:`Move or rename “${leaf}”`,inputLabel:'Name',defaultValue:leaf,maxLength:160,
         content:api=>{
           const label=()=>clashes().length?'Merge':place&&!place.top===!!parentKey&&(place.key||'')===parentKey?'Rename':'Move';
-          const picker=notePlacePicker({label:'Move to',selected:parentKey,exclude:item=>item.key===entry.key||item.key.startsWith(prefix),onChange:chosen=>{place=chosen;api.refresh();api.setConfirmLabel(label());}});
-          place=picker.chosen();api.input?.addEventListener('input',()=>{name=api.input.value;api.setConfirmLabel(label());});
-          requestAnimationFrame(()=>picker.focus());
-          const wrap=document.createElement('div');wrap.className='note-place-new';wrap.append(textEl('div','interaction-field ui-body','Place'),picker.element);return wrap;
+          const wrap=document.createElement('div');wrap.className='note-place-new';
+          const planBox=()=>{const checks=wrap.parentElement?.querySelector('.interaction-checks');if(checks)checks.hidden=!!destination()?.reservedArea;};
+          const picker=notePlacePicker({label:'Move to',selected:parentKey,exclude:item=>item.key===entry.key||item.key.startsWith(prefix),onChange:chosen=>{place=chosen;api.refresh();api.setConfirmLabel(label());planBox();}});
+          place=picker.chosen();api.input?.addEventListener('input',()=>{name=api.input.value;api.setConfirmLabel(label());planBox();});
+          requestAnimationFrame(()=>{planBox();picker.focus();});
+          wrap.append(textEl('div','interaction-field ui-body','Place'),picker.element);return wrap;
         },
         preview:()=>{
           const target=destination();if(!target)return name.trim()?'Choose a place.':'Give it a name.';
           if(target.reserved)return '“Support Activities” is the shared note for support blocks. Choose another name.';
+          if(target.reservedArea&&state.kind==='plan')return AREA_INSIDE_SUPPORT;
           if(target.key===entry.key&&target.label===entry.label)return 'It is already here.';
           const found=clashes(),path=target.label.replace(/\s*>\s*/g,' › '),carried=nested?`, with ${nested} nested ${nested===1?'note':'notes'}`:'';
           if(found.length)return `“${found[0].label.replace(/\s*>\s*/g,' › ')}” already exists${found.length>1?`, with ${found.length-1} more of the same names inside`:''}. Moving adds this text to the end of it.`;
-          return `Becomes ${path}${carried}.`;
+          return `Becomes ${path}${carried}.${target.reservedArea&&where?` ${capitalized(where)} ${plural(where)?'keep':'keeps'} the Area “${entry.label}”: a work block’s Area can’t be inside Support Activities.`:''}`;
         },
-        validate:()=>{const target=destination();return !name.trim()?'Give it a name.':!target?'Use > only to separate nested notes.':target.reserved?'“Support Activities” is the shared note for support blocks. Choose another name.':target.key===entry.key&&target.label===entry.label?'Nothing to change. Choose another place or name.':'';},
+        validate:()=>{const target=destination();return !name.trim()?'Give it a name.':!target?'Use > only to separate nested notes.':target.reserved?'“Support Activities” is the shared note for support blocks. Choose another name.':target.reservedArea&&state.kind==='plan'?AREA_INSIDE_SUPPORT:target.key===entry.key&&target.label===entry.label?'Nothing to change. Choose another place or name.':'';},
         checkbox:where&&state.kind!=='plan'&&!entry.ephemeral?{label:`Also rename it in ${where}`,description:'Unticked, those blocks keep the old name and start a new note under it.',defaultChecked:true}:null,
         confirmLabel:'Move',cancelLabel:'Cancel'
       });
       if(!result||!canMutate()||!place)return false;
       return applyNoteRename(entry,joinPath(place.top?null:place,name.trim()),{inPlans:!where||state.kind==='plan'||result.checked===true,mergeAgreed:clashes().length>0});
     }
+    const AREA_INSIDE_SUPPORT='This is an Area of today’s plan, and a work block’s Area can’t be inside Support Activities. Choose another place.';
+    const capitalized=text=>text.charAt(0).toUpperCase()+text.slice(1),plural=where=>where.includes(' and ')||/^\d/.test(where);
     // Where a note's Area is used: "today’s plan", "2 saved plans", or both.
     function planAreaPlaces(use){
       const parts=[use&&use.today?'today’s plan':'',use&&use.savedPlans?`${use.savedPlans===1?'a saved plan':`${use.savedPlans} saved plans`}`:''].filter(Boolean);
@@ -1091,6 +1095,10 @@ registry.define('library-notes',1,modules=>{
         return true;
       }
       const state=noteState(entry),where=planAreaPlaces(planAreaUse(entry.key));
+      // No work block's Area goes inside Support Activities: an Area with no
+      // note cannot move there, and a note that moves there leaves the plans
+      // on their Area.
+      if(identity.reservedArea){if(state.kind==='plan'){setNotesStatus(AREA_INSIDE_SUPPORT,{error:true});return false;}inPlans=false;}
       // An Area of today's plan with no note is renamed in the plans.
       if(state.kind==='plan'){inPlans=true;if(!where)return false;}
       const notice=notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',message:'Renaming the note…'});
@@ -1107,8 +1115,8 @@ registry.define('library-notes',1,modules=>{
           return false;
         }
         let plans='';
-        if(where&&inPlans){await renameAreaInPlans(entry.key,identity.label);plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} now ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the new name.`;}
-        else if(where)plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} still ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the old name.`;
+        if(where&&inPlans){await renameAreaInPlans(entry.key,identity.label);plans=` ${capitalized(where)} now ${plural(where)?'use':'uses'} the new name.`;}
+        else if(where)plans=` ${capitalized(where)} still ${plural(where)?'use':'uses'} the old name.`;
         selectedNoteKey=outcome.key;noteTree(noteEntries());expandNoteAncestors(outcome.key);renderNotes();
         const moved=outcome.moved.length-(state.kind==='parent'?0:1);
         const moving=noteParentPath(entry.label).toLowerCase()!==noteParentPath(identity.label).toLowerCase();

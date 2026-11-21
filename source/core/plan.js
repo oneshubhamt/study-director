@@ -11,7 +11,7 @@ registry.define('plan',1,()=>{
     configuration:freeze(['limits']),
     persistence:freeze(['lastError','readDraft','readLibrary','writeLibrary','writeDraft','reportDraftResult']),
     defaults:freeze(['active','applyStudentName','factory']),
-    domain:freeze(['clampText','fmtDur','fmtS','hasOngoingTaskNotes','isFixedBlock','isSupportBlock','isTrackableBlock','isWorkBlock','makeScheduleRow','normalizeScheduleKind','normalizeScheduleTarget','positiveMinutes','scheduleFingerprintForRows','scheduleToken','scheduleWarningsMessage','taskAreaKey','taskAreaValue','taskMeasureValue','taskTargetValue','noteTextForKey']),
+    domain:freeze(['clampText','fmtDur','fmtS','hasOngoingTaskNotes','isFixedBlock','isSupportBlock','isTrackableBlock','isWorkBlock','makeScheduleRow','normalizeScheduleKind','normalizeScheduleTarget','positiveMinutes','scheduleFingerprintForRows','scheduleToken','scheduleWarningsMessage','taskAreaKey','taskAreaValue','taskMeasureValue','taskTargetValue','noteTextForKey','reservedArea']),
     parser:freeze(['isCanonicalScheduleText','parseScheduleDraftText','scheduleTextFromRows']),
     clock:freeze(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso']),
     view:freeze(['document','on','textEl','updateRealTimeAwareness','window']),
@@ -42,7 +42,7 @@ registry.define('plan',1,()=>{
     const APP_LIMITS=ports.configuration.limits;
     const persistence=ports.persistence,notifications=ports.notifications;
     const DefaultStore=ports.defaults;
-    const {clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,scheduleToken,scheduleWarningsMessage,taskAreaKey,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey}=ports.domain;
+    const {clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,scheduleToken,scheduleWarningsMessage,taskAreaKey,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey,reservedArea}=ports.domain;
     const {isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}=ports.parser;
     const {clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}=ports.clock;
     const {document,on,textEl,updateRealTimeAwareness,window}=ports.view;
@@ -325,8 +325,20 @@ function firstActionableDraftError(draft){
   if(!draft.errors.length)return draft.message;
   return `${draft.kind==='timeline'?'⚠ Timeline error:':'⚠ Error:'} ${draft.errors[0]}`;
 }
-function createPlanDraftProjection(result=null){
-  const draft=immutableDraftResult(result||parseScheduleDraftText(getPlanDraftText()));
+// A work block's Area names its note, and "Support Activities" is the note
+// every support block shares: a plan being written cannot give a work block
+// that Area or one inside it. Support blocks open the shared note whatever
+// their Area, and fixed blocks have no notes. A session being restored keeps
+// what it has (checkAreas false), so a day is never lost to this rule.
+function refuseSupportAreas(draft){
+  if(!draft.ok)return draft;
+  const named=draft.parsed.filter(row=>isWorkBlock(row)&&reservedArea(taskAreaKey(row)));
+  if(!named.length)return draft;
+  const errors=freeze(named.map(row=>`“${row.name}” is a work block, so its Area can’t be “${taskAreaValue(row)}”: Support Activities is the note all support blocks share. Choose another Area, or make it a support block.`));
+  return freeze({ok:false,kind:'errors',message:'⚠ Errors: '+errors.slice(0,8).join(' · ')+(errors.length>8?' · …':''),parsed:freeze([]),errors,warnings:draft.warnings});
+}
+function createPlanDraftProjection(result=null,{checkAreas=true}={}){
+  const parsed=immutableDraftResult(result||parseScheduleDraftText(getPlanDraftText())),draft=checkAreas?refuseSupportAreas(parsed):parsed;
   const hasApplied=livePlan(),editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
   const status=draft.ok?'valid':draft.kind==='empty'||draft.kind==='no-tasks'?'empty':isIncompleteDraftResult(draft,hasRows)?'incomplete':'invalid';
   const draftMatchesApplied=hasApplied&&draft.ok&&draft.parsed.length>0&&
@@ -546,7 +558,7 @@ function applySchedule(options={}){
   const explicitSchedule=typeof opts.scheduleText==='string'?opts.scheduleText:null;
   const rawOriginal=explicitSchedule===null?getPlanDraftText():explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
-    ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
+    ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal),{checkAreas:explicitSchedule===null});
   const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
   const canApply=()=>
     (explicitSchedule!==null||ownership.canMutate())&&
@@ -1112,7 +1124,7 @@ const PlanDraftEditor=(()=>{
       return freeze({today:scheduleGateway.read().tasks.some(task=>areaMatches(task,from)),savedPlans:persistence.readLibrary().savedPlans.filter(plan=>renameAreaInText(plan.scheduleText,from,'x')!==null).length});
     }
     async function renameArea(fromTitle,toLabel){
-      const from=taskAreaKey({area:fromTitle}),label=String(toLabel||'').trim();if(!from||!label)return freeze({blocks:0,savedPlans:0});
+      const from=taskAreaKey({area:fromTitle}),label=String(toLabel||'').trim();if(!from||!label||reservedArea(taskAreaKey({area:label})))return freeze({blocks:0,savedPlans:0});
       const blocks=scheduleGateway.renameAreas(row=>renamedArea(row,from,label));
       if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});}
       if(lastAppliedScheduleText)lastAppliedScheduleText=renameAreaInText(lastAppliedScheduleText,from,label)??lastAppliedScheduleText;

@@ -121,7 +121,38 @@ try{
     const support=row('support activities'),supportRect=support.getBoundingClientRect();
     out.supportPrevented=!support.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:supportRect.left+40,clientY:supportRect.top+10}));
     menu=await until(()=>{const list=document.querySelector('.library-note-context-menu');return list&&!list.hidden&&list.querySelector('.library-note-menu-item')?list:null;});
-    out.supportMenu={label:menu.getAttribute('aria-label'),items:items(menu)};document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    out.supportMenu={label:menu.getAttribute('aria-label'),items:items(menu)};
+    // Notes inside Support Activities: New note inside from its menu; such a
+    // note has the ordinary menu. The open shared note has a ⋯ menu too.
+    menu.querySelector('#library-note-new-inside').click();box=await dialog();
+    const inside=box.querySelector('.interaction-input');inside.value='Gym log';inside.dispatchEvent(new Event('input',{bubbles:true}));
+    out.supportNew=box.querySelector('.interaction-preview').textContent;
+    box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(200);
+    out.supportNewOpen=document.querySelector('#library-notes-list .active')?.dataset.noteKey;
+    d.AppData.notes.update('support activities > gym log','Support Activities > Gym log','Sets and reps','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(200);
+    out.supportChild={after:keys()[keys().indexOf('support activities')+1],stored:!!d.AppData.notes.get('support activities > gym log')};
+    document.querySelector('.library-note-context-menu')?.hidePopover?.();menu=await open('support activities > gym log');out.childMenu=items(menu);document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    row('support activities').click();await wait(150);document.getElementById('library-note-actions').click();await wait(100);
+    out.supportDots=[...document.querySelectorAll('.library-note-menu')].filter(list=>!list.hidden&&!list.classList.contains('library-note-context-menu')).flatMap(list=>items(list));
+    document.getElementById('library-note-actions').click();await wait(100);
+    // A plan Area with no note cannot go inside Support Activities; a written
+    // note used as a plan Area can, and the plan keeps its Area.
+    const moveIntoSupport=async key=>{
+      row(key).click();await wait(150);document.getElementById('library-note-actions').click();await wait(100);document.getElementById('library-note-move').click();box=await dialog();
+      (await until(()=>box.querySelector('.note-place-option[data-key="support activities"]'))).click();await wait(80);
+      return {preview:box.querySelector('.interaction-preview').textContent,planBox:box.querySelector('.interaction-checks')?(box.querySelector('.interaction-checks').hidden?'hidden':'shown'):'none'};
+    };
+    out.areaIntoSupport=await moveIntoSupport('botany');
+    box.querySelector('.interaction-actions .primary').click();await wait(100);
+    out.areaIntoSupport.refused={open:box.open,error:box.querySelector('.interaction-error')?.textContent};box.querySelector('[data-interaction-cancel]').click();await until(()=>!box.open);
+    d.AppData.notes.update('botany','Botany','Plant notes','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(200);
+    out.noteIntoSupport=await moveIntoSupport('botany');
+    box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(400);
+    out.noteIntoSupport.after={area:d.TimerState.tasks[0]?.area,moved:!!d.AppData.notes.get('support activities > botany'),status:document.getElementById('notes-status').textContent};
+    // The plan editor refuses a work block's Area inside Support Activities.
+    document.getElementById('plan-input').value=start+' | 20 | Gym log | work | Support Activities > Gym | pages | 10';
+    out.workArea={applied:await d.applySchedule({skipNotify:true}),area:d.TimerState.tasks[0]?.area,status:document.getElementById('plan-status').textContent};
+    document.querySelector('.library-note-context-menu')?.hidePopover?.();
     const toggle=document.getElementById('library-notes-trash-toggle');toggle.click();await wait(150);
     out.trashArrow=getComputedStyle(toggle,'::before').content;
     const trashRow=await until(()=>[...document.querySelectorAll('#library-notes-trash-list [data-trash-key]')].find(item=>/To delete/.test(item.textContent)));
@@ -164,7 +195,20 @@ try{
   assert.equal(tagsAfter.includes('#formula'),false,'deleting the only #formula takes it out of the tag row as you type');
   assert.equal(realRightClick,'Actions for GS2','a real right-click leaves the menu open after the button is released');
   assert.equal(realLongPress,'Actions for GS2','a real long press leaves the menu open after the finger lifts');
-  assert.deepEqual(result.supportMenu,{label:'Actions for Support Activities',items:['export-one','print']},'Support Activities shows only what applies to the shared note');
+  assert.deepEqual(result.supportMenu,{label:'Actions for Support Activities',items:['new-inside','export-one','print']},'Support Activities shows only what applies to the shared note');
+  assert.equal(result.supportNew,'Creates Support Activities › Gym log.','New note inside from the Support Activities menu');
+  assert.equal(result.supportNewOpen,'support activities > gym log');
+  assert.deepEqual(result.supportChild,{after:'support activities > gym log',stored:true},'a note inside Support Activities sits under it');
+  assert.deepEqual(result.childMenu,['rename','move','new-inside','versions','export-one','print','delete'],'a note inside Support Activities has the ordinary menu');
+  assert.deepEqual(result.supportDots,['new-inside','export-one','print'],'the open shared note has a ⋯ menu with the same actions');
+  const insideRefusal='This is an Area of today’s plan, and a work block’s Area can’t be inside Support Activities. Choose another place.';
+  assert.deepEqual(result.areaIntoSupport,{preview:insideRefusal,planBox:'none',refused:{open:true,error:insideRefusal}},'a plan Area with no note cannot go inside Support Activities');
+  assert.equal(result.noteIntoSupport.planBox,'hidden','inside Support Activities, the tick box to rename it in the plans is hidden');
+  assert.equal(result.noteIntoSupport.preview,'Becomes Support Activities › Botany. Today’s plan keeps the Area “Botany”: a work block’s Area can’t be inside Support Activities.');
+  assert.equal(result.noteIntoSupport.after.area,'Botany','the plan keeps its Area');assert.equal(result.noteIntoSupport.after.moved,true);
+  assert.match(result.noteIntoSupport.after.status,/Moved to “Support Activities › Botany”\. Today’s plan still uses the old name\./u);
+  assert.equal(result.workArea.applied,false,'the plan editor refuses a work block Area inside Support Activities');assert.equal(result.workArea.area,'Botany');
+  assert.match(result.workArea.status,/“Gym log” is a work block, so its Area can’t be “Support Activities > Gym”/u);
   assert.equal(result.supportPrevented,true,'right-click on Support Activities opens the app menu, not the browser one');
   assert.deepEqual(result.trashMenu,{label:'Actions for To delete',items:['restore','forget']},'a deleted note offers Restore and Delete forever');
   assert.equal(result.trashPrevented,true,'right-click on a deleted note opens the app menu, not the browser one');

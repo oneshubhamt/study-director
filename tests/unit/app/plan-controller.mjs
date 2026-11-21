@@ -68,12 +68,12 @@ const viewFunctions={
 };
 const domainFunctions={
   clampText:value=>String(value),fmtDur:value=>String(value)+'m',fmtS:value=>String(value),
-  hasOngoingTaskNotes:()=>false,isFixedBlock:()=>false,isSupportBlock:()=>false,isTrackableBlock:()=>true,isWorkBlock:()=>true,
+  hasOngoingTaskNotes:()=>false,isFixedBlock:()=>false,isSupportBlock:()=>false,isTrackableBlock:()=>true,isWorkBlock:task=>task?.kind!=='support',
   makeScheduleRow:()=>null,normalizeScheduleKind:value=>value,normalizeScheduleTarget:value=>value,
   positiveMinutes:value=>Math.max(0,Number(value)||0),scheduleFingerprintForRows:fingerprint,
   scheduleToken:value=>String(value||'').toLowerCase(),scheduleWarningsMessage:()=>'',taskAreaKey:task=>task.area||'',
   taskAreaValue:task=>task.area||'',taskMeasureValue:task=>task.measure||'',taskTargetValue:task=>task.target??null,
-  noteTextForKey:()=>''
+  noteTextForKey:()=>'',reservedArea:key=>String(key).toLowerCase().split(' > ')[0]==='support activities'
 };
 const t2m=text=>Number(text.slice(0,2))*60+Number(text.slice(3,5));
 const hm=minutes=>String(Math.floor((minutes%1440)/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
@@ -456,10 +456,26 @@ fireTimers(300);await Promise.resolve();
 assert.equal(canonicalDraft,'Default');
 assert.equal(plan.draft.authoredText(),'Default','a stored draft is always authored');
 
+// A work block's Area names its note, so the plan being written cannot give
+// one the Area "Support Activities" or one inside it. A support block can
+// (it opens the shared note whatever its Area), and a session being restored
+// keeps what it has, so no day is lost to the rule.
+const insideSupport=[{...row('Gym log'),area:'Support Activities > Gym'}];
+ids['plan-input'].value='ROW:'+JSON.stringify(insideSupport);
+const beforeRefused=applyCount,refusedFeedback=feedback.length;
+assert.equal(await plan.apply(),false,'a work block cannot take an Area inside Support Activities');
+assert.equal(applyCount,beforeRefused);
+assert.match(JSON.stringify(feedback.slice(refusedFeedback)),/“Gym log” is a work block, so its Area can’t be “Support Activities > Gym”/u,'the refusal names the block and its Area');
+ids['plan-input'].value='ROW:'+JSON.stringify([{...row('Gym'),kind:'support',area:'Support Activities'}]);
+assert.equal(await plan.apply(),true,'a support block may use the Area');
+assert.equal(plan.apply({scheduleText:'ROW:'+JSON.stringify(insideSupport),source:'active-session-restore',persistDraft:false,forceReload:true}),true,'a restored session keeps its Area');
+assert.equal(tasks[0].area,'Support Activities > Gym');
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default',
+    'work-area-inside-support-refused-restore-kept']}));

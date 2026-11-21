@@ -27,14 +27,20 @@ registry.define('note-catalogue',1,()=>{
     const reservedRoot=normalize(SUPPORT.label);
 
     // "Support Activities" names the one shared support note, so no other
-    // note takes it, alone or as the start of a path ("Support Activities >
-    // res" made a second, look-alike Area).
-    function reserved(key){return String(key||'').split(' > ')[0]===reservedRoot;}
-    // A name as typed: its title key, its label, and whether it is reserved.
+    // note takes that name. Notes inside it ("Support Activities > Gym log")
+    // are ordinary notes.
+    function reserved(key){return String(key||'')===reservedRoot;}
+    // A work block's Area names its note, so no work Area is "Support
+    // Activities" or inside it: it would write into the shared note, or sit
+    // under it looking like part of it. Support blocks always open the shared
+    // note, whatever their Area, and fixed blocks have no notes.
+    function reservedArea(key){return String(key||'').split(' > ')[0]===reservedRoot;}
+    // A name as typed: its title key, its label, whether a note can take it,
+    // and whether a work block's Area can.
     function normalizeName(value){
       const raw=clamp(String(value||'').trim()),key=normalize(raw);
       if(!key)return null;
-      return freeze({key,label:clamp(display(raw)),reserved:reserved(key)});
+      return freeze({key,label:clamp(display(raw)),reserved:reserved(key),reservedArea:reservedArea(key)});
     }
     // Merges rows by title key and orders them as a tree, each with its depth.
     function order(source){
@@ -92,7 +98,7 @@ registry.define('note-catalogue',1,()=>{
       cache=freeze({revision:snapshot.revision,hierarchy,entries:ordered});
       return ordered;
     }
-    return freeze({entries,order,normalizeName,reserved});
+    return freeze({entries,order,normalizeName,reserved,reservedArea});
   }
   return freeze({format:'study-director.note-catalogue-module',contractVersion:1,createCatalogue});
 });
