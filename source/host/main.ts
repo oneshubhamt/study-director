@@ -511,13 +511,14 @@ function reviewDateTitle(iso:Parameters<typeof ReviewDayState['dateTitle']>[0]){
 function setReviewDateTitle(iso:Parameters<typeof ReviewDayState['setDateTitle']>[0]){return ReviewDayState.setDateTitle(iso);}
 let ReviewSavedDayRuntime:ReturnType<typeof ReviewHostModule.createSavedDayCoordinator>|null=null;
 function requireReviewSavedDayRuntime(){if(!ReviewSavedDayRuntime)throw new Error('Study Director Saved Day coordinator is unavailable.');return ReviewSavedDayRuntime;}
-function promptSaveToday(...args){return requireReviewSavedDayRuntime().promptSaveToday(...args);}
-function clearSaveReminder(...args){return requireReviewSavedDayRuntime().clearSaveReminder(...args);}
-function revalidateSaveReminderAfterCanonicalConvergence(...args){return requireReviewSavedDayRuntime().revalidateSaveReminder(...args);}
-function acknowledgeSavedStudyDay(...args){return requireReviewSavedDayRuntime().acknowledgeSavedStudyDay(...args);}
-function clearCanonicalSessionAfterSavedDay(...args){return requireReviewSavedDayRuntime().clearCanonicalSessionAfterSavedDay(...args);}
-function saveDayRecord(...args){return requireReviewSavedDayRuntime().saveDayRecord(...args);}
-function handleStudyDayRollover(...args){return requireReviewSavedDayRuntime().handleStudyDayRollover(...args);}
+type ReviewSavedDayCoordinator=ReturnType<typeof ReviewHostModule.createSavedDayCoordinator>;
+function promptSaveToday(...args:Parameters<ReviewSavedDayCoordinator['promptSaveToday']>){return requireReviewSavedDayRuntime().promptSaveToday(...args);}
+function clearSaveReminder(...args:Parameters<ReviewSavedDayCoordinator['clearSaveReminder']>){return requireReviewSavedDayRuntime().clearSaveReminder(...args);}
+function revalidateSaveReminderAfterCanonicalConvergence(...args:Parameters<ReviewSavedDayCoordinator['revalidateSaveReminder']>){return requireReviewSavedDayRuntime().revalidateSaveReminder(...args);}
+function acknowledgeSavedStudyDay(...args:Parameters<ReviewSavedDayCoordinator['acknowledgeSavedStudyDay']>){return requireReviewSavedDayRuntime().acknowledgeSavedStudyDay(...args);}
+function clearCanonicalSessionAfterSavedDay(...args:Parameters<ReviewSavedDayCoordinator['clearCanonicalSessionAfterSavedDay']>){return requireReviewSavedDayRuntime().clearCanonicalSessionAfterSavedDay(...args);}
+function saveDayRecord(...args:Parameters<ReviewSavedDayCoordinator['saveDayRecord']>){return requireReviewSavedDayRuntime().saveDayRecord(...args);}
+function handleStudyDayRollover(...args:Parameters<ReviewSavedDayCoordinator['handleStudyDayRollover']>){return requireReviewSavedDayRuntime().handleStudyDayRollover(...args);}
 const {
   PRACTICE_CUE_DEFAULT,PRACTICE_PAUSE_CAUSES,formatPracticeMs,practicePaceBandLabel,sanitizePracticeCueMode,
   sanitizePracticeRun,sanitizePracticeRuns,sanitizePracticeState,summarizeCleanPracticeRuns,
@@ -1812,7 +1813,7 @@ const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze<Pa
   scheduleIdle:typeof requestIdleCallback==='function'
     ?(callback,timeoutMs)=>requestIdleCallback(callback,{timeout:timeoutMs})
     :null,
-  requestTab:()=>PluginRuntime.requestTab('insights')
+  requestTab:()=>PluginRuntime.requestTab('insights')??Promise.resolve(false)
 }));
 function registerStudyDirectorPlugin(plugin){
   return PluginRuntime.register(plugin);
