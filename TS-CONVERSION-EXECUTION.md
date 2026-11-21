@@ -6,8 +6,9 @@
 - Audit confirmed presentation ownership was split: checked conversion required the inline kernel/metadata, Glass/Aurora packs, and appearance/preference callbacks still embedded in unchecked `main.js`.
 - A checked `presentation-host.ts` now owns theme/skin controls, font scaling, first-paint mirror refresh, appearance transitions and display-tools behavior; `main.js` retains thin composition and the existing canonical preference writer.
 - Audit also found an in-scope startup defect: Glass/Aurora ran in `<head>` before overlay surfaces existed, yet marked their overlay coordinators installed. Pack registration and DOM-coordinator installation are now independently retry-safe at `studydirector:ready`, with stylesheet/coordinator deduplication.
-- Source contracts and browser acceptance are staged for all three skins in both themes, reload/profile restoration, pack retry, and live overlay handoff.
-- **Still open:** strict type/lint, fresh build/verify/generated syntax, affected unit/architecture checks, changed browser witness 5×, populated accessibility, objective reconciliation and final record closure. Full QA remains intentionally deferred.
+- Source contracts and browser acceptance are staged for all three skins in both themes, reload/profile restoration, duplicate pack registration, ready-event retry, and live overlay handoff.
+- Hosted pinned-toolchain repository checks are green at `892e1d32`: strict typecheck and typed lint cover **236 checked / 0 unchecked** TypeScript files; the affected runtime-boundary contract, fresh source build, generated-build verification and generated-JS syntax all passed. This is supporting evidence only; the dedicated P5.11b gate remains required for its feature-specific contracts/browser repetitions.
+- **Still open:** dedicated P5.11b unit/architecture checks, changed runtime-security browser witness 5×, changed populated-accessibility witness 5×, objective reconciliation and final record closure. Full QA remains intentionally deferred.
 
 ## P5.11a · VERIFIED — TARGETED · 2026-11-21
 
