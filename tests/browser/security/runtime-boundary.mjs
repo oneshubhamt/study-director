@@ -35,10 +35,6 @@ try{
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});
 
  const openDisplayTools=async()=>{
-   if(await page.evaluate(`document.getElementById('first-start-dialog')?.open===true`)){
-     await page.click('#first-start-skip');
-     await waitFor(()=>page.evaluate(`document.getElementById('first-start-dialog')?.open!==true`),{label:'first-start modal dismissed'});
-   }
    if(await page.evaluate(`document.getElementById('display-tools-menu').hidden`))await page.click('#display-tools-trigger');
    await waitFor(()=>page.evaluate(`!document.getElementById('display-tools-menu').hidden`),{label:'visible Display Tools'});
  };
@@ -70,6 +66,10 @@ try{
  const freshAppearance=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,fontScale:document.documentElement.dataset.fontScale,themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),computedThemeColor:getComputedStyle(document.documentElement).getPropertyValue('--sd-meta-theme-color').trim()}))()`);
  assert.deepEqual({theme:freshAppearance.theme,presentation:freshAppearance.presentation,fontScale:freshAppearance.fontScale},{theme:'dark',presentation:'glass',fontScale:'1'},'fresh profile must start from implicit Glass/Dark without inheriting appearance');
  assert.equal(freshAppearance.themeColor,freshAppearance.computedThemeColor,'fresh profile browser chrome follows Glass/Dark');
+ assert.equal(await page.evaluate(`document.getElementById('first-start-dialog')?.open===true`),true,'new profile setup is presented before appearance changes');
+ await page.click('#first-start-continue');
+ await waitFor(()=>page.evaluate(`document.getElementById('first-start-dialog')?.open!==true`),{label:'new profile setup completed'});
+ assert.equal(await page.evaluate(`__PWA6.Profiles.current().id`),addedProfile.id,'completing first-start must keep the newly added profile active');
  await chooseAppearance('aurora','light',{expectFocus:false});
  await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.presentation==='aurora'&&value?.theme==='light')`),{label:'second profile canonical appearance'});
  const scopedMirrors=await page.evaluate(`(()=>{const scope=__PWA6.Profiles.current().scope,suffix=scope?'~'+scope:'';return {theme:localStorage.getItem('studyDirector.theme.v1'+suffix),presentation:localStorage.getItem('studyDirector.presentation.v1'+suffix)};})()`);
