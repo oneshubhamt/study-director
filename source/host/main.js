@@ -3475,7 +3475,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
   persistence:Object.freeze({
     settleDiary:()=>LibraryView.settleDiary(),flushPlanDraft:()=>PlanDraftEditor.flush(),planAuthoredText:()=>PlanDraftEditor.authoredText(),planReadDraft:()=>PlanData.readDraft(),
     savePlanDraft:()=>PlanDraftEditor.save(),settlePlanData:()=>PlanData.settled(),readStoredPlan:()=>AppData.planData.read(),
-    flushPendingReview:()=>flushPendingReviewSave({strict:true}),settleReviewEditor:()=>ReviewEditor.settled(),
+    flushPendingReview:()=>flushPendingReviewSave({strict:true,allowDuringRecoveryQuiescence:true}),settleReviewEditor:()=>ReviewEditor.settled(),
     writeLiveDraft:allowDuringRecoveryQuiescence=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence}),flushNotes:()=>AppData.notes.flush(),noteFailure:()=>AppData.notes.failure(),
     flushDeletionRecovery:()=>AppData.deletionRecovery.flush(),settleActiveSession:()=>AppData.activeSession.settled(),loadActiveSession:()=>AppData.activeSession.load(),
     activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded)
