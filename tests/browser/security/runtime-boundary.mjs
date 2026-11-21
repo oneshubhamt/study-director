@@ -169,8 +169,8 @@ try{
  await waitFor(()=>page.evaluate(`StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='missing'`),{label:'late optional load failure'});
  assert.equal(await page.evaluate(`document.querySelector('.pane.on')?.id`),'pane-plan','late optional failure must not steal active-tab ownership');
  await page.click('[data-tab="guide"]');
- await waitFor(()=>page.evaluate(`document.querySelector('#pane-guide .plugin-loading-panel .mini-btn')?.textContent==='Retry loading'`),{label:'optional retry control'});
- await page.click('#pane-guide .plugin-loading-panel .mini-btn');
+ await waitFor(()=>page.evaluate(`document.querySelector('#pane-guide .ui-panel .mini-btn')?.textContent==='Retry loading'`),{label:'optional retry control'});
+ await page.click('#pane-guide .ui-panel .mini-btn');
  await waitFor(()=>page.evaluate(`!!document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]")&&StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='registered'`),{label:'Guide retry registration'});
  const pluginContract=await page.evaluate(`(()=>{
    let incompatibleSetup=0,setup=0;
