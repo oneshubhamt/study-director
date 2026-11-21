@@ -1158,6 +1158,7 @@ function installOverlayCoordinator():boolean{
   const update=document.querySelector<HTMLElement>('.pwa-update-control'),nudge=document.getElementById('nudge-overlay');
   const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger'),body=document.body;
   if(!update||!nudge||!menu||!trigger||!body)return false;
+  const displayMenu:HTMLElement=menu,displayTrigger:HTMLElement=trigger;
   const definitions:readonly OverlaySurfaceDefinition[]=Object.freeze([
     Object.freeze({id:'owner',element:()=>document.querySelector<HTMLElement>('.ownership-banner'),visible:(element:HTMLElement)=>element.classList.contains('on'),blocksTools:true}),
     Object.freeze({id:'update',element:()=>update,visible:(element:HTMLElement)=>!element.hidden,blocksTools:false}),
@@ -1183,7 +1184,7 @@ function installOverlayCoordinator():boolean{
       surfaces.forEach(surface=>surface.element.classList.toggle('sd-glass-surface-suppressed',!!winner&&surface!==winner));
       if(winner){root.dataset['glassOverlayActive']=winner.id;root.dataset['glassOverlayBlocksTools']=winner.blocksTools?'true':'false';}
       else{delete root.dataset['glassOverlayActive'];delete root.dataset['glassOverlayBlocksTools'];}
-      if(winner?.blocksTools&&!menu.hidden){menu.hidden=true;trigger.setAttribute('aria-expanded','false');}
+      if(winner?.blocksTools&&!displayMenu.hidden){displayMenu.hidden=true;displayTrigger.setAttribute('aria-expanded','false');}
     }finally{running=false;}
   }
   function schedule():void{if(queued)return;queued=true;queueMicrotask(reconcile);}
