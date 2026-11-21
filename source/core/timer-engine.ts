@@ -587,7 +587,7 @@ function preferredScrollBehavior(){
 function timerClockEls(){
   return cachedElements(timerClockEls,{cd:'cd',overflow:'cd-overflow',prog:'prog',pct:'prog-pct'});
 }
-function startCur(durationOverrideSec?:number|null,options:{cue?:string}={}){
+function startCur(durationOverrideSec?:number|null,options:{cue?:Cue}={}){
   if(!appCanMutate())return false;
   if(!TASKS.length){showEmpty();return false;}
   let nextIdx=TimerState.currentIndex;
