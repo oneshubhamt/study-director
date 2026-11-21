@@ -85,7 +85,7 @@ try{
  await chooseAppearance('aurora','light');
  assert.equal(await page.evaluate(`__PWA6.Pomodoro.timerEvent('tick',{activeSec:3600})`),true,'real Pomodoro path must open the blocking overlay');
  await waitFor(()=>page.evaluate(`document.getElementById('nudge-overlay').classList.contains('on')`),{label:'Pomodoro overlay'});
- await page.evaluate(`document.querySelector('.pwa-update-control').hidden=false;document.getElementById('display-tools-trigger').click()`);
+ await page.evaluate(`__PWA6.NoticeCoordinator.publish('qa-pwa-update',{visible:true,kind:'update',title:'Update ready',message:'Presentation overlay priority check.'});document.getElementById('display-tools-trigger').click()`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='update'&&!document.getElementById('display-tools-menu').hidden&&document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed')`),{label:'Aurora overlay priority'});
  await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='glass').click()`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation==='glass'&&document.documentElement.dataset.glassOverlayActive==='update'`),{label:'Glass overlay handoff'});
@@ -95,7 +95,7 @@ try{
  assert.deepEqual(await page.evaluate(`({glassActive:document.documentElement.dataset.glassOverlayActive||'',auroraActive:document.documentElement.dataset.auroraOverlayActive||'',glassSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-glass-surface-suppressed'),auroraSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed'),menuHidden:document.getElementById('display-tools-menu').hidden})`),{glassActive:'',auroraActive:'',glassSuppressed:false,auroraSuppressed:false,menuHidden:false});
  await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='aurora').click()`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='update'`),{label:'Aurora overlay reacquire'});
- await page.evaluate(`document.querySelector('.pwa-update-control').hidden=true`);
+ await page.evaluate(`__PWA6.NoticeCoordinator.publish('qa-pwa-update',null)`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='nudge'&&document.getElementById('display-tools-menu').hidden&&document.getElementById('display-tools-trigger').getAttribute('aria-expanded')==='false'`),{label:'blocking overlay closes display tools'});
  assert.equal(await page.evaluate(`document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed')`),false);
  await page.evaluate(`__PWA6.Pomodoro.timerEvent('clear-cue')`);
