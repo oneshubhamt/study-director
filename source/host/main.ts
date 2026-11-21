@@ -3,6 +3,8 @@ import type {PresentationKernel} from '../../types/presentation.ts';
 import type {ProfileScopeValue} from '../../types/profile-scope.ts';
 import type {StudyDirectorPublicApi} from '../../types/public-api-host.ts';
 import type {RichTextApi} from '../../rich-text/editor.ts';
+import type {ActiveSession} from '../../types/record-models.ts';
+import type {SessionActionState} from '../../types/session-actions.ts';
 
 type HostWindow=Window&{StudyDirector?:StudyDirectorPublicApi;StudyDirectorRichText?:RichTextApi};
 const HOST_WINDOW=window as HostWindow;
@@ -125,6 +127,7 @@ const NOTES_SEARCH_WORKER_URL='@@SD_SEARCH_WORKER_FILENAME@@';
 const RICH_TEXT_BOOT_API=HOST_WINDOW.StudyDirectorRichText;
 if(!RICH_TEXT_BOOT_API||!RICH_TEXT_BOOT_API.assetPolicy||typeof RICH_TEXT_BOOT_API.isAssetId!=='function'||typeof RICH_TEXT_BOOT_API.isSupportedImageType!=='function'){throw new Error('Study Director rich text runtime is unavailable or incompatible.');}
 const ProfileScopeBootstrap=(window as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.profileScope.v1')] as ProfileScopeValue|undefined;
+if(!ProfileScopeBootstrap)throw new Error('Study Director profile scope is unavailable or incompatible.');
 function decodeBuildJson(value:string,label:string):unknown{
   try{return JSON.parse(decodeURIComponent(value)) as unknown;}catch(error){throw new TypeError('Invalid '+label+' build input.',{cause:error});}
 }
@@ -135,8 +138,13 @@ function decodeBuildStringRecord(value:string,label:string):Readonly<Record<stri
   if(entries.some(([,item])=>typeof item!=='string'||!item))throw new TypeError('Invalid '+label+' build input.');
   return Object.freeze(Object.fromEntries(entries) as Record<string,string>);
 }
+function decodeBuildStringArray(value:string,label:string):readonly string[]{
+  const parsed=decodeBuildJson(value,label);
+  if(!Array.isArray(parsed)||parsed.some(item=>typeof item!=='string'||!item))throw new TypeError('Invalid '+label+' build input.');
+  return Object.freeze([...parsed]);
+}
 const RAW_LOCAL_STORAGE_KEYS=decodeBuildStringRecord('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys');
-const DEVICE_WIDE_STORAGE_KEY_NAMES=new Set<string>(decodeBuildJson('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys') as string[]);
+const DEVICE_WIDE_STORAGE_KEY_NAMES=new Set<string>(decodeBuildStringArray('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys'));
 const {
   APP_VERSION,APP_CONFIG,APP_LIMITS,ProfileScope,DEVICE_WIDE_STORAGE_KEYS,STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,EXTERNAL_REPOSITORY_IDENTITIES,APP_META_REGISTRY,
   DATA_CONTRACT,DB_STORES,DB_NAME,DB_VER,DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_NOTES_STORE,DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE,DB_ASSET_STORE,
@@ -178,10 +186,10 @@ const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
 // prototype-key collisions and keeps own-property access consistent.
 const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setElementValue,setElementClass,setElementHidden,setElementDisabled,setElementAttribute,setElementStyle,setTextSafe,cachedElements,clampText,clampArray,wipeObject,boundedInt,boundedNumber,safeBoolean,finiteNumber,optionalBoundedNumber,optionalText,sameDataValue}=FoundationHostModule.createPrimitives({document,APP_LIMITS,CompletionModel:{fromUnits:(done,total)=>CompletionModel.fromUnits(done,total)}});
 // Data access is instantiated after the codecs through the private repository module.
-let StorageHealthController=null;
-let StorageResetRecovery=null,BackupNudge=null;
-let NativeCapabilities=null,CapabilityBadge=null;
-let DeviceBackup=null,BackupRecoveryHost=null,KeptVersions=null,BackupActions=null;
+let StorageHealthController:ReturnType<typeof BackupReadinessHostModule.createStorageHealth>|null=null;
+let StorageResetRecovery:ReturnType<typeof BackupRecoveryHostModule.createStorageReset>|null=null,BackupNudge:ReturnType<typeof BackupReadinessHostModule.createBackupNudge>|null=null;
+let NativeCapabilities:ReturnType<typeof CapabilitiesHostModule.createController>|null=null,CapabilityBadge:ReturnType<typeof CapabilitiesHostModule.createBadge>|null=null;
+let DeviceBackup:ReturnType<typeof BackupActionsHostModule.createDeviceBackup>|null=null,BackupRecoveryHost:ReturnType<typeof BackupRecoveryHostModule.createHost>|null=null,KeptVersions:ReturnType<typeof BackupRecoveryHostModule.createKeptVersions>|null=null,BackupActions:ReturnType<typeof BackupActionsHostModule.createControls>|null=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
 const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze<Parameters<typeof PersistenceModule.createLocalStorage>[0]>({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
@@ -285,7 +293,7 @@ const {
 /* DOM PRIMITIVES */
 
 /* SHARED INTERACTION AND SYSTEM-ALERT SERVICES */
-let NavigationController=null;
+let NavigationController:ReturnType<typeof NavigationModule.createController>|null=null;
 const {WorkspaceRouteCoordinator,WorkspaceHistoryBridge,WorkspaceHistoryPublic}=FoundationHostModule.createWorkspace({navigation:()=>NavigationController,interactions:()=>Interactions,overlay:()=>WorkspaceOverlay});
 
 
@@ -394,19 +402,19 @@ const {
   sanitizeCounts:sanitizeTaskOutcomeCounts, total:taskOutcomeTotal, info:taskOutcomeInfo,
   summary:taskOutcomeSummaryText
 }=OutcomeModel;
-function updateExecutePanels(...args){return ExecutionViews.updateExecutePanels(...args);}
+function updateExecutePanels(...args:Parameters<typeof ExecutionViews.updateExecutePanels>){return ExecutionViews.updateExecutePanels(...args);}
 // Today's session as another device runs it, while this one shows it there.
-function sessionShownElsewhere(...args){return ExecutionViews.sessionShownElsewhere(...args);}
+function sessionShownElsewhere(...args:Parameters<typeof ExecutionViews.sessionShownElsewhere>){return ExecutionViews.sessionShownElsewhere(...args);}
 // Today's session parked on this device (Suspend Today, or handed over by another).
-function sessionParkedHere(...args){return ExecutionViews.sessionParkedHere(...args);}
-function executeSessionStatusModel(...args){return ExecutionViews.executeSessionStatusModel(...args);}
-function updateExecuteSessionStatus(...args){return ExecutionViews.updateExecuteSessionStatus(...args);}
+function sessionParkedHere(...args:Parameters<typeof ExecutionViews.sessionParkedHere>){return ExecutionViews.sessionParkedHere(...args);}
+function executeSessionStatusModel(...args:Parameters<typeof ExecutionViews.executeSessionStatusModel>){return ExecutionViews.executeSessionStatusModel(...args);}
+function updateExecuteSessionStatus(...args:Parameters<typeof ExecutionViews.updateExecuteSessionStatus>){return ExecutionViews.updateExecuteSessionStatus(...args);}
 /* RUNTIME STATE · CHECKED LIVE EXECUTION HOST */
 const SLEEP_GAP_THRESHOLD_MS=120000;
 // While the timer runs on a work block here, pop-ups that block nothing
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
-function syncStudyQuiet(...args){return ExecutionViews.syncStudyQuiet(...args);}
+function syncStudyQuiet(...args:Parameters<typeof ExecutionViews.syncStudyQuiet>){return ExecutionViews.syncStudyQuiet(...args);}
 const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameters<typeof ExecutionHostModule.createRuntime>[0]>({
   modules:Object.freeze({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
   timerState:Object.freeze({
@@ -490,7 +498,7 @@ function markDayContentChanged(){return ReviewDayState.markChanged();}
 function markDayContentSaved(date,revision){return ReviewDayState.markSaved(date,revision);}
 function reviewDateTitle(iso){return ReviewDayState.dateTitle(iso);}
 function setReviewDateTitle(iso){return ReviewDayState.setDateTitle(iso);}
-let ReviewSavedDayRuntime=null;
+let ReviewSavedDayRuntime:ReturnType<typeof ReviewHostModule.createSavedDayCoordinator>|null=null;
 function requireReviewSavedDayRuntime(){if(!ReviewSavedDayRuntime)throw new Error('Study Director Saved Day coordinator is unavailable.');return ReviewSavedDayRuntime;}
 function promptSaveToday(...args){return requireReviewSavedDayRuntime().promptSaveToday(...args);}
 function clearSaveReminder(...args){return requireReviewSavedDayRuntime().clearSaveReminder(...args);}
@@ -520,7 +528,7 @@ function restoreTimerRuntimeIfAny(){return TimerRestoration.restoreTimerRuntimeI
 /* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
 const LIVE_DRAFT_SAVE_DEBOUNCE_MS=1000;
 const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
-let ActiveSessionRuntime=null,SessionHandoffRuntime=null;
+let ActiveSessionRuntime:ReturnType<typeof SessionHostModule.createController>|null=null,SessionHandoffRuntime:ReturnType<typeof SessionHandoffModule.createController>|null=null;
 const SessionActionState={
  get sessionPanelMode(){return sessionPanelMode;},set sessionPanelMode(value){sessionPanelMode=value;},
  get sessionPanelSession(){return sessionPanelSession;},set sessionPanelSession(value){sessionPanelSession=value;},
@@ -591,7 +599,7 @@ const SessionActions=SessionActionsModule.createController(Object.freeze<Paramet
   DecisionClock,SLEEP_GAP_THRESHOLD_MS,HANDOFF_RETRY_MESSAGE:SessionHandoffModule.retryMessage,navigator
 }));
 
-function clearSessionSafetyMessage(...args){return SessionActions.clearSessionSafetyMessage(...args);}
+function clearSessionSafetyMessage(...args:Parameters<typeof SessionActions.clearSessionSafetyMessage>){return SessionActions.clearSessionSafetyMessage(...args);}
 const ExecutionViewCache={get executePanelsRenderKey(){return executePanelsRenderKey;},set executePanelsRenderKey(value){executePanelsRenderKey=value;},get executeIdleDisplayKey(){return executeIdleDisplayKey;},set executeIdleDisplayKey(value){executeIdleDisplayKey=value;},get realTimeAwarenessRenderKey(){return realTimeAwarenessRenderKey;},set realTimeAwarenessRenderKey(value){realTimeAwarenessRenderKey=value;},get scheduleEndPromptKey(){return scheduleEndPromptKey;},set scheduleEndPromptKey(value){scheduleEndPromptKey=value;}};
 const ExecutionViews=ExecutionViewsModule.createController(Object.freeze<Parameters<typeof ExecutionViewsModule.createController>[0]>({
  state:SessionActionState,cache:ExecutionViewCache,runtime:ExecutionRuntime,actions:SessionActions,document,window,APP_LIMITS,STUDY_DAY_MINUTES,
@@ -643,12 +651,12 @@ notifyBackupChange:(...args)=>notifyBackupChange(...args),
 schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args),
 wakeSessionOwnershipClaim:(...args)=>wakeSessionOwnershipClaim(...args)
 }));
-let sessionPanelMode='none',sessionPanelSession=null;
+let sessionPanelMode:SessionActionState['sessionPanelMode']='none',sessionPanelSession:ActiveSession|null=null;
 let sessionSafetyMessage='';
 // The checked sync/status host is declared early because storage health can
 // request a profile-indicator redraw during start-up.
-let SyncStatusHost=null,syncStatusPending=false,sessionHandoff={step:'',error:''},sessionMovingHere=null,sessionYieldedAt=0;
-let ManagedRecoveryQuiescence=null;
+let SyncStatusHost:ReturnType<typeof SyncStatusHostModule.createController>|null=null,syncStatusPending=false,sessionHandoff={step:'',error:''},sessionMovingHere:ActiveSession|null=null,sessionYieldedAt=0;
+let ManagedRecoveryQuiescence:ReturnType<typeof BackupRecoveryHostModule.createQuiescence>|null=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
 function managedRecoverySessionQuiesced(){return ManagedRecoveryQuiescence?.active()||false;}
@@ -656,7 +664,7 @@ async function withRestoreSessionPersistenceSuppressed(operation){
   if(!ActiveSessionRuntime)throw new Error('Active Session runtime is unavailable.');
   return ActiveSessionRuntime.withPersistenceSuppressed(operation);
 }
-function hasBlockingActiveSession(...args){return SessionActions.hasBlockingActiveSession(...args);}
+function hasBlockingActiveSession(...args:Parameters<typeof SessionActions.hasBlockingActiveSession>){return SessionActions.hasBlockingActiveSession(...args);}
 let hydrateReviewState=()=>false;
 let currentReviewSnapshot=()=>Object.freeze({reflection:'',studyQuality:null});
 let bindReviewSession=()=>false;
@@ -665,7 +673,7 @@ let richTextCloseField=()=>false;
 let richTextSyncField=()=>false;
 let richTextSyncAll=()=>false;
 let richTextReconcileExternal=()=>Object.freeze({status:'unmounted'});
-let NotesRuntime=null,LibraryNoteWorkflows=null;
+let NotesRuntime:ReturnType<typeof NotesHostModule.createController>|null=null,LibraryNoteWorkflows:ReturnType<typeof NotesHostModule.createLibraryWorkflows>|null=null;
 let executeIdleDisplayKey='';
 let realTimeAwarenessRenderKey='';
 let executePanelsRenderKey='';
@@ -676,7 +684,7 @@ const AppActivation=StartupHostModule.createActivation(Object.freeze<Parameters<
   capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
 }));
 const APP_ACTIVATION_KINDS=AppActivation.kinds;
-let StartupLifecycle;
+let StartupLifecycle!:ReturnType<typeof StartupHostModule.createCoordinator>;
 /* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP */
 const OWNERSHIP_HEARTBEAT_MS=4000;
 const OWNERSHIP_STALE_MS=15000;
@@ -684,7 +692,7 @@ const OWNERSHIP_PROBE_MS=700;
 const OWNERSHIP_WEB_LOCK_NAME=ProfileScope.scoped('study-director-app-owner-v1');
 const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
 
-let AppMutationCoordinator=null;
+let AppMutationCoordinator:ReturnType<typeof MutationCoordinatorModule.createCoordinator>|null=null;
 let mutationUiOperationActive=false;
 const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Parameters<typeof StartupHostModule.createOwnershipController>[0]>({
   module:OwnershipModule,
@@ -766,8 +774,8 @@ if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='st
 // within seconds (an urgent change), not at the next quiet-period upload:
 // Continue Here elsewhere takes the timer from Drive's newest version, so a
 // pause still waiting here would count the paused time there as study.
-function sendSessionChangeSoon(...args){return ExecutionViews.sendSessionChangeSoon(...args);}
-function togglePause(...args){return ExecutionViews.togglePause(...args);}
+function sendSessionChangeSoon(...args:Parameters<typeof ExecutionViews.sendSessionChangeSoon>){return ExecutionViews.sendSessionChangeSoon(...args);}
+function togglePause(...args:Parameters<typeof ExecutionViews.togglePause>){return ExecutionViews.togglePause(...args);}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -782,7 +790,7 @@ function automaticBackupsWaiting(){return BackupProviderBackground.waiting();}
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(appCanMutate())void flushAutomaticBackups('app-hidden');}else BackupProviderRuntime.refresh();});
 // A plan applied by hand goes to Drive within seconds, like Suspend and
 // Continue Here, so the other device sees today's session at its next check.
-function uploadSoonAfterPlanApply(...args){return SessionActions.uploadSoonAfterPlanApply(...args);}
+function uploadSoonAfterPlanApply(...args:Parameters<typeof SessionActions.uploadSoonAfterPlanApply>){return SessionActions.uploadSoonAfterPlanApply(...args);}
 // During a live session, the checked P5.4C controller owns remote-claim
 // observation, timer preemption, frozen evidence and retry cadence. The host
 // keeps only scheduling and browser lifecycle adapters.
@@ -790,12 +798,12 @@ const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SY
 
 async function checkSessionOwnershipClaim(){return SessionHandoffRuntime?SessionHandoffRuntime.checkClaim():false;}
 function wakeSessionOwnershipClaim(slackMs=0){return SessionHandoffRuntime?SessionHandoffRuntime.wakeClaim(slackMs):false;}
-function installSessionWatch(...args){return ExecutionViews.installSessionWatch(...args);}
-function notifyDeviceBackupIfStudyDayResolved(...args){return ExecutionViews.notifyDeviceBackupIfStudyDayResolved(...args);}
-function markDone(...args){return ExecutionViews.markDone(...args);}
-function skipTask(...args){return ExecutionViews.skipTask(...args);}
-function finishPracticePacer(...args){return ExecutionViews.finishPracticePacer(...args);}
-function handlePracticeStartKey(...args){return ExecutionViews.handlePracticeStartKey(...args);}
+function installSessionWatch(...args:Parameters<typeof ExecutionViews.installSessionWatch>){return ExecutionViews.installSessionWatch(...args);}
+function notifyDeviceBackupIfStudyDayResolved(...args:Parameters<typeof ExecutionViews.notifyDeviceBackupIfStudyDayResolved>){return ExecutionViews.notifyDeviceBackupIfStudyDayResolved(...args);}
+function markDone(...args:Parameters<typeof ExecutionViews.markDone>){return ExecutionViews.markDone(...args);}
+function skipTask(...args:Parameters<typeof ExecutionViews.skipTask>){return ExecutionViews.skipTask(...args);}
+function finishPracticePacer(...args:Parameters<typeof ExecutionViews.finishPracticePacer>){return ExecutionViews.finishPracticePacer(...args);}
+function handlePracticeStartKey(...args:Parameters<typeof ExecutionViews.handlePracticeStartKey>){return ExecutionViews.handlePracticeStartKey(...args);}
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
 function readStorageHealth(){return StorageHealthController.snapshot();}
@@ -853,23 +861,23 @@ function dismissStorageWarning(){
     NoticeCoordinator.acknowledge(active.id);
   }
 }
-function resumeTimerLoopAfterPrimaryRestore(...args){return SessionActions.resumeTimerLoopAfterPrimaryRestore(...args);}
+function resumeTimerLoopAfterPrimaryRestore(...args:Parameters<typeof SessionActions.resumeTimerLoopAfterPrimaryRestore>){return SessionActions.resumeTimerLoopAfterPrimaryRestore(...args);}
 const StartupOwnershipViews=StartupHostModule.createOwnershipViews({document,OWNERSHIP_STATES,AppOwnership,NoticeCoordinator,appCanMutate,
  claimAppControl:(...args)=>claimAppControl(...args),setPlanStatus:(...args)=>setPlanStatus(...args),mutationStatus:()=>AppMutationCoordinator?.status()||null,ready:()=>StartupLifecycle.status().fullyInitialized,
  syncPlanAccess:()=>PlanRuntime.savedPlans.syncAccess(),projectOwnership:()=>OwnershipUiProjection.apply(),wakeBackground:wakeBackgroundOperations,syncWake:()=>NativeCapabilities?.syncWake()});
-function renderOwnershipBanner(...args){return StartupOwnershipViews.renderOwnershipBanner(...args);}
-function renderOwnershipUi(...args){return StartupOwnershipViews.renderOwnershipUi(...args);}
-function loadActiveSessionForRestore(...args){return SessionActions.loadActiveSessionForRestore(...args);}
-function activeSessionScheduleFingerprint(...args){return SessionActions.activeSessionScheduleFingerprint(...args);}
-function applyStoredSessionSnapshot(...args){return SessionActions.applyStoredSessionSnapshot(...args);}
-function hydratePrimaryStateFromStorage(...args){return SessionActions.hydratePrimaryStateFromStorage(...args);}
+function renderOwnershipBanner(...args:Parameters<typeof StartupOwnershipViews.renderOwnershipBanner>){return StartupOwnershipViews.renderOwnershipBanner(...args);}
+function renderOwnershipUi(...args:Parameters<typeof StartupOwnershipViews.renderOwnershipUi>){return StartupOwnershipViews.renderOwnershipUi(...args);}
+function loadActiveSessionForRestore(...args:Parameters<typeof SessionActions.loadActiveSessionForRestore>){return SessionActions.loadActiveSessionForRestore(...args);}
+function activeSessionScheduleFingerprint(...args:Parameters<typeof SessionActions.activeSessionScheduleFingerprint>){return SessionActions.activeSessionScheduleFingerprint(...args);}
+function applyStoredSessionSnapshot(...args:Parameters<typeof SessionActions.applyStoredSessionSnapshot>){return SessionActions.applyStoredSessionSnapshot(...args);}
+function hydratePrimaryStateFromStorage(...args:Parameters<typeof SessionActions.hydratePrimaryStateFromStorage>){return SessionActions.hydratePrimaryStateFromStorage(...args);}
 const {
   writeLease:writeAppOwner, release:releaseAppOwner, evaluate:evaluateAppOwnership,
   setPrimary:setPrimaryTabState, takeOwnership:claimAppControl, install:installAppOwnership
 }=AppOwnership;
 function flushAndReleaseAppOwner(requestId=''){return AppOwnership.flushAndRelease(requestId);}
-function requirePrimaryTab(...args){return StartupOwnershipViews.requirePrimaryTab(...args);}
-function renderPrimaryTabBlock(...args){return StartupOwnershipViews.renderPrimaryTabBlock(...args);}
+function requirePrimaryTab(...args:Parameters<typeof StartupOwnershipViews.requirePrimaryTab>){return StartupOwnershipViews.requirePrimaryTab(...args);}
+function renderPrimaryTabBlock(...args:Parameters<typeof StartupOwnershipViews.renderPrimaryTabBlock>){return StartupOwnershipViews.renderPrimaryTabBlock(...args);}
 /* DAILY RECORD COMPACTION AND SANITIZERS · IMPORTED */
 const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createDailyRecordCodec>[0]>({
   limits:APP_LIMITS,
@@ -978,7 +986,7 @@ async function activeSessionContentFingerprint(session){
 }
 function activeSessionPayload(snapshot=null,options={}){return ActiveSessionRuntime?.payload(snapshot,options)||null;}
 function readLocalRecoverySession(){return ActiveSessionRuntime?.readLocal()||null;}
-function handleActiveSessionRepositoryResult(...args){return SessionActions.handleActiveSessionRepositoryResult(...args);}
+function handleActiveSessionRepositoryResult(...args:Parameters<typeof SessionActions.handleActiveSessionRepositoryResult>){return SessionActions.handleActiveSessionRepositoryResult(...args);}
 function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
 function writeActiveSessionNow(snapshot,options={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
 function writeLiveDraftNow(options={}){return ActiveSessionRuntime.writeNow(options);}
@@ -987,26 +995,26 @@ function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPending
 function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
 function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
 function applySessionSnapshot(snapshot){return ActiveSessionRuntime?.applySnapshot(snapshot)||false;}
-function restoreLiveDraftIfAny(...args){return SessionActions.restoreLiveDraftIfAny(...args);}
-function activeSessionSnapshot(...args){return SessionActions.activeSessionSnapshot(...args);}
+function restoreLiveDraftIfAny(...args:Parameters<typeof SessionActions.restoreLiveDraftIfAny>){return SessionActions.restoreLiveDraftIfAny(...args);}
+function activeSessionSnapshot(...args:Parameters<typeof SessionActions.activeSessionSnapshot>){return SessionActions.activeSessionSnapshot(...args);}
 
 // A session another device runs: this device shows it and never runs its timer.
-function sessionRunsElsewhere(...args){return SessionActions.sessionRunsElsewhere(...args);}
-function sessionFromElsewhere(...args){return SessionActions.sessionFromElsewhere(...args);}
-function isRestorableActiveSession(...args){return SessionActions.isRestorableActiveSession(...args);}
-function isSuspendedActiveSession(...args){return SessionActions.isSuspendedActiveSession(...args);}
-function isPreviousActiveSessionRecord(...args){return SessionActions.isPreviousActiveSessionRecord(...args);}
+function sessionRunsElsewhere(...args:Parameters<typeof SessionActions.sessionRunsElsewhere>){return SessionActions.sessionRunsElsewhere(...args);}
+function sessionFromElsewhere(...args:Parameters<typeof SessionActions.sessionFromElsewhere>){return SessionActions.sessionFromElsewhere(...args);}
+function isRestorableActiveSession(...args:Parameters<typeof SessionActions.isRestorableActiveSession>){return SessionActions.isRestorableActiveSession(...args);}
+function isSuspendedActiveSession(...args:Parameters<typeof SessionActions.isSuspendedActiveSession>){return SessionActions.isSuspendedActiveSession(...args);}
+function isPreviousActiveSessionRecord(...args:Parameters<typeof SessionActions.isPreviousActiveSessionRecord>){return SessionActions.isPreviousActiveSessionRecord(...args);}
 // Verify the actual canonical Saved Day, not just a date match or two
 // unrelated devices' numeric revision counters. The session must first carry
 // its own durable save acknowledgement; its study evidence must still be
 // represented by the Day presently in Library.
-function savedDayCoversActiveSession(...args){return SessionActions.savedDayCoversActiveSession(...args);}
-function retireCoveredPreviousActiveSession(...args){return SessionActions.retireCoveredPreviousActiveSession(...args);}
-function setSessionPanelMode(...args){return SessionActions.setSessionPanelMode(...args);}
-function recoverPreviousSessionForReview(...args){return SessionActions.recoverPreviousSessionForReview(...args);}
-function handlePreviousActiveSession(...args){return SessionActions.handlePreviousActiveSession(...args);}
-function revisitPreviousStoredSession(...args){return SessionActions.revisitPreviousStoredSession(...args);}
-function attemptAutoRestoreActiveSession(...args){return SessionActions.attemptAutoRestoreActiveSession(...args);}
+function savedDayCoversActiveSession(...args:Parameters<typeof SessionActions.savedDayCoversActiveSession>){return SessionActions.savedDayCoversActiveSession(...args);}
+function retireCoveredPreviousActiveSession(...args:Parameters<typeof SessionActions.retireCoveredPreviousActiveSession>){return SessionActions.retireCoveredPreviousActiveSession(...args);}
+function setSessionPanelMode(...args:Parameters<typeof SessionActions.setSessionPanelMode>){return SessionActions.setSessionPanelMode(...args);}
+function recoverPreviousSessionForReview(...args:Parameters<typeof SessionActions.recoverPreviousSessionForReview>){return SessionActions.recoverPreviousSessionForReview(...args);}
+function handlePreviousActiveSession(...args:Parameters<typeof SessionActions.handlePreviousActiveSession>){return SessionActions.handlePreviousActiveSession(...args);}
+function revisitPreviousStoredSession(...args:Parameters<typeof SessionActions.revisitPreviousStoredSession>){return SessionActions.revisitPreviousStoredSession(...args);}
+function attemptAutoRestoreActiveSession(...args:Parameters<typeof SessionActions.attemptAutoRestoreActiveSession>){return SessionActions.attemptAutoRestoreActiveSession(...args);}
 /* INDEXEDDB STORE ADAPTERS · IMPORTED */
 const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze<Parameters<typeof DataBootstrapHostModule.createIndexedDb>[0]>({
   module:PersistenceModule,
@@ -1099,7 +1107,7 @@ const RecoveryAssetMaintenancePause=BackupRecoveryHostModule.createMaintenancePa
 if(!Object.isFrozen(RecoveryAssetMaintenancePause)||RecoveryAssetMaintenancePause.format!=='study-director.backup-maintenance-pause'||RecoveryAssetMaintenancePause.contractVersion!==1){
   throw new Error('Study Director recovery attachment-maintenance pause is unavailable or incompatible.');
 }
-let BackupIntegrity=null,AttachmentIntegrityJob=null;
+let BackupIntegrity:ReturnType<typeof BackupIntegrityHostModule.createController>|null=null,AttachmentIntegrityJob:ReturnType<typeof BackupIntegrityHostModule.createController>['attachmentJob']|null=null;
 const RichTextAssetWriteLease=AssetStorageModule.createLease();
 function richAssetId(value){const id=String(value||'');if(!RichTextApi.isAssetId(id))throw new TypeError('Rich-text asset identity is invalid.');return id;}
 const AttachmentIngest=AttachmentIngestModule.create({
@@ -1333,39 +1341,39 @@ NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze<Paramet
 StorageHealthController.activate();
 
 /* SESSION RESET ORCHESTRATION */
-function resetRuntimeSessionState(...args){return SessionActions.resetRuntimeSessionState(...args);}
-function refreshPlanAfterSessionReset(...args){return SessionActions.refreshPlanAfterSessionReset(...args);}
-function suspendTodaySession(...args){return SessionActions.suspendTodaySession(...args);}
-function sessionUpdateTime(...args){return SessionActions.sessionUpdateTime(...args);}
+function resetRuntimeSessionState(...args:Parameters<typeof SessionActions.resetRuntimeSessionState>){return SessionActions.resetRuntimeSessionState(...args);}
+function refreshPlanAfterSessionReset(...args:Parameters<typeof SessionActions.refreshPlanAfterSessionReset>){return SessionActions.refreshPlanAfterSessionReset(...args);}
+function suspendTodaySession(...args:Parameters<typeof SessionActions.suspendTodaySession>){return SessionActions.suspendTodaySession(...args);}
+function sessionUpdateTime(...args:Parameters<typeof SessionActions.sessionUpdateTime>){return SessionActions.sessionUpdateTime(...args);}
 // The device a session runs on, by name: "on iPhone · Safari", or "on another device".
-function sessionDevice(...args){return SessionActions.sessionDevice(...args);}
+function sessionDevice(...args:Parameters<typeof SessionActions.sessionDevice>){return SessionActions.sessionDevice(...args);}
 // Continue Here: this device runs the session from now on. A session still
 // running on another device moves only after a warning; that device stops its
 // timer at its next sync and offers what it recorded since for review.
-function confirmSessionTakeover(...args){return SessionActions.confirmSessionTakeover(...args);}
+function confirmSessionTakeover(...args:Parameters<typeof SessionActions.confirmSessionTakeover>){return SessionActions.confirmSessionTakeover(...args);}
 const HANDOFF_RETRY_MESSAGE=SessionHandoffModule.retryMessage;
 // P5.4C owns the distributed claim/compensation state machine. This host
 // adapter supplies UI progress only; provider and persistence semantics live
 // behind the checked controller.
-function transferSessionOwnershipHere(...args){return SessionActions.transferSessionOwnershipHere(...args);}
+function transferSessionOwnershipHere(...args:Parameters<typeof SessionActions.transferSessionOwnershipHere>){return SessionActions.transferSessionOwnershipHere(...args);}
 // Continue Here in progress: every Continue Here button says so and the
 // Execute card shows the step; a failure stays in the card until the next
 // try or until the session moves on.
-function setSessionHandoff(...args){return SessionActions.setSessionHandoff(...args);}
+function setSessionHandoff(...args:Parameters<typeof SessionActions.setSessionHandoff>){return SessionActions.setSessionHandoff(...args);}
 // The block a stored session is on and how many of its blocks are done.
-function sessionProgressSummary(...args){return SessionActions.sessionProgressSummary(...args);}
-function sessionHandoffProblem(...args){return SessionActions.sessionHandoffProblem(...args);}
-function continueSessionHere(...args){return SessionActions.continueSessionHere(...args);}
+function sessionProgressSummary(...args:Parameters<typeof SessionActions.sessionProgressSummary>){return SessionActions.sessionProgressSummary(...args);}
+function sessionHandoffProblem(...args:Parameters<typeof SessionActions.sessionHandoffProblem>){return SessionActions.sessionHandoffProblem(...args);}
+function continueSessionHere(...args:Parameters<typeof SessionActions.continueSessionHere>){return SessionActions.continueSessionHere(...args);}
 // From a pop-up or the profile panel: open Execute first, where the card
 // shows each Continue Here step.
-function continueSessionOnExecute(...args){return SessionActions.continueSessionOnExecute(...args);}
+function continueSessionOnExecute(...args:Parameters<typeof SessionActions.continueSessionOnExecute>){return SessionActions.continueSessionOnExecute(...args);}
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
-function yieldSessionToOtherDevice(...args){return SessionActions.yieldSessionToOtherDevice(...args);}
-function restoreSuspendedTodaySession(...args){return SessionActions.restoreSuspendedTodaySession(...args);}
-function finishTodaySession(...args){return SessionActions.finishTodaySession(...args);}
-function resetTodaySession(...args){return SessionActions.resetTodaySession(...args);}
+function yieldSessionToOtherDevice(...args:Parameters<typeof SessionActions.yieldSessionToOtherDevice>){return SessionActions.yieldSessionToOtherDevice(...args);}
+function restoreSuspendedTodaySession(...args:Parameters<typeof SessionActions.restoreSuspendedTodaySession>){return SessionActions.restoreSuspendedTodaySession(...args);}
+function finishTodaySession(...args:Parameters<typeof SessionActions.finishTodaySession>){return SessionActions.finishTodaySession(...args);}
+function resetTodaySession(...args:Parameters<typeof SessionActions.resetTodaySession>){return SessionActions.resetTodaySession(...args);}
 let latestCarryForward='';
 /* AREA NOTES REPOSITORY */
 
@@ -1403,7 +1411,7 @@ const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData.maintenance.intervalMs,DATA_
 // keeps running through a clear. Ownership is asked first: a job configured
 // while the page is still loading asks before start-up exists, and no tab owns
 // writes until start-up has begun.
-let BackgroundMaintenance=null,DataMaintenanceJob=null;
+let BackgroundMaintenance:ReturnType<typeof BackupMaintenanceHostModule.createBackground>|null=null,DataMaintenanceJob:ReturnType<typeof BackupMaintenanceHostModule.createBackground>['job']|null=null;
 function backgroundBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.backgroundBlocker(options):'startup';}
 function upkeepBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.upkeepBlocker(options):'startup';}
 function foregroundChanged(){return BackgroundMaintenance?.foregroundChanged()||false;}
@@ -1435,7 +1443,7 @@ function updateNoteSyncIndicators(idx,key){
 /* PLAN DRAFTS, SAVED DEFAULTS, AND QUOTE DRAFT */
 const PROTECTED_PREFERENCES_SAVE_DELAY_MS=250;
 let protectedPreferencesState=Object.freeze({version:2,studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,updatedAt:null});
-let protectedPreferencesHydrated=false,protectedPreferencesDirty=false,protectedPreferencesWriteTimer=null,protectedPreferencesWriteFailure=null;
+let protectedPreferencesHydrated=false,protectedPreferencesDirty=false,protectedPreferencesWriteTimer:number|null=null,protectedPreferencesWriteFailure:unknown=null;
 let protectedPreferencesWriteChain=Promise.resolve(),PresentationRuntime=null;
 function requirePresentationRuntime(){if(!PresentationRuntime)throw new Error('Study Director presentation host is unavailable.');return PresentationRuntime;}
 function acceptProtectedPreferences(value){
@@ -1539,7 +1547,7 @@ function persistPracticeTarget(targetMs){if(!appCanMutate())return false;const c
 function persistPracticeCueMode(mode){if(!appCanMutate())return false;return persistUserDefaults({practiceCueMode:sanitizePracticeCueMode(mode)});}
 function ensureTaskIds(){return TimerState.ensureTaskIds();}
 /* SHELL DEFAULTS AND CLOCK HEADER */
-function normalizeStudentName(...args){return ProfileViews.normalizeStudentName(...args);}
+function normalizeStudentName(...args:Parameters<typeof ProfileViews.normalizeStudentName>){return ProfileViews.normalizeStudentName(...args);}
 function filenameSafeStudentName(name){
   const base=normalizeStudentName(name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,Math.max(1,APP_LIMITS.maxBackupFilenameChars-64)).replace(/-$/g,'');
   return base||'student';
@@ -1552,13 +1560,13 @@ function readUserDefaults(){
   return {studentName,practiceTargetMs:practiceTargetMs||null,practiceCueMode};
 }
 function getActiveDefaults(){return PlanData.activeDefaults();}
-function applyStudentName(...args){return ProfileViews.applyStudentName(...args);}
-function getStudentNameFromDisplay(...args){return ProfileViews.getStudentNameFromDisplay(...args);}
-function isDefaultStudentName(...args){return ProfileViews.isDefaultStudentName(...args);}
-function profileInitial(...args){return ProfileViews.profileInitial(...args);}
-function profileSince(...args){return ProfileViews.profileSince(...args);}
-function profileLabel(...args){return ProfileViews.profileLabel(...args);}
-function renderProfileBadge(...args){return ProfileViews.renderProfileBadge(...args);}
+function applyStudentName(...args:Parameters<typeof ProfileViews.applyStudentName>){return ProfileViews.applyStudentName(...args);}
+function getStudentNameFromDisplay(...args:Parameters<typeof ProfileViews.getStudentNameFromDisplay>){return ProfileViews.getStudentNameFromDisplay(...args);}
+function isDefaultStudentName(...args:Parameters<typeof ProfileViews.isDefaultStudentName>){return ProfileViews.isDefaultStudentName(...args);}
+function profileInitial(...args:Parameters<typeof ProfileViews.profileInitial>){return ProfileViews.profileInitial(...args);}
+function profileSince(...args:Parameters<typeof ProfileViews.profileSince>){return ProfileViews.profileSince(...args);}
+function profileLabel(...args:Parameters<typeof ProfileViews.profileLabel>){return ProfileViews.profileLabel(...args);}
+function renderProfileBadge(...args:Parameters<typeof ProfileViews.renderProfileBadge>){return ProfileViews.renderProfileBadge(...args);}
 // P5.8B owns the shared profile/sync status surface. These wrappers exist
 // early because storage/profile composition can request a redraw before the
 // checked owner is instantiated; the pending redraw is replayed after wiring.
@@ -1569,9 +1577,9 @@ function scheduleSyncStatus(){
 function connectDriveForProfile(){return SyncStatusHost?SyncStatusHost.connectDriveForProfile():false;}
 function endDriveConnectCard(){return SyncStatusHost?SyncStatusHost.endConnectCard():false;}
 function syncStatusAction(event){return SyncStatusHost?SyncStatusHost.action(event):Promise.resolve(false);}
-function renderProfilePanel(...args){return ProfileViews.renderProfilePanel(...args);}
-function renderProfile(...args){return ProfileViews.renderProfile(...args);}
-function reportProfileActionError(...args){return ProfileViews.reportProfileActionError(...args);}
+function renderProfilePanel(...args:Parameters<typeof ProfileViews.renderProfilePanel>){return ProfileViews.renderProfilePanel(...args);}
+function renderProfile(...args:Parameters<typeof ProfileViews.renderProfile>){return ProfileViews.renderProfile(...args);}
+function reportProfileActionError(...args:Parameters<typeof ProfileViews.reportProfileActionError>){return ProfileViews.reportProfileActionError(...args);}
 const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze<Parameters<typeof ProfilesHostModule.createPanelActions>[0]>({
   document,
   getStudentName:()=>getStudentNameFromDisplay(),
@@ -1876,9 +1884,9 @@ function shortTaskLabel(t){
   const prefix=isFixedBlock(t)?(taskAreaValue(t)||'fixed').toUpperCase()+': ':'';
   return prefix+t.name;
 }
-function realTimeAwarenessKey(...args){return ExecutionViews.realTimeAwarenessKey(...args);}
-function realTimeElements(...args){return ExecutionViews.realTimeElements(...args);}
-function updateRealTimeAwareness(...args){return ExecutionViews.updateRealTimeAwareness(...args);}
+function realTimeAwarenessKey(...args:Parameters<typeof ExecutionViews.realTimeAwarenessKey>){return ExecutionViews.realTimeAwarenessKey(...args);}
+function realTimeElements(...args:Parameters<typeof ExecutionViews.realTimeElements>){return ExecutionViews.realTimeElements(...args);}
+function updateRealTimeAwareness(...args:Parameters<typeof ExecutionViews.updateRealTimeAwareness>){return ExecutionViews.updateRealTimeAwareness(...args);}
 const renderQueue=new Set();
 let renderQueueFrame=0;
 const markScheduleRenderDirty=()=>PlanRuntime.markRenderDirty();
@@ -1930,30 +1938,30 @@ function queueProtectedMutationUiReconcile(){
   return true;
 }
 /* TIMER RECOVERY ACTIONS AND UNFINISHED NOTE DRAFT */
-function recoverySetStatus(...args){return ExecutionViews.recoverySetStatus(...args);}
+function recoverySetStatus(...args:Parameters<typeof ExecutionViews.recoverySetStatus>){return ExecutionViews.recoverySetStatus(...args);}
 
-function recoveryTargetTrackableIdx(...args){return ExecutionViews.recoveryTargetTrackableIdx(...args);}
-function recoveryFallbackTrackableIdx(...args){return ExecutionViews.recoveryFallbackTrackableIdx(...args);}
-function renderRecoveryTarget(...args){return ExecutionViews.renderRecoveryTarget(...args);}
-function recoveryStartTimerAt(...args){return ExecutionViews.recoveryStartTimerAt(...args);}
-function recoveryJumpToScheduledNow(...args){return ExecutionViews.recoveryJumpToScheduledNow(...args);}
-function recoveryStartScheduledFull(...args){return ExecutionViews.recoveryStartScheduledFull(...args);}
-function recoveryStartRemainingWindow(...args){return ExecutionViews.recoveryStartRemainingWindow(...args);}
-function recoveryShiftStartIndex(...args){return ExecutionViews.recoveryShiftStartIndex(...args);}
-function deriveRecoveryShiftPlan(...args){return ExecutionViews.deriveRecoveryShiftPlan(...args);}
-function applyRecoveryShiftPlan(...args){return ExecutionViews.applyRecoveryShiftPlan(...args);}
-function recoveryShiftOverflowText(...args){return ExecutionViews.recoveryShiftOverflowText(...args);}
-function finishRecoveryShiftPlan(...args){return ExecutionViews.finishRecoveryShiftPlan(...args);}
-function recoveryShiftRemainingDay(...args){return ExecutionViews.recoveryShiftRemainingDay(...args);}
-function recoveryCarryForwardItems(...args){return ExecutionViews.recoveryCarryForwardItems(...args);}
-function buildCarryForwardText(...args){return ExecutionViews.buildCarryForwardText(...args);}
-function setCarryForwardDraft(...args){return ExecutionViews.setCarryForwardDraft(...args);}
-function recoveryGenerateCarryForward(...args){return ExecutionViews.recoveryGenerateCarryForward(...args);}
-function syncUnfinishedNoteDraft(...args){return ExecutionViews.syncUnfinishedNoteDraft(...args);}
-function copyCarryForward(...args){return ExecutionViews.copyCarryForward(...args);}
-function unfinishedNoteDraftText(...args){return ExecutionViews.unfinishedNoteDraftText(...args);}
-function closeUnfinishedNotePanel(...args){return ExecutionViews.closeUnfinishedNotePanel(...args);}
-function renderRecoveryReview(...args){return ExecutionViews.renderRecoveryReview(...args);}
+function recoveryTargetTrackableIdx(...args:Parameters<typeof ExecutionViews.recoveryTargetTrackableIdx>){return ExecutionViews.recoveryTargetTrackableIdx(...args);}
+function recoveryFallbackTrackableIdx(...args:Parameters<typeof ExecutionViews.recoveryFallbackTrackableIdx>){return ExecutionViews.recoveryFallbackTrackableIdx(...args);}
+function renderRecoveryTarget(...args:Parameters<typeof ExecutionViews.renderRecoveryTarget>){return ExecutionViews.renderRecoveryTarget(...args);}
+function recoveryStartTimerAt(...args:Parameters<typeof ExecutionViews.recoveryStartTimerAt>){return ExecutionViews.recoveryStartTimerAt(...args);}
+function recoveryJumpToScheduledNow(...args:Parameters<typeof ExecutionViews.recoveryJumpToScheduledNow>){return ExecutionViews.recoveryJumpToScheduledNow(...args);}
+function recoveryStartScheduledFull(...args:Parameters<typeof ExecutionViews.recoveryStartScheduledFull>){return ExecutionViews.recoveryStartScheduledFull(...args);}
+function recoveryStartRemainingWindow(...args:Parameters<typeof ExecutionViews.recoveryStartRemainingWindow>){return ExecutionViews.recoveryStartRemainingWindow(...args);}
+function recoveryShiftStartIndex(...args:Parameters<typeof ExecutionViews.recoveryShiftStartIndex>){return ExecutionViews.recoveryShiftStartIndex(...args);}
+function deriveRecoveryShiftPlan(...args:Parameters<typeof ExecutionViews.deriveRecoveryShiftPlan>){return ExecutionViews.deriveRecoveryShiftPlan(...args);}
+function applyRecoveryShiftPlan(...args:Parameters<typeof ExecutionViews.applyRecoveryShiftPlan>){return ExecutionViews.applyRecoveryShiftPlan(...args);}
+function recoveryShiftOverflowText(...args:Parameters<typeof ExecutionViews.recoveryShiftOverflowText>){return ExecutionViews.recoveryShiftOverflowText(...args);}
+function finishRecoveryShiftPlan(...args:Parameters<typeof ExecutionViews.finishRecoveryShiftPlan>){return ExecutionViews.finishRecoveryShiftPlan(...args);}
+function recoveryShiftRemainingDay(...args:Parameters<typeof ExecutionViews.recoveryShiftRemainingDay>){return ExecutionViews.recoveryShiftRemainingDay(...args);}
+function recoveryCarryForwardItems(...args:Parameters<typeof ExecutionViews.recoveryCarryForwardItems>){return ExecutionViews.recoveryCarryForwardItems(...args);}
+function buildCarryForwardText(...args:Parameters<typeof ExecutionViews.buildCarryForwardText>){return ExecutionViews.buildCarryForwardText(...args);}
+function setCarryForwardDraft(...args:Parameters<typeof ExecutionViews.setCarryForwardDraft>){return ExecutionViews.setCarryForwardDraft(...args);}
+function recoveryGenerateCarryForward(...args:Parameters<typeof ExecutionViews.recoveryGenerateCarryForward>){return ExecutionViews.recoveryGenerateCarryForward(...args);}
+function syncUnfinishedNoteDraft(...args:Parameters<typeof ExecutionViews.syncUnfinishedNoteDraft>){return ExecutionViews.syncUnfinishedNoteDraft(...args);}
+function copyCarryForward(...args:Parameters<typeof ExecutionViews.copyCarryForward>){return ExecutionViews.copyCarryForward(...args);}
+function unfinishedNoteDraftText(...args:Parameters<typeof ExecutionViews.unfinishedNoteDraftText>){return ExecutionViews.unfinishedNoteDraftText(...args);}
+function closeUnfinishedNotePanel(...args:Parameters<typeof ExecutionViews.closeUnfinishedNotePanel>){return ExecutionViews.closeUnfinishedNotePanel(...args);}
+function renderRecoveryReview(...args:Parameters<typeof ExecutionViews.renderRecoveryReview>){return ExecutionViews.renderRecoveryReview(...args);}
 /* TASK PROGRESS AND ONGOING NOTE EDITORS */
 function getTaskCompletion(idx){
   return resolveTaskCompletion(idx).pct;
@@ -2222,11 +2230,11 @@ function saveNote(){
     if(field)commitTaskNoteEditor(field,field.value);
   }
 }
-let pnoteInfoPopover=null;
+let pnoteInfoPopover:ReturnType<typeof RichTextApi.createAnchoredPopover>|null=null;
 function togglePnoteInfo(){const button=document.getElementById('pn-info-btn'),popover=document.getElementById('pn-info-popover');if(!button||!popover)return false;pnoteInfoPopover??=RichTextApi.createAnchoredPopover(popover,{align:'end'});const opening=popover.hidden;if(opening)pnoteInfoPopover.show(button);else pnoteInfoPopover.hide();return opening;}
 const backupInfoPopovers=new Map();
 function toggleBackupInfo(event){const button=event?.target?.closest?.('[data-backup-info-target]'),id=String(button?.dataset?.backupInfoTarget||''),popover=id?document.getElementById(id):null;if(!button||!popover)return false;let controller=backupInfoPopovers.get(id);if(!controller){controller=RichTextApi.createAnchoredPopover(popover,{align:'end',onClose:()=>button.setAttribute('aria-expanded','false')});backupInfoPopovers.set(id,controller);}const opening=popover.hidden;if(opening){controller.show(button);button.setAttribute('aria-expanded','true');}else{controller.hide();button.setAttribute('aria-expanded','false');}return opening;}
-let executeNoteView=null;
+let executeNoteView:Readonly<{taskId:string;id:string}>|null=null;
 function refreshPnote(options={}){
   const t=TASKS[TimerState.currentIndex];
   if(!isLiveTrackableTimer()){
@@ -2324,24 +2332,24 @@ function onPnoteChange(){
   if(resolved.changed)saveLiveDraft();
 }
 /* EXECUTE IDLE DISPLAY AND SESSION CONTROLS */
-function isLiveTrackableTimer(...args){return ExecutionViews.isLiveTrackableTimer(...args);}
-function setExecuteControlsEnabled(...args){return ExecutionViews.setExecuteControlsEnabled(...args);}
-function setExecuteShellVisible(...args){return ExecutionViews.setExecuteShellVisible(...args);}
-function nextTrackableWindowLabel(...args){return ExecutionViews.nextTrackableWindowLabel(...args);}
-function stripScheduleLead(...args){return ExecutionViews.stripScheduleLead(...args);}
-function executeIdleView(...args){return ExecutionViews.executeIdleView(...args);}
-function executeIdlePresentation(...args){return ExecutionViews.executeIdlePresentation(...args);}
-function setExecuteStateOverlay(...args){return ExecutionViews.setExecuteStateOverlay(...args);}
-function clearExecuteStateOverlay(...args){return ExecutionViews.clearExecuteStateOverlay(...args);}
-function refreshExecuteIdleDisplay(...args){return ExecutionViews.refreshExecuteIdleDisplay(...args);}
-function showExecuteWaitingState(...args){return ExecutionViews.showExecuteWaitingState(...args);}
-function maybeAutoStartScheduledBlock(...args){return ExecutionViews.maybeAutoStartScheduledBlock(...args);}
-function maybePromptScheduleEndSave(...args){return ExecutionViews.maybePromptScheduleEndSave(...args);}
-function showDone(...args){return ExecutionViews.showDone(...args);}
-function showEmpty(...args){return ExecutionViews.showEmpty(...args);}
-function badgeElements(...args){return ExecutionViews.badgeElements(...args);}
-function updateBadges(...args){return ExecutionViews.updateBadges(...args);}
-function updateSessionControls(...args){return ExecutionViews.updateSessionControls(...args);}
+function isLiveTrackableTimer(...args:Parameters<typeof ExecutionViews.isLiveTrackableTimer>){return ExecutionViews.isLiveTrackableTimer(...args);}
+function setExecuteControlsEnabled(...args:Parameters<typeof ExecutionViews.setExecuteControlsEnabled>){return ExecutionViews.setExecuteControlsEnabled(...args);}
+function setExecuteShellVisible(...args:Parameters<typeof ExecutionViews.setExecuteShellVisible>){return ExecutionViews.setExecuteShellVisible(...args);}
+function nextTrackableWindowLabel(...args:Parameters<typeof ExecutionViews.nextTrackableWindowLabel>){return ExecutionViews.nextTrackableWindowLabel(...args);}
+function stripScheduleLead(...args:Parameters<typeof ExecutionViews.stripScheduleLead>){return ExecutionViews.stripScheduleLead(...args);}
+function executeIdleView(...args:Parameters<typeof ExecutionViews.executeIdleView>){return ExecutionViews.executeIdleView(...args);}
+function executeIdlePresentation(...args:Parameters<typeof ExecutionViews.executeIdlePresentation>){return ExecutionViews.executeIdlePresentation(...args);}
+function setExecuteStateOverlay(...args:Parameters<typeof ExecutionViews.setExecuteStateOverlay>){return ExecutionViews.setExecuteStateOverlay(...args);}
+function clearExecuteStateOverlay(...args:Parameters<typeof ExecutionViews.clearExecuteStateOverlay>){return ExecutionViews.clearExecuteStateOverlay(...args);}
+function refreshExecuteIdleDisplay(...args:Parameters<typeof ExecutionViews.refreshExecuteIdleDisplay>){return ExecutionViews.refreshExecuteIdleDisplay(...args);}
+function showExecuteWaitingState(...args:Parameters<typeof ExecutionViews.showExecuteWaitingState>){return ExecutionViews.showExecuteWaitingState(...args);}
+function maybeAutoStartScheduledBlock(...args:Parameters<typeof ExecutionViews.maybeAutoStartScheduledBlock>){return ExecutionViews.maybeAutoStartScheduledBlock(...args);}
+function maybePromptScheduleEndSave(...args:Parameters<typeof ExecutionViews.maybePromptScheduleEndSave>){return ExecutionViews.maybePromptScheduleEndSave(...args);}
+function showDone(...args:Parameters<typeof ExecutionViews.showDone>){return ExecutionViews.showDone(...args);}
+function showEmpty(...args:Parameters<typeof ExecutionViews.showEmpty>){return ExecutionViews.showEmpty(...args);}
+function badgeElements(...args:Parameters<typeof ExecutionViews.badgeElements>){return ExecutionViews.badgeElements(...args);}
+function updateBadges(...args:Parameters<typeof ExecutionViews.updateBadges>){return ExecutionViews.updateBadges(...args);}
+function updateSessionControls(...args:Parameters<typeof ExecutionViews.updateSessionControls>){return ExecutionViews.updateSessionControls(...args);}
 /* REVIEW SUBSYSTEM · PRIVATE MODULE */
 const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze<Parameters<typeof ReviewHostModule.createSubsystem>[0]>({
   module:ReviewModule,
@@ -2454,11 +2462,11 @@ requestRender:(...args)=>requestRender(...args),
 appCanMutate:(...args)=>appCanMutate(...args),
 schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args)
 }));
-function lifecycleEditorElements(...args){return SessionLifecycleViews.lifecycleEditorElements(...args);}
-function setLifecycleEditorsBlocked(...args){return SessionLifecycleViews.setLifecycleEditorsBlocked(...args);}
-function invalidateLifecycleEditors(...args){return SessionLifecycleViews.invalidateLifecycleEditors(...args);}
-function reconcileLifecycleEditors(...args){return SessionLifecycleViews.reconcileLifecycleEditors(...args);}
-function completeLifecycleTransition(...args){return SessionLifecycleViews.completeLifecycleTransition(...args);}
+function lifecycleEditorElements(...args:Parameters<typeof SessionLifecycleViews.lifecycleEditorElements>){return SessionLifecycleViews.lifecycleEditorElements(...args);}
+function setLifecycleEditorsBlocked(...args:Parameters<typeof SessionLifecycleViews.setLifecycleEditorsBlocked>){return SessionLifecycleViews.setLifecycleEditorsBlocked(...args);}
+function invalidateLifecycleEditors(...args:Parameters<typeof SessionLifecycleViews.invalidateLifecycleEditors>){return SessionLifecycleViews.invalidateLifecycleEditors(...args);}
+function reconcileLifecycleEditors(...args:Parameters<typeof SessionLifecycleViews.reconcileLifecycleEditors>){return SessionLifecycleViews.reconcileLifecycleEditors(...args);}
+function completeLifecycleTransition(...args:Parameters<typeof SessionLifecycleViews.completeLifecycleTransition>){return SessionLifecycleViews.completeLifecycleTransition(...args);}
 const SessionLifecycleHooks=ReviewHostModule.createLifecycleHooks(Object.freeze<Parameters<typeof ReviewHostModule.createLifecycleHooks>[0]>({
   canMutate:()=>appCanMutate(),
   reviewEditor:ReviewEditor,
@@ -2568,8 +2576,8 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<P
 }));
 
 /* LIVE FOCUS EVIDENCE IN THE EXECUTION HEADER */
-function timerMetricElements(...args){return ExecutionViews.timerMetricElements(...args);}
-function updateTimerFocusMetrics(...args){return ExecutionViews.updateTimerFocusMetrics(...args);}
+function timerMetricElements(...args:Parameters<typeof ExecutionViews.timerMetricElements>){return ExecutionViews.timerMetricElements(...args);}
+function updateTimerFocusMetrics(...args:Parameters<typeof ExecutionViews.updateTimerFocusMetrics>){return ExecutionViews.updateTimerFocusMetrics(...args);}
 /* PORTABLE ONGOING-NOTE EXPORT · READ-ONLY */
 const RetainedBackupFiles=BackupRecoveryHostModule.createRetainedBackupFiles(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createRetainedBackupFiles>[0]>({
   restoreJournalPayload:()=>JournalAppMeta.read('restoreJournalPayload'),
@@ -2579,12 +2587,12 @@ if(!Object.isFrozen(RetainedBackupFiles)||RetainedBackupFiles.format!=='study-di
   throw new Error('Study Director retained backup-file policy is unavailable or incompatible.');
 }
 const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,root:ProfileScope.scoped('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'),retained:()=>RetainedBackupFiles.names(),isAvailable:()=>upkeepBlocker()||(navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable'),onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
-let fileProcessingNotice=null;
+let fileProcessingNotice:ReturnType<ReturnType<typeof NoticeCoordinator.presentation>['begin']>|null=null;
 const Exports=ExportsModule.createCoordinator({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_EXPORT_WORKER_FILENAME@@'),{name:'study-director-exports'}),window,document,files:BackupFiles,
   onState:state=>{renderFileBackup();if(state.fileBusy){if(!fileProcessingNotice)fileProcessingNotice=NoticeCoordinator.presentation('file-processing').begin({id:'worker',surfaceId:'file-processing-status',foreground:false,announce:false,title:'File processing'});fileProcessingNotice.update({message:state.phase,progress:{stage:state.phase}});}else{fileProcessingNotice?.resolve();fileProcessingNotice=null;const status=document.getElementById('file-processing-status');if(status)status.textContent='';}}
 });
-let BackupProtectionHost=null;
+let BackupProtectionHost:ReturnType<typeof BackupActionsHostModule.createProtectionHost>|null=null;
 function backupBackgroundAvailability(){return BackupProtectionHost?BackupProtectionHost.backgroundAvailability():backgroundBlocker()||'locked';}
 function setBackupProtectionSurfaceError(error){return BackupProtectionHost?.surfaceError(error)||false;}
 const BackupProtectionStorage=BackupActionsHostModule.createProtectionStorage(Object.freeze<Parameters<typeof BackupActionsHostModule.createProtectionStorage>[0]>({meta:ExportsAppMeta,settingName:'backupProtection',settingKey:APP_META_KEYS.backupProtection}));
@@ -2632,7 +2640,7 @@ const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<Parameters<type
   document,window,richText:RichTextApi,assets:RichTextAssets,plain:value=>plainTextContent(value),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
 }));
-let AttachmentLibrary=null;
+let AttachmentLibrary:ReturnType<typeof AttachmentsModule.create>|null=null;
 const LibraryDocuments=DocumentHostModule.createIntegration(Object.freeze<Parameters<typeof DocumentHostModule.createIntegration>[0]>({
   limits:Object.freeze({maxRichAssetPerDocument:APP_LIMITS.richAssetMaxPerDocument,maxRichAssetBytesPerDocument:RichTextApi.assetPolicy.maxBytesPerDocument}),
   notes:AppData.notes,
@@ -2890,9 +2898,9 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze<Parameters<t
 
 const RuntimeBackupCodec=Object.freeze({...BackupCodec,inspect:BackupCodec.inspectCurrent});
 
-function restoreSessionStateThroughLifecycle(...args){return SessionActions.restoreSessionStateThroughLifecycle(...args);}
-function verifyRestoredTimerRuntimeSemantics(...args){return SessionActions.verifyRestoredTimerRuntimeSemantics(...args);}
-function verifyRestoredSessionRuntime(...args){return SessionActions.verifyRestoredSessionRuntime(...args);}
+function restoreSessionStateThroughLifecycle(...args:Parameters<typeof SessionActions.restoreSessionStateThroughLifecycle>){return SessionActions.restoreSessionStateThroughLifecycle(...args);}
+function verifyRestoredTimerRuntimeSemantics(...args:Parameters<typeof SessionActions.verifyRestoredTimerRuntimeSemantics>){return SessionActions.verifyRestoredTimerRuntimeSemantics(...args);}
+function verifyRestoredSessionRuntime(...args:Parameters<typeof SessionActions.verifyRestoredSessionRuntime>){return SessionActions.verifyRestoredSessionRuntime(...args);}
 
 // Byte staging finishes before the single attachment metadata commit. Rollback
 // replaces the catalogue; physical reclamation still waits for all readers.
