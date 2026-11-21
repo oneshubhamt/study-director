@@ -128,6 +128,14 @@ const ProfileScopeBootstrap=(window as unknown as Record<symbol,unknown>)[Symbol
 function decodeBuildJson(value:string,label:string):unknown{
   try{return JSON.parse(decodeURIComponent(value)) as unknown;}catch(error){throw new TypeError('Invalid '+label+' build input.',{cause:error});}
 }
+function decodeBuildStringRecord(value:string,label:string):Readonly<Record<string,string>>{
+  const parsed=decodeBuildJson(value,label);
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new TypeError('Invalid '+label+' build input.');
+  const entries=Object.entries(parsed as Record<string,unknown>);
+  if(entries.some(([,item])=>typeof item!=='string'||!item))throw new TypeError('Invalid '+label+' build input.');
+  return Object.freeze(Object.fromEntries(entries) as Record<string,string>);
+}
+const RAW_LOCAL_STORAGE_KEYS=decodeBuildStringRecord('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys');
 const {
   APP_VERSION,APP_CONFIG,APP_LIMITS,ProfileScope,DEVICE_WIDE_STORAGE_KEYS,STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,EXTERNAL_REPOSITORY_IDENTITIES,APP_META_REGISTRY,
   DATA_CONTRACT,DB_STORES,DB_NAME,DB_VER,DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_NOTES_STORE,DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE,DB_ASSET_STORE,
@@ -138,7 +146,7 @@ const {
   raw:Object.freeze({
     productionLimits:decodeBuildJson('@@SD_PRODUCTION_LIMITS_URI@@','production limits'),
     deviceWideStorageKeys:decodeBuildJson('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys'),
-    localStorageKeys:decodeBuildJson('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys'),
+    localStorageKeys:RAW_LOCAL_STORAGE_KEYS,
     sessionStorageKeys:decodeBuildJson('@@SD_SESSION_STORAGE_KEYS_URI@@','session storage keys'),
     appMetaKeys:decodeBuildJson('@@SD_APP_META_KEYS_URI@@','AppMeta keys'),
     externalRepositoryIdentities:decodeBuildJson('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@','external repository identities'),
@@ -239,7 +247,7 @@ const Profiles=ProfilesHostModule.createController(Object.freeze({module:Profile
     keys:()=>LocalStorageContract.keys(),
     remove:key=>LocalStorageContract.remove(key)
   }),
-  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
+  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(RAW_LOCAL_STORAGE_KEYS).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
   platform:ProfilesHostModule.createPlatform({indexedDB,window,localStorage,storage:navigator.storage,now:()=>Date.now(),random:randomIdPart,reload:()=>location.reload()}),
   limits:Object.freeze({maxName:APP_LIMITS.maxStudentNameChars})
 })}));
