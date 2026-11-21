@@ -34,12 +34,16 @@ try{
  })()`);
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});
 
- const chooseAppearance=async(presentation,theme,{expectFocus=true}={})=>{
-   await page.evaluate(`(()=>{const menu=document.getElementById('display-tools-menu');if(menu.hidden)document.getElementById('display-tools-trigger').click();})()`);
+ const openDisplayTools=async()=>{
+   if(await page.evaluate(`document.getElementById('display-tools-menu').hidden`))await page.click('#display-tools-trigger');
    await waitFor(()=>page.evaluate(`!document.getElementById('display-tools-menu').hidden`),{label:'visible Display Tools'});
-   await page.evaluate(`(()=>{const button=[...document.querySelectorAll('.theme-btn[data-theme-id]')].find(item=>item.dataset.themeId===${JSON.stringify(theme)});if(!button)throw Error('Theme control unavailable: '+${JSON.stringify(theme)});button.click();})()`);
+ };
+ const chooseAppearance=async(presentation,theme,{expectFocus=true}={})=>{
+   await openDisplayTools();
+   await page.click(`.theme-btn[data-theme-id="${theme}"]`);
    await waitFor(()=>page.evaluate(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`),{label:`theme ${theme}`});
-   await page.evaluate(`(()=>{const button=[...document.querySelectorAll('.presentation-btn[data-presentation-id]')].find(item=>item.dataset.presentationId===${JSON.stringify(presentation)});if(!button)throw Error('Presentation control unavailable: '+${JSON.stringify(presentation)});button.click();})()`);
+   await openDisplayTools();
+   await page.click(`.presentation-btn[data-presentation-id="${presentation}"]`);
    await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation===${JSON.stringify(presentation)}`),{label:`presentation ${presentation}`});
    const state=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,themePressed:document.querySelector('.theme-btn[data-theme-id="${theme}"]')?.getAttribute('aria-pressed'),presentationPressed:document.querySelector('.presentation-btn[data-presentation-id="${presentation}"]')?.getAttribute('aria-pressed'),focus:document.activeElement?.dataset?.presentationId||'',themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content')||'',computedThemeColor:getComputedStyle(document.documentElement).getPropertyValue('--sd-meta-theme-color').trim()}))()`);
    assert.deepEqual({theme:state.theme,presentation:state.presentation,themePressed:state.themePressed,presentationPressed:state.presentationPressed},{theme,presentation,themePressed:'true',presentationPressed:'true'});
@@ -49,7 +53,7 @@ try{
  for(const presentation of ['director-current','glass','aurora'])for(const theme of ['dark','light'])await chooseAppearance(presentation,theme);
 
  await chooseAppearance('director-current','light');
- await page.evaluate(`document.querySelector('[data-action="font-larger"]').click()`);
+ await openDisplayTools();await page.click('[data-action="font-larger"]');
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.fontScale==='1.08'`),{label:'font scale persisted selection'});
  await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.presentation==='director-current'&&value?.theme==='light'&&value?.fontScale===1.08)`),{label:'canonical appearance preferences'});
  assert.deepEqual(await page.evaluate(`({theme:localStorage.getItem('studyDirector.theme.v1'),presentation:localStorage.getItem('studyDirector.presentation.v1'),fontScale:localStorage.getItem('studyDirector.fontScale.v1')})`),{theme:'light',presentation:'director-current',fontScale:'1.08'});
@@ -87,13 +91,13 @@ try{
  await waitFor(()=>page.evaluate(`document.getElementById('nudge-overlay').classList.contains('on')`),{label:'Pomodoro overlay'});
  await page.evaluate(`__PWA6.NoticeCoordinator.publish('qa-pwa-update',{visible:true,kind:'update',title:'Update ready',message:'Presentation overlay priority check.'});document.getElementById('display-tools-trigger').click()`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='update'&&!document.getElementById('display-tools-menu').hidden&&document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed')`),{label:'Aurora overlay priority'});
- await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='glass').click()`);
+ await openDisplayTools();await page.click('.presentation-btn[data-presentation-id="glass"]');
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation==='glass'&&document.documentElement.dataset.glassOverlayActive==='update'`),{label:'Glass overlay handoff'});
  assert.deepEqual(await page.evaluate(`({auroraActive:document.documentElement.dataset.auroraOverlayActive||'',auroraSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed'),glassSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-glass-surface-suppressed'),menuHidden:document.getElementById('display-tools-menu').hidden})`),{auroraActive:'',auroraSuppressed:false,glassSuppressed:true,menuHidden:false});
- await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='director-current').click()`);
+ await openDisplayTools();await page.click('.presentation-btn[data-presentation-id="director-current"]');
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation==='director-current'`),{label:'Director overlay cleanup'});
  assert.deepEqual(await page.evaluate(`({glassActive:document.documentElement.dataset.glassOverlayActive||'',auroraActive:document.documentElement.dataset.auroraOverlayActive||'',glassSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-glass-surface-suppressed'),auroraSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed'),menuHidden:document.getElementById('display-tools-menu').hidden})`),{glassActive:'',auroraActive:'',glassSuppressed:false,auroraSuppressed:false,menuHidden:false});
- await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='aurora').click()`);
+ await openDisplayTools();await page.click('.presentation-btn[data-presentation-id="aurora"]');
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='update'`),{label:'Aurora overlay reacquire'});
  await page.evaluate(`__PWA6.NoticeCoordinator.publish('qa-pwa-update',null)`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='nudge'&&document.getElementById('display-tools-menu').hidden&&document.getElementById('display-tools-trigger').getAttribute('aria-expanded')==='false'`),{label:'blocking overlay closes display tools'});

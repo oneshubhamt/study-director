@@ -14,9 +14,15 @@ async function axe(label){
   assert.deepEqual(violations,[],`${label}: ${JSON.stringify(violations)}`);
   result.matrix.push(label);
 }
+async function openDisplayTools(){
+  if(await page.evaluate(`document.getElementById('display-tools-menu').hidden`))await page.click('#display-tools-trigger');
+  await waitFor(()=>page.evaluate(`!document.getElementById('display-tools-menu').hidden`),{label:'visible Display tools'});
+}
 async function selectAppearance(presentation,theme){
+  await openDisplayTools();
   await page.click(`.theme-btn[data-theme-id="${theme}"]`);
   await waitFor(()=>page.evaluate(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`),{label:`theme ${theme}`});
+  await openDisplayTools();
   await page.click(`.presentation-btn[data-presentation-id="${presentation}"]`);
   await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation===${JSON.stringify(presentation)}`),{label:`presentation ${presentation}`});
   await page.settle(3);

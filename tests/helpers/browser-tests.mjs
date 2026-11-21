@@ -49,8 +49,8 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('unsupported-data','tests/browser/storage/unsupported-data.mjs',['storage','compatibility','indexeddb','profiles','reload'],240000),
     test('interactions','tests/browser/ui/interactions.mjs',['dialogs','history','navigation','keyboard','notifications']),
     test('notification-stack','tests/browser/ui/notification-stack.mjs',['notifications','stack','recent','mobile','touch','keyboard','reload']),
-    test('profile-panel','tests/browser/ui/profile-panel.mjs',['profile','recent','notifications','rename','mobile','keyboard','reload'])
-    ,test('presentation-accessibility','tests/browser/ui/presentation-accessibility.mjs',['presentation','theme','accessibility','axe','controls','mobile','profiles'])
+    test('profile-panel','tests/browser/ui/profile-panel.mjs',['profile','recent','notifications','rename','mobile','keyboard','reload']),
+    test('presentation-accessibility','tests/browser/ui/presentation-accessibility.mjs',['presentation','theme','accessibility','axe','controls','mobile','profiles'])
   ]),
   extended:Object.freeze([
     test('attachment-library','tests/browser/attachments/attachments.mjs',['attachments','pdf','audio','opfs','references','streaming','atomic-import','trusted-types'],180000),
