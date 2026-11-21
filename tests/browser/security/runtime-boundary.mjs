@@ -148,6 +148,42 @@ try{
  assert.match(await page.evaluate('document.querySelector("#security-note + .sd-rte").textContent'),/Safe text/);
  assert.equal(await page.evaluate('document.querySelector("#security-note + .sd-rte a[href^=javascript]")===null'),true);
  await page.evaluate('testEditor.destroy();document.getElementById("security-note").remove()');
+
+ // P5.13a: hold the first optional Guide script request, leave the tab while
+ // it is pending, fail it late, then return and retry through ordinary tab UI.
+ await page.evaluate(`(()=>{
+   const head=document.head,append=head.appendChild.bind(head);
+   window.__p513Optional={append,held:null,intercepted:false};
+   head.appendChild=function(node){
+     if(node instanceof HTMLScriptElement&&node.dataset.studyDirectorPluginTab==='guide'&&!window.__p513Optional.intercepted){
+       window.__p513Optional.intercepted=true;window.__p513Optional.held=node;return node;
+     }
+     return append(node);
+   };
+ })()`);
+ await page.click('[data-tab="guide"]');
+ await waitFor(()=>page.evaluate(`!!window.__p513Optional?.held&&document.querySelector('.pane.on')?.id==='pane-guide'&&StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='loading'`),{label:'held optional Guide load'});
+ await page.click('[data-tab="plan"]');
+ await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-plan'`),{label:'switch away during optional load'});
+ await page.evaluate(`(()=>{const qa=window.__p513Optional,held=qa.held;document.head.appendChild=qa.append;held.onerror?.call(held,new Event('error'));})()`);
+ await waitFor(()=>page.evaluate(`StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='missing'`),{label:'late optional load failure'});
+ assert.equal(await page.evaluate(`document.querySelector('.pane.on')?.id`),'pane-plan','late optional failure must not steal active-tab ownership');
+ await page.click('[data-tab="guide"]');
+ await waitFor(()=>page.evaluate(`document.querySelector('#pane-guide .plugin-loading-panel .mini-btn')?.textContent==='Retry loading'`),{label:'optional retry control'});
+ await page.click('#pane-guide .plugin-loading-panel .mini-btn');
+ await waitFor(()=>page.evaluate(`!!document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]")&&StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='registered'`),{label:'Guide retry registration'});
+ const pluginContract=await page.evaluate(`(()=>{
+   let incompatibleSetup=0,setup=0;
+   const bad={name:'qa-p513-incompatible',version:'1',requires:{missingCapability:1},setup(){incompatibleSetup++;return true;}};
+   const good={name:'qa-p513-single',version:'1',requires:{pluginApi:1,tabRegistry:1},setup(api){setup++;return api.ui.registerTab({id:'qa-p513-tab',label:'QA P5.13',icon:'Q',render(){}});}};
+   const badFirst=StudyDirector.registerPlugin(bad),badSecond=StudyDirector.registerPlugin(bad);
+   const goodFirst=StudyDirector.registerPlugin(good),goodSecond=StudyDirector.registerPlugin(good);
+   const state=StudyDirector.plugins.status();
+   return {badFirst,badSecond,incompatibleSetup,goodFirst,goodSecond,setup,navs:document.querySelectorAll('[data-tab="qa-p513-tab"]').length,badState:state.registered.find(row=>row.name==='qa-p513-incompatible')?.state||'',goodState:state.registered.find(row=>row.name==='qa-p513-single')?.state||'',apiFrozen:Object.isFrozen(StudyDirector)&&Object.isFrozen(StudyDirector.backup)&&Object.isFrozen(StudyDirector.ui)};
+ })()`);
+ assert.deepEqual(pluginContract,{badFirst:false,badSecond:false,incompatibleSetup:0,goodFirst:true,goodSecond:true,setup:1,navs:1,badState:'incompatible',goodState:'registered',apiFrozen:true});
+ delete globalThis.__p513Optional;
+
  await page.evaluate(`__PWA6.goTab('guide')`);await waitFor(()=>page.evaluate('!!document.getElementById("pane-guide")'));
  await waitFor(()=>page.evaluate('!!document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]")'));
  await page.evaluate('document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]").focus()');

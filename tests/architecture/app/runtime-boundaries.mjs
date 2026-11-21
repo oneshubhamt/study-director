@@ -28,6 +28,21 @@ assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note
 }
 
 
+{ // p5.13a-public-api-plugin-boundary
+const host=readHostHtml(),owner=readScript('source/core/public-api-host.ts');
+assert.match(host,/const PublicApiHostModule=INTERNAL_MODULES\.load\('public-api-host',1,'study-director\.public-api-host-module',1\)/u,'P5.13a host loads the checked public API owner');
+assert.match(host,/const PluginRuntime=PublicApiHostModule\.createRuntime\(Object\.freeze\(\{/u,'optional-plugin runtime must cross the checked P5.13a boundary');
+assert.match(host,/const StudyDirectorPublicAPI=PluginRuntime\.createPublicApi\(Object\.freeze\(\{/u,'public capability construction must cross the checked P5.13a boundary');
+assert.doesNotMatch(host,/const PluginRuntime=\(\(\)=>\{/u,'unchecked optional-plugin runtime must not remain in main');
+assert.doesNotMatch(host,/const StudyDirectorPublicAPI=Object\.freeze\(\{/u,'unchecked public API assembly must not remain in main');
+for(const required of ['MAX_LOAD_ATTEMPTS=2','MAX_REGISTRATION_ATTEMPTS=2','function registerPlaceholders','function requestTab','function createPublicApi'])assert.ok(owner.includes(required),`checked public API owner is missing ${required}`);
+assert.match(owner,/if\(activeTabId\(\)===tabId\)input\.tabs\.renderTab\(tabId\)/u,'optional plugin completion may rerender only its active tab');
+assert.match(owner,/if\(missing\.length\)[\s\S]{0,420}state:'incompatible'/u,'capability rejection happens before plugin setup');
+assert.match(owner,/if\(previous\?\.state==='registered'\)return true/u,'successful plugin registration is idempotent');
+const published=host.indexOf('window.StudyDirector=StudyDirectorPublicAPI;'),ready=host.indexOf('window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT'),invalidate=host.indexOf("SessionLifecycle.invalidate('app-restart'"),startup=host.indexOf('StartupLifecycle.start();'),pwa=host.indexOf('void PwaRuntime.install();');
+assert.ok(published>=0&&published<ready&&ready<invalidate&&invalidate<startup&&startup<pwa,'public API publication and ready event must remain before lifecycle startup and PWA install');
+}
+
 { // p5.7a-backup-actions-host-boundary
 const host=readHostHtml(),owner=readScript('source/core/backup-actions-host.ts'),ownerTypes=fs.readFileSync('types/backup-actions-host.ts','utf8'),deviceTypes=fs.readFileSync('types/device-backup.ts','utf8');
 assert.match(host,/const BackupActionsHostModule=INTERNAL_MODULES\.load\('backup-actions-host',1,'study-director\.backup-actions-host-module',1\)/u,'P5.7A host loads the checked backup-actions owner');
