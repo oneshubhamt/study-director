@@ -487,9 +487,10 @@ def update_service_worker(public: Path, replacements: dict[str, str]) -> None:
         manifest_json = json.dumps(manifest, separators=(",", ":"), ensure_ascii=False)
         source = source[:match.start(1)] + manifest_json + source[match.end(1):]
         manifests[constant] = manifest
+    release_sentinel = "0" * 24
     normalized = re.sub(
         r"const RELEASE_ID='[0-9a-f]+';",
-        "const RELEASE_ID='@@SD_PWA_RELEASE_ID@@';",
+        f"const RELEASE_ID='{release_sentinel}';",
         source,
         count=1,
     )
@@ -502,7 +503,7 @@ def update_service_worker(public: Path, replacements: dict[str, str]) -> None:
     )
     release_id = sha256_bytes(release_payload.encode("utf-8"))[:24]
     final_worker, replacements = re.subn(
-        r"const\s+RELEASE_ID\s*=\s*'@@SD_PWA_RELEASE_ID@@';",
+        rf"const\s+RELEASE_ID\s*=\s*'{release_sentinel}';",
         f"const RELEASE_ID='{release_id}';",
         worker_template,
         count=1,

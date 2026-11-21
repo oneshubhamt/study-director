@@ -23,6 +23,7 @@ function invariant(condition,message){if(!condition)throw new Error(message);}
 function sha256(value){return crypto.createHash('sha256').update(value).digest('hex');}
 function sha256Base64(value){return crypto.createHash('sha256').update(value).digest('base64');}
 function normalizePath(value){return value.split(path.sep).join('/');}
+const PWA_RELEASE_SENTINEL='0'.repeat(24);
 function sourceFile(relative){return fs.readFileSync(path.join(SOURCE,relative),'utf8');}
 function sourceBytes(relative){return fs.readFileSync(path.join(SOURCE,relative));}
 function moduleSourceFiles(module){return Array.isArray(module.sources)?[...module.sources]:[module.source];}
@@ -274,13 +275,17 @@ export function renderBuild(){
       ...legalReaderAssets.map(reader=>reader.output)
     ].filter((name,index,names)=>name!==platformFiles.serviceWorker.output&&names.indexOf(name)===index).sort();
     const precache=precacheNames.map(name=>Object.freeze({path:`./${normalizePath(name)}`,sha256:sha256(files.get(name))}));
-    // A worker-only release must not reset the cache serving identical assets.
-    const pwaReleaseId=sha256(JSON.stringify({precache,worker:sha256(serviceWorkerTemplate)})).slice(0,24);
-    const serviceWorker=renderPlatformTokens(serviceWorkerTemplate,identity,platformFiles.serviceWorker.source,{
-      PWA_RELEASE_ID:pwaReleaseId,
+    // Derive the release from the actual rendered worker contract, normalized
+    // only at its self-referential release field.
+    const workerForIdentity=renderPlatformTokens(serviceWorkerTemplate,identity,platformFiles.serviceWorker.source,{
+      PWA_RELEASE_ID:PWA_RELEASE_SENTINEL,
       PAGE_ASSET_ID:assetId,
       PWA_ASSET_MANIFEST:JSON.stringify(precache)
     });
+    const pwaReleaseId=sha256(JSON.stringify({precache,worker:sha256(workerForIdentity)})).slice(0,24);
+    const releaseNeedle=`const RELEASE_ID='${PWA_RELEASE_SENTINEL}';`,releaseValue=`const RELEASE_ID='${pwaReleaseId}';`;
+    invariant(workerForIdentity.split(releaseNeedle).length===2,'Service Worker release sentinel is missing or duplicated.');
+    const serviceWorker=workerForIdentity.replace(releaseNeedle,releaseValue);
     files.set(platformFiles.serviceWorker.output,serviceWorker);
     return Object.freeze({files,pwa:Object.freeze({releaseId:pwaReleaseId,assetId,precache:Object.freeze(precache)})});
   };
@@ -317,7 +322,10 @@ function verifyPwaTarget(files,pwa,label){
   invariant(pwa&&/^[a-f0-9]{24}$/.test(pwa.releaseId),`${label} PWA release identity is invalid.`);
   invariant(/^[a-f0-9]{24}$/.test(pwa.assetId),`${label} page asset identity is invalid.`);
   invariant(files.get('index.html').includes(`<meta name="study-director-assets" content="${pwa.assetId}">`),`${label} boot asset identity drifted.`);
-  invariant(pwa.releaseId===sha256(JSON.stringify({precache:pwa.precache,worker:sha256(compileScript(sourceFile(platformFiles.serviceWorker.source),platformFiles.serviceWorker.source))})).slice(0,24),`${label} worker-inclusive PWA identity drifted.`);
+  const serviceWorker=files.get(platformFiles.serviceWorker.output),releaseNeedle=`const RELEASE_ID='${pwa.releaseId}';`,normalizedRelease=`const RELEASE_ID='${PWA_RELEASE_SENTINEL}';`;
+  invariant(typeof serviceWorker==='string'&&serviceWorker.split(releaseNeedle).length===2,`${label} service worker release identity drifted.`);
+  const normalizedWorker=serviceWorker.replace(releaseNeedle,normalizedRelease);
+  invariant(pwa.releaseId===sha256(JSON.stringify({precache:pwa.precache,worker:sha256(normalizedWorker)})).slice(0,24),`${label} worker-inclusive PWA identity drifted from actual output.`);
   invariant(Array.isArray(pwa.precache)&&pwa.precache.length>0,`${label} precache inventory is empty.`);
   const paths=pwa.precache.map(asset=>asset.path);
   invariant(new Set(paths).size===paths.length,`${label} precache inventory contains duplicates.`);
@@ -327,8 +335,6 @@ function verifyPwaTarget(files,pwa,label){
     invariant(files.has(name),`${label} precache asset is missing: ${name}.`);
     invariant(sha256(files.get(name))===asset.sha256,`${label} precache hash drifted: ${name}.`);
   }
-  const serviceWorker=files.get(platformFiles.serviceWorker.output);
-  invariant(typeof serviceWorker==='string'&&serviceWorker.includes(`const RELEASE_ID='${pwa.releaseId}';`),`${label} service worker release identity drifted.`);
   invariant(serviceWorker.includes(`const PRECACHE=parsePrecache('${JSON.stringify(pwa.precache)}')`),`${label} service worker asset manifest drifted.`);
 }
 

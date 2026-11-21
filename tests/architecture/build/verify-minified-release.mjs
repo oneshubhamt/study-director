@@ -79,7 +79,7 @@ for(const asset of manifest){const name=asset.path.replace(/^\.\//,'');assert.ok
 assert.ok(richScript&&manifest.some(row=>row.path===`./${richScript}`),'Eager rich-text runtime must be install-time precached.');
 const searchWorker=externalScripts.find(name=>/^sd\.note-search\./.test(name));
 assert.ok(searchWorker&&manifest.some(row=>row.path===`./${searchWorker}`),'Lazy search Worker runtime must be precached without being eagerly executed.');
-const normalizedWorker=sw.replace(/const RELEASE_ID='[0-9a-f]+';/u,"const RELEASE_ID='@@SD_PWA_RELEASE_ID@@';");const releaseId=sha(JSON.stringify({precache:manifest,worker:sha(normalizedWorker)})).slice(0,24);assert.ok(sw.includes(`const RELEASE_ID='${releaseId}';`));
+const normalizedWorker=sw.replace(/const RELEASE_ID='[0-9a-f]+';/u,`const RELEASE_ID='${'0'.repeat(24)}';`);const releaseId=sha(JSON.stringify({precache:manifest,worker:sha(normalizedWorker)})).slice(0,24);assert.ok(sw.includes(`const RELEASE_ID='${releaseId}';`));
 assert.doesNotMatch(sw,/CompatibilityFacade|installBridgeRequired|recoveryHandoff/,'deployment must contain no historical updater bridge');
 const cacheIdentityMatch=sw.match(/parseCacheIdentities\(decodeURIComponent\('([^']+)'\)\)/);
 assert.ok(cacheIdentityMatch,'Service worker must embed the centralized Cache Storage identities.');
