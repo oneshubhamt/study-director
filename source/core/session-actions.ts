@@ -36,7 +36,7 @@ async function loadActiveSessionForRestore(){
   if(loaded&&!loaded.ok&&loaded.error)markStorageHealthError('activeSession',`Live-session recovery could not be loaded: ${errorMessage(loaded.error)||'active session load failed'}`);
   return loaded&&loaded.value||null;
 }
-function activeSessionScheduleFingerprint(session:ActiveSession|null){
+function activeSessionScheduleFingerprint(session:Pick<ActiveSession,'scheduleText'>|null){
   const draft=parseScheduleDraftText(String(session&&session.scheduleText||''));
   return draft.ok?scheduleFingerprintForRows(draft.parsed):'';
 }
