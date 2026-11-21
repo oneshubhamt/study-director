@@ -1,0 +1,80 @@
+name: P5.12 targeted PWA closure
+
+on:
+  push:
+    branches: [ts-exp]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p512-targeted-pwa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: P5.12 direct update and worker contracts
+        run: |
+          node tests/integration/pwa/native-capabilities.mjs
+          node tests/integration/pwa/pwa-lifecycle.mjs
+          node tests/integration/pwa/application-update-safety.mjs
+          node tests/integration/pwa/service-worker-lifecycle.mjs
+          node tests/integration/pwa/build-identity.mjs
+          node tests/architecture/pwa/pwa-updater-contract.mjs
+          node tests/architecture/storage/background-work-contract.mjs
+      - name: Fresh source build
+        run: npm run build
+      - name: Verify generated build
+        run: npm run verify
+      - name: Verify generated syntax
+        run: npm run test:release:generated-syntax
+      - name: Stage minified deployment
+        run: npm run stage:firebase:minified
+      - name: Verify minified PWA deployment
+        run: npm run test:release:minified
+
+  pwa-browser:
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Offline and update journeys x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "P5.12 offline pass $pass/5"
+            node tests/browser/pwa/pwa-offline.mjs
+            echo "P5.12 update pass $pass/5"
+            node tests/browser/pwa/pwa-update.mjs
+          done
