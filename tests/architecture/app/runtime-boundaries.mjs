@@ -596,7 +596,7 @@ assert.ok(editorBundle.includes('.workspace-overlay-rich-text .sd-rte-focus-body
 
 // Execute is the workspace/surface vocabulary; Timer remains reserved for genuine timing behavior.
 const guideSource=readScript('source/external/guide.ts');
-assert.match(guideSource,/GUIDE_ORDER=Object\.freeze\(\['plan','execute','review','library','insights'\]\)/,
+assert.match(guideSource,/GUIDE_ORDER\s*=\s*Object\.freeze\(\['plan','execute','review','library','insights'\]\)/,
   'Guide lifecycle uses Execute as the canonical workspace id');
 assert.match(guideSource,/\s*execute:guideSection\(\{\s*label:"Execute"/,
   'Guide section registry exposes the Execute workspace under the Execute key');
