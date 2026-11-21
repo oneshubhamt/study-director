@@ -23,8 +23,8 @@ export interface TimeModel{
 export interface ScheduleModel{
  token(value:unknown):string;normalizeKind(kind:unknown,area?:unknown,task?:unknown):TaskKind;
  isWork(task:TaskInput|null|undefined):boolean;isSupport(task:TaskInput|null|undefined):boolean;isFixed(task:TaskInput|null|undefined):boolean;isTrackable(task:TaskInput|null|undefined):boolean;isPomodoroEligible(task:TaskInput|null|undefined):boolean;hasNotes(task:TaskInput|null|undefined):boolean;
- normalizeTarget(value:unknown):number|null;makeRow(input:RowInput):ScheduleRow;parseText(value:unknown):ScheduleParse;isCanonicalText(value:unknown):boolean;analyzeTimeline(rows:ScheduleRow[],lineNos?:number[]):TimelineAnalysis;warningsMessage(warnings:unknown,limit?:number):string;
- buildTasks<T extends TaskInput>(rows:readonly T[]):(T&{id:string})[];textFromRows(rows:ScheduleRow[]):string;fingerprint(rows:ScheduleRow[]):string;chronologicalRows<T extends TimelineRow>(rows:readonly T[]):T[];startMinutes(rows:ScheduleRow[]):number[];
+ normalizeTarget(value:unknown):number|null;makeRow(input:RowInput):ScheduleRow;parseText(value:unknown):ScheduleParse;isCanonicalText(value:unknown):boolean;analyzeTimeline(rows:readonly ScheduleRow[],lineNos?:readonly number[]):TimelineAnalysis;warningsMessage(warnings:unknown,limit?:number):string;
+ buildTasks<T extends TaskInput>(rows:readonly T[]):(T&{id:string})[];textFromRows(rows:readonly ScheduleRow[]):string;fingerprint(rows:readonly ScheduleRow[]):string;chronologicalRows<T extends TimelineRow>(rows:readonly T[]):T[];startMinutes(rows:readonly ScheduleRow[]):number[];
  normalizeArea(value:unknown):string;displayArea(value:unknown):string;areaValue(task:TaskInput|null|undefined):string;measureValue(task:TaskInput|null|undefined,fallback?:string):string;targetValue(task:TaskInput|null|undefined):number|null;areaLabel(task:TaskInput|null|undefined):string;areaKey(task:TaskInput|null|undefined):string;parentAreaKeys(key:unknown):string[];cleanIdentifierText(value:unknown):string;
 }
 export interface CompletionModel{
