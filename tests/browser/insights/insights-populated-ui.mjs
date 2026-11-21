@@ -63,6 +63,7 @@ try{
   await waitFor(()=>page.evaluate(`!document.getElementById('first-start-dialog')?.open`),{label:'first-start fixture dismissal'});
   await page.evaluate(`__InsightsUiDebug.goTab('insights')`);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-empty')`),{label:'empty Insights renderer'});
+  const canonicalBeforePreview=await page.evaluate(`(async()=>(await __InsightsUiDebug.AppData.dailyRecords.list()).length)()`);
   const empty=await page.evaluate(`(()=>({copy:document.querySelector('#pane-insights .insights-empty')?.textContent||'',sample:document.querySelector('#pane-insights .insights-empty-actions button')?.textContent||''}))()`);
   assert.match(empty.copy,/No saved daily records yet/i);
   assert.match(empty.sample,/Preview with 28-day sample/i);
@@ -88,6 +89,8 @@ try{
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-empty')&&!document.querySelector('#pane-insights .demo-data-banner')`),{timeout:15000,label:'return from Insights sample to saved data'});
   const backToSaved=await page.evaluate(`document.querySelector('#pane-insights .insights-empty')?.textContent||''`);
   assert.match(backToSaved,/No saved daily records yet/i);
+  const canonicalAfterPreview=await page.evaluate(`(async()=>(await __InsightsUiDebug.AppData.dailyRecords.list()).length)()`);
+  assert.equal(canonicalAfterPreview,canonicalBeforePreview,'sample preview must not add, replace or delete canonical Saved Days');
 
   await page.evaluate(`__InsightsUiDebug.goTab('plan');window.__StudyDirectorInsightsLastProfile=null`);
   const seeded=await page.evaluate(`(async()=>{

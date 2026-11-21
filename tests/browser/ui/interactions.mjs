@@ -175,6 +175,73 @@ try{
   const guide=await ipad.evaluate(`({context:document.querySelector('.guide-install-context').textContent.trim(),steps:[...document.querySelectorAll('.guide-install-steps li')].map(item=>item.textContent.trim()),refresh:document.querySelector('#guide-install-card .mini-btn')?.textContent.trim()||''})`);
   assert.equal(guide.context,'Steps for iPad · Chrome');assert.ok(guide.steps.some(step=>/Share button/.test(step)));assert.ok(guide.steps.some(step=>/Add to Home Screen/.test(step)));assert.equal(guide.refresh,'Refresh install status');
   result.checks.contextualIPadInstallGuide=true;
+  await browser.closePage(ipad);pages.pop();
+  await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().state==='primary'`),{label:'Guide acceptance primary ownership'});
+
+  await page.setViewport({width:1280,height:860,mobile:false,scale:1});
+  await page.evaluate(`__PWA6.goTab('guide')`);
+  await waitFor(()=>page.evaluate(`!!document.querySelector('#pane-guide .guide-life-node[data-guide-step="plan"]')`),{label:'Guide handbook'});
+  await page.evaluate(`document.querySelector('#pane-guide .guide-life-node[data-guide-step="plan"]').focus()`);
+  await page.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+  await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+  const guideKeyboard=await page.evaluate(`(()=>{const active=document.activeElement,selected=document.querySelector('#pane-guide .guide-life-node[aria-selected="true"]'),stage=document.querySelector('#guide-stage-panel');return {focus:active?.dataset?.guideStep||'',selected:selected?.dataset?.guideStep||'',labelledBy:stage?.getAttribute('aria-labelledby')||''};})()`);
+  assert.deepEqual(guideKeyboard,{focus:'execute',selected:'execute',labelledBy:'guide-step-execute'});
+  result.checks.guideKeyboardSelection=true;
+
+  const acceptDraft='06:15 | 30 | Existing draft before Guide | work | Existing | block | 1';
+  await page.evaluate(`(()=>{document.getElementById('plan-input').value=${JSON.stringify(acceptDraft)};const button=document.querySelector('#pane-guide .guide-template .mini-btn');button.click();})()`);
+  await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('.interaction-title')?.textContent==='Replace current draft?'`),{label:'Guide template replacement confirmation'});
+  await page.evaluate(`document.querySelector('#sd-interaction-dialog .interaction-actions .primary').click()`);
+  await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-plan'&&document.getElementById('plan-input')?.value.includes('Morning Routine: Wake-up + Exercise + Freshen-up')`),{label:'Guide template accepted'});
+  const acceptedTemplate=await page.evaluate(`({draft:document.getElementById('plan-input').value,pane:document.querySelector('.pane.on')?.id||''})`);
+  assert.equal(acceptedTemplate.pane,'pane-plan');assert.match(acceptedTemplate.draft,/Deep Study Block 1/);
+  result.checks.guideTemplateAccepted=true;
+
+  const cancelDraft='06:45 | 35 | Keep this draft on cancel | work | Existing | block | 1';
+  await page.evaluate(`(()=>{__PWA6.goTab('guide');document.getElementById('plan-input').value=${JSON.stringify(cancelDraft)};const buttons=[...document.querySelectorAll('#pane-guide .guide-template .mini-btn')];buttons[1].click();})()`);
+  await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('.interaction-title')?.textContent==='Replace current draft?'`),{label:'Guide template cancellation confirmation'});
+  await page.evaluate(`document.querySelector('#sd-interaction-dialog [data-interaction-cancel]').click()`);
+  await waitFor(()=>page.evaluate(`!document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('#pane-guide .guide-status')?.textContent.trim()==='Current draft kept.'`),{label:'Guide template cancellation'});
+  const cancelledTemplate=await page.evaluate(`({draft:document.getElementById('plan-input').value,pane:document.querySelector('.pane.on')?.id||'',status:document.querySelector('#pane-guide .guide-status')?.textContent.trim()||''})`);
+  assert.deepEqual(cancelledTemplate,{draft:cancelDraft,pane:'pane-guide',status:'Current draft kept.'});
+  result.checks.guideTemplateCancelled=true;
+
+  await page.evaluate(`(()=>{
+    const originalFetch=window.fetch.bind(window),pending={};
+    window.__guideLegalQA={
+      pending,originalFetch,
+      resolve(id){const finish=pending[id];if(finish){delete pending[id];finish();}},
+      restore(){window.fetch=originalFetch;delete window.__guideLegalQA;}
+    };
+    window.fetch=(input,init)=>{
+      const url=typeof input==='string'?input:String(input?.url||input),match=url.match(/(?:^|\\/)(privacy|terms|security)\\.html(?:[?#]|$)/i);
+      if(!match)return originalFetch(input,init);
+      const id=match[1].toLowerCase();
+      return new Promise(resolve=>{pending[id]=()=>resolve(new Response('<main><h1>'+id.toUpperCase()+'_SENTINEL</h1><script>window.__guideBadScript=true<\\/script><a id="unsafe-link" href="javascript:alert(1)">Unsafe</a></main>',{status:200,headers:{'Content-Type':'text/html'}}));});
+    };
+    [...document.querySelectorAll('#pane-guide .guide-legal-links button')].find(button=>button.textContent.trim()==='Privacy').click();
+  })()`);
+  await waitFor(()=>page.evaluate(`!!window.__guideLegalQA?.pending?.privacy&&!document.querySelector('.legal-center-overlay')?.hidden`),{label:'delayed Privacy read'});
+  await page.evaluate(`document.querySelector('.legal-center-nav-button[data-legal-document="terms"]').click()`);
+  await waitFor(()=>page.evaluate(`!!window.__guideLegalQA?.pending?.terms&&document.querySelector('.legal-center-title')?.textContent==='Terms'`),{label:'delayed Terms read'});
+  await page.evaluate(`window.__guideLegalQA.resolve('privacy')`);await sleep(60);
+  const switchedLegal=await page.evaluate(`({title:document.querySelector('.legal-center-title')?.textContent||'',busy:document.querySelector('.legal-center-content')?.getAttribute('aria-busy')||'',privacyVisible:/PRIVACY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||'')})`);
+  assert.deepEqual(switchedLegal,{title:'Terms',busy:'true',privacyVisible:false},'stale Privacy completion must not replace the selected Terms document');
+  await page.evaluate(`window.__guideLegalQA.resolve('terms')`);
+  await waitFor(()=>page.evaluate(`document.querySelector('.legal-center-content')?.getAttribute('aria-busy')==='false'&&/TERMS_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||'')`),{label:'Terms completion'});
+  const sanitizedLegal=await page.evaluate(`({script:!!document.querySelector('.legal-center-document script'),unsafeHref:document.querySelector('.legal-center-document #unsafe-link')?.getAttribute('href')||null,badScript:window.__guideBadScript===true})`);
+  assert.deepEqual(sanitizedLegal,{script:false,unsafeHref:null,badScript:false});
+
+  await page.evaluate(`(()=>{const close=document.querySelector('.legal-center-close'),security=[...document.querySelectorAll('#pane-guide .guide-legal-links button')].find(button=>button.textContent.trim()==='Security');close.click();security.click();})()`);
+  await waitFor(()=>page.evaluate(`!!window.__guideLegalQA?.pending?.security&&!document.querySelector('.legal-center-overlay')?.hidden&&document.querySelector('.legal-center-title')?.textContent==='Security'`),{label:'Legal Center close-reopen ownership'});
+  await page.evaluate(`document.querySelector('.legal-center-close').click()`);
+  await waitFor(()=>page.evaluate(`document.querySelector('.legal-center-overlay')?.hidden===true`),{label:'Legal Center close while read pending'});
+  await waitFor(()=>page.evaluate(`document.activeElement?.textContent?.trim()==='Security'&&!!document.activeElement?.closest?.('.guide-legal-links')`),{label:'Legal Center trigger focus restoration'});
+  await page.evaluate(`window.__guideLegalQA.resolve('security')`);await sleep(60);
+  const closedLegal=await page.evaluate(`({hidden:document.querySelector('.legal-center-overlay')?.hidden===true,securityVisible:/SECURITY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||''),focused:document.activeElement?.textContent?.trim()||''})`);
+  assert.deepEqual(closedLegal,{hidden:true,securityVisible:false,focused:'Security'},'a delayed closed document must not reclaim the surface or focus');
+  await page.evaluate(`window.__guideLegalQA.restore()`);
+  result.checks.guideLegalDelayedOwnershipAndFocus=true;
 
   const errors=pages.flatMap(item=>item.events).filter(event=>!/favicon|ResizeObserver loop/i.test(event.text));assert.deepEqual(errors,[]);
 }finally{
