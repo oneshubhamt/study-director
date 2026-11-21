@@ -1827,7 +1827,7 @@ const OPTIONAL_PLUGIN_DESCRIPTORS=Object.freeze([
   Object.freeze({tabId:'insights',label:'Insights',icon:'✦',src:'@@SD_EXTERNAL_INSIGHTS_FILENAME@@',pluginName:'SD-insights'})
 ]);
 const PluginRuntime=PublicApiHostModule.createRuntime(Object.freeze<Parameters<typeof PublicApiHostModule.createRuntime>[0]>({
-  configuration:Object.freeze({capabilities:STUDY_DIRECTOR_CAPABILITIES,descriptors:OPTIONAL_PLUGIN_DESCRIPTORS}),
+  configuration:Object.freeze<SessionHostInput['configuration']>({capabilities:STUDY_DIRECTOR_CAPABILITIES,descriptors:OPTIONAL_PLUGIN_DESCRIPTORS}),
   environment:Object.freeze({document,trustedAssetURL:value=>trustedAssetURL(value)}),
   tabs:Object.freeze({registerTab:config=>UiTabRegistry.registerTab(config),renderTab:id=>UiTabRegistry.renderTab(id)}),
   preview:Object.freeze({registerProvider:(target,provider)=>PreviewRuntime.registerProvider(target,provider)}),
@@ -2532,7 +2532,8 @@ if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director
   throw new Error('Study Director session lifecycle coordinator is unavailable or incompatible.');
 }
 
-ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<Parameters<typeof SessionHostModule.createController>[0]>({
+type SessionHostInput=Parameters<typeof SessionHostModule.createController>[0];
+ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHostInput>({
   configuration:Object.freeze({
     activeSessionId:ACTIVE_SESSION_ID,activeSessionVersion:DATA_CONTRACT.schemas.ActiveSession.version,
     sessionSnapshotVersion:DATA_CONTRACT.schemas.SessionSnapshot.version,maxCarryForwardChars:APP_LIMITS.maxCarryForwardChars,
@@ -2541,14 +2542,14 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<Parameters
     completionNone:COMPLETION_SOURCES.NONE,
     practicePauseCauses:Object.freeze({session:PRACTICE_PAUSE_CAUSES.SESSION,gap:PRACTICE_PAUSE_CAUSES.GAP,main:PRACTICE_PAUSE_CAUSES.MAIN})
   }),
-  codec:Object.freeze({sanitizeCurrent:value=>ActiveSessionCodec.sanitizeCurrent(value),sanitizeSessionSnapshot:(value,date,fingerprint,revision)=>ActiveSessionCodec.sanitizeSessionSnapshot(value,date,fingerprint,revision)}),
-  repository:Object.freeze({
+  codec:Object.freeze<SessionHostInput['codec']>({sanitizeCurrent:value=>ActiveSessionCodec.sanitizeCurrent(value),sanitizeSessionSnapshot:(value,date,fingerprint,revision)=>ActiveSessionCodec.sanitizeSessionSnapshot(value,date,fingerprint,revision)}),
+  repository:Object.freeze<SessionHostInput['repository']>({
     save:(value,options)=>AppData.activeSession.save(value,options),load:(retry,options)=>AppData.activeSession.load(retry,options),
     clear:()=>AppData.activeSession.clear(),readLocal:()=>AppData.activeSession.readLocal(),
     nextRevision:seed=>AppData.activeSession.nextRevision(seed),settled:()=>AppData.activeSession.settled()
   }),
-  canonical:Object.freeze({same:(a,b)=>CanonicalModule.same(a,b)}),
-  snapshot:Object.freeze({
+  canonical:Object.freeze<SessionHostInput['canonical']>({same:(a,b)=>CanonicalModule.same(a,b)}),
+  snapshot:Object.freeze<SessionHostInput['snapshot']>({
     tasks:()=>TASKS,ensureTaskIds,taskIdentity:TaskIdentity,taskState:TaskSessionState,timerState:TimerState,
     captureEvidence:()=>captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true}),
     timerPayload:timerRuntimePayload,reviewSnapshot:()=>currentReviewSnapshot(),practiceSnapshot:()=>PracticePacer.snapshot(),
@@ -2557,25 +2558,25 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<Parameters
     getCarryForward:()=>latestCarryForward,setCarryForward:value=>{latestCarryForward=value;},clearProgress:clearProgressRuntime,
     sanitizeAdjustedSchedule:sanitizeRuntimeAdjustedSchedule,invalidateScheduleDerived,setCurrentTask,timerRestoreValid:runtime=>!!validateTimerRestoreCandidate(runtime)
   }),
-  domain:Object.freeze({normalizeCompletionSource,clampCompletion:CompletionModel.clampPercent,cleanDayRevision,clampText,isCanonicalScheduleText,isValidIsoDate,todayISO}),
-  persistence:Object.freeze({
+  domain:Object.freeze<SessionHostInput['domain']>({normalizeCompletionSource,clampCompletion:CompletionModel.clampPercent,cleanDayRevision,clampText,isCanonicalScheduleText,isValidIsoDate,todayISO}),
+  persistence:Object.freeze<SessionHostInput['persistence']>({
     canMutate:appCanMutate,recoveryQuiesced:managedRecoverySessionQuiesced,
     persistenceBlocked:()=>ReviewSaveService.status().activeSessionPersistenceBlocked,
     recoveryWorkActive:()=>AppOwnership.canMutate()&&AppMutationCoordinator?.status().active==='managed-recovery',
     timerSnapshotEligible:()=>!TimerState.paused&&!TimerState.inactiveGap&&!!TimerState.runtime&&TimerState.runtime.startMs!==null,
     markContentChanged:markDayContentChanged,
-    snapshotForWrite:()=>SessionHandoffRuntime?.snapshotForWrite()||ActiveSessionRuntime.captureSnapshot(),
+    snapshotForWrite:()=>SessionHandoffRuntime?.snapshotForWrite()||requireActiveSessionRuntime().captureSnapshot(),
     reportResult:handleActiveSessionRepositoryResult,warn:showLiveDraftSaveWarning
   }),
-  lifecycle:Object.freeze({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation)}),
-  apply:Object.freeze({
-    readPlanDraft:()=>String(document.getElementById('plan-input')?.value||''),
-    writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input)input.value=value;},
+  lifecycle:Object.freeze<SessionHostInput['lifecycle']>({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation)}),
+  apply:Object.freeze<SessionHostInput['apply']>({
+    readPlanDraft:()=>{const input=document.getElementById('plan-input');return input instanceof HTMLTextAreaElement||input instanceof HTMLInputElement?input.value:'';},
+    writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input instanceof HTMLTextAreaElement||input instanceof HTMLInputElement)input.value=value;},
     previewPlanDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
-    setStudyDate:(date,automatic)=>{const dd=document.getElementById('day-date');if(dd){dd.value=date;dd.dataset.autoDate=automatic?'1':'0';}},
+    setStudyDate:(date,automatic)=>{const dd=document.getElementById('day-date');if(dd instanceof HTMLInputElement){dd.value=date;dd.dataset['autoDate']=automatic?'1':'0';}},
     applySessionSchedule:input=>applySchedule({source:input.source,skipNotify:true,studyDate:input.studyDate,reviewOnly:input.reviewOnly,forceReload:true,sessionSnapshot:input.snapshot,lifecycleManaged:true,scheduleText:input.scheduleText,persistDraft:false})
   }),
-  reset:Object.freeze({
+  reset:Object.freeze<SessionHostInput['reset']>({
     stopTimerPresentation:()=>TimerPresentation.stop(),
     invalidatePresentation:()=>{executeIdleDisplayKey='';realTimeAwarenessRenderKey='';executePanelsRenderKey='';executeProgressPanelRenderKey='';scheduleEndPromptKey='';},
     resetCountdown:resetCountdownRuntime,setCurrentTask,resetBreak:resetBreakState,setEmptyTimerMode:()=>setTimerMode(TIMER_MODES.EMPTY,'session-reset'),
@@ -2584,16 +2585,17 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<Parameters
     clearProgress:clearProgressRuntime,clearCarryForward:()=>{latestCarryForward='';},resetPractice:()=>PracticePacer.reset(),
     pausePracticeForSessionEnd:()=>PracticePacer.pauseForSessionEnd({persist:false})
   }),
-  installation:Object.freeze({id:()=>InstallationIdentity.getId()}),clock:Object.freeze({nowMs:DecisionClock.nowMs,nowIso:()=>new Date().toISOString()}),
-  environment:Object.freeze({clearTimeout:id=>clearTimeout(id),setTimeout:(callback,delay)=>setTimeout(callback,delay)})
+  installation:Object.freeze<SessionHostInput['installation']>({id:()=>InstallationIdentity.getId()}),clock:Object.freeze<SessionHostInput['clock']>({nowMs:DecisionClock.nowMs,nowIso:()=>new Date().toISOString()}),
+  environment:Object.freeze<SessionHostInput['environment']>({clearTimeout:id=>clearTimeout(id),setTimeout:(callback,delay)=>setTimeout(callback,delay)})
 }));
 if(!Object.isFrozen(ActiveSessionRuntime)||ActiveSessionRuntime.format!=='study-director.session-host'||ActiveSessionRuntime.contractVersion!==1){
   throw new Error('Study Director Active Session runtime is unavailable or incompatible.');
 }
 
-ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<Parameters<typeof ReviewHostModule.createSavedDayCoordinator>[0]>({
+type ReviewSavedDayInput=Parameters<typeof ReviewHostModule.createSavedDayCoordinator>[0];
+ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<ReviewSavedDayInput>({
   document,day:ReviewDayState,
-  runtime:Object.freeze({
+  runtime:Object.freeze<ReviewSavedDayInput['runtime']>({
     tasks:()=>TASKS,timerState:TimerState,isTrackableBlock,captureSessionSnapshot:()=>captureSessionSnapshot(),
     appliedScheduleText:()=>PlanRuntime.appliedScheduleText(),appCanMutate:()=>appCanMutate(),panelMode:()=>sessionPanelMode,
     safetyMessage:()=>sessionSafetyMessage,setSafetyMessage:value=>{sessionSafetyMessage=String(value||'');},
@@ -2602,31 +2604,31 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<P
     setPanelMode:(mode,session)=>setSessionPanelMode(mode,session),setTimerDone:()=>setTimerMode(TIMER_MODES.DONE,'suspended-session-saved'),
     updateSessionControls
   }),
-  repositories:Object.freeze({
+  repositories:Object.freeze<ReviewSavedDayInput['repositories']>({
     loadActiveSession:(...args)=>AppData.activeSession.load(...args),
     dailyDocuments:(...args)=>AppData.dailyRecords.documents(...args),
     verifyDaily:record=>AppData.dailyRecords.verifyCanonical(record),
     pendingReviews:()=>AppData.pendingReviews.list()
   }),
-  codecs:Object.freeze({
+  codecs:Object.freeze<ReviewSavedDayInput['codecs']>({
     sanitizeSession:value=>ActiveSessionCodec.sanitizeCurrent(value),
     savedDayCoversSessionEvidence:(record,subject,options)=>DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,options)
   }),
-  session:Object.freeze({
-    writeCanonicalNow:(label,options)=>ActiveSessionRuntime.writeCanonicalNow(label,options),
-    clearCanonicalAfterSavedDay:()=>ActiveSessionRuntime.clearCanonical('clearing the saved study session'),
+  session:Object.freeze<ReviewSavedDayInput['session']>({
+    writeCanonicalNow:(label,options)=>requireActiveSessionRuntime().writeCanonicalNow(label,options),
+    clearCanonicalAfterSavedDay:()=>requireActiveSessionRuntime().clearCanonical('clearing the saved study session'),
     clearSafetyMessage:prefix=>clearSessionSafetyMessage(prefix)
   }),
-  review:Object.freeze({
+  review:Object.freeze<ReviewSavedDayInput['review']>({
     saveService:ReviewSaveService,editor:ReviewEditor,
-    closeReflectionEditor:()=>richTextCloseField(document.getElementById('daily-reflection'))
+    closeReflectionEditor:()=>{const field=document.getElementById('daily-reflection');return richTextCloseField(field instanceof HTMLTextAreaElement?field:null);}
   }),
-  view:Object.freeze({
+  view:Object.freeze<ReviewSavedDayInput['view']>({
     prettyDate,refreshStorageWarning:refreshStorageFallbackWarning,notifyUser,setStatus,openDetails:setReviewDetailDisclosures,
     diagnostics:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     staleSaveStatus:()=>NoticeCoordinator.eventStatus().events.some(event=>event.source==='review'&&event.id==='status-save-status'&&event.message==='Review is ready. Save today to Library when you are done.')
   }),
-  activation:Object.freeze({publishRollover:()=>AppActivation.publish(APP_ACTIVATION_KINDS.DATE_ROLLOVER,'study-day-rollover',{destructive:true})})
+  activation:Object.freeze<ReviewSavedDayInput['activation']>({publishRollover:()=>AppActivation.publish(APP_ACTIVATION_KINDS.DATE_ROLLOVER,'study-day-rollover',{destructive:true})})
 }));
 
 /* LIVE FOCUS EVIDENCE IN THE EXECUTION HEADER */
