@@ -1,0 +1,94 @@
+name: P5.11b targeted presentation closure
+
+on:
+  push:
+    branches: [ts-exp]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p511b-targeted-presentation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: P5.11b presentation contracts
+        run: |
+          node tests/unit/app/presentation-defaults.mjs
+          node tests/architecture/app/presentation-contracts.mjs
+          node tests/architecture/storage/runtime-authority-contract.mjs
+          node tests/architecture/app/runtime-boundaries.mjs
+      - name: Fresh source build
+        run: npm run build
+      - name: Verify generated build
+        run: node build/verify-build.mjs
+      - name: Verify generated syntax
+        run: node tests/architecture/build/generated-syntax-check.mjs
+
+  presentation-browser:
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Changed presentation/security witness x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "P5.11b runtime-boundary pass $pass/5"
+            node tests/browser/security/runtime-boundary.mjs
+          done
+
+  accessibility:
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Changed populated accessibility witness x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "P5.11b populated-accessibility pass $pass/5"
+            node tests/browser/ui/populated-accessibility.mjs
+          done

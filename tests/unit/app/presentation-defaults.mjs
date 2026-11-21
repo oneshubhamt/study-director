@@ -63,6 +63,8 @@ const GLASS_PROFILE=Object.freeze({
   assert.equal(kernel.activePresentationId(),'glass','Glass is the pre-hydration presentation for users without a saved choice.');
   assert.equal(storage.has('studyDirector.presentation.v1'),false,'Choosing the new-user default must not manufacture a persisted preference.');
   assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
+  assert.equal(kernel.registerPresentation(GLASS_PROFILE),true,'re-registering the same shipped pack is idempotent');
+  assert.equal(kernel.listPresentations().filter(profile=>profile.id==='glass').length,1,'duplicate pack registration cannot duplicate the presentation registry');
   assert.equal(kernel.activePresentationId(),'glass','Glass remains active when its presentation pack registers.');
   assert.equal(storage.has('studyDirector.presentation.v1'),false,'Default Glass remains an implicit default, not a migration/write.');
   kernel.synchronizeMetadata();
