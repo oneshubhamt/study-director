@@ -249,17 +249,18 @@ const InstallationIdentity=DataBootstrapHostModule.createInstallationIdentity(Ob
   module:PersistenceModule,local:LocalStorageContract,installationKey:STORAGE_KEYS.installationId,navigator
 }));
 // The people who use Study Director on this device (core/profiles.ts).
-const Profiles=ProfilesHostModule.createController(Object.freeze<Parameters<typeof ProfilesHostModule.createController>[0]>({module:ProfilesModule,ports:Object.freeze({
-  scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
-  storage:Object.freeze({
+type ProfilesControllerInput=Parameters<typeof ProfilesHostModule.createController>[0];
+const Profiles=ProfilesHostModule.createController(Object.freeze<ProfilesControllerInput>({module:ProfilesModule,ports:Object.freeze<ProfilesControllerInput['ports']>({
+  scope:Object.freeze<ProfilesControllerInput['ports']['scope']>({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
+  storage:Object.freeze<ProfilesControllerInput['ports']['storage']>({
     read:()=>LocalStorageContract.getText(ProfileScope.registryKey,null),
     write:text=>LocalStorageContract.setText(ProfileScope.registryKey,text),
     keys:()=>LocalStorageContract.keys(),
     remove:key=>LocalStorageContract.remove(key)
   }),
-  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(RAW_LOCAL_STORAGE_KEYS).filter(([name])=>!DEVICE_WIDE_STORAGE_KEY_NAMES.has(name)).map(([,key])=>key))}),
+  names:Object.freeze<ProfilesControllerInput['ports']['names']>({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(RAW_LOCAL_STORAGE_KEYS).filter(([name])=>!DEVICE_WIDE_STORAGE_KEY_NAMES.has(name)).map(([,key])=>key))}),
   platform:ProfilesHostModule.createPlatform({indexedDB,window,localStorage,storage:navigator.storage,now:()=>Date.now(),random:randomIdPart,reload:()=>location.reload()}),
-  limits:Object.freeze({maxName:APP_LIMITS.maxStudentNameChars})
+  limits:Object.freeze<ProfilesControllerInput['ports']['limits']>({maxName:APP_LIMITS.maxStudentNameChars})
 })}));
 Profiles.watch();
 const ProfileViews=ProfilesHostModule.createViews({document,Profiles,APP_LIMITS,FACTORY_DEFAULTS,clampText,appCanMutate:()=>appCanMutate(),scheduleSyncStatus,
@@ -315,29 +316,31 @@ const {NotificationRecent}=FoundationHostModule.createRecent({document,sessionSt
 const {showBackupPresentation,openBackupRestore,backupRestoreChoices}=FoundationHostModule.createBackupActions({document,AppDiagnostics,device:()=>{if(!DeviceBackup)throw new Error('Study Director Device Backup is unavailable.');return DeviceBackup;},providers:()=>BackupProviderRuntime,history:()=>BackupRecoveryHost?.history,checkForUpdate:()=>PwaLifecycle.checkForUpdate(),connectDeviceBackupWithRecovery,connectDriveForProfile,goTab:(...args)=>goTab(...args),showData:()=>LibraryView.showSection('data'),preferredScrollBehavior:()=>preferredScrollBehavior()});
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
 const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze<Parameters<typeof BackupPresentationModule.createPresentation>[0]>({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>VerifiedRecovery.verified(source),action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
-const Interactions=InteractionsModule.createController(Object.freeze<Parameters<typeof InteractionsModule.createController>[0]>({ports:Object.freeze({
-  environment:Object.freeze({
+type InteractionsInput=Parameters<typeof InteractionsModule.createController>[0];
+const Interactions=InteractionsModule.createController(Object.freeze<InteractionsInput>({ports:Object.freeze<InteractionsInput['ports']>({
+  environment:Object.freeze<InteractionsInput['ports']['environment']>({
     clearTimeout:id=>clearTimeout(id),document,
     nativeConfirm:message=>window.confirm(message),
     nativePrompt:(message,defaultValue)=>window.prompt(message,defaultValue),
     requestAnimationFrame:callback=>requestAnimationFrame(callback),
     setTimeout:(callback,delay)=>setTimeout(callback,delay),window
   }),
-  diagnostics:Object.freeze({capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')}),
+  diagnostics:Object.freeze<InteractionsInput['ports']['diagnostics']>({capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')}),
   history:WorkspaceHistoryBridge,
-  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,dismissAll:NoticeCoordinator.dismissAll,pauseEvent:NoticeCoordinator.pauseEvent,setPaused:NoticeCoordinator.setPaused,setHidden:NoticeCoordinator.setHidden})
+  notifications:Object.freeze<InteractionsInput['ports']['notifications']>({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,dismissAll:NoticeCoordinator.dismissAll,pauseEvent:NoticeCoordinator.pauseEvent,setPaused:NoticeCoordinator.setPaused,setHidden:NoticeCoordinator.setHidden})
 })}));
 if(!Object.isFrozen(Interactions)||Interactions.format!=='study-director.interactions'||Interactions.contractVersion!==1){
   throw new Error('Study Director interaction controller is unavailable or incompatible.');
 }
-const WorkspaceOverlay=WorkspaceOverlayModule.createController(Object.freeze<Parameters<typeof WorkspaceOverlayModule.createController>[0]>({ports:Object.freeze({
-  environment:Object.freeze({document}),
+type WorkspaceOverlayInput=Parameters<typeof WorkspaceOverlayModule.createController>[0];
+const WorkspaceOverlay=WorkspaceOverlayModule.createController(Object.freeze<WorkspaceOverlayInput>({ports:Object.freeze<WorkspaceOverlayInput['ports']>({
+  environment:Object.freeze<WorkspaceOverlayInput['ports']['environment']>({document}),
   history:WorkspaceHistoryBridge,
 })}));
 if(!Object.isFrozen(WorkspaceOverlay)||WorkspaceOverlay.format!=='study-director.workspace-overlay'||WorkspaceOverlay.contractVersion!==1){
   throw new Error('Study Director workspace overlay controller is unavailable or incompatible.');
 }
-const RichTextWorkspaceOverlay=Object.freeze({open:options=>WorkspaceOverlay.open(options)});
+const RichTextWorkspaceOverlay=Object.freeze({open:(options:Parameters<typeof WorkspaceOverlay.open>[0])=>WorkspaceOverlay.open(options)});
 const {SystemNotifications}=FoundationHostModule.createSystem({window,document,navigator,location,NoticeCoordinator,Interactions,AppDiagnostics,appCanMutate:()=>appCanMutate(),readPreference:()=>AppData.local.getJson(STORAGE_KEYS.systemAlerts,false),writePreference:value=>AppData.local.setJson(STORAGE_KEYS.systemAlerts,value)});
 const notifyUser=SystemNotifications.notify;
 /* SOUND DELIVERY */
@@ -351,10 +354,15 @@ window.addEventListener('beforeunload',()=>AppAudio.dispose());
 
 const RichTextApi=RICH_TEXT_BOOT_API;
 const RICH_VALIDATED_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1');
-function validatedRichInputMeta(event,field){
-  const meta=event&&event[RICH_VALIDATED_INPUT_META];
-  if(!meta||meta.format!=='study-director.rich-validated-input'||meta.version!==1||typeof meta.canonical!=='string'||typeof meta.plain!=='string')return null;
-  return field&&String(field.value||'')===meta.canonical?meta:null;
+type RichValidatedInputMeta=Readonly<{format:'study-director.rich-validated-input';version:1;canonical:string;plain:string}>;
+function validatedRichInputMeta(event:unknown,field:{value:string}|null|undefined):RichValidatedInputMeta|null{
+  if(!event||typeof event!=='object')return null;
+  const meta=Reflect.get(event,RICH_VALIDATED_INPUT_META) as unknown;
+  if(!meta||typeof meta!=='object')return null;
+  const row=meta as Record<string,unknown>;
+  if(row['format']!=='study-director.rich-validated-input'||row['version']!==1||typeof row['canonical']!=='string'||typeof row['plain']!=='string')return null;
+  if(!field||String(field.value||'')!==row['canonical'])return null;
+  return Object.freeze({format:'study-director.rich-validated-input',version:1,canonical:row['canonical'],plain:row['plain']});
 }
 if(typeof RichTextApi.mountRichTextEditor!=='function'||typeof RichTextApi.renderRichText!=='function'||typeof RichTextApi.toPlainText!=='function'||typeof RichTextApi.toMarkdown!=='function'||typeof RichTextApi.classifySerializedValue!=='function'||typeof RichTextApi.isRichTextValue!=='function'||typeof RichTextApi.measure!=='function'||typeof RichTextApi.assetIds!=='function'||typeof RichTextApi.scanAssetReferences!=='function'||typeof RichTextApi.scanAttachmentReferences!=='function'||typeof RichTextApi.insertAttachmentReference!=='function'||typeof RichTextApi.removeAttachmentReferences!=='function'||typeof RichTextApi.exportDocument!=='function'||typeof RichTextApi.compareRichText!=='function'||typeof RichTextApi.mergeIncomingAdditions!=='function'||typeof RichTextApi.appendIncomingAdditions!=='function'||typeof RichTextApi.mergeThreeWay!=='function'){
   throw new Error('Study Director rich text runtime is unavailable or incompatible.');
