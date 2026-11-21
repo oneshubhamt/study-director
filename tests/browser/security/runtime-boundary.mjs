@@ -34,11 +34,65 @@ try{
  })()`);
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});
 
+ const chooseAppearance=async(presentation,theme)=>{
+   await page.evaluate(`(()=>{const button=[...document.querySelectorAll('.theme-btn[data-theme-id]')].find(item=>item.dataset.themeId===${JSON.stringify(theme)});if(!button)throw Error('Theme control unavailable: '+${JSON.stringify(theme)});button.click();})()`);
+   await waitFor(()=>page.evaluate(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`),{label:`theme ${theme}`});
+   await page.evaluate(`(()=>{const button=[...document.querySelectorAll('.presentation-btn[data-presentation-id]')].find(item=>item.dataset.presentationId===${JSON.stringify(presentation)});if(!button)throw Error('Presentation control unavailable: '+${JSON.stringify(presentation)});button.click();})()`);
+   await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation===${JSON.stringify(presentation)}`),{label:`presentation ${presentation}`});
+   const state=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,themePressed:document.querySelector('.theme-btn[data-theme-id="${theme}"]')?.getAttribute('aria-pressed'),presentationPressed:document.querySelector('.presentation-btn[data-presentation-id="${presentation}"]')?.getAttribute('aria-pressed'),focus:document.activeElement?.dataset?.presentationId||'',themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content')||''}))()`);
+   assert.deepEqual(state,{theme,presentation,themePressed:'true',presentationPressed:'true',focus:presentation,themeColor:theme==='light'?'#f2f0ea':'#04050a'});
+ };
+ for(const presentation of ['director-current','glass','aurora'])for(const theme of ['dark','light'])await chooseAppearance(presentation,theme);
+
+ await chooseAppearance('director-current','light');
+ await page.evaluate(`document.querySelector('[data-action="font-larger"]').click()`);
+ await waitFor(()=>page.evaluate(`document.documentElement.dataset.fontScale==='1.08'`),{label:'font scale persisted selection'});
+ await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.presentation==='director-current'&&value?.theme==='light'&&value?.fontScale===1.08)`),{label:'canonical appearance preferences'});
+ assert.deepEqual(await page.evaluate(`({theme:localStorage.getItem('studyDirector.theme.v1'),presentation:localStorage.getItem('studyDirector.presentation.v1'),fontScale:localStorage.getItem('studyDirector.fontScale.v1')})`),{theme:'light',presentation:'director-current',fontScale:'1.08'});
+
+ const originalProfile=await page.evaluate(`__PWA6.Profiles.current()`);
+ await page.evaluate(`setTimeout(()=>__PWA6.Profiles.add(),0)`);
+ await new Promise(resolve=>setTimeout(resolve,1700));await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'new profile ownership'});
+ const addedProfile=await page.evaluate(`__PWA6.Profiles.current()`);
+ assert.notEqual(addedProfile.id,originalProfile.id,'a distinct profile must open');
+ assert.deepEqual(await page.evaluate(`({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,fontScale:document.documentElement.dataset.fontScale,themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content')})`),{theme:'dark',presentation:'glass',fontScale:'1',themeColor:'#04050a'},'fresh profile must start from implicit Glass/Dark without inheriting appearance');
+ await chooseAppearance('aurora','light');
+ await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.presentation==='aurora'&&value?.theme==='light')`),{label:'second profile canonical appearance'});
+ const scopedMirrors=await page.evaluate(`(()=>{const scope=__PWA6.Profiles.current().scope,suffix=scope?'~'+scope:'';return {theme:localStorage.getItem('studyDirector.theme.v1'+suffix),presentation:localStorage.getItem('studyDirector.presentation.v1'+suffix)};})()`);
+ assert.deepEqual(scopedMirrors,{theme:'light',presentation:'aurora'});
+
+ await page.evaluate(`setTimeout(()=>__PWA6.Profiles.switchTo(${JSON.stringify(originalProfile.id)}),0)`);
+ await new Promise(resolve=>setTimeout(resolve,1700));await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'original profile ownership'});
+ const restoredAppearance=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,fontScale:document.documentElement.dataset.fontScale,themePressed:document.querySelector('.theme-btn[data-theme-id="light"]')?.getAttribute('aria-pressed'),presentationPressed:document.querySelector('.presentation-btn[data-presentation-id="director-current"]')?.getAttribute('aria-pressed'),themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content')}))()`);
+ assert.deepEqual(restoredAppearance,{theme:'light',presentation:'director-current',fontScale:'1.08',themePressed:'true',presentationPressed:'true',themeColor:'#f2f0ea'},'switching profiles must restore canonical appearance, first-paint mirrors and controls');
+ await page.evaluate(`window.dispatchEvent(new CustomEvent('studydirector:ready'));window.dispatchEvent(new CustomEvent('studydirector:ready'))`);
+ assert.deepEqual(await page.evaluate(`({glassStyles:document.querySelectorAll('#sd-glass-presentation-v1').length,auroraStyles:document.querySelectorAll('#sd-aurora-presentation-v1').length,glassObserver:document.documentElement.dataset.glassOverlayCoordinator,auroraObserver:document.documentElement.dataset.auroraOverlayCoordinator})`),{glassStyles:1,auroraStyles:1,glassObserver:'installed',auroraObserver:'installed'},'pack retries must retain one stylesheet and one effective coordinator marker');
+
+
  await page.evaluate(`(()=>{const d=__PWA6,now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');document.getElementById('plan-input').value=fmt(m)+' | 30 | Ethics study | work | Ethics | pages | 10';d.applySchedule({skipNotify:true});d.goTab('execute');d.TimerEngine.startCur(30);})()`);
  assert.equal(await page.evaluate('document.querySelector(".pane.on").id'),'pane-execute');
  assert.equal(await page.evaluate('__PWA6.TimerState.paused'),false);
  await page.click('#cd-card');assert.equal(await page.evaluate('__PWA6.TimerState.paused'),true);
  await page.click('#cd-card');assert.equal(await page.evaluate('__PWA6.TimerState.paused'),false);
+
+ await chooseAppearance('aurora','light');
+ assert.equal(await page.evaluate(`__PWA6.Pomodoro.timerEvent('tick',{activeSec:3600})`),true,'real Pomodoro path must open the blocking overlay');
+ await waitFor(()=>page.evaluate(`document.getElementById('nudge-overlay').classList.contains('on')`),{label:'Pomodoro overlay'});
+ await page.evaluate(`document.querySelector('.pwa-update-control').hidden=false;document.getElementById('display-tools-trigger').click()`);
+ await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='update'&&!document.getElementById('display-tools-menu').hidden&&document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed')`),{label:'Aurora overlay priority'});
+ await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='glass').click()`);
+ await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation==='glass'&&document.documentElement.dataset.glassOverlayActive==='update'`),{label:'Glass overlay handoff'});
+ assert.deepEqual(await page.evaluate(`({auroraActive:document.documentElement.dataset.auroraOverlayActive||'',auroraSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed'),glassSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-glass-surface-suppressed'),menuHidden:document.getElementById('display-tools-menu').hidden})`),{auroraActive:'',auroraSuppressed:false,glassSuppressed:true,menuHidden:false});
+ await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='director-current').click()`);
+ await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation==='director-current'`),{label:'Director overlay cleanup'});
+ assert.deepEqual(await page.evaluate(`({glassActive:document.documentElement.dataset.glassOverlayActive||'',auroraActive:document.documentElement.dataset.auroraOverlayActive||'',glassSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-glass-surface-suppressed'),auroraSuppressed:document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed'),menuHidden:document.getElementById('display-tools-menu').hidden})`),{glassActive:'',auroraActive:'',glassSuppressed:false,auroraSuppressed:false,menuHidden:false});
+ await page.evaluate(`[...document.querySelectorAll('.presentation-btn')].find(button=>button.dataset.presentationId==='aurora').click()`);
+ await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='update'`),{label:'Aurora overlay reacquire'});
+ await page.evaluate(`document.querySelector('.pwa-update-control').hidden=true`);
+ await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='nudge'&&document.getElementById('display-tools-menu').hidden&&document.getElementById('display-tools-trigger').getAttribute('aria-expanded')==='false'`),{label:'blocking overlay closes display tools'});
+ assert.equal(await page.evaluate(`document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed')`),false);
+ await page.evaluate(`__PWA6.Pomodoro.timerEvent('clear-cue')`);
+
  // Repeat HTML paste to catch duplicate policy creation under enforcement.
  await page.evaluate(`(async()=>{const field=document.createElement('textarea');field.id='security-note';document.body.appendChild(field);window.testEditor=await StudyDirectorRichText.mountRichTextEditor({field,label:'Security paste',initialValue:'',maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}}});for(let i=0;i<2;i++){const editor=document.querySelector('#security-note + .sd-rte .sd-rte-editor');editor.focus();const data=new DataTransfer();data.setData('text/html','<p><strong>Safe text</strong><img src=x onerror="window.badPaste=true"><a href="javascript:alert(1)">bad link</a></p>');data.setData('text/plain','Safe text');${pasteInPage}(editor,data);await new Promise(r=>setTimeout(r,50));}})()`);
  assert.equal(await page.evaluate('window.badPaste===true'),false);
@@ -102,6 +156,6 @@ try{
  await page.evaluate('__PWA6.BackupController.createCheckpoint()');
  assert.equal(await page.evaluate('__PWA6.trustedTypeViolations.size'),0);
  await page.evaluate('__PWA6.TimerEngine.stopExecution()');
- console.log(JSON.stringify({status:'PASS',suite:'runtime-security-boundary',strictTrustedTypes:true,repeatedPaste:true,exportWorker:true,timer:true,minified:process.env.SD_MINIFIED_TEST==='1'}));
+ console.log(JSON.stringify({status:'PASS',suite:'runtime-security-boundary',strictTrustedTypes:true,repeatedPaste:true,exportWorker:true,timer:true,presentationMatrix:true,profileAppearance:true,overlayHandoff:true,packRetry:true,minified:process.env.SD_MINIFIED_TEST==='1'}));
  const errors=page.events.filter(e=>!/favicon|ResizeObserver loop/.test(e.text));assert.deepEqual(errors,[]);
 }finally{if(page)await browser.closePage(page);await browser.close();await server.close();}
