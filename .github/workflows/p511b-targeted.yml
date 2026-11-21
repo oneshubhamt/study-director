@@ -85,9 +85,9 @@ jobs:
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: Changed populated accessibility witness x5 isolated
+      - name: Changed presentation accessibility witness x5 isolated
         run: |
           for pass in 1 2 3 4 5; do
-            echo "P5.11b populated-accessibility pass $pass/5"
-            node tests/browser/ui/populated-accessibility.mjs
+            echo "P5.11b presentation-accessibility pass $pass/5"
+            node tests/browser/ui/presentation-accessibility.mjs
           done
