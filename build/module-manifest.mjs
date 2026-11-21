@@ -4,6 +4,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'interactions',source:'core/interactions.ts',stem:'sd.interactions'}),
   Object.freeze({id:'workspace-overlay',source:'core/workspace-overlay.ts',stem:'sd.workspace-overlay'}),
   Object.freeze({id:'backup-presentation',source:'core/backup-presentation.ts',stem:'sd.backup-presentation'}),
+  Object.freeze({id:'presentation-host',source:'core/presentation-host.ts',stem:'sd.presentation-host'}),
   Object.freeze({id:'audio-engine',source:'core/audio-engine.ts',stem:'sd.audio-engine'}),
   Object.freeze({id:'notice-coordinator',source:'core/notice-coordinator.ts',stem:'sd.notice-coordinator'}),
   Object.freeze({id:'foundation-host',source:'core/foundation-host.ts',stem:'sd.foundation-host'}),
@@ -91,6 +92,7 @@ export const runtimeDependencies=Object.freeze({
   'foundation-host':Object.freeze([]),
   'capabilities-host':Object.freeze([]),
   'backup-presentation':Object.freeze([]),
+  'presentation-host':Object.freeze([]),
   navigation:Object.freeze([]),
   domain:Object.freeze([]),
   persistence:Object.freeze([]),
@@ -164,8 +166,8 @@ export const runtimeDependencies=Object.freeze({
 
 export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
 export const externalModules=Object.freeze([
-  Object.freeze({id:'glass',source:'external/glass.js',stem:'sd.glass',execution:'startup'}),
-  Object.freeze({id:'aurora',source:'external/aurora.js',stem:'sd.aurora',execution:'startup'}),
+  Object.freeze({id:'glass',source:'external/glass.ts',stem:'sd.glass',execution:'startup'}),
+  Object.freeze({id:'aurora',source:'external/aurora.ts',stem:'sd.aurora',execution:'startup'}),
   Object.freeze({id:'guide',source:'external/guide.ts',stem:'sd.guide',execution:'on-demand'}),
   Object.freeze({id:'insights',sources:Object.freeze(['external/insights-model.ts','external/insights-protocol.ts','external/insights-worker.ts','external/insights-compute.ts','external/insights-rendering.ts','external/insights-runtime.ts','external/insights.js']),stem:'sd.insights',execution:'on-demand'}),
   Object.freeze({id:'drive',source:'external/drive.ts',stem:'sd.drive',execution:'startup'}),
@@ -186,8 +188,8 @@ export const styleModules=Object.freeze([
 export const hostScripts=Object.freeze([
   Object.freeze({id:'install-capture',source:'host/install-capture.js',marker:'<!-- @SD_HOST_INSTALL_CAPTURE@ -->'}),
   Object.freeze({id:'profile-scope',source:'host/profile-scope.ts',marker:'<!-- @SD_HOST_PROFILE_SCOPE@ -->'}),
-  Object.freeze({id:'presentation-kernel',source:'host/presentation-kernel.js',marker:'<!-- @SD_HOST_PRESENTATION_KERNEL@ -->'}),
-  Object.freeze({id:'presentation-metadata',source:'host/presentation-metadata.js',marker:'<!-- @SD_HOST_PRESENTATION_METADATA@ -->'}),
+  Object.freeze({id:'presentation-kernel',source:'host/presentation-kernel.ts',marker:'<!-- @SD_HOST_PRESENTATION_KERNEL@ -->'}),
+  Object.freeze({id:'presentation-metadata',source:'host/presentation-metadata.ts',marker:'<!-- @SD_HOST_PRESENTATION_METADATA@ -->'}),
   Object.freeze({id:'main',source:'host/main.js',marker:'<!-- @SD_HOST_MAIN@ -->'}),
 ]);
 

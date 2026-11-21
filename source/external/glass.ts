@@ -1,9 +1,11 @@
+import type {PresentationDefinition,PresentationKernel} from '../../types/presentation.ts';
+
 (()=>{
 'use strict';
 
 const KERNEL_KEY=Symbol.for('studyDirector.presentationKernel.v1');
 const STYLE_ID='sd-glass-presentation-v1';
-const PROFILE=Object.freeze({
+const PROFILE:PresentationDefinition=Object.freeze({
   contractVersion:2,
   id:'glass',
   label:'Glass',
@@ -1131,53 +1133,52 @@ html[data-material="glass"] #pane-insights .ui-disclosure{
 }
 `;
 
-function install(){
-  const kernel=window[KERNEL_KEY];
-  if(!kernel||kernel.format!=='study-director.presentation-kernel'||kernel.version!==1)return false;
-  if(!document.getElementById(STYLE_ID)){
-    const style=document.createElement('style');
-    style.id=STYLE_ID;
-    style.dataset.sdPresentationPack=PROFILE.id;
-    style.textContent=CSS;
-    document.head.appendChild(style);
-  }
-  const registered=kernel.registerPresentation(PROFILE);
-  installOverlayCoordinator();
-  return registered;
+type OverlaySurface=Readonly<{id:string;element:HTMLElement;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>;
+const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null;
+function kernelValue():PresentationKernel|null{
+  const value=(window as unknown as Record<PropertyKey,unknown>)[KERNEL_KEY];
+  if(!record(value)||value['format']!=='study-director.presentation-kernel'||value['version']!==1||typeof value['registerPresentation']!=='function')return null;
+  return value as unknown as PresentationKernel;
 }
-
-function installOverlayCoordinator(){
+function ensureStyle():boolean{
+  if(document.getElementById(STYLE_ID))return true;
+  const style=document.createElement('style');style.id=STYLE_ID;style.dataset['sdPresentationPack']=PROFILE.id;style.textContent=CSS;document.head.appendChild(style);return true;
+}
+function registerPack():boolean{
+  const kernel=kernelValue();if(!kernel)return false;
+  ensureStyle();return kernel.registerPresentation(PROFILE);
+}
+function installOverlayCoordinator():boolean{
   const root=document.documentElement;
-  if(!root||root.dataset.glassOverlayCoordinator==='installed')return;
-  const surfaces=[
-    {id:'owner',element:document.querySelector('.ownership-banner'),visible:element=>element.classList.contains('on'),blocksTools:true},
-    {id:'update',element:document.querySelector('.pwa-update-control'),visible:element=>!element.hidden,blocksTools:false},
+  if(root.dataset['glassOverlayCoordinator']==='installed')return true;
+  const candidates:readonly (Readonly<{id:string;element:HTMLElement|null;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>)[]=[
+    {id:'owner',element:document.querySelector<HTMLElement>('.ownership-banner'),visible:element=>element.classList.contains('on'),blocksTools:true},
+    {id:'update',element:document.querySelector<HTMLElement>('.pwa-update-control'),visible:element=>!element.hidden,blocksTools:false},
     {id:'nudge',element:document.getElementById('nudge-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true}
-  ].filter(surface=>surface.element);
-  const menu=document.getElementById('display-tools-menu');
-  const trigger=document.getElementById('display-tools-trigger');
+  ];
+  if(candidates.some(surface=>!surface.element))return false;
+  const surfaces:readonly OverlaySurface[]=candidates.map(surface=>Object.freeze({id:surface.id,element:surface.element as HTMLElement,visible:surface.visible,blocksTools:surface.blocksTools}));
+  const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger');
+  if(!menu||!trigger)return false;
   let queued=false,running=false;
-  const reconcile=()=>{
-    queued=false;
-    if(running)return;
-    running=true;
+  const reconcile=():void=>{
+    queued=false;if(running)return;running=true;
     try{
-      const glass=root.dataset.presentation==='glass';
-      const visible=glass?surfaces.filter(surface=>surface.visible(surface.element)):[];
-      const winner=visible[0]||null;
+      const active=root.dataset['presentation']===PROFILE.id;
+      const visible=active?surfaces.filter(surface=>surface.visible(surface.element)):[];
+      const winner=visible[0]??null;
       surfaces.forEach(surface=>surface.element.classList.toggle('sd-glass-surface-suppressed',!!winner&&surface!==winner));
-      if(winner){root.dataset.glassOverlayActive=winner.id;root.dataset.glassOverlayBlocksTools=winner.blocksTools?'true':'false';}
-      else{delete root.dataset.glassOverlayActive;delete root.dataset.glassOverlayBlocksTools;}
-      if(winner&&winner.blocksTools&&menu&&!menu.hidden){menu.hidden=true;if(trigger)trigger.setAttribute('aria-expanded','false');}
+      if(winner){root.dataset['glassOverlayActive']=winner.id;root.dataset['glassOverlayBlocksTools']=winner.blocksTools?'true':'false';}
+      else{delete root.dataset['glassOverlayActive'];delete root.dataset['glassOverlayBlocksTools'];}
+      if(winner?.blocksTools&&!menu.hidden){menu.hidden=true;trigger.setAttribute('aria-expanded','false');}
     }finally{running=false;}
   };
-  const schedule=()=>{if(queued)return;queued=true;queueMicrotask(reconcile);};
+  const schedule=():void=>{if(queued)return;queued=true;queueMicrotask(reconcile);};
   const observer=new MutationObserver(schedule);
   observer.observe(root,{attributes:true,attributeFilter:['data-presentation']});
   surfaces.forEach(surface=>observer.observe(surface.element,{attributes:true,attributeFilter:['class','hidden']}));
-  root.dataset.glassOverlayCoordinator='installed';
-  reconcile();
+  root.dataset['glassOverlayCoordinator']='installed';reconcile();return true;
 }
-
-if(!install())window.addEventListener('studydirector:ready',install,{once:true});
+function install():boolean{return registerPack()&&installOverlayCoordinator();}
+if(!install())window.addEventListener('studydirector:ready',()=>{install();},{once:true});
 })();

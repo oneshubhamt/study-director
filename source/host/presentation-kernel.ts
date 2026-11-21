@@ -1,9 +1,13 @@
+import type {ProfileScopeValue} from '../../types/profile-scope.ts';
+import type {AppearanceStorageRead,AppearanceStorageWrite,PresentationField,PresentationKernel,PresentationManifest,PresentationProfile,ThemeDefinition} from '../../types/presentation.ts';
+
 
 (()=>{
   const key=Symbol.for('studyDirector.presentationKernel.v1');
   const freeze=Object.freeze;
-  const list=(...values)=>freeze(values);
-  const presentations=freeze({
+  const list=<T>(...values:T[]):readonly T[]=>freeze(values);
+  const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
+  const presentations:Readonly<Record<string,PresentationProfile>>=freeze({
     'director-current':freeze({
       id:'director-current',
       label:'Director',
@@ -41,7 +45,7 @@
       charts:'analytical'
     })
   });
-  const themes=freeze({
+  const themes:Readonly<Record<string,ThemeDefinition>>=freeze({
     // Themes choose light or dark semantic roles only; skins are independent.
     'dark':freeze({id:'dark',label:'Dark'}),
     'light':freeze({id:'light',label:'Light'})
@@ -315,7 +319,7 @@
       '--sd-chart-series-16'
     )
   });
-  const manifest=freeze({
+  const manifest:PresentationManifest=freeze({
     format:'study-director.presentation-manifest',
     version:1,
     defaults:freeze({theme:'dark',preferredPresentation:'glass',fallbackPresentation:'director-current'}),
@@ -346,39 +350,37 @@
     })
   });
   const root=document.documentElement;
-  const profileScope=window[Symbol.for('studyDirector.profileScope.v1')];
+  const profileScopeValue=(window as unknown as Record<PropertyKey,unknown>)[Symbol.for('studyDirector.profileScope.v1')];
+  if(!record(profileScopeValue)||typeof profileScopeValue['scoped']!=='function')throw new Error('Study Director profile scope is unavailable.');
+  const profileScope=profileScopeValue as unknown as ProfileScopeValue;
   const themeStorageKey=profileScope.scoped('@@SD_THEME_STORAGE_KEY@@');
   const presentationStorageKey=profileScope.scoped('@@SD_PRESENTATION_STORAGE_KEY@@');
   const presentationIdPattern=/^[a-z][a-z0-9-]{0,40}$/;
-  const profileFields=freeze(['typography','shape','material','depth','density','responsive','motion','charts']);
-  const registry=new Map(Object.entries(manifest.presentations));
+  const profileFields:readonly PresentationField[]=freeze(['typography','shape','material','depth','density','responsive','motion','charts']);
+  const registry=new Map<string,PresentationProfile>(Object.entries(manifest.presentations));
   let preferredPresentationId=manifest.defaults.preferredPresentation;
-  const owns=(record,value)=>Object.prototype.hasOwnProperty.call(record,value);
-  const safePresentationId=value=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
-  const normalizeThemeId=value=>{
+  const owns=(value:Readonly<Record<string,unknown>>,key:string)=>Object.prototype.hasOwnProperty.call(value,key);
+  const safePresentationId=(value:unknown):string=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
+  const normalizeThemeId=(value:unknown):string=>{
     const candidate=String(value||'').trim();
     return owns(manifest.themes,candidate)?candidate:manifest.defaults.theme;
   };
-  const normalizePresentationId=value=>{
+  const normalizePresentationId=(value:unknown):string=>{
     const candidate=safePresentationId(value);
     return registry.has(candidate)?candidate:manifest.defaults.fallbackPresentation;
   };
-  const normalizePresentationDefinition=value=>{
-    if(!value||typeof value!=='object'||Number(value.contractVersion)!==manifest.tokens.contractVersion)return null;
-    const id=safePresentationId(value.id);
-    if(!id)return null;
-    const profile={id,label:String(value.label||id).trim().slice(0,40)||id};
-    for(const field of profileFields){
-      const clean=safePresentationId(value[field]);
-      if(!clean)return null;
-      profile[field]=clean;
-    }
-    return freeze(profile);
+  const normalizePresentationDefinition=(value:unknown):Readonly<PresentationProfile>|null=>{
+    if(!record(value)||Number(value['contractVersion'])!==manifest.tokens.contractVersion)return null;
+    const id=safePresentationId(value['id']);if(!id)return null;
+    const fields:Record<PresentationField,string>={typography:'',shape:'',material:'',depth:'',density:'',responsive:'',motion:'',charts:''};
+    for(const field of profileFields){const clean=safePresentationId(value[field]);if(!clean)return null;fields[field]=clean;}
+    return freeze({id,label:String(value['label']||id).trim().slice(0,40)||id,...fields});
   };
-  const samePresentation=(left,right)=>!!(left&&right&&left.id===right.id&&left.label===right.label&&profileFields.every(field=>left[field]===right[field]));
-  const applyPresentation=profileId=>{
+  const samePresentation=(left:PresentationProfile|undefined,right:PresentationProfile):boolean=>!!left&&left.id===right.id&&left.label===right.label&&profileFields.every(field=>left[field]===right[field]);
+  const applyPresentation=(profileId:unknown):string=>{
     const clean=normalizePresentationId(profileId);
-    const profile=registry.get(clean)||manifest.presentations[manifest.defaults.fallbackPresentation];
+    const profile=registry.get(clean)??manifest.presentations[manifest.defaults.fallbackPresentation];
+    if(!profile)throw new Error('Study Director fallback presentation is unavailable.');
     Object.assign(root.dataset,{
       presentation:profile.id,
       typography:profile.typography,
@@ -392,7 +394,7 @@
     });
     return clean;
   };
-  const defaultRead=(key,fallback)=>{
+  const defaultRead:AppearanceStorageRead=(key,fallback)=>{
     try{
       const value=localStorage.getItem(key);
       return value===null?fallback:value;
@@ -400,7 +402,7 @@
       return fallback;
     }
   };
-  const defaultWrite=(key,value)=>{
+  const defaultWrite:AppearanceStorageWrite=(key,value)=>{
     try{
       localStorage.setItem(key,String(value));
       return true;
@@ -408,15 +410,15 @@
       return false;
     }
   };
-  const readStoredTheme=(read=defaultRead)=>normalizeThemeId(read(themeStorageKey,manifest.defaults.theme));
-  const readStoredPresentation=(read=defaultRead)=>{
+  const readStoredTheme=(read:AppearanceStorageRead=defaultRead):string=>normalizeThemeId(read(themeStorageKey,manifest.defaults.theme));
+  const readStoredPresentation=(read:AppearanceStorageRead=defaultRead):string=>{
     const stored=safePresentationId(read(presentationStorageKey,manifest.defaults.preferredPresentation));
     preferredPresentationId=stored||manifest.defaults.preferredPresentation;
     return registry.has(preferredPresentationId)?preferredPresentationId:manifest.defaults.fallbackPresentation;
   };
-  const restoreStoredPresentation=(read=defaultRead)=>applyPresentation(readStoredPresentation(read));
-  const listPresentations=()=>freeze([...registry.values()]);
-  const registerPresentation=value=>{
+  const restoreStoredPresentation=(read:AppearanceStorageRead=defaultRead):string=>applyPresentation(readStoredPresentation(read));
+  const listPresentations=():readonly PresentationProfile[]=>freeze([...registry.values()]);
+  const registerPresentation=(value:unknown):boolean=>{
     const profile=normalizePresentationDefinition(value);
     if(!profile)return false;
     const current=registry.get(profile.id);
@@ -425,14 +427,14 @@
     if(profile.id===preferredPresentationId)applyPresentation(profile.id);
     return true;
   };
-  const switchPresentation=(presentationId,{persist=false,write=defaultWrite}={})=>{
+  const switchPresentation=(presentationId:unknown,{persist=false,write=defaultWrite}:Readonly<{persist?:boolean;write?:AppearanceStorageWrite}>={}):string=>{
     const clean=normalizePresentationId(presentationId);
     preferredPresentationId=clean;
     applyPresentation(clean);
     if(persist)write(presentationStorageKey,clean);
     return clean;
   };
-  const synchronizeMetadata=()=>{
+  const synchronizeMetadata=():void=>{
     const styles=getComputedStyle(root);
     const themeColor=document.querySelector('meta[name="theme-color"]');
     const statusBar=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
@@ -441,16 +443,16 @@
     if(themeColor&&computedColor)themeColor.setAttribute('content',computedColor);
     if(statusBar&&computedStatus)statusBar.setAttribute('content',computedStatus);
   };
-  const switchTheme=(themeId,{persist=false,write=defaultWrite,syncMetadata=true}={})=>{
+  const switchTheme=(themeId:unknown,{persist=false,write=defaultWrite,syncMetadata=true}:Readonly<{persist?:boolean;write?:AppearanceStorageWrite;syncMetadata?:boolean}>={}):string=>{
     const clean=normalizeThemeId(themeId);
     root.dataset.theme=clean;
     if(persist)write(themeStorageKey,clean);
     if(syncMetadata)synchronizeMetadata();
     return clean;
   };
-  const activeThemeId=()=>normalizeThemeId(root.dataset.theme);
-  const activePresentationId=()=>normalizePresentationId(root.dataset.presentation);
-  const kernel=freeze({
+  const activeThemeId=():string=>normalizeThemeId(root.dataset['theme']);
+  const activePresentationId=():string=>normalizePresentationId(root.dataset['presentation']);
+  const kernel:PresentationKernel=freeze({
     format:'study-director.presentation-kernel',
     version:1,
     manifest,
