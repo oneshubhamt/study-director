@@ -157,6 +157,9 @@ await assert.rejects(storage.assertPublication(publication),/could not be verifi
 await assert.rejects(storage.renewPublication(publication),/could not be verified/u);
 await assert.rejects(storage.endPublication(publication),/could not be verified/u);
 assert.equal((await storage.listPublications()).ignored,1,'release preserves an unrecognized marker');
+// Unreadable and over a day old by the file's own time: no upload or cleanup
+// lasts that long, so it no longer holds cleanup up (the file stays).
+now+=25*3600000;assert.equal((await storage.listPublications()).ignored,0,'an unrecognized marker over a day old holds nothing');now-=25*3600000;
 const maintenance=await storage.beginMaintenance();assertOperationalFormat('deviceMaintenance',await lockBody(maintenance));now+=40000;
 await assert.rejects(()=>storage.assertMaintenance(maintenance),/too old/u,'maintenance must renew before its window closes');
 await storage.endMaintenance(maintenance);const renewed=await storage.beginMaintenance();now+=20000;await storage.renewMaintenance(renewed);now+=20000;

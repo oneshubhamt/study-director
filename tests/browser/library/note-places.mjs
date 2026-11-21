@@ -107,14 +107,36 @@ try{
     // A new, empty note says how tags and links are made.
     document.getElementById('library-note-add').click();box=await dialog();const hintName=box.querySelector('.interaction-input');hintName.value='Hinted';hintName.dispatchEvent(new Event('input',{bubbles:true}));box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(200);
     out.hint=document.querySelector('#library-notes-editor .library-notes-textarea')?.getAttribute('placeholder');
+    // Support Activities and a deleted note open their own menus the same
+    // way, never the browser's: the shared note only what applies to it, a
+    // deleted note Restore and Delete forever. The drawer's open arrow points
+    // up, where its list opens.
+    const items=list=>[...list.querySelectorAll('.library-note-menu-item')].map(item=>item.id.replace('library-note-',''));
+    d.AppData.notes.update('support activities','Support Activities','Shared text','');
+    for(const [key,label] of [['to delete','To delete'],['gone','Gone']])d.AppData.notes.update(key,label,'Soon deleted','');
+    await d.AppData.notes.flush();for(const key of ['to delete','gone'])await d.AppData.notes.remove(key);await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(250);
+    document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    const support=row('support activities'),supportRect=support.getBoundingClientRect();
+    out.supportPrevented=!support.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:supportRect.left+40,clientY:supportRect.top+10}));
+    menu=await until(()=>{const list=document.querySelector('.library-note-context-menu');return list&&!list.hidden&&list.querySelector('.library-note-menu-item')?list:null;});
+    out.supportMenu={label:menu.getAttribute('aria-label'),items:items(menu)};document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    const toggle=document.getElementById('library-notes-trash-toggle');toggle.click();await wait(150);
+    out.trashArrow=getComputedStyle(toggle,'::before').content;
+    const trashRow=await until(()=>[...document.querySelectorAll('#library-notes-trash-list [data-trash-key]')].find(item=>/To delete/.test(item.textContent)));
+    out.trashNoSelect=getComputedStyle(trashRow).userSelect;
+    const trashRect=trashRow.getBoundingClientRect();
+    out.trashPrevented=!trashRow.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:trashRect.left+40,clientY:trashRect.top+10}));
+    menu=await until(()=>{const list=document.querySelector('.library-note-context-menu');return list&&!list.hidden&&list.querySelector('#library-note-restore')?list:null;});
+    out.trashMenu={label:menu.getAttribute('aria-label'),items:items(menu)};
+    menu.querySelector('#library-note-restore').click();out.restoredFromMenu=await until(()=>!!d.AppData.notes.get('to delete'),3000).catch(()=>false);
     return out;
   })()`);
   // Real input, not a synthetic event: the browser closes a light-dismiss menu
   // on the release of a press that began before it opened. macOS and Linux
   // send contextmenu with the right button still down, and a long press fires
   // under the finger, so the menu must still be open after the release.
-  const realMenu=async(press,release)=>{
-    const at=await page.evaluate(`(async()=>{const d=__PWA6;document.querySelector('.library-note-context-menu')?.hidePopover?.();await new Promise(r=>setTimeout(r,100));const row=document.querySelector('#library-notes-list [data-note-key="gs2"]');row.scrollIntoView({block:'center'});const rect=row.getBoundingClientRect();return {x:Math.round(rect.left+40),y:Math.round(rect.top+rect.height/2)};})()`);
+  const realMenu=async(press,release,selector='#library-notes-list [data-note-key="gs2"]')=>{
+    const at=await page.evaluate(`(async()=>{const d=__PWA6;document.querySelector('.library-note-context-menu')?.hidePopover?.();await new Promise(r=>setTimeout(r,100));const row=document.querySelector(${JSON.stringify(selector)});row.scrollIntoView({block:'center'});const rect=row.getBoundingClientRect();return {x:Math.round(rect.left+40),y:Math.round(rect.top+rect.height/2)};})()`);
     await press(at);await new Promise(resolve=>setTimeout(resolve,650));await release(at);await new Promise(resolve=>setTimeout(resolve,400));
     return page.evaluate(`(()=>{const menu=document.querySelector('.library-note-context-menu');return menu&&!menu.hidden&&menu.matches(':popover-open')?menu.getAttribute('aria-label'):null;})()`);
   };
@@ -122,6 +144,11 @@ try{
   const realRightClick=await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at));
   const touch=(type,{x,y})=>page.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:[{x,y,id:1}]});
   const realLongPress=await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at));
+  // The same, for real, on Support Activities and on a deleted note (Gone is
+  // still in the open Recently deleted list).
+  const supportRow='#library-notes-list [data-note-key="support activities"]',trashRow='#library-notes-trash-list [data-trash-key]';
+  const realSupport=[await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at),supportRow),await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at),supportRow)];
+  const realTrash=[await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at),trashRow),await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at),trashRow)];
   // Deleting a tag while typing takes it out of the tag row by itself (no
   // other redraw): Physics holds the only #formula.
   await page.evaluate(`(async()=>{document.querySelector('.library-note-context-menu')?.hidePopover?.();document.querySelector('#library-notes-list [data-note-key="physics"]').click();await new Promise(r=>setTimeout(r,300));})()`);
@@ -135,6 +162,15 @@ try{
   assert.equal(tagsAfter.includes('#formula'),false,'deleting the only #formula takes it out of the tag row as you type');
   assert.equal(realRightClick,'Actions for GS2','a real right-click leaves the menu open after the button is released');
   assert.equal(realLongPress,'Actions for GS2','a real long press leaves the menu open after the finger lifts');
+  assert.deepEqual(result.supportMenu,{label:'Actions for Support Activities',items:['export-one','print']},'Support Activities shows only what applies to the shared note');
+  assert.equal(result.supportPrevented,true,'right-click on Support Activities opens the app menu, not the browser one');
+  assert.deepEqual(result.trashMenu,{label:'Actions for To delete',items:['restore','forget']},'a deleted note offers Restore and Delete forever');
+  assert.equal(result.trashPrevented,true,'right-click on a deleted note opens the app menu, not the browser one');
+  assert.equal(result.restoredFromMenu,true,'Restore from the menu brings the note back');
+  assert.equal(result.trashNoSelect,'none','a long press on a deleted note selects no text (the same rule hides the system callout on Safari)');
+  assert.equal(result.trashArrow,'"▴ "','the open drawer\'s arrow points up, where its list opens');
+  assert.deepEqual(realSupport,['Actions for Support Activities','Actions for Support Activities'],'a real right-click and long press on Support Activities');
+  assert.deepEqual(realTrash,['Actions for Gone','Actions for Gone'],'a real right-click and long press on a deleted note');
   assert.equal(result.count,'4','the count is of real notes: GS2, Polity, Physics, Rivers');
   assert.equal(result.newDefault,'Creates GS2 › Rights.','New starts inside the open note');
   assert.equal(result.newPicked,'Creates Physics › Rights.','Change picks another place');

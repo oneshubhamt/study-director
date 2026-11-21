@@ -64,6 +64,10 @@
   const HISTORY_ORIGIN_MARKER='sdHistoryOrigin',ORIGIN_PATTERN=/^inst_[a-z0-9_]{8,96}$/u;
   const GIS_LOAD_TIMEOUT_MS=20000;
   const AUTH_TIMEOUT_MS=120000;
+  // An upload marker this build cannot read is waited for (it may be live),
+  // but not past a day by Drive's own creation time: no upload lasts that
+  // long, so it holds nothing, and Drive cleanup goes on.
+  const UNREADABLE_MARKER_MAX_AGE_MS=24*60*60*1000;
   let API_TIMEOUT_MS=0;
   const TRANSFER_TIMEOUT_MS=120000;
   const MAX_TRANSIENT_ATTEMPTS=3;
@@ -758,7 +762,7 @@
     ]),params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'100',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not inspect active Study Director backup publications.');
     const payload=await jsonResponse(response),raw=Array.isArray(payload&&payload.files)?payload.files:[],items=[];let ignored=0;
-    for(const file of raw){if(validPublicationMetadata(file,parent))items.push(publicationDescriptor(file,parent));else ignored+=1;}
+    for(const file of raw){if(validPublicationMetadata(file,parent))items.push(publicationDescriptor(file,parent));else if(!(driveNow()-Date.parse(String(file&&file.createdTime||''))>UNREADABLE_MARKER_MAX_AGE_MS))ignored+=1;}
     return Object.freeze({items:Object.freeze(items),overflow:!!(payload&&payload.nextPageToken),ignored});
   }
   async function assertRepositoryPublication(ref,baseContext=EMPTY_DRIVE_OPERATION){

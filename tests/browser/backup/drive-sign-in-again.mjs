@@ -74,12 +74,13 @@ try{
   // connecting again goes straight back to the profile's account. Pressed
   // while a sync runs here, it stops that sync safely first (it used to do
   // nothing and say nothing).
-  const held=hold('A',request=>request.method==='GET');
-  const running=a.evaluate(`__PWA6.BackupProviderRuntime.syncRepositoryProvider('google-drive').then(()=>'ended',error=>'stopped')`);
-  await waitFor(()=>held.reached,{label:'a sync is running',timeout:20000});
-  await waitFor(()=>a.evaluate(`__PWA6.BackupProviderRuntime.status().busy`),{label:'the sync holds the foreground',timeout:10000});
+  // A sync starts only when nothing else runs, so it is asked again until
+  // Drive work holds the foreground (its requests wait at the hold).
+  const held=hold('A',request=>request.method==='GET'),started=[];
+  await waitFor(async()=>{if(await a.evaluate(`__PWA6.BackupProviderRuntime.status().busy`))return true;started.push(a.evaluate(`__PWA6.BackupProviderRuntime.syncRepositoryProvider('google-drive').then(()=>'ended',()=>'stopped')`));return false;},{label:'a sync holds the foreground',timeout:20000});
+  await waitFor(()=>held.reached,{label:'its Drive request waits',timeout:20000});
   const disconnected=await a.evaluate(`__PWA6.BackupProviderRuntime.disconnect('google-drive')`);
-  held.release();await running;
+  held.release();await Promise.all(started);
   assert.equal(disconnected,true,'Disconnect during a sync stops it and signs out');
   assert.equal(await connected(a),false);assert.equal(await a.evaluate('window.__gisRevokes'),0,'Disconnect keeps Google\'s permission for the other devices');
   await sleep(200);await tap(a);await waitFor(()=>connected(a),{label:'connected again after Disconnect',timeout:20000});

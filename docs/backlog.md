@@ -97,6 +97,7 @@ Each fix shipped in the build named, or in F25 if none is (the reports were seen
 | 24 | No "Previous study day needs review" after a saved day: Save Today pauses a running timer, only the device that ran the day asks, notes after the save leave it saved ([study-session.md](areas/study-session.md)) | a few mornings |
 | 27 | Typing no longer uploads to Drive every few seconds: one upload 20 minutes after the first change, within seconds of a key moment, at once on going to the background (F28, [backup-and-sync.md](areas/backup-and-sync.md)) | Drive activity while typing; Continue Here still quick |
 | 28 | A sync while typing keeps the editor and the cursor (Library note, reflection, Execute note); no raw `WG1:` text; today's reflection takes a click at once with no session (F28, [notes.md](areas/notes.md#which-editors-are-live)) | type while another device syncs; reopen after the app sat in the background |
+| Notes menus | Support Activities and Recently deleted rows open the app's menu on right-click and long press, never the browser's or a text selection: Support Activities only Export and Print, a deleted note Restore and Delete forever; the open drawer's arrow points up (F30, [notes.md](areas/notes.md)) | right-click and long press on both, on the iPad and the Mac |
 | Notes D | Support Activities stored under its own name and a fixed id, every copy converted (note, kept versions, browser copy, older backups and versions); backup files v26 and Drive versions 11, so older builds wait for an update; "Format cleanup" also checks the newest Continue Here claim (F29, [notes.md](areas/notes.md#how-notes-and-areas-fit-together)) | every device on F29 at about the same time; Support Activities reads normally; then Copy diagnostics, "Format cleanup" on each device |
 | Obs. 2 | Catch-up when Drive connects: a looping failed catch-up fixed (`2eaf3fe`), faster Drive backups (`5bbc008`), a Connect card showing each step on every tab (`eb8601d`; [status-indicator.md](areas/status-indicator.md#connect-google-drive-card)) | the iPad connecting Drive |
 
@@ -182,8 +183,6 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 The notes audit's findings A to D are done (D, Support Activities under its own name and a fixed id, in F29).
 
 - **Real-device check of the notes work of 2026-11-13 to 16.** Not yet tried on Safari, the iPad or the phone: swiping the tag row, the line under each note and its "# Tag" picker, Rename from ⋯ (the fix for a menu handing focus back late), right-click and long press (no system callout or text selection on the rows), New and Move, pinch zoom in the image view, dropping files. One pass per device.
-- **Recently Deleted has no right-click or long-press menu** (owner, 2026-11-17). In the Library's notes list, deleted notes open no actions menu. Give them their own: Restore, and Delete forever. Fix it, and test it like the other rows.
-- **Recently Deleted's arrow points the wrong way** (owner, 2026-11-17). When the drawer is open, the arrow left of the "Recently Deleted" label points down, but the drawer opens upward. The arrow should match the direction the drawer opens, in both states.
 
 ## Decided, not yet scheduled
 
@@ -199,7 +198,7 @@ The notes audit's findings A to D are done (D, Support Activities under its own 
 - **Very large backups.** Measure restore of a very large library. Aggregate backup size and storage pressure on small devices are deferred until there is concrete evidence of a problem.
 - **Drive maintenance planning** can be expensive on a cold, paginated Drive inventory. Measure it with real Drive before building a resumable planning cursor.
 - **Duplicate local checkpoint captures**: an optimisation to make only if measurement shows it matters.
-- **An unreadable coordination file holds things up** (audit, 2026-11-21; F29 behaves the same). An unreadable Drive upload marker stops Drive cleanup, and an unreadable Device Folder lock stops that folder's cleanup, for good; a damaged Continue Here claim would block hand-overs. Unlikely: markers are written whole. Seen in diagnostics as cleanup waiting with an `uncertain` state. Then: ignore an unreadable marker or lock once it is over a day old by the file's own creation time, as Drive cleanup markers already are, with a test per location; claims need their own design.
+- **An unreadable Continue Here claim stops hand-overs** (audit, 2026-11-21; F29 behaves the same). Unreadable upload markers and Device Folder locks age out after a day since F30; a claim cannot, because each new claim is numbered from the newest readable one. Unlikely (a claim is one small file written whole). Seen as Continue Here failing with "could not be verified safely". A fix changes how claims are numbered, so it needs its own design and the hand-over journeys.
 - **Large orchestration modules** (`backup-provider.js`, `backup.js`, `app.html`): no splitting by size alone; consolidate only proven duplication.
 
 ## Not yet checked

@@ -279,11 +279,24 @@ registry.define('library-notes',1,modules=>{
         {id:'library-note-print',label:'Print…',hint:'',reason:stored&&entry.hasNote?'':stored?'The note is empty':unwritten,run:open(()=>printNoteEntry(entry))},
         'separator',
         {id:'library-note-delete',label:entry.ephemeral?'Discard':'Delete',hint:'Del',danger:true,reason:readOnly||(entry.ephemeral||stored?'':state.kind==='parent'?'Delete the notes inside it first':'It is an Area in today’s plan'),run:open(()=>deleteNote())}
+      ].filter(action=>!entry.support||SUPPORT_NOTE_ACTIONS.has(action.id));
+    }
+    // Support Activities keeps its name and place and is never deleted: its
+    // menu holds what applies to the shared note.
+    const SUPPORT_NOTE_ACTIONS=new Set(['library-note-export-one','library-note-print']);
+    // A deleted note's actions, the same as its Restore and Delete forever.
+    function trashActions(item){
+      const readOnly=canMutate()?'':'Read-only in this tab';
+      return [
+        {id:'library-note-restore',label:'Restore',hint:'',reason:readOnly,run:()=>restoreTrashedNote(item.key)},
+        'separator',
+        {id:'library-note-forget',label:'Delete forever',hint:'',danger:true,reason:readOnly,run:()=>deleteTrashedNoteForever(item.key)}
       ];
     }
     // Fills a menu with a note's actions as they stand now.
-    function fillNoteMenu(menu,entry,controller){
-      menu.replaceChildren(...noteActions(entry).map(action=>{
+    function fillNoteMenu(menu,entry,controller){fillMenu(menu,noteActions(entry),controller);}
+    function fillMenu(menu,actions,controller){
+      menu.replaceChildren(...actions.map(action=>{
         if(action==='separator'){const line=document.createElement('div');line.className='library-note-menu-separator';line.setAttribute('role','separator');return line;}
         const button=document.createElement('button');button.type='button';button.id=action.id;button.className='library-note-menu-item'+(action.danger?' danger':'');button.setAttribute('role','menuitem');
         button.disabled=!!action.reason;
@@ -310,8 +323,10 @@ registry.define('library-notes',1,modules=>{
     // Right-click (or a long press on a touch screen) on a row opens the same
     // actions at the pointer.
     let noteContextMenu=null;
-    function openNoteContextMenu(entry,row,x,y){
-      if(!entry||entry.support||noteSelectionMode)return false;
+    function openNoteContextMenu(entry,row,x,y){return !!entry&&openContextMenu(entry.label,noteActions(entry),row,x,y);}
+    function openTrashContextMenu(item,row,x,y){return !!item&&openContextMenu(item.label,trashActions(item),row,x,y);}
+    function openContextMenu(label,actions,row,x,y){
+      if(noteSelectionMode)return false;
       if(!noteContextMenu){
         const menu=document.createElement('div');menu.className='library-note-menu library-note-context-menu';menu.setAttribute('role','menu');
         let point={x:0,y:0};
@@ -320,7 +335,7 @@ registry.define('library-notes',1,modules=>{
       }
       const {menu,controller,at}=noteContextMenu;
       if(!menu.hidden)controller.hide();
-      menu.setAttribute('aria-label',`Actions for ${entry.label}`);at(x,y);fillNoteMenu(menu,entry,controller);controller.show(row);focusFirstMenuItem(menu);
+      menu.setAttribute('aria-label',`Actions for ${label}`);at(x,y);fillMenu(menu,actions,controller);controller.show(row);focusFirstMenuItem(menu);
       return true;
     }
     function chooseNote(entries,filtered){
@@ -432,7 +447,12 @@ registry.define('library-notes',1,modules=>{
     // Right-click on a row, or a long press on a touch screen (iPadOS and iOS
     // send no contextmenu for one), opens its actions at the pointer.
     function installNoteContextMenu(list){
-      const rowEntry=target=>{const row=target&&target.closest?target.closest('[data-note-key]'):null;const entry=row?noteEntries().find(item=>item.key===row.dataset.noteKey):null;return entry?{row,entry}:null;};
+      // A note's row (Support Activities included) or a deleted note's row.
+      const rowEntry=target=>{
+        const trashRow=target&&target.closest?target.closest('[data-trash-key]'):null;
+        if(trashRow){const trash=noteTrashItems().find(item=>item.key===trashRow.dataset.trashKey);return trash?{row:trashRow,trash}:null;}
+        const row=target&&target.closest?target.closest('[data-note-key]'):null;const entry=row?noteEntries().find(item=>item.key===row.dataset.noteKey):null;return entry?{row,entry}:null;
+      };
       let press=null,suppressClick=false,held=null;
       const cancel=()=>{if(press){clearTimeout(press.timer);press=null;}};
       // The menu is a light-dismiss popover: a press that began before it
@@ -441,13 +461,13 @@ registry.define('library-notes',1,modules=>{
       // fires under the finger, so the menu opens once that button or finger
       // is released. (Windows sends contextmenu after the release: it opens
       // at once.)
-      const openAfterRelease=(hit,x,y)=>{const open=()=>openNoteContextMenu(hit.entry,hit.row,x,y);if(held)held.open=open;else open();};
+      const openAfterRelease=(hit,x,y)=>{const open=()=>hit.trash?openTrashContextMenu(hit.trash,hit.row,x,y):openNoteContextMenu(hit.entry,hit.row,x,y);if(held)held.open=open;else open();};
       const release=event=>{if(!held||event.pointerId!==held.id)return;const open=held.open;held=null;if(open&&event.type==='pointerup')setTimeout(open,0);};
       window.addEventListener('pointerup',release,true);window.addEventListener('pointercancel',release,true);
-      list.addEventListener('contextmenu',event=>{const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;event.preventDefault();cancel();openAfterRelease(hit,event.clientX,event.clientY);});
+      list.addEventListener('contextmenu',event=>{const hit=rowEntry(event.target);if(!hit||noteSelectionMode)return;event.preventDefault();cancel();openAfterRelease(hit,event.clientX,event.clientY);});
       list.addEventListener('pointerdown',event=>{
         held=event.pointerType==='touch'||event.button===2?{id:event.pointerId,open:null}:null;
-        if(event.pointerType!=='touch')return;const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;
+        if(event.pointerType!=='touch')return;const hit=rowEntry(event.target);if(!hit||noteSelectionMode)return;
         cancel();press={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{press=null;suppressClick=true;openAfterRelease(hit,event.clientX,event.clientY);},500)};
       });
       list.addEventListener('pointermove',event=>{if(press&&Math.hypot(event.clientX-press.x,event.clientY-press.y)>8)cancel();});
@@ -1150,6 +1170,15 @@ registry.define('library-notes',1,modules=>{
       const importButton=document.getElementById('library-note-import'),importFile=document.getElementById('library-note-import-file');
       if(importButton&&importFile){importButton.addEventListener('click',()=>{importFile.value='';importFile.click();});importFile.addEventListener('change',()=>{const files=[...(importFile.files||[])];importFile.value='';void importNotes(files);});}
       if(list){list.addEventListener('keydown',handleNoteTreeKey);installNoteContextMenu(list);}
+      const trashList=document.getElementById('library-notes-trash-list');
+      if(trashList){
+        installNoteContextMenu(trashList);
+        trashList.addEventListener('keydown',event=>{
+          if(event.key!=='ContextMenu'&&!(event.key==='F10'&&event.shiftKey))return;
+          const row=event.target?.closest?.('[data-trash-key]'),item=row&&noteTrashItems().find(candidate=>candidate.key===row.dataset.trashKey);if(!item)return;
+          const rect=row.getBoundingClientRect();event.preventDefault();openTrashContextMenu(item,row,rect.left+24,rect.bottom);
+        });
+      }
       if(trashToggle)trashToggle.addEventListener('click',toggleNoteTrash);
       if(select)select.addEventListener('click',enterNoteSelection);
       if(selectAll)selectAll.addEventListener('click',selectAllNotes);

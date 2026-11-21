@@ -19,6 +19,7 @@ registry.define('device-folder-storage',1,()=>{
     checkpoint:freeze({directory:'checkpoints',suffix:'.sdcheckpoint',pattern:/^(cp_[a-f0-9]{32})\.sdcheckpoint$/u}),
     commit:freeze({directory:'commits',suffix:'.sdcommit',pattern:/^(cp_[a-f0-9]{32})\.sdcommit$/u})
   });
+  const UNREADABLE_LOCK_MAX_AGE_MS=24*60*60*1000;
   const LOCKS=freeze({
     publication:freeze({prefix:'pub_',suffix:'.sdpublication',format:'study-director.repository-publication',pattern:/^(pub_[a-f0-9]{32})\.sdpublication$/u}),
     maintenance:freeze({prefix:'mnt_',suffix:'.sdmaintenance',format:'study-director.repository-maintenance',pattern:/^(mnt_[a-f0-9]{32})\.sdmaintenance$/u})
@@ -256,7 +257,12 @@ registry.define('device-folder-storage',1,()=>{
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);await readLock(kind,file,match[1]);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:kind==='publication'}));}catch{ignored+=1;}
+        // A lock this build cannot read is waited for, but not past a day by
+        // the file's own time: no upload or cleanup lasts that long. One that
+        // could not be opened at all still counts as uncertain.
+        let file=null;
+        try{file=await bounded(handle.getFile(),`Device Folder lock ${name}`);await readLock(kind,file,match[1]);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:kind==='publication'}));}
+        catch{if(!(file&&nowMs()-Number(file.lastModified)>UNREADABLE_LOCK_MAX_AGE_MS))ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }

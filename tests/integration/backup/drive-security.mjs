@@ -335,6 +335,11 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   }
   delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
   const listed=await provider.repository.listPublications();assert.equal(listed.items.some(row=>row.id===late.id),false);assert.equal(listed.ignored,1);
+  // Unreadable and over a day old by Drive's own creation time: no upload
+  // lasts that long, so it no longer holds Drive cleanup up.
+  const created=legacy.createdTime;legacy.createdTime=new Date(Date.parse(created)-25*3600000).toISOString();
+  assert.equal((await provider.repository.listPublications()).ignored,0,'an unreadable marker over a day old holds nothing');
+  legacy.createdTime=created;
   await assert.rejects(provider.repository.assertPublication(late),/disappeared|unsafe|verified/u);
 
 }
