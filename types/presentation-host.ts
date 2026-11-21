@@ -3,8 +3,7 @@ import type {PresentationKernel} from './presentation.ts';
 
 export type AppearancePreferenceOverrides=Partial<Pick<PersonalPreferences,'theme'|'presentation'|'fontScale'>>;
 export interface AnchoredPopoverPort{show(trigger:HTMLElement):unknown;hide():unknown}
-export interface AppearanceViewTransition{readonly finished:PromiseLike<unknown>;readonly ready:PromiseLike<unknown>}
-export interface AppearanceDocument extends Document{startViewTransition?:(callback:()=>void)=>AppearanceViewTransition}
+export type AppearanceDocument=Document;
 export interface PresentationHostInput{
   readonly kernel:PresentationKernel;
   readonly document:AppearanceDocument;
