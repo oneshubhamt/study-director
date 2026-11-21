@@ -53,6 +53,15 @@ function evaluateWorkerValidation({cacheJson=JSON.stringify(CACHE_STORAGE_IDENTI
  const h=fixture();await h.emit('install');assert.equal(h.stores.get(current).size,rows.length+1);assert.equal(h.maximum(),8);assert.equal(h.fetches.length,rows.length);assert.ok(h.fetches.every(row=>row.cache==='default'));assert.deepEqual(h.claims,['skip']);assert.equal(h.deletions.length,0);cases.push('eight-way verified precache and first installation');
 }
 {
+ const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);await h.emit('install');
+ const available=h.messages.find(row=>row.type==='SD_PWA_UPDATE_AVAILABLE');
+ assert.deepEqual(available&&{releaseId:available.releaseId,buildId:available.buildId,assetId:available.assetId},{releaseId:'current',buildId:'qa-build',assetId});
+ await h.emit('activate');
+ const activated=h.messages.find(row=>row.type==='SD_PWA_ACTIVATED');
+ assert.deepEqual(activated&&{releaseId:activated.releaseId,buildId:activated.buildId,assetId:activated.assetId},{releaseId:'current',buildId:'qa-build',assetId});
+ cases.push('update and activation announcements carry the immutable release/build/asset tuple');
+}
+{
  const h=fixture({delays:{'./asset-0.js':30}});await h.emit('install');
  const startNinth=h.fetchEvents.findIndex(value=>value.startsWith('start:./asset-8.js:')),finishSlow=h.fetchEvents.findIndex(value=>value.startsWith('finish:./asset-0.js:'));
  assert.ok(startNinth>=0&&finishSlow>=0&&startNinth<finishSlow,'a free precache worker must start the next asset without waiting for the slowest request in the first eight');

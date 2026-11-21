@@ -21,7 +21,7 @@ function harness({controlled=true,supported=true}={}){
  const behavior={prepare:async()=>({ok:true}),register:async()=>{},update:async()=>{},reload:()=>{},valid:true,ready:Promise.resolve(),follower:false};
  const api=module.createCoordinator(freeze({configuration:freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:freeze({trusted:'./sw.js'})}),environment:freeze({AbortController,MessageChannel:Channel,clearTimeout:id=>timers.delete(id),setTimeout:setTimer,document:doc,navigator:supported?{serviceWorker:sw}:{},window:win}),hooks:freeze({capture:(scope,error)=>captures.push({scope,error}),captureFollower:()=>behavior.follower,render:state=>renders.push(state),reserve:context=>{reserves++;held++;let released=false;return freeze({ready:behavior.ready,validate:()=>behavior.valid&&!context.signal.aborted,release:async()=>{if(!released){released=true;releases++;held--;}}});},prepare:async context=>{prepareCalls++;prepares.push(context);return behavior.prepare(context);}})}));
  const activate=async(worker=candidate,{control=true,state='activated'}={})=>{registration.waiting=null;registration.active=worker;worker.state=state;if(control)sw.controller=worker;worker.emit('statechange');if(control)sw.emit('controllerchange');await flush();};
- const message=(type,source=sw.controller,releaseId=source?.releaseId)=>sw.emit('message',{source,data:{type,releaseId}});
+ const message=(type,source=sw.controller,releaseId=source?.releaseId)=>sw.emit('message',{source,data:{type,releaseId,buildId:source?.buildId,assetId:source?.assetId}});
  return {api,sw,win,doc,old,candidate,registration,behavior,timers,channels,captures,renders,storage,prepares,advance,worker,activate,message,counts:()=>({reloads,registerCalls,checks,prepareCalls,reserves,releases,held})};
 }
 // Real worker-message contract retains the cache outcome and only stable reasons.
@@ -62,11 +62,12 @@ await test('early candidate announcement binds follower role before registration
 });
 await test('captured follower identity survives ServiceWorker wrapper replacement after activation',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
- h.behavior.follower=true;h.candidate.state='installing';h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'claimed-next'}});await flush();
+ h.behavior.follower=true;h.candidate.state='installing';h.candidate.identityBlocked=true;
+ h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:h.candidate.buildId,assetId:h.candidate.assetId}});await flush();
  h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;
- assert.equal(h.api.reconcileFollowerRole(false),false,'controller change must preserve the already-captured follower identity through ownership handoff');
+ assert.equal(h.api.reconcileFollowerRole(false),false,'controller change must preserve the synchronously announced follower identity through ownership handoff');
  h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'verified candidate identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'full candidate identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
 });
 await test('primary takeover before activation clears stale follower identity once waiting is verified',async()=>{
  const h=harness();await h.api.install();
@@ -84,7 +85,7 @@ await test('activation handoff preserves follower evidence after waiting pointer
 });
 await test('candidate hint cannot transfer follower role through a forged release name',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
- h.behavior.follower=true;const rogue=h.worker('rogue','installing');h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next'}});await flush();
+ h.behavior.follower=true;const rogue=h.worker('rogue','installing');h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:'rogue-build',assetId:'b'.repeat(24)}});await flush();
  h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
  assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].follower,false,'message release strings are hints and cannot confer follower authority on another worker');h.win.emit('pagehide');await flush();
 });

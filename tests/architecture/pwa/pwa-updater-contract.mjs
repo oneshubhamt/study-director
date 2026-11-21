@@ -41,6 +41,9 @@ assert.match(updater,/lifecycle\.reconcileFollowerRole\(state\.ownership\(\)\.st
 assert.match(lifecycle,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
 assert.match(lifecycle,/followerIdentities\.has\(followerIdentity\(target\)\)/u,'external follower ownership must survive browser ServiceWorker wrapper replacement by verified full identity');
 assert.doesNotMatch(lifecycle,/captureWorkerRole\(source,String\(data\['releaseId'\]/u,'candidate hint release strings must not establish follower identity');
+assert.match(lifecycle,/rememberFollowerHint\(source,data\)/u,'candidate announcements may retain only a complete identity tuple for follower handoff');
+assert.match(sw,/SD_PWA_UPDATE_AVAILABLE',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'waiting-worker announcements must carry the immutable identity tuple');
+assert.match(sw,/SD_PWA_ACTIVATED',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'activation announcements must carry the immutable identity tuple');
 
 assert.match(sw,/\bPRECACHE_CONCURRENCY=8\b/u,'Service Worker precache concurrency must be explicitly bounded at eight');
 assert.match(sw,/const worker=async\(\)=>\{while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
