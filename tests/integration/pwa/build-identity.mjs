@@ -13,10 +13,11 @@ try{
  const worker=path.join(temporary,'source/platform/sw.ts');fs.appendFileSync(worker,'\n// Independently changed worker policy.\n');const workerChanged=renderBuild();validateBuild(workerChanged);
  for(const target of ['development','deployment']){assert.equal(workerChanged.pwa[target].assetId,before.pwa[target].assetId);assert.notEqual(workerChanged.pwa[target].releaseId,before.pwa[target].releaseId);}
  fs.writeFileSync(worker,fs.readFileSync('source/platform/sw.ts','utf8'));
- const identities=path.join(temporary,'contracts/canonical-identities.mjs'),identitySource=fs.readFileSync(identities,'utf8');fs.writeFileSync(identities,identitySource.replace("clientState:'study-director-update-bridge-v2'","clientState:'study-director-update-bridge-v2-qa'"));
- const renderedContractChanged=renderBuild();validateBuild(renderedContractChanged);
+ const renderedRoot=path.join(temporary,'rendered-contract-change');fs.mkdirSync(renderedRoot);
+ for(const name of ['source','build','contracts'])fs.cpSync(path.join(temporary,name),path.join(renderedRoot,name),{recursive:true});fs.copyFileSync(path.join(temporary,'release.config.mjs'),path.join(renderedRoot,'release.config.mjs'));
+ const identities=path.join(renderedRoot,'contracts/canonical-identities.mjs'),identitySource=fs.readFileSync(identities,'utf8');fs.writeFileSync(identities,identitySource.replace("clientState:'study-director-update-bridge-v2'","clientState:'study-director-update-bridge-v2-qa'"));
+ const changedBuildModule=await import(pathToFileURL(path.join(renderedRoot,'build/build.mjs')).href),renderedContractChanged=changedBuildModule.renderBuild();changedBuildModule.validateBuild(renderedContractChanged);
  for(const target of ['development','deployment']){assert.equal(renderedContractChanged.pwa[target].assetId,before.pwa[target].assetId);assert.notEqual(renderedContractChanged.pwa[target].releaseId,before.pwa[target].releaseId,'rendered worker contract changes must affect PWA release identity');}
- fs.writeFileSync(identities,identitySource);
  const core=path.join(temporary,'source/core/operation-lifecycle.ts');fs.appendFileSync(core,'\n// Independently changed page asset.\n');const assetsChanged=renderBuild();validateBuild(assetsChanged);
  for(const target of ['development','deployment']){assert.notEqual(assetsChanged.pwa[target].assetId,workerChanged.pwa[target].assetId);assert.notEqual(assetsChanged.pwa[target].releaseId,workerChanged.pwa[target].releaseId);}
  assert.equal(assetsChanged.identity.buildId,before.identity.buildId);console.log(JSON.stringify({status:'PASS',suite:'pwa-build-identity',workerOnlyCacheIsolation:true,renderedWorkerContractIdentity:true,sameBuildAssetIsolation:true,targets:2}));
