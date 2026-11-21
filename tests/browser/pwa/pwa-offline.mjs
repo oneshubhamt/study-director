@@ -141,7 +141,14 @@ try{
   page2=await createPage(appUrl);
   await waitForStartup(page2);
   await waitFor(()=>page2.evaluate(`!!navigator.serviceWorker.controller`),{label:'second controlled tab'});
-  await page2.evaluate(`(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});return true})()`);
+  await waitFor(()=>page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{label:'offline journey primary ownership'});
+  await waitFor(()=>page2.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`),{label:'offline journey secondary ownership'});
+  // Match the update journey's real browser visibility contract. A synthetic
+  // document.hidden override can disagree with Chromium scheduling and obscure
+  // which tab actually owns writes.
+  await page1.send('Page.bringToFront');
+  await waitFor(()=>page1.evaluate(`!document.hidden`),{label:'offline journey foreground primary'});
+  await waitFor(()=>page2.evaluate(`document.hidden`),{label:'offline journey hidden secondary'});
   const scheduleState=await page1.evaluate(`(async()=>{const now=new Date(),minute=now.getHours()*60+now.getMinutes()-1,hh=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0'),mm=String((minute+1440)%1440%60).padStart(2,'0'),input=document.getElementById('plan-input');document.querySelector('[data-tab="plan"]').click();input.value=hh+':'+mm+' | 30 | PWA Update Safety | work | QA | pages | 5';input.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,500));const apply=document.querySelector('[data-action="apply-schedule"]');const enabled=!apply.disabled;apply.click();return enabled})()`);
   assert.equal(scheduleState,true);
   await waitFor(()=>page1.evaluate(`document.getElementById('cd-mode')?.textContent.includes('RUNNING')&&document.getElementById('execute-state-overlay')?.hidden`),{label:'running timer'});
