@@ -69,8 +69,12 @@ jobs:
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: Pre-host install prompt through Guide
-        run: node tests/browser/pwa/install-capture.mjs
+      - name: Pre-host install prompt through Guide x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "P5.12 install-capture pass $pass/5"
+            node tests/browser/pwa/install-capture.mjs
+          done
       - name: Offline and update journeys x5 isolated
         run: |
           for pass in 1 2 3 4 5; do

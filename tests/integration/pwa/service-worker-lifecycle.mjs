@@ -32,6 +32,20 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  async function report(client,id){await emit('message',{source:client,data:{type:'SD_PWA_CLIENT_STATE',assetId:id,ready:true}});}
  return {stores,windows,deletions,messages,fetches,fetchEvents,claims,opened,self,seed,client,report,emit,maximum:()=>maximum};
 }
+function evaluateWorkerValidation({cacheJson=JSON.stringify(CACHE_STORAGE_IDENTITIES),precacheJson=JSON.stringify(manifest)}={}){
+ const self={registration:{scope,active:null,installing:null,waiting:null},location:{origin:'https://study.test'},clients:{matchAll:async()=>[],claim:async()=>{},openWindow:async()=>null},addEventListener(){},skipWaiting:async()=>{}};
+ const rendered=template.replaceAll('@@SD_RELEASE@@','QA_VALIDATION').replaceAll('@@SD_BUILD_ID@@','qa-build').replaceAll('@@SD_PAGE_ASSET_ID@@',assetId).replaceAll('@@SD_PWA_RELEASE_ID@@','current').replaceAll('@@SD_PWA_ASSET_MANIFEST@@',precacheJson).replaceAll('@@SD_CACHE_STORAGE_IDENTITIES_URI@@',encodeURIComponent(cacheJson));
+ return ()=>vm.runInContext(rendered,vm.createContext({self,URL,Request,Response,crypto:webcrypto,console}),{filename:'source/platform/sw.ts'});
+}
+{
+ assert.throws(evaluateWorkerValidation({cacheJson:'{'}),/cache identities are unavailable/u);
+ assert.throws(evaluateWorkerValidation({cacheJson:JSON.stringify({shellPrefix:'study-director-shell-'})}),/cache identities are unavailable/u);
+ assert.throws(evaluateWorkerValidation({precacheJson:'{'}),/precache manifest is unavailable/u);
+ assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'asset.js',sha256:'0'.repeat(64)}])}),/invalid asset/u);
+ assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./asset.js',sha256:'bad'}])}),/invalid asset/u);
+ assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./asset.js',sha256:'0'.repeat(64)},{path:'./asset.js',sha256:'1'.repeat(64)}])}),/invalid asset/u);
+ cases.push('embedded cache identities and precache rows reject malformed or incomplete data');
+}
 {
  const h=fixture();await h.emit('install');assert.equal(h.stores.get(current).size,rows.length+1);assert.equal(h.maximum(),8);assert.equal(h.fetches.length,rows.length);assert.ok(h.fetches.every(row=>row.cache==='default'));assert.deepEqual(h.claims,['skip']);assert.equal(h.deletions.length,0);cases.push('eight-way verified precache and first installation');
 }

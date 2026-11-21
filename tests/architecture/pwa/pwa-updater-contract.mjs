@@ -33,6 +33,7 @@ assert.match(updater,/token\.workRevision!==state\.workRevision\(\)/u,'reservati
 assert.match(updater,/await input\.reservation\.settleMutation\(\)/u,'unreserved preparation must still wait for the mutation coordinator');
 assert.match(app,/flushPendingReview:\(\)=>flushPendingReviewSave\(\{strict:true,allowDuringRecoveryQuiescence:true\}\)/u,'PWA-owned Review checkpoint must be allowed inside its recovery-quiesced reservation');
 assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.revision\)/u,'active-session persistence must retain read-back verification');
+assert.match(updater,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
 
 assert.match(sw,/\bPRECACHE_CONCURRENCY=8\b/u,'Service Worker precache concurrency must be explicitly bounded at eight');
 assert.match(sw,/const worker=async\(\)=>\{while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');

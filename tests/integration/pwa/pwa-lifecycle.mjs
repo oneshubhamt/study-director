@@ -80,8 +80,14 @@ await test('reservation timeout releases even before ready',async()=>{
 await test('ownership loss at activation prevents reload',async()=>{
  const h=harness();await h.api.install();await h.api.apply();h.behavior.valid=false;await h.activate();assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.api.status().applying,false);
 });
-await test('identified controller release must match immutable candidate',async()=>{
- const h=harness();await h.api.install();await h.api.apply();h.candidate.releaseId='unexpected';await h.activate();assert.equal(h.counts().reloads,0);await h.advance(8000);assert.equal(h.counts().held,0);
+await test('identified controller must match immutable release, build and asset candidate',async()=>{
+ for(const mutate of [
+  worker=>{worker.releaseId='unexpected';},
+  worker=>{worker.buildId='unexpected-build';},
+  worker=>{worker.assetId='b'.repeat(24);}
+ ]){
+  const h=harness();await h.api.install();await h.api.apply();mutate(h.candidate);await h.activate();assert.equal(h.counts().reloads,0);assert.equal(h.storage.has('reload'),false);await h.advance(8000);assert.equal(h.counts().held,0);
+ }
 });
 await test('concurrent apply prepares only once',async()=>{
  const h=harness();await h.api.install();const first=h.api.apply();assert.equal(await h.api.apply(),false);await first;assert.equal(h.counts().prepareCalls,1);h.win.emit('pagehide');
