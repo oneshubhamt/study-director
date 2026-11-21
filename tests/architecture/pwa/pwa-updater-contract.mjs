@@ -3,32 +3,41 @@ import assert from 'node:assert/strict';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 
 const app=readHostHtml();
+const updater=readRuntimeSource('source/core/pwa-update-host.ts');
 const sw=readRuntimeSource('source/platform/sw.ts');
-assert.match(app,/const PWA_UPDATE_CHECK_INTERVAL_MS=24\*60\*60\*1000;/,'proactive update checks must use a 24-hour success cooldown');
-assert.doesNotMatch(app,/const PWA_UPDATE_RETRY_MS=1800;/,'waiting updates must not use the legacy 1.8-second polling loop');
-assert.match(app,/const PWA_UPDATE_SAFETY_RETRY_MS=5\*60\*1000;/,'waiting updates need only a slow safety fallback');
-assert.match(app,/PWA_UPDATE_CHECK_RETRY_BASE_MS/,'failed checks need bounded retry backoff');
-assert.match(app,/PWA_UPDATE_CHECK_RETRY_MAX_MS/,'failed checks need a maximum retry bound');
 
-const checkStart=app.indexOf('async function checkPwaUpdateIfDue(');
-const checkEnd=app.indexOf('\nconst PwaLifecycle=',checkStart);
-assert.ok(checkStart>0&&checkEnd>checkStart,'update-check scheduler function not found');
-const checkBody=app.slice(checkStart,checkEnd);
-const requestIndex=checkBody.indexOf('await PwaLifecycle.checkForUpdate()');
-const markIndex=checkBody.indexOf('markPwaUpdateCheck');
+assert.match(app,/PwaUpdateHostModule\.createController\(/u,'main must compose the checked PWA update host');
+assert.doesNotMatch(app,/function (?:pwaUpdateBlockReason|reserveApplicationUpdate|prepareApplicationUpdate|checkPwaUpdateIfDue)\b/u,'PWA update algorithms must not remain unchecked in main');
+assert.match(updater,/const READY_DELAY=650,SAFETY_RETRY=5\*60\*1000,EXTERNAL_RETRY=5000,CHECK_INTERVAL=24\*60\*60\*1000/u,'checked updater must retain ready, safety and 24-hour check cadence');
+assert.doesNotMatch(updater,/PWA_UPDATE_RETRY_MS=1800/u,'waiting updates must not restore legacy 1.8-second polling');
+assert.match(updater,/CHECK_RETRY_BASE=5\*60\*1000,CHECK_RETRY_MAX=60\*60\*1000/u,'failed checks need bounded retry backoff');
+
+const checkStart=updater.indexOf('async function checkIfDue(');
+const checkEnd=updater.indexOf('lifecycle=input.lifecycle.module.createCoordinator',checkStart);
+assert.ok(checkStart>0&&checkEnd>checkStart,'checked update-check scheduler function not found');
+const checkBody=updater.slice(checkStart,checkEnd);
+const requestIndex=checkBody.indexOf('await lifecycle.checkForUpdate()');
+const markIndex=checkBody.indexOf('markCheck()');
 assert.ok(requestIndex>=0&&markIndex>requestIndex,'successful-check timestamp must be written only after registration.update succeeds');
 
-const applyStart=app.indexOf('async function applyPwaUpdateFromUi()');
-const applyEnd=app.indexOf('\nfunction renderPwaUpdateStatus',applyStart);
-assert.ok(applyStart>0&&applyEnd>applyStart,'manual update handler not found');
-const applyBody=app.slice(applyStart,applyEnd);
+const applyStart=updater.indexOf('async function applyFromUi()');
+const applyEnd=updater.indexOf('function renderStatus',applyStart);
+assert.ok(applyStart>0&&applyEnd>applyStart,'checked manual update handler not found');
+const applyBody=updater.slice(applyStart,applyEnd);
 const preflightIndex=applyBody.indexOf('ignoreActiveTimers:true');
-const pauseIndex=applyBody.indexOf('togglePause()');
+const pauseIndex=applyBody.indexOf('effects.pauseTimer()');
 assert.ok(preflightIndex>=0&&pauseIndex>preflightIndex,'Pause & Update must preflight non-timer blockers before pausing the timer');
 
-assert.match(sw,/const PRECACHE_CONCURRENCY=8;/,'Service Worker precache concurrency must be explicitly bounded at eight');
-assert.match(sw,/const worker=async\(\)=>\{[\s\S]*while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
-assert.match(sw,/Promise\.all\(Array\.from\(\{length:Math\.min\(PRECACHE_CONCURRENCY,PRECACHE\.length\)\},\(\)=>worker\(\)\)\)/u,'precache worker count must be bounded by both the concurrency limit and asset count');
-assert.match(sw,/if\(failure\)throw failure;/,'worker-queue failures must still fail the installation before release metadata is committed');
+assert.match(updater,/activeReservation!==token/u,'reservation validation must be tied to the exact operation token');
+assert.match(updater,/token\.workRevision!==state\.workRevision\(\)/u,'reservation validation must reject newer work');
+assert.match(updater,/await input\.reservation\.settleMutation\(\)/u,'unreserved preparation must still wait for the mutation coordinator');
+assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.revision\)/u,'active-session persistence must retain read-back verification');
 
-console.log(JSON.stringify({status:'PASS',suite:'pwa-updater-contract',checks:{cooldown24h:true,successTimestamp:true,boundedBackoff:true,eventDrivenWaiting:true,preflightBeforePause:true,precacheConcurrency8:true,workerQueue:true}},null,2));
+assert.match(sw,/const PRECACHE_CONCURRENCY=8;/u,'Service Worker precache concurrency must be explicitly bounded at eight');
+assert.match(sw,/const worker=async\(\)=>\{while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
+assert.match(sw,/Promise\.all\(Array\.from\(\{length:Math\.min\(PRECACHE_CONCURRENCY,PRECACHE\.length\)\},\(\)=>worker\(\)\)\)/u,'precache worker count must be bounded by both the concurrency limit and asset count');
+assert.match(sw,/if\(failure\)throw failure;/u,'worker-queue failures must still fail installation before release metadata is committed');
+assert.match(sw,/parseCacheIdentities\(decodeURIComponent\('@@SD_CACHE_STORAGE_IDENTITIES_URI@@'\)\)/u,'cache identities must be safely quoted then validated');
+assert.match(sw,/const PRECACHE=parsePrecache\('@@SD_PWA_ASSET_MANIFEST@@'\)/u,'precache data must be validated at consumption');
+
+console.log(JSON.stringify({status:'PASS',suite:'pwa-updater-contract',checks:{checkedOwner:true,cooldown24h:true,successTimestamp:true,boundedBackoff:true,preflightBeforePause:true,reservationIdentity:true,sessionReadback:true,precacheValidation:true,precacheConcurrency8:true,workerQueue:true}},null,2));
