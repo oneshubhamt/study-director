@@ -5,6 +5,7 @@ import type {SaveLaneModule} from './pilot.ts';
 import type {SessionContext,SessionOptions} from './session-lifecycle.ts';
 import type {SessionResult} from './repositories.ts';
 import type {TimerMode} from './timer-state.ts';
+import type {ActualRecordSnapshot} from './timer-engine.ts';
 
 export type ReviewQuality=number|null;
 export type ReviewTimerModes=Readonly<{EMPTY?:TimerMode;READY?:TimerMode;RUNNING?:TimerMode;PAUSED?:TimerMode;DONE:TimerMode;SUSPENDED?:TimerMode}>;
@@ -143,7 +144,7 @@ export interface ReviewSubsystemInput{
     notifications:Readonly<{begin(options:Readonly<Record<string,unknown>>):ReviewNotificationOperation;feedback(options:Readonly<Record<string,unknown>>):unknown}>;
     domain:Readonly<Pick<RecordHelpers,'boundedInt'|'clampText'|'clampEditorContent'|'editorContentWithinLimits'> & {
       plainTextContent(value:unknown):string;classifyTaskOutcome(task:Task|ReviewRecordViewTask|SavedDayPresentationTask):TaskOutcome;cleanDayRevision(value:unknown):number;
-      dailyRecordMetricsFromEvidence(value:unknown):ReviewMetrics;emptyTaskOutcomeCounts():Record<TaskOutcome,number>;finiteNumber(value:unknown):number|null;
+      emptyTaskOutcomeCounts():Record<TaskOutcome,number>;finiteNumber(value:unknown):number|null;
       materializeDailyRecordView(value:DailyRecord):ReviewRecordView|null;normalizeCompletionSource(value:unknown):CompletionSource;
       normalizeDailyResultEntry(value:unknown,schedule:ReviewScheduleRow):DailyResult|null;positiveMinutes(value:unknown):number;
       sanitizePracticeRuns(value:unknown):PracticeRun[];sanitizeTaskOutcomeCounts(value:unknown):Record<TaskOutcome,number>;
@@ -155,7 +156,7 @@ export interface ReviewSubsystemInput{
       dateInsightsMeta(date:string):Readonly<{dayOfWeek:number;dayName:string}>;fmtS(seconds:number):string;formatPracticeMs(ms:number):string;practicePaceBandLabel(value:string):string;
       prettyDate(date:string):string;renderRichTextContent(container:HTMLElement,value:string,...rest:unknown[]):unknown;
       setProgressSummary(element:HTMLElement|null,done:unknown,total:unknown,measure:string,suffix?:string,showZero?:boolean):unknown;studyMinuteToHHMM(value:number):string;
-      textEl<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:unknown):HTMLElementTagNameMap[K];timeLabelFromIso(value:unknown):string;
+      textEl<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:unknown):HTMLElementTagNameMap[K];timeLabelFromIso(value:unknown):string|null;
     }>;
     schedule:Readonly<{
       adjustedEndMin(index:number):number;adjustedStartMin(index:number):number;effectiveNowMin(date?:Date):number;hasAdjustedTiming(index:number):boolean;isLiveTrackableTimer():boolean;
@@ -179,7 +180,7 @@ export interface ReviewSubsystemInput{
       refreshPlanAfterSessionReset(message:string,title:string):unknown;renderInheritedNotes(container:HTMLElement|null,key:string,compact?:boolean):unknown;setPlanStatus(message:string):unknown;
       syncUnfinishedNoteDraft():unknown;unfinishedNoteDraftText():string;
     }>;
-    view:Readonly<{markStorageHealthTimestamp(key:string):unknown;notifyUser(title:string,message:string,key:string):unknown;on(target:EventTarget,type:string,listener:EventListenerOrEventListenerObject,options?:boolean|AddEventListenerOptions):unknown;refreshLibraryAfterSave(date:string):unknown|PromiseLike<unknown>;refreshStorageFallbackWarning():unknown;setStatus(id:string,message:string,ok?:boolean):unknown;updateBadges():unknown}>;
+    view:Readonly<{markStorageHealthTimestamp(key:string):unknown;notifyUser(title:string,message:string,key:string,occurrence?:string):unknown;on(target:EventTarget,type:string,listener:EventListenerOrEventListenerObject,options?:boolean|AddEventListenerOptions):unknown;refreshLibraryAfterSave(date:string):unknown|PromiseLike<unknown>;refreshStorageFallbackWarning():unknown;setStatus(id:string,message:string,ok?:boolean):unknown;updateBadges():unknown}>;
     interactions:Readonly<{confirm(options:Readonly<Record<string,unknown>>):boolean|PromiseLike<boolean>;notify(options:Readonly<Record<string,unknown>>):unknown}>;
     environment:Readonly<{cancelAnimationFrame(handle:number):void;clearTimeout(handle:number):void;requestAnimationFrame(callback:FrameRequestCallback):number;setTimeout(callback:()=>void,delay?:number):number;todayISO(date?:Date):string}>;
   }>;

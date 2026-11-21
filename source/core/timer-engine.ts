@@ -5,6 +5,7 @@ import type {Task,TaskInput} from '../../types/domain.ts';
 import type {PauseEvent,TimerPayload} from '../../types/record-models.ts';
 import type {Cue} from '../../types/notifications.ts';
 import type {RuntimeInput,InactiveGap,DeepReadonly} from '../../types/timer-state.ts';
+import type {ReviewEvidence,ReviewTaskRow} from '../../types/review.ts';
 const sdTimerEngineFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'timer-engine','study-director.timer-engine-module',2,[],2>|undefined;
@@ -903,11 +904,11 @@ const SessionEvidenceProjector=(()=>{
     }
     return copy(value) as DeepReadonly<T>;
   }
-  function snapshot(options:{includeRecords?:boolean;evidence?:RuntimeEvidence}={}){
+  function snapshot(options:{includeRecords?:boolean;evidence?:RuntimeEvidence}={}):ReviewEvidence{
     const includeRecords=options.includeRecords!==false;
     const evidence=options.evidence||captureRuntimeEvidence({includeRecords});
     const sourceRows=TimerState.originalSchedule.length===TASKS.length?TimerState.originalSchedule:TASKS.map((task,idx)=>({...task,idx}));
-    const reviewTasks=TASKS.map((task,idx)=>{
+    const reviewTasks:ReviewTaskRow[]=TASKS.map((task,idx)=>{
       const id=String(task.id||TaskIdentity.idAt(idx));
       const row:Partial<TaskEvidence>=evidence.taskEvidence[id]||{};
       const resolved=row.resolved||resolveTaskCompletion(idx,{actualSnapshot:evidence.actualTime});
@@ -917,7 +918,7 @@ const SessionEvidenceProjector=(()=>{
       const actualRecord=TaskSessionState.getField(idx,'actualRecords')||{};
       const original:Readonly<TaskInput>=sourceRows[idx]||task;
       return cloneFrozen({
-        idx,i:idx,id,name:String(original.name||task.name||''),kind:String(original.kind||task.kind||'work'),
+        idx,i:idx,id,name:String(original.name||task.name||''),kind:original.kind==='support'||original.kind==='fixed'||original.kind==='work'?original.kind:task.kind,
         area:taskAreaValue(task),measure:taskMeasureValue(task,''),target:taskTargetValue(task),
         duration:positiveMinutes(original.duration??original.dur??task.dur),
         dur:positiveMinutes(original.duration??original.dur??task.dur),

@@ -20,7 +20,7 @@ const createModule=():ReviewModuleContract=>{
   const PORT_FIELDS=freeze({
     notifications:freeze(['begin','feedback']),
     domain:freeze([
-      'boundedInt','clampText','clampEditorContent','editorContentWithinLimits','plainTextContent','classifyTaskOutcome','cleanDayRevision','dailyRecordMetricsFromEvidence',
+      'boundedInt','clampText','clampEditorContent','editorContentWithinLimits','plainTextContent','classifyTaskOutcome','cleanDayRevision',
       'emptyTaskOutcomeCounts','finiteNumber','materializeDailyRecordView','normalizeCompletionSource',
       'normalizeDailyResultEntry','positiveMinutes','sanitizePracticeRuns','sanitizeTaskOutcomeCounts',
       'summarizeCleanPracticeRuns','taskAreaValue','taskMeasureValue','taskOutcomeInfo',
@@ -93,7 +93,7 @@ const createModule=():ReviewModuleContract=>{
     const SessionState=Runtime.sessionState;
     const ScheduleDerivedState=Runtime.scheduleDerivedState;
     const {
-      boundedInt,clampText,clampEditorContent,editorContentWithinLimits,plainTextContent,classifyTaskOutcome,cleanDayRevision,dailyRecordMetricsFromEvidence,
+      boundedInt,clampText,clampEditorContent,editorContentWithinLimits,plainTextContent,classifyTaskOutcome,cleanDayRevision,
       emptyTaskOutcomeCounts,finiteNumber,materializeDailyRecordView,normalizeCompletionSource,
       normalizeDailyResultEntry,positiveMinutes,sanitizePracticeRuns,sanitizeTaskOutcomeCounts,
       summarizeCleanPracticeRuns,taskAreaValue,taskMeasureValue,taskOutcomeInfo,taskOutcomeSummaryText,

@@ -245,18 +245,18 @@ const createModule=()=>{
     }
     function createEvidenceGateway<O extends object,E extends EvidenceBase>(projector:(options:Partial<O>,state:ReturnType<typeof snapshot>)=>E){
       if(typeof projector!=='function')throw new TypeError('Session evidence projector must be a function.');
-      function evidence(options:Partial<O>={}){
+      function evidence(options:Partial<O>={}):DeepReadonly<E>{
         const projected=projector(options,snapshot());
-        const base=projected&&typeof projected==='object'?projected:{} as Partial<E>;
+        if(!projected||typeof projected!=='object')throw new TypeError('Session evidence projector returned an invalid snapshot.');
         return cloneFrozen({
-          ...base,
+          ...projected,
           format:'study-director.review-evidence',version:1,
           date:session.studyDate||base.date||'',
           currentTaskIndex:currentIndex,currentTaskId:taskIdAt(currentIndex),
           timerMode:mode,paused,inactiveGap:inactiveGap||null,pendingGap:!!inactiveGap,
           contentRevision:Math.max(0,Math.round(Number(session.contentRevision)||0)),
           savedRevision:Math.max(0,Math.round(Number(session.savedRevision)||0))
-        });
+        }) as DeepReadonly<E>;
       }
       return freeze({
         format:'study-director.session-evidence-gateway',contractVersion:1,

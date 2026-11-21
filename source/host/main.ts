@@ -2444,8 +2444,8 @@ const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze<ReviewHostI
   }),
   ports:Object.freeze<ReviewSubsystemInput['ports']>({
     domain:Object.freeze<ReviewSubsystemInput['ports']['domain']>({
-      boundedInt,clampText,clampEditorContent,editorContentWithinLimits,plainTextContent,classifyTaskOutcome,cleanDayRevision,dailyRecordMetricsFromEvidence,
-      emptyTaskOutcomeCounts,finiteNumber,materializeDailyRecordView,normalizeCompletionSource,
+      boundedInt,clampText,clampEditorContent,editorContentWithinLimits,plainTextContent,classifyTaskOutcome,cleanDayRevision,
+      emptyTaskOutcomeCounts,finiteNumber,materializeDailyRecordView:value=>{const record=materializeDailyRecordView(value);return record?.recordKind==='study'?record:null;},normalizeCompletionSource,
       normalizeDailyResultEntry,positiveMinutes,sanitizePracticeRuns,sanitizeTaskOutcomeCounts,
       summarizeCleanPracticeRuns,taskAreaValue,taskMeasureValue,taskOutcomeInfo,taskOutcomeSummaryText,
       taskOutcomeTotal,taskTargetValue
