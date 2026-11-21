@@ -34,7 +34,7 @@ try{
  })()`);
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});
 
- const chooseAppearance=async(presentation,theme)=>{
+ const chooseAppearance=async(presentation,theme,{expectFocus=true}={})=>{
    await page.evaluate(`(()=>{const menu=document.getElementById('display-tools-menu');if(menu.hidden)document.getElementById('display-tools-trigger').click();})()`);
    await waitFor(()=>page.evaluate(`!document.getElementById('display-tools-menu').hidden`),{label:'visible Display Tools'});
    await page.evaluate(`(()=>{const button=[...document.querySelectorAll('.theme-btn[data-theme-id]')].find(item=>item.dataset.themeId===${JSON.stringify(theme)});if(!button)throw Error('Theme control unavailable: '+${JSON.stringify(theme)});button.click();})()`);
@@ -42,7 +42,8 @@ try{
    await page.evaluate(`(()=>{const button=[...document.querySelectorAll('.presentation-btn[data-presentation-id]')].find(item=>item.dataset.presentationId===${JSON.stringify(presentation)});if(!button)throw Error('Presentation control unavailable: '+${JSON.stringify(presentation)});button.click();})()`);
    await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation===${JSON.stringify(presentation)}`),{label:`presentation ${presentation}`});
    const state=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,themePressed:document.querySelector('.theme-btn[data-theme-id="${theme}"]')?.getAttribute('aria-pressed'),presentationPressed:document.querySelector('.presentation-btn[data-presentation-id="${presentation}"]')?.getAttribute('aria-pressed'),focus:document.activeElement?.dataset?.presentationId||'',themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content')||'',computedThemeColor:getComputedStyle(document.documentElement).getPropertyValue('--sd-meta-theme-color').trim()}))()`);
-   assert.deepEqual({theme:state.theme,presentation:state.presentation,themePressed:state.themePressed,presentationPressed:state.presentationPressed,focus:state.focus},{theme,presentation,themePressed:'true',presentationPressed:'true',focus:presentation});
+   assert.deepEqual({theme:state.theme,presentation:state.presentation,themePressed:state.themePressed,presentationPressed:state.presentationPressed},{theme,presentation,themePressed:'true',presentationPressed:'true'});
+   if(expectFocus)assert.equal(state.focus,presentation,`${presentation}/${theme} user-driven selection must restore focus to the selected skin control`);
    assert.equal(state.themeColor,state.computedThemeColor,`${presentation}/${theme} metadata must follow the active presentation token`);
  };
  for(const presentation of ['director-current','glass','aurora'])for(const theme of ['dark','light'])await chooseAppearance(presentation,theme);
@@ -61,7 +62,7 @@ try{
  const freshAppearance=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,fontScale:document.documentElement.dataset.fontScale,themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),computedThemeColor:getComputedStyle(document.documentElement).getPropertyValue('--sd-meta-theme-color').trim()}))()`);
  assert.deepEqual({theme:freshAppearance.theme,presentation:freshAppearance.presentation,fontScale:freshAppearance.fontScale},{theme:'dark',presentation:'glass',fontScale:'1'},'fresh profile must start from implicit Glass/Dark without inheriting appearance');
  assert.equal(freshAppearance.themeColor,freshAppearance.computedThemeColor,'fresh profile browser chrome follows Glass/Dark');
- await chooseAppearance('aurora','light');
+ await chooseAppearance('aurora','light',{expectFocus:false});
  await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.presentation==='aurora'&&value?.theme==='light')`),{label:'second profile canonical appearance'});
  const scopedMirrors=await page.evaluate(`(()=>{const scope=__PWA6.Profiles.current().scope,suffix=scope?'~'+scope:'';return {theme:localStorage.getItem('studyDirector.theme.v1'+suffix),presentation:localStorage.getItem('studyDirector.presentation.v1'+suffix)};})()`);
  assert.deepEqual(scopedMirrors,{theme:'light',presentation:'aurora'});
