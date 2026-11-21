@@ -46,12 +46,58 @@ try{
  assert.equal(await page.evaluate('document.querySelector("#security-note + .sd-rte a[href^=javascript]")===null'),true);
  await page.evaluate('testEditor.destroy();document.getElementById("security-note").remove()');
  await page.evaluate(`__PWA6.goTab('guide')`);await waitFor(()=>page.evaluate('!!document.getElementById("pane-guide")'));
- await waitFor(()=>page.evaluate('!![...document.querySelectorAll("#pane-guide button")].find(b=>b.textContent==="Privacy")'));
- await page.evaluate('[...document.querySelectorAll("#pane-guide button")].find(b=>b.textContent==="Privacy").click()');
- await waitFor(()=>page.evaluate('!!document.querySelector(".legal-center-document")'));
- assert.equal(await page.evaluate('document.querySelector(".legal-center-document script")===null'),true);
+ await waitFor(()=>page.evaluate('!!document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]")'));
+ await page.evaluate('document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]").focus()');
+ await page.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+ await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39,nativeVirtualKeyCode:39});
+ assert.deepEqual(await page.evaluate(`(()=>({focus:document.activeElement?.dataset?.guideStep||'',selected:document.querySelector('#pane-guide .guide-life-node[aria-selected=true]')?.dataset?.guideStep||'',panel:document.querySelector('#guide-stage-panel')?.getAttribute('aria-labelledby')||''}))()`),{focus:'execute',selected:'execute',panel:'guide-step-execute'});
+
+ const acceptedDraft='06:15 | 30 | Existing draft before Guide | work | Existing | block | 1';
+ await page.evaluate(`(()=>{document.getElementById('plan-input').value=${JSON.stringify(acceptedDraft)};document.querySelector('#pane-guide .guide-template .mini-btn').click();})()`);
+ await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('.interaction-title')?.textContent==='Replace current draft?'`),{label:'Guide template replacement'});
+ await page.evaluate(`document.querySelector('#sd-interaction-dialog .interaction-actions .primary').click()`);
+ await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-plan'&&document.getElementById('plan-input')?.value.includes('Deep Study Block 1')`),{label:'Guide template accepted'});
+ await page.evaluate(`(()=>{__PWA6.goTab('guide');document.getElementById('plan-input').value='06:45 | 35 | Keep this draft on cancel | work | Existing | block | 1';[...document.querySelectorAll('#pane-guide .guide-template .mini-btn')][1].click();})()`);
+ await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('.interaction-title')?.textContent==='Replace current draft?'`),{label:'Guide template cancellation'});
+ await page.evaluate(`document.querySelector('#sd-interaction-dialog [data-interaction-cancel]').click()`);
+ await waitFor(()=>page.evaluate(`!document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('#pane-guide .guide-status')?.textContent.trim()==='Current draft kept.'`),{label:'Guide template cancelled'});
+ assert.equal(await page.evaluate(`document.getElementById('plan-input').value`),'06:45 | 35 | Keep this draft on cancel | work | Existing | block | 1');
+
+ await page.evaluate(`(()=>{
+   const originalFetch=window.fetch.bind(window),pending={};
+   window.__guideLegalQA={pending,originalFetch,resolve(id){const finish=pending[id];if(finish){delete pending[id];finish();}},restore(){window.fetch=originalFetch;delete window.__guideLegalQA;}};
+   window.fetch=(input,init)=>{
+     const url=typeof input==='string'?input:String(input?.url||input),match=url.match(/(?:^|\\/)(privacy|terms|security)\\.html(?:[?#]|$)/i);
+     if(!match)return originalFetch(input,init);
+     const id=match[1].toLowerCase();
+     return new Promise(resolve=>{pending[id]=()=>resolve(new Response('<main><h1>'+id.toUpperCase()+'_SENTINEL</h1><script>window.__guideBadScript=true<\\/script><a id="unsafe-link" href="javascript:alert(1)">Unsafe</a></main>',{status:200,headers:{'Content-Type':'text/html'}}));});
+   };
+   [...document.querySelectorAll('#pane-guide .guide-legal-links button')].find(button=>button.textContent.trim()==='Privacy').click();
+ })()`);
+ await waitFor(()=>page.evaluate(`!!window.__guideLegalQA?.pending?.privacy&&!document.querySelector('.legal-center-overlay')?.hidden`),{label:'delayed Privacy'});
+ await page.evaluate(`document.querySelector('.legal-center-nav-button[data-legal-document=terms]').click()`);
+ await waitFor(()=>page.evaluate(`!!window.__guideLegalQA?.pending?.terms&&document.querySelector('.legal-center-title')?.textContent==='Terms'`),{label:'delayed Terms'});
+ await page.evaluate(`window.__guideLegalQA.resolve('privacy')`);await new Promise(resolve=>setTimeout(resolve,60));
+ assert.deepEqual(await page.evaluate(`({title:document.querySelector('.legal-center-title')?.textContent||'',busy:document.querySelector('.legal-center-content')?.getAttribute('aria-busy')||'',privacy:/PRIVACY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||'')})`),{title:'Terms',busy:'true',privacy:false});
+ await page.evaluate(`window.__guideLegalQA.resolve('terms')`);
+ await waitFor(()=>page.evaluate(`document.querySelector('.legal-center-content')?.getAttribute('aria-busy')==='false'&&/TERMS_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||'')`),{label:'Terms legal completion'});
+ assert.deepEqual(await page.evaluate(`({script:!!document.querySelector('.legal-center-document script'),unsafe:document.querySelector('.legal-center-document #unsafe-link')?.getAttribute('href')||null,executed:window.__guideBadScript===true})`),{script:false,unsafe:null,executed:false});
  await page.evaluate('history.back()');
- await waitFor(()=>page.evaluate('!document.querySelector(".legal-center-overlay:not([hidden])")'));
+ await waitFor(()=>page.evaluate('document.querySelector(".legal-center-overlay")?.hidden===true'));
+ await waitFor(()=>page.evaluate(`document.activeElement?.textContent?.trim()==='Privacy'&&!!document.activeElement?.closest?.('.guide-legal-links')`),{label:'Legal Back focus restoration'});
+
+ await page.evaluate(`(()=>{
+   const privacy=[...document.querySelectorAll('#pane-guide .guide-legal-links button')].find(button=>button.textContent.trim()==='Privacy');
+   const security=[...document.querySelectorAll('#pane-guide .guide-legal-links button')].find(button=>button.textContent.trim()==='Security');
+   privacy.click();document.querySelector('.legal-center-close').click();security.click();
+ })()`);
+ await waitFor(()=>page.evaluate(`!!window.__guideLegalQA?.pending?.security&&!document.querySelector('.legal-center-overlay')?.hidden&&document.querySelector('.legal-center-title')?.textContent==='Security'`),{label:'Legal close-reopen ownership'});
+ await page.evaluate(`document.querySelector('.legal-center-close').click()`);
+ await waitFor(()=>page.evaluate(`document.querySelector('.legal-center-overlay')?.hidden===true`),{label:'Legal close while pending'});
+ await waitFor(()=>page.evaluate(`document.activeElement?.textContent?.trim()==='Security'&&!!document.activeElement?.closest?.('.guide-legal-links')`),{label:'Legal close focus restoration'});
+ await page.evaluate(`window.__guideLegalQA.resolve('security')`);await new Promise(resolve=>setTimeout(resolve,60));
+ assert.deepEqual(await page.evaluate(`({hidden:document.querySelector('.legal-center-overlay')?.hidden===true,security:/SECURITY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||''),focused:document.activeElement?.textContent?.trim()||''})`),{hidden:true,security:false,focused:'Security'});
+ await page.evaluate(`window.__guideLegalQA.restore()`);
  // Export worker construction is also a TrustedScriptURL sink.
  await page.evaluate('__PWA6.BackupController.createCheckpoint()');
  assert.equal(await page.evaluate('__PWA6.trustedTypeViolations.size'),0);
