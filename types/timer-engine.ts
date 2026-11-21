@@ -23,7 +23,7 @@ export type RuntimeEvidence={actualTime:Record<string,number>;actualRecords:Reco
 export type PlannedRow={idx:number;t:Task;start:number;end:number};
 export type TimerBoundary={idx:number;task:Task;start:number;end:number};
 export type SoundMetadata={system?:boolean;title?:string;message?:string};
-export interface SoundOperation{resolve():unknown;update(event:SoundMetadata&{cue:string;occurrence:string}):unknown}
+export type SoundOperation=ReturnType<NoticeCoordinator['begin']>;
 export interface TimerEngineInput{ports:{
  configuration:{APP_LIMITS:Limits;SLEEP_GAP_THRESHOLD_MS:number};
  state:{TASKS:readonly Task[];TIMER_MODES:TimerStateModule['TIMER_MODES'];TaskIdentity:TimerController['taskIdentity'];TaskSessionState:TaskSessionPort;TimerState:TimerController;resetBreakState(clear?:boolean):void;setCurrentTask(index:number):unknown;setTimerMode(mode:TimerMode,reason:string):unknown};
