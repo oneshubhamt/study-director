@@ -39,7 +39,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
       void Promise.resolve(transition.finished).then(settle,settle);
       void Promise.resolve(transition.ready).catch(()=>undefined);
     }catch{
-      root.removeAttribute('data-sd-appearance-reveal');change();
+      settle();change();
     }
   }
   function renderThemeControls():void{

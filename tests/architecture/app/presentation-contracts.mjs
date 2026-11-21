@@ -26,7 +26,8 @@ const preferenceFlushEnd=html.indexOf('function scheduleProtectedPreferencesWrit
 const preferenceFlush=html.slice(preferenceFlushStart,preferenceFlushEnd);
 assert.ok(preferenceFlushStart>=0&&preferenceFlushEnd>preferenceFlushStart,'protected-preference flush must remain present for presentation persistence.');
 assert.ok(preferenceFlush.indexOf('const saved=await run;')<preferenceFlush.indexOf('refreshAppearanceMirrors(saved)'),'first-paint mirrors advance only after canonical preference persistence succeeds.');
-assert.match(preferenceFlush,/if\(protectedPreferencesState\.updatedAt===snapshot\.updatedAt\)\{acceptProtectedPreferences\(saved\);refreshAppearanceMirrors\(saved\);\}/u,'a delayed appearance write must not overwrite a newer in-memory preference or mirror.');
+assert.match(preferenceFlush,/if\(protectedPreferencesState===snapshot\)\{acceptProtectedPreferences\(saved\);refreshAppearanceMirrors\(saved\);\}/u,'a delayed appearance write must commit mirrors only when the exact in-memory preference snapshot is still current.');
+assert.doesNotMatch(preferenceFlush,/protectedPreferencesState\.updatedAt===snapshot\.updatedAt/u,'stale-write fencing must not depend on millisecond timestamp uniqueness.');
 assert.match(preferenceFlush,/catch\(error\)\{[\s\S]*?protectedPreferencesDirty=true;protectedPreferencesWriteFailure=error;[\s\S]*?throw error;/u,'a failed appearance write remains dirty/retryable and does not masquerade as durable success.');
 
 assert.match(coreCss,/@media \(any-pointer:coarse\) and \(min-width:721px\)\{[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields\{[\s\S]*?--plan-draft-control-height:max\(var\(--_sd-touch-min,44px\),var\(--sd-density-touch-target,0px\)\);[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\);[\s\S]*?"start dur kind"[\s\S]*?"area measure target"/u,'touch-capable tablets must use the three-column Plan composition even when iPadOS reports a fine primary pointer.');
@@ -64,6 +65,7 @@ assert.match(coreCss,/@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?\.pane\
 assert.match(glassCss,/--sd-motion-pane-enter-name:sd-pane-enter-float;/u,'Glass must present its own pane entrance.');
 assert.match(foundation,/pane\.classList\.add\('on'\);[^\n]*\n\s*if\(previousTab!==tabName\)markPaneEntrance\(pane\);/u,'only a real tab change may mark a pane entrance.');
 assert.match(presentationHost,/function runAppearanceChange\([^)]*\)[^{]*\{[\s\S]*?prefers-reduced-motion: reduce[\s\S]*?\{change\(\);return;\}[\s\S]*?typeof document\.startViewTransition!=='function'\)\{beginAppearanceShift\(\);change\(\);return;\}/u,'checked presentation host owns immediate reduced-motion changes and the fallback colour crossfade.');
+assert.match(presentationHost,/catch\{\s*settle\(\);change\(\);\s*\}/u,'a synchronous View Transition failure must clear reveal attributes and custom properties before falling back.');
 assert.doesNotMatch(html,/function runAppearanceChange\(/u,'unchecked main host must not retain appearance-transition behavior.');
 assert.match(coreCss,/html\[data-sd-appearance-reveal\]::view-transition-old\(root\)\{animation:none;[\s\S]*?html\[data-sd-appearance-reveal\] \*,html\[data-sd-appearance-reveal\] \*::before,html\[data-sd-appearance-reveal\] \*::after\{transition:none!important\}/u,'the reveal holds the old view still and settles the live new view without replaying control transitions.');
 assert.match(glassCss,/html\[data-presentation="glass"\]\[data-sd-appearance-reveal\]::view-transition-new\(root\)\{[\s\S]*?mask-image:radial-gradient/u,'Glass reveals appearance changes as a feathered bloom.');
@@ -90,9 +92,11 @@ assert.match(auroraCss,/const PROFILE\s*=\s*Object\.freeze\(\{\s*contractVersion
 assert.doesNotMatch(auroraCss,/data-(?:presentation|typography|shape|material|depth)="glass"|presentation==='glass'/u,'Aurora is an independent snapshot: no rule may depend on Glass, so reimagining Glass never changes it.');
 assert.match(html,/<script src="@@SD_EXTERNAL_GLASS_FILENAME@@"><\/script>\n<script src="@@SD_EXTERNAL_AURORA_FILENAME@@"><\/script>/u,'Aurora loads synchronously beside Glass so a saved Aurora choice paints without a flash.');
 for(const [label,pack,marker] of [['Glass',glassCss,'glass'],['Aurora',auroraCss,'aurora']]){
-  assert.match(pack,/function registerPack\(\)[\s\S]*?registerPresentation\(PROFILE\)/u,`${label} registration is owned by the checked startup pack.`);
+  assert.match(pack,/function ensureStyle\(\)[\s\S]*?document\.getElementById\(STYLE_ID\)[\s\S]*?document\.head\.appendChild\(style\)/u,`${label} pack stylesheet installation is idempotent.`);
+  assert.match(pack,/function registerPack\(\)[\s\S]*?ensureStyle\(\);const registered=kernel\.registerPresentation\(PROFILE\);if\(registered\)kernel\.synchronizeMetadata\(\);return registered;/u,`${label} registration is owned by the checked startup pack and immediately resynchronizes browser chrome after pack CSS activates.`);
   assert.match(pack,/if\(!install\(\)\)window\.addEventListener\('studydirector:ready',[\s\S]*?once:true/u,`${label} retries DOM coordination at the ready boundary.`);
-  assert.match(pack,new RegExp(`dataset\\['${marker}OverlayCoordinator'\\]===['"]installed['"]`,'u'),`${label} deduplicates its effective overlay observer.`);
+  const markerGuard=pack.indexOf(`dataset['${marker}OverlayCoordinator']==='installed'`),observerCreation=pack.indexOf('new MutationObserver(schedule)');
+  assert.ok(markerGuard>=0&&observerCreation>markerGuard,`${label} coordinator marker must short-circuit before observer creation.`);
 }
 assert.match(presentationHost,/function refreshMirrors\([^)]*\)[^{]*\{[\s\S]*?preferences\.mirror-write/u,'checked presentation host owns first-paint mirror refresh failure handling.');
 assert.match(presentationHost,/function toggleDisplayTools\([^)]*\)[^{]*\{[\s\S]*?display-tools-menu[\s\S]*?popovers\.create/u,'checked presentation host owns display-tools interaction.');

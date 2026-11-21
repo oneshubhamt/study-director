@@ -1140,10 +1140,10 @@ html[data-material="aurora"] #pane-insights .ui-disclosure{
 
 type OverlaySurface=Readonly<{id:string;element:HTMLElement;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>;
 type OverlaySurfaceDefinition=Readonly<{id:string;element:()=>HTMLElement|null;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>;
-type PackKernel=Pick<PresentationKernel,'format'|'version'|'registerPresentation'>;
+type PackKernel=Pick<PresentationKernel,'format'|'version'|'registerPresentation'|'synchronizeMetadata'>;
 const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null;
 function isPackKernel(value:unknown):value is PackKernel{
-  return record(value)&&value['format']==='study-director.presentation-kernel'&&value['version']===1&&typeof value['registerPresentation']==='function';
+  return record(value)&&value['format']==='study-director.presentation-kernel'&&value['version']===1&&typeof value['registerPresentation']==='function'&&typeof value['synchronizeMetadata']==='function';
 }
 function kernelValue():PackKernel|null{
   const value=(window as unknown as Record<PropertyKey,unknown>)[KERNEL_KEY];
@@ -1155,7 +1155,7 @@ function ensureStyle():boolean{
 }
 function registerPack():boolean{
   const kernel=kernelValue();if(!kernel)return false;
-  ensureStyle();return kernel.registerPresentation(PROFILE);
+  ensureStyle();const registered=kernel.registerPresentation(PROFILE);if(registered)kernel.synchronizeMetadata();return registered;
 }
 function installOverlayCoordinator():boolean{
   const root=document.documentElement;

@@ -1463,7 +1463,7 @@ async function flushProtectedPreferences(options={}){
     try{
       const saved=await run;
       protectedPreferencesWriteFailure=null;
-      if(protectedPreferencesState.updatedAt===snapshot.updatedAt){acceptProtectedPreferences(saved);refreshAppearanceMirrors(saved);}
+      if(protectedPreferencesState===snapshot){acceptProtectedPreferences(saved);refreshAppearanceMirrors(saved);}
     }catch(error){
       protectedPreferencesDirty=true;protectedPreferencesWriteFailure=error;
       AppDiagnostics.capture('preferences.write',error,'error');markStorageHealthError('personalPreferences','Personal settings could not be saved.');

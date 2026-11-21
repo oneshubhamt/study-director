@@ -55,6 +55,20 @@ const GLASS_PROFILE=Object.freeze({
   charts:'analytical'
 });
 
+const AURORA_PROFILE=Object.freeze({
+  contractVersion:2,
+  id:'aurora',
+  label:'Aurora',
+  typography:'aurora',
+  shape:'aurora',
+  material:'aurora',
+  depth:'aurora',
+  density:'standard',
+  responsive:'adaptive',
+  motion:'precise',
+  charts:'analytical'
+});
+
 {
   const {kernel,storage,root,meta}=loadKernel();
   assert.equal(kernel.manifest.defaults.theme,'dark','Dark is the new-user default theme.');
@@ -63,8 +77,11 @@ const GLASS_PROFILE=Object.freeze({
   assert.equal(kernel.activePresentationId(),'glass','Glass is the pre-hydration presentation for users without a saved choice.');
   assert.equal(storage.has('studyDirector.presentation.v1'),false,'Choosing the new-user default must not manufacture a persisted preference.');
   assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
-  assert.equal(kernel.registerPresentation(GLASS_PROFILE),true,'re-registering the same shipped pack is idempotent');
-  assert.equal(kernel.listPresentations().filter(profile=>profile.id==='glass').length,1,'duplicate pack registration cannot duplicate the presentation registry');
+  assert.equal(kernel.registerPresentation(GLASS_PROFILE),true,'re-registering the same Glass pack is idempotent');
+  assert.equal(kernel.registerPresentation(AURORA_PROFILE),true);
+  assert.equal(kernel.registerPresentation(AURORA_PROFILE),true,'re-registering the same Aurora pack is idempotent');
+  assert.equal(kernel.listPresentations().filter(profile=>profile.id==='glass').length,1,'duplicate Glass registration cannot duplicate the presentation registry');
+  assert.equal(kernel.listPresentations().filter(profile=>profile.id==='aurora').length,1,'duplicate Aurora registration cannot duplicate the presentation registry');
   assert.equal(kernel.activePresentationId(),'glass','Glass remains active when its presentation pack registers.');
   assert.equal(storage.has('studyDirector.presentation.v1'),false,'Default Glass remains an implicit default, not a migration/write.');
   kernel.synchronizeMetadata();
@@ -83,7 +100,8 @@ for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
   assert.equal(kernel.activeThemeId(),storedTheme,`Saved ${storedTheme} theme must be restored during pre-hydration.`);
   assert.equal(kernel.activePresentationId(),storedPresentation,`Saved ${storedPresentation} presentation must be restored during pre-hydration.`);
   assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
-  assert.equal(kernel.activePresentationId(),storedPresentation,'Registering Glass must not override a saved presentation.');
+  assert.equal(kernel.registerPresentation(AURORA_PROFILE),true);
+  assert.equal(kernel.activePresentationId(),storedPresentation,'Registering shipped packs must not override a saved presentation.');
   assert.equal(storage.get('studyDirector.theme.v1'),storedTheme);
   assert.equal(storage.get('studyDirector.presentation.v1'),storedPresentation);
   kernel.synchronizeMetadata();
@@ -113,7 +131,8 @@ for(const theme of ['dark','light']){
   assert.equal(kernel.activePresentationId(),'aurora','Saved Aurora must restore during pre-hydration.');
   assert.deepEqual([root.dataset.typography,root.dataset.shape,root.dataset.material,root.dataset.depth],['aurora','aurora','aurora','aurora'],'Aurora owns its own presentation axes.');
   assert.equal(kernel.registerPresentation(GLASS_PROFILE),true);
-  assert.equal(kernel.activePresentationId(),'aurora','Registering Glass must not override a saved Aurora choice.');
+  assert.equal(kernel.registerPresentation(AURORA_PROFILE),true);
+  assert.equal(kernel.activePresentationId(),'aurora','Registering shipped packs must not override a saved Aurora choice.');
   assert.equal(storage.get('studyDirector.presentation.v1'),'aurora');
 }
 
