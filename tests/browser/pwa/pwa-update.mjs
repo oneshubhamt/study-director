@@ -196,35 +196,43 @@ try{
   const violationsAfter=await page1.evaluate(`__sd73iViolations.filter(row=>row.directive==='trusted-types'||row.directive==='require-trusted-types-for')`);
   assert.deepEqual(violationsAfter,[],'Trusted Types violation appeared after automatic update');
 
+  // Either reloaded tab may legitimately win the ownership lease. Exercise
+  // the failure/retry checks through the actual primary instead of forcing a
+  // takeover race that is unrelated to service-worker correctness.
+  const page1Primary=await page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`);
+  const page2Primary=await page2.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`);
+  assert.notEqual(page1Primary,page2Primary,'exactly one reloaded tab must own writes');
+  const updateOwner=page1Primary?page1:page2;
+  await updateOwner.send('Page.bringToFront');
+  await waitForStartup(updateOwner);
+  await waitFor(()=>updateOwner.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{timeout:30000,label:'primary ownership after update'});
+
   // Corrupt service-worker script must fail closed without displacing the active release.
   served='bad-syntax';
-  await waitForStartup(page1);
-  if(await page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='secondary'`))await page1.evaluate(`document.querySelector('.ownership-banner[data-ownership-state="secondary"] button').click()`);
-  await waitFor(()=>page1.evaluate(`document.documentElement.dataset.studyDirectorUiState==='primary'`),{timeout:30000,label:'primary ownership after update'});
-  const corruptDueStamp=await page1.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`);
+  const corruptDueStamp=await updateOwner.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`);
   const syntaxRequestFloor=swRequests;
-  await waitFor(()=>page1.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'update control settled'});
-  await page1.evaluate(`document.getElementById('pwa-update-apply').click()`);
+  await waitFor(()=>updateOwner.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'update control settled'});
+  await updateOwner.evaluate(`document.getElementById('pwa-update-apply').click()`);
   await waitFor(()=>swRequests>syntaxRequestFloor,{label:'corrupt worker check'});
   await sleep(700);
-  await waitForNoInstalling(page1);
-  assert.equal(await page1.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`),corruptDueStamp,'failed update check consumed the 24-hour cooldown');
-  assert.equal(await workerIdentity(page1),next.releaseId);
-  assert.equal(await page1.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
-  evidence.checks.corruptWorker={rejected:true,activePreserved:true};
+  await waitForNoInstalling(updateOwner);
+  assert.equal(await updateOwner.evaluate(`Number(localStorage.getItem('studyDirector.pwaUpdateCheck.v1'))`),corruptDueStamp,'failed update check consumed the 24-hour cooldown');
+  assert.equal(await workerIdentity(updateOwner),next.releaseId);
+  assert.equal(await updateOwner.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
+  evidence.checks.corruptWorker={rejected:true,activePreserved:true,primaryWinner:page1Primary?'page1':'page2'};
 
   // A user retry bypasses failure backoff through the existing update control.
   // Required-asset hash failure must keep the active release and remove partial cache.
   served='bad-precache';
   const precacheRequestFloor=swRequests;
-  await waitFor(()=>page1.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'failed check settled'});
-  await page1.evaluate(`document.getElementById('pwa-update-apply').click()`);
+  await waitFor(()=>updateOwner.evaluate(`!document.getElementById('pwa-update-apply').disabled`),{label:'failed check settled'});
+  await updateOwner.evaluate(`document.getElementById('pwa-update-apply').click()`);
   await waitFor(()=>swRequests>precacheRequestFloor,{label:'bad-precache worker check'});
-  await waitForNoInstalling(page1);
+  await waitForNoInstalling(updateOwner);
   await sleep(400);
-  assert.equal(await workerIdentity(page1),next.releaseId);
-  assert.equal(await page1.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
-  const cacheNames=await page1.evaluate(`caches.keys()`);
+  assert.equal(await workerIdentity(updateOwner),next.releaseId);
+  assert.equal(await updateOwner.evaluate(`navigator.serviceWorker.getRegistration().then(registration=>!!registration.waiting)`),false);
+  const cacheNames=await updateOwner.evaluate(`caches.keys()`);
   assert.equal(cacheNames.some(name=>name===`study-director-shell-${badPrecache.releaseId}`),false,'failed precache left a partial shell cache');
   evidence.checks.precacheFailure={rejected:true,partialCacheRemoved:true,activePreserved:true};
 
