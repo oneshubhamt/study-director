@@ -60,6 +60,12 @@ await test('early candidate announcement binds follower role before registration
  assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'exact candidate must retain follower role captured before the primary unloads');
  h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(h.counts().reloads,1);h.win.emit('pagehide');
 });
+await test('captured follower release survives ServiceWorker wrapper replacement across activation',async()=>{
+ const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
+ h.behavior.follower=true;h.candidate.state='installing';h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next'}});await flush();
+ h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'stable release identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+});
 await test('candidate replacement during preparation never gets stale release request',async()=>{
  const h=harness(),gate=deferred();await h.api.install();h.behavior.prepare=()=>gate.promise;const task=h.api.apply();await flush();const newer=h.worker('newer');h.registration.waiting=newer;h.message('SD_PWA_UPDATE_AVAILABLE',newer);await flush();gate.resolve({ok:true});assert.equal(await task,false);assert.equal(h.counts().held,0);assert.ok(!newer.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));assert.equal(h.api.status().waitingReleaseId,'newer');
  h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(newer.messages.find(m=>m.type==='SD_PWA_APPLY_UPDATE').releaseId,'newer');h.win.emit('pagehide');
