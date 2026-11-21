@@ -35,6 +35,10 @@ try{
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});
 
  const openDisplayTools=async()=>{
+   if(await page.evaluate(`document.getElementById('first-start-dialog')?.open===true`)){
+     await page.click('#first-start-skip');
+     await waitFor(()=>page.evaluate(`document.getElementById('first-start-dialog')?.open!==true`),{label:'first-start modal dismissed'});
+   }
    if(await page.evaluate(`document.getElementById('display-tools-menu').hidden`))await page.click('#display-tools-trigger');
    await waitFor(()=>page.evaluate(`!document.getElementById('display-tools-menu').hidden`),{label:'visible Display Tools'});
  };

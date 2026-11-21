@@ -40,6 +40,7 @@ for(const [action,label] of [['font-smaller','A-, decrease text size'],['font-re
   assert.ok(html.includes(`data-action="${action}"`)&&html.includes(`aria-label="${label}"`),`${action} accessible name must contain its visible label.`);
 }
 assert.match(coreCss,/\.pnote-title-row\{display:flex;align-items:baseline;/u,'Notes title and Area context must share a typographic baseline.');
+assert.match(coreCss,/\.pnote-share-inline\{[^}]*color:var\(--sd-color-accent-primary\);opacity:1\}/u,'Area-share context must retain full semantic accent contrast across presentation themes.');
 assert.doesNotMatch(glassCss,/\.pnote-title-row\{[^}]*align-items:(?:flex-start|center|flex-end)/u,'Glass must inherit the shared typographic baseline instead of centering the Area context.');
 assert.doesNotMatch(html,/id="backup-freshness-(?:status|separator)"/u,'backup rows must not repeat the last-verified summary in a third line');
 assert.doesNotMatch(html,/renderVerifiedRecoveryFreshness|currentRecoveryCopyState/u,'removed global backup freshness projection must not leave dead save or drawer callbacks');
