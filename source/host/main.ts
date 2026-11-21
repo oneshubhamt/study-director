@@ -6,6 +6,7 @@ import type {RichTextApi} from '../../rich-text/editor.ts';
 import type {ActiveSession} from '../../types/record-models.ts';
 import type {SessionActionState} from '../../types/session-actions.ts';
 import type {Task} from '../../types/domain.ts';
+import type {NoteEditorBinding,NoteSyncState,NoteCatalogueInput} from '../../types/notes-host.ts';
 
 type HostWindow=Window&{StudyDirector?:StudyDirectorPublicApi;StudyDirectorRichText?:RichTextApi};
 const HOST_WINDOW=window as HostWindow;
@@ -1394,26 +1395,26 @@ function notesRuntime(){
   if(!NotesRuntime)throw new Error('Notes runtime is unavailable.');
   return NotesRuntime;
 }
-function legacyNoteBinding(binding){
+function legacyNoteBinding(binding:NoteEditorBinding|null){
   return binding?Object.freeze({...binding,areaKey:binding.key,areaLabel:binding.label}):null;
 }
-function noteStoredValueForKey(key){return notesRuntime().storedValueForKey(key);}
-function noteTextForKey(key){return notesRuntime().textForKey(key);}
-function noteEditorContent(binding,value){return notesRuntime().editorContent({key:binding?.areaKey||binding?.key||''},value);}
-function applicableNotesForTask(task){return notesRuntime().applicableForTask(task);}
-function inheritedNoteEntries(areaKey){return notesRuntime().inheritedEntries(areaKey);}
-function normalizeOngoingAreaInput(value){return notesRuntime().normalizeAreaInput(value);}
-function orderOngoingAreaEntries(source){return notesRuntime().orderEntries(source);}
+function noteStoredValueForKey(key:Parameters<NonNullable<typeof NotesRuntime>['storedValueForKey']>[0]){return notesRuntime().storedValueForKey(key);}
+function noteTextForKey(key:Parameters<NonNullable<typeof NotesRuntime>['textForKey']>[0]){return notesRuntime().textForKey(key);}
+function noteEditorContent(binding:NoteEditorBinding|null,value:unknown){return notesRuntime().editorContent({key:binding?.areaKey||binding?.key||''},value);}
+function applicableNotesForTask(task:Task|undefined){return notesRuntime().applicableForTask(task);}
+function inheritedNoteEntries(areaKey:unknown){return notesRuntime().inheritedEntries(areaKey);}
+function normalizeOngoingAreaInput(value:unknown){return notesRuntime().normalizeAreaInput(value);}
+function orderOngoingAreaEntries(source:readonly NoteCatalogueInput[]){return notesRuntime().orderEntries(source);}
 function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
 function noteCatalogue(){return notesRuntime().catalogue();}
 let refreshLibraryNotes=()=>false;
 let updateNoteSearchDocument=()=>false;
-function updateNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
+function updateNoteSearchText(key:string,plain:unknown){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
 function refreshNoteConsumers(){
   richAssetReferenceRevision++;
   return NotesRuntime?NotesRuntime.refreshConsumers():false;
 }
-function reportNoteConflict(info={}){return NotesRuntime?NotesRuntime.reportConflict(info):false;}
+function reportNoteConflict(info:Parameters<NonNullable<typeof NotesRuntime>['reportConflict']>[0]={}){return NotesRuntime?NotesRuntime.reportConflict(info):false;}
 
 /* BOUNDED DATA MAINTENANCE */
 const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData.maintenance.intervalMs,DATA_MAINTENANCE_FAILURE_RETRY_MS=30*60*1000,ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS=5000;
@@ -1425,39 +1426,42 @@ const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData.maintenance.intervalMs,DATA_
 // while the page is still loading asks before start-up exists, and no tab owns
 // writes until start-up has begun.
 let BackgroundMaintenance:ReturnType<typeof BackupMaintenanceHostModule.createBackground>|null=null,DataMaintenanceJob:ReturnType<typeof BackupMaintenanceHostModule.createBackground>['job']|null=null;
-function backgroundBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.backgroundBlocker(options):'startup';}
-function upkeepBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.upkeepBlocker(options):'startup';}
+function backgroundBlocker(options:Parameters<NonNullable<typeof BackgroundMaintenance>['backgroundBlocker']>[0]={}){return BackgroundMaintenance?BackgroundMaintenance.backgroundBlocker(options):'startup';}
+function upkeepBlocker(options:Parameters<NonNullable<typeof BackgroundMaintenance>['upkeepBlocker']>[0]={}){return BackgroundMaintenance?BackgroundMaintenance.upkeepBlocker(options):'startup';}
 function foregroundChanged(){return BackgroundMaintenance?.foregroundChanged()||false;}
 function installBackgroundOwners(){return BackgroundMaintenance?.install()||false;}
-function wakeBackgroundOperations(trigger='eligibility'){return BackgroundMaintenance?.wake(trigger)||false;}
+function wakeBackgroundOperations(trigger:Parameters<NonNullable<typeof BackgroundMaintenance>['wake']>[0]='eligibility'){return BackgroundMaintenance?.wake(trigger)||false;}
 function backgroundMaintenanceForegroundBusy(){return BackgroundMaintenance?BackgroundMaintenance.foregroundBusy():true;}
-function waitForClosedTabLease(limitMs=25000){return BackgroundMaintenance?BackgroundMaintenance.waitForClosedTabLease(AppOwnership,AppMutationCoordinator,limitMs):Promise.resolve(false);}
-function scheduleDataMaintenance(delay=1200,trigger='scheduled'){return BackgroundMaintenance?.schedule(delay,trigger)||false;}
+function waitForClosedTabLease(limitMs:number=25000){return BackgroundMaintenance?BackgroundMaintenance.waitForClosedTabLease(AppOwnership,requireMutationCoordinator(),limitMs):Promise.resolve(false);}
+function scheduleDataMaintenance(delay:number=1200,trigger:string='scheduled'){return BackgroundMaintenance?.schedule(delay,trigger)||false;}
 NoticeCoordinator.subscribe(()=>{foregroundChanged();});
 
 /* ONGOING SUBJECT NOTES · P5.6A CHECKED OWNER */
 const NOTE_EDITOR_BINDING_VERSION=NotesHostModule.bindingVersion;
-function inheritedSubjectNotesHtml(task){return notesRuntime().inheritedTextForTask(task);}
-function renderInheritedNotes(container,areaKey,compact=false,options={}){return notesRuntime().renderInherited(container,areaKey,compact,options);}
-function renderInheritedSubjectNotes(container,task,compact=false){return notesRuntime().renderInheritedForTask(container,task,compact);}
-function currentNoteEntriesForWorkTasks(tasks){return notesRuntime().currentEntriesForTasks(tasks);}
-function clearTaskNoteEditorBinding(field){return NotesRuntime?NotesRuntime.clearEditor(field):false;}
-function taskNoteEditorIsVisible(field){return NotesRuntime?NotesRuntime.editorVisible(field):false;}
-function bindTaskNoteEditor(field,idx,source='field'){return legacyNoteBinding(notesRuntime().bindTaskEditor(field,idx,source));}
-function bindNoteEditor(field,areaKey,areaLabel,source='library'){return legacyNoteBinding(notesRuntime().bindAreaEditor(field,areaKey,areaLabel,source));}
-function resolveTaskNoteEditorBinding(field,options={}){return legacyNoteBinding(notesRuntime().resolveEditor(field,options));}
-function refreshSubjectNoteFieldsForKey(key,originField=null,derived=null,options={}){return notesRuntime().refreshFieldsForKey(key,originField,derived,options);}
+function inheritedSubjectNotesHtml(task:Task|undefined){return notesRuntime().inheritedTextForTask(task);}
+function renderInheritedNotes(container:HTMLElement|null,areaKey:unknown,compact:boolean=false,options:Parameters<NonNullable<typeof NotesRuntime>['renderInherited']>[3]={}){return notesRuntime().renderInherited(container,areaKey,compact,options);}
+function renderInheritedSubjectNotes(container:HTMLElement|null,task:Task|undefined,compact:boolean=false){return notesRuntime().renderInheritedForTask(container,task,compact);}
+function currentNoteEntriesForWorkTasks(tasks:readonly Task[]){return notesRuntime().currentEntriesForTasks(tasks);}
+function clearTaskNoteEditorBinding(field:HTMLTextAreaElement|null){return NotesRuntime?NotesRuntime.clearEditor(field):false;}
+function taskNoteEditorIsVisible(field:HTMLTextAreaElement){return NotesRuntime?NotesRuntime.editorVisible(field):false;}
+function bindTaskNoteEditor(field:HTMLTextAreaElement,idx:number,source:string='field'){return legacyNoteBinding(notesRuntime().bindTaskEditor(field,idx,source));}
+function bindNoteEditor(field:HTMLTextAreaElement,areaKey:unknown,areaLabel:unknown,source:string='library'){return legacyNoteBinding(notesRuntime().bindAreaEditor(field,areaKey,areaLabel,source));}
+function resolveTaskNoteEditorBinding(field:HTMLTextAreaElement|null,options:Parameters<NonNullable<typeof NotesRuntime>['resolveEditor']>[1]={}){return legacyNoteBinding(notesRuntime().resolveEditor(field,options));}
+function refreshSubjectNoteFieldsForKey(key:unknown,originField:HTMLTextAreaElement|null=null,derived:Parameters<NonNullable<typeof NotesRuntime>['refreshFieldsForKey']>[2]=null,options:Parameters<NonNullable<typeof NotesRuntime>['refreshFieldsForKey']>[3]={}){return notesRuntime().refreshFieldsForKey(key,originField,derived,options);}
 function refreshAllSubjectNoteFieldsFromRepository(){return NotesRuntime?NotesRuntime.refreshAllFields():false;}
-function setNoteSyncStateForKey(key,state){return NotesRuntime?NotesRuntime.setSyncState(key,state):false;}
-function updateNoteSyncIndicators(idx,key){
+function setNoteSyncStateForKey(key:unknown,state:NoteSyncState){return NotesRuntime?NotesRuntime.setSyncState(key,state):false;}
+function updateNoteSyncIndicators(idx:number,key:unknown){
   const task=TASKS[idx],safeKey=key?normalizeAreaName(key):(task?noteKeyForTask(task):'');
   return setNoteSyncStateForKey(safeKey,'synced');
 }
 /* PLAN DRAFTS, SAVED DEFAULTS, AND QUOTE DRAFT */
 const PROTECTED_PREFERENCES_SAVE_DELAY_MS=250;
-let protectedPreferencesState=Object.freeze({version:2,studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,updatedAt:null});
+type PortablePreferencesState=ReturnType<typeof PersonalDataCodec.portablePreferences>;
+let protectedPreferencesState:PortablePreferencesState=Object.freeze({version:2,studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,updatedAt:null});
 let protectedPreferencesHydrated=false,protectedPreferencesDirty=false,protectedPreferencesWriteTimer:number|null=null,protectedPreferencesWriteFailure:unknown=null;
-let protectedPreferencesWriteChain=Promise.resolve(),PresentationRuntime=null;
+let protectedPreferencesWriteChain:Promise<unknown>=Promise.resolve();
+type PresentationController=ReturnType<typeof PresentationHostModule.createController>;
+let PresentationRuntime:PresentationController|null=null;
 function requirePresentationRuntime(){if(!PresentationRuntime)throw new Error('Study Director presentation host is unavailable.');return PresentationRuntime;}
 function acceptProtectedPreferences(value){
   const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
@@ -1850,19 +1854,19 @@ function updateFullscreenButton(){
   }
 }
 function renderThemeControls(){return requirePresentationRuntime().renderThemeControls();}
-function applyTheme(themeId,options={}){return requirePresentationRuntime().applyTheme(themeId,options);}
-function setTheme(themeId,options={}){return requirePresentationRuntime().setTheme(themeId,options);}
-function handleThemeSelection(event){return requirePresentationRuntime().handleThemeSelection(event);}
+function applyTheme(themeId:Parameters<PresentationController['applyTheme']>[0],options:Parameters<PresentationController['applyTheme']>[1]={}){return requirePresentationRuntime().applyTheme(themeId,options);}
+function setTheme(themeId:Parameters<PresentationController['setTheme']>[0],options:Parameters<PresentationController['setTheme']>[1]={}){return requirePresentationRuntime().setTheme(themeId,options);}
+function handleThemeSelection(event:Parameters<PresentationController['handleThemeSelection']>[0]){return requirePresentationRuntime().handleThemeSelection(event);}
 function renderPresentationControls(){return requirePresentationRuntime().renderPresentationControls();}
-function applyPresentation(presentationId,options={}){return requirePresentationRuntime().applyPresentation(presentationId,options);}
-function setPresentation(presentationId,options={}){return requirePresentationRuntime().setPresentation(presentationId,options);}
-function registerPresentationPack(definition){return requirePresentationRuntime().registerPresentation(definition);}
-function handlePresentationSelection(event){return requirePresentationRuntime().handlePresentationSelection(event);}
-function normalizeFontScale(value){return requirePresentationRuntime().normalizeFontScale(value);}
+function applyPresentation(presentationId:Parameters<PresentationController['applyPresentation']>[0],options:Parameters<PresentationController['applyPresentation']>[1]={}){return requirePresentationRuntime().applyPresentation(presentationId,options);}
+function setPresentation(presentationId:Parameters<PresentationController['setPresentation']>[0],options:Parameters<PresentationController['setPresentation']>[1]={}){return requirePresentationRuntime().setPresentation(presentationId,options);}
+function registerPresentationPack(definition:Parameters<PresentationController['registerPresentation']>[0]){return requirePresentationRuntime().registerPresentation(definition);}
+function handlePresentationSelection(event:Parameters<PresentationController['handlePresentationSelection']>[0]){return requirePresentationRuntime().handlePresentationSelection(event);}
+function normalizeFontScale(value:Parameters<PresentationController['normalizeFontScale']>[0]){return requirePresentationRuntime().normalizeFontScale(value);}
 function readFontScale(){return requirePresentationRuntime().readFontScale();}
-function applyFontScale(value){return requirePresentationRuntime().applyFontScale(value);}
-function setFontScale(value){return requirePresentationRuntime().setFontScale(value);}
-function stepFontScale(delta){return requirePresentationRuntime().stepFontScale(delta);}
+function applyFontScale(value:Parameters<PresentationController['applyFontScale']>[0]){return requirePresentationRuntime().applyFontScale(value);}
+function setFontScale(value:Parameters<PresentationController['setFontScale']>[0]){return requirePresentationRuntime().setFontScale(value);}
+function stepFontScale(delta:Parameters<PresentationController['stepFontScale']>[0]){return requirePresentationRuntime().stepFontScale(delta);}
 function toggleDisplayTools(){return requirePresentationRuntime().toggleDisplayTools();}
 function toggleFS(){
   if(!fullscreenAvailable())return;
