@@ -25,7 +25,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
   type InstallStatus=Readonly<{installationAction:string;installationState:string;installationLabel:string;installationSummary:string;installationContext:string;installationSteps:readonly string[];installationFallback:readonly string[];installInspecting:boolean;installHelpRequested:boolean}>;
   type WorkspaceRoute=Readonly<{kind:'legal';token:string;key:string}>;
   type WorkspaceHistoryPort=Readonly<{register:(kind:'legal',controller:Readonly<{current:()=>WorkspaceRoute|null;reconcile:(desired:unknown)=>Promise<WorkspaceRoute|null>}>)=>boolean;open:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;replace:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;close:(descriptor:WorkspaceRoute)=>unknown;closed:(descriptor:WorkspaceRoute,meta:Readonly<{fromHistory:boolean;historyPending:boolean}>)=>unknown}>;
-  type GuideApi=Readonly<{capabilities:Readonly<Record<string,number>>;ui:Readonly<{registerTab:(definition:Readonly<{id:string;label:string;icon:string;render:(context:GuideRenderContext)=>void}>)=>unknown;goTab:(tab:string)=>unknown;workspaceHistory:WorkspaceHistoryPort}>;plan:Readonly<{loadDraft:(schedule:string,options:Readonly<{label:string}>)=>PromiseLike<Readonly<{ok?:boolean;error?:string}>>|Readonly<{ok?:boolean;error?:string}>}>;preview:Readonly<{useSample:(options:Readonly<{label:string;target:'insights'}>)=>PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;clear:(target:'insights')=>unknown}>;installation:Readonly<{status:()=>InstallStatus;prompt:()=>PromiseLike<unknown>|unknown;inspect:()=>PromiseLike<unknown>|unknown;showHelp:()=>unknown}>}>;
+  type GuideApi=Readonly<{capabilities:Readonly<Record<string,number>>;ui:Readonly<{registerTab:(definition:Readonly<{id:string;label:string;icon:string;render:(context:GuideRenderContext)=>void}>)=>boolean;goTab:(tab:string)=>unknown;workspaceHistory:WorkspaceHistoryPort}>;plan:Readonly<{loadDraft:(schedule:string,options:Readonly<{label:string}>)=>PromiseLike<Readonly<{ok?:boolean;error?:string}>>|Readonly<{ok?:boolean;error?:string}>}>;preview:Readonly<{useSample:(options:Readonly<{label:string;target:'insights'}>)=>PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;clear:(target:'insights')=>unknown}>;installation:Readonly<{status:()=>InstallStatus;prompt:()=>PromiseLike<unknown>|unknown;inspect:()=>PromiseLike<unknown>|unknown;showHelp:()=>unknown}>}>;
   type PluginDescriptor=Readonly<{name:string;version:string;requires:Readonly<Record<string,number>>;previewProviders:Readonly<{insights:InsightsPreviewProvider}>;setup:(api:unknown)=>boolean}>;
   type LegalDocumentId='privacy'|'terms'|'security'|'license'|'notices';
   type LegalDocumentDefinition=Readonly<{id:LegalDocumentId;label:string;path:string;type:'html'|'text'}>;
@@ -1184,7 +1184,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     if(!LegalCenter.connect(api.ui.workspaceHistory))return false;
     const state=guideState??(guideState={step:'plan',status:'',ok:false,mapTabs:{},referenceOpen:{},installHelpOpen:false,context:null});
     const registered=api.ui.registerTab({id:TAB_ID,label:'Guide',icon:'?',render:context=>renderGuide(context,api,state)});
-    if(registered===false)return false;guideApi=api;
+    if(registered!==true)return false;guideApi=api;
     if(!installListenerBound){window.addEventListener(INSTALL_STATE_EVENT,installStateChanged);installListenerBound=true;}
     setupComplete=true;return true;
   }

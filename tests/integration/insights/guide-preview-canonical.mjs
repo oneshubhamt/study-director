@@ -54,7 +54,7 @@ let tabRegistrationAttempts=0,historyRegistrations=0;
 const retryApi=Object.freeze({
   capabilities:Object.freeze({pluginApi:1,tabRegistry:1,planDraft:1,previewRecords:1,installation:1,workspaceHistory:1}),
   ui:Object.freeze({
-    registerTab(){tabRegistrationAttempts+=1;return tabRegistrationAttempts>1;},goTab(){},
+    registerTab(){tabRegistrationAttempts+=1;return tabRegistrationAttempts>1?true:undefined;},goTab(){},
     workspaceHistory:Object.freeze({
       register(){historyRegistrations+=1;return true;},open(){},replace(){},close(){return true;},closed(){}
     })
@@ -63,7 +63,7 @@ const retryApi=Object.freeze({
   preview:Object.freeze({useSample(){return Promise.resolve({ok:true});},clear(){}}),
   installation:Object.freeze({status(){return Object.freeze({});},prompt(){},inspect(){},showHelp(){}})
 });
-assert.equal(descriptor.setup(retryApi),false,'a failed tab registration must keep plugin setup retryable');
+assert.equal(descriptor.setup(retryApi),false,'a non-true tab registration result must keep plugin setup retryable');
 assert.equal(descriptor.setup(retryApi),true,'the retry must complete Guide setup');
 assert.equal(descriptor.setup(retryApi),true,'completed Guide setup remains idempotent');
 assert.equal(historyRegistrations,1,'Guide retries must reuse one Legal Center history registration');
