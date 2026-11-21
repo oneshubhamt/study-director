@@ -6867,8 +6867,15 @@ function handleProfileNameKey(e){
   return true;
 }
 async function profileDriveAction(){
-  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return BackupProviderRuntime.disconnect('google-drive');
+  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return disconnectDrive();
   return connectDriveForProfile();
+}
+// Disconnect stops Drive work running here first; if work is still finishing
+// after that, the person is told rather than left wondering.
+async function disconnectDrive(){
+  if(await BackupProviderRuntime.disconnect('google-drive'))return true;
+  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)Interactions.notify({key:'drive-disconnect',title:'Google Drive is still connected',message:'Google Drive was still finishing its work. Disconnect again in a moment.'});
+  return false;
 }
 function switchProfile(ev){
   const id=String(ev?.target?.closest?.('[data-profile]')?.dataset.profile||'');
@@ -11590,7 +11597,7 @@ const CLICK_ACTIONS=Object.freeze({
   'open-version-history': ()=>withBackupPassword(()=>BackupRecoveryHost.history.open()),
   'connect-drive-backup': connectDriveForProfile,
   'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
-  'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
+  'disconnect-drive-backup': ()=>disconnectDrive(),
   'refresh-version-history': ()=>BackupRecoveryHost.history.refresh(),
   'close-version-history': ()=>BackupRecoveryHost.history.close(),
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),

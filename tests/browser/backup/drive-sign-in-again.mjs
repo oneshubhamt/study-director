@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
 import {drive,uploadsBy,reopen,sync,sleep} from '../../helpers/drive-browser.mjs';
-import {openDevice,settled,writeNote} from '../../helpers/sync-journey-world.mjs';
+import {openDevice,settled,writeNote,hold} from '../../helpers/sync-journey-world.mjs';
 
 // Signing in to Google Drive again (owner, 2026-11-21). A profile syncs with
 // one Google account: after its first connect, signing in again goes straight
@@ -71,13 +71,20 @@ try{
   result.checks.otherAccountRefused=true;
 
   // Disconnect signs this device out only: Google's permission is kept, and
-  // connecting again goes straight back to the profile's account.
-  // Disconnect waits while Drive work runs (it returns false then), as a tap would.
-  await waitFor(()=>a.evaluate(`__PWA6.BackupProviderRuntime.disconnect('google-drive').then(done=>done===true)`),{label:'Disconnect',timeout:30000});
+  // connecting again goes straight back to the profile's account. Pressed
+  // while a sync runs here, it stops that sync safely first (it used to do
+  // nothing and say nothing).
+  const held=hold('A',request=>request.method==='GET');
+  const running=a.evaluate(`__PWA6.BackupProviderRuntime.syncRepositoryProvider('google-drive').then(()=>'ended',error=>'stopped')`);
+  await waitFor(()=>held.reached,{label:'a sync is running',timeout:20000});
+  await waitFor(()=>a.evaluate(`__PWA6.BackupProviderRuntime.status().busy`),{label:'the sync holds the foreground',timeout:10000});
+  const disconnected=await a.evaluate(`__PWA6.BackupProviderRuntime.disconnect('google-drive')`);
+  held.release();await running;
+  assert.equal(disconnected,true,'Disconnect during a sync stops it and signs out');
   assert.equal(await connected(a),false);assert.equal(await a.evaluate('window.__gisRevokes'),0,'Disconnect keeps Google\'s permission for the other devices');
   await sleep(200);await tap(a);await waitFor(()=>connected(a),{label:'connected again after Disconnect',timeout:20000});
   assert.deepEqual(await lastRequest(a),{prompt:'',login_hint:email},'connecting again after Disconnect goes to the profile account');
   await settled(a,'A');
-  result.checks.disconnectIsThisDeviceOnly=true;
+  result.checks.disconnectIsThisDeviceOnly=true;result.checks.disconnectDuringSync=true;
   console.log(JSON.stringify(result,null,2));
 }finally{await browser.close();await server.close();}

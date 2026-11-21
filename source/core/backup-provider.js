@@ -70,6 +70,7 @@ registry.define('backup-provider',1,input=>{
   // Connect, disconnect and Back up now report to the location they act on.
   let statusSource='';
   let busy=false;
+  const DISCONNECT_WAIT_MS=30*1000;
   let foregroundController=null;
   const presentation=ports.view.presentation;
   let foregroundPresentation=null,foregroundSource='',borrowedPresentation=false;
@@ -2338,8 +2339,17 @@ registry.define('backup-provider',1,input=>{
     sessionWatchByProvider.delete(selected.id);
     Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);overtakenByProvider.delete(selected.id);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
+  // Resolves true once no backup operation runs, false after timeoutMs.
+  function whenIdle(timeoutMs){
+    if(!busy)return Promise.resolve(true);
+    return new Promise(resolve=>{let timer=null;const stop=value=>{statusListeners.delete(check);clearTimeout(timer);resolve(value);},check=()=>{if(!busy)stop(true);};statusListeners.add(check);timer=setTimeout(()=>stop(!busy),timeoutMs);});
+  }
+  // Disconnect is never ignored: work running at this location stops safely
+  // first, as with Cancel, and other work is waited for (up to
+  // DISCONNECT_WAIT_MS); false only if it is still running then.
   async function disconnectProvider(selected){
-    if(busy||!selected||!selected.disconnect)return false;
+    if(!selected||!selected.disconnect)return false;
+    if(busy){cancelForeground('Stopped so this device could disconnect.',selected.id);if(!await whenIdle(DISCONNECT_WAIT_MS))return false;}
     const foreground=beginForeground(selected);if(!foreground)return false;
     statusSource=selected.id;setBusy(true);statusText(`Disconnecting ${selected.label}…`);
     try{
