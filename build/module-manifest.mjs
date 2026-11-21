@@ -194,7 +194,7 @@ export const hostScripts=Object.freeze([
   Object.freeze({id:'profile-scope',source:'host/profile-scope.ts',marker:'<!-- @SD_HOST_PROFILE_SCOPE@ -->'}),
   Object.freeze({id:'presentation-kernel',source:'host/presentation-kernel.ts',marker:'<!-- @SD_HOST_PRESENTATION_KERNEL@ -->'}),
   Object.freeze({id:'presentation-metadata',source:'host/presentation-metadata.ts',marker:'<!-- @SD_HOST_PRESENTATION_METADATA@ -->'}),
-  Object.freeze({id:'main',source:'host/main.js',marker:'<!-- @SD_HOST_MAIN@ -->'}),
+  Object.freeze({id:'main',source:'host/main.ts',marker:'<!-- @SD_HOST_MAIN@ -->'}),
 ]);
 
 export const htmlSource='app.html';

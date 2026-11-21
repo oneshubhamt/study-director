@@ -201,6 +201,7 @@
     "source/host/profile-scope.ts",
     "source/host/presentation-kernel.ts",
     "source/host/presentation-metadata.ts",
+    "source/host/main.ts",
     "types/presentation.ts",
     "types/presentation-host.ts",
     "types/profiles.ts",

@@ -1,3 +1,12 @@
+import type {BrowserRegistry} from '../../types/browser-registry.ts';
+import type {PresentationKernel} from '../../types/presentation.ts';
+import type {ProfileScopeValue} from '../../types/profile-scope.ts';
+import type {StudyDirectorPublicApi} from '../../types/public-api-host.ts';
+import type {RichTextApi} from '../../rich-text/editor.ts';
+
+type HostWindow=Window&{StudyDirector?:StudyDirectorPublicApi;StudyDirectorRichText?:RichTextApi};
+const HOST_WINDOW=window as HostWindow;
+
 
 (()=>{
 'use strict';
@@ -15,7 +24,7 @@
 // private registry -> host contracts/state -> repositories -> feature controllers ->
 // shell/public plugins -> DOM/startup. Private modules never resolve one another.
 /* CONFIG AND DATA CONTRACT */
-const INTERNAL_MODULES=window[Symbol.for('studyDirector.internalModules.v1')];
+const INTERNAL_MODULES=(window as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as BrowserRegistry|undefined;
 if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-registry'||INTERNAL_MODULES.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
@@ -99,7 +108,7 @@ const ExecutionViewsModule=INTERNAL_MODULES.load('execution-views',1,'study-dire
 const ExecutionHostModule=INTERNAL_MODULES.load('execution-host',1,'study-director.execution-host-module',1);
 const SessionHostModule=INTERNAL_MODULES.load('session-host',1,'study-director.session-host-module',1);
 const SessionHandoffModule=INTERNAL_MODULES.load('session-handoff',1,'study-director.session-handoff-module',1);
-const PRESENTATION_KERNEL=window[Symbol.for('studyDirector.presentationKernel.v1')];
+const PRESENTATION_KERNEL=(window as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.presentationKernel.v1')] as PresentationKernel|undefined;
 const PRESENTATION_MANIFEST=PRESENTATION_KERNEL&&PRESENTATION_KERNEL.manifest;
 if(!PRESENTATION_KERNEL||PRESENTATION_KERNEL.format!=='study-director.presentation-kernel'||PRESENTATION_KERNEL.version!==1||!PRESENTATION_MANIFEST||PRESENTATION_MANIFEST.format!=='study-director.presentation-manifest'||PRESENTATION_MANIFEST.version!==1){
   throw new Error('Study Director presentation kernel is unavailable or incompatible.');
@@ -113,9 +122,12 @@ const {
   invariants:PRESENTATION_INVARIANTS, breakpoints:PRESENTATION_BREAKPOINTS, tokens:PRESENTATION_TOKEN_CONTRACT
 }=PRESENTATION_MANIFEST;
 const NOTES_SEARCH_WORKER_URL='@@SD_SEARCH_WORKER_FILENAME@@';
-const RICH_TEXT_BOOT_API=window.StudyDirectorRichText;
+const RICH_TEXT_BOOT_API=HOST_WINDOW.StudyDirectorRichText;
 if(!RICH_TEXT_BOOT_API||!RICH_TEXT_BOOT_API.assetPolicy||typeof RICH_TEXT_BOOT_API.isAssetId!=='function'||typeof RICH_TEXT_BOOT_API.isSupportedImageType!=='function'){throw new Error('Study Director rich text runtime is unavailable or incompatible.');}
-const ProfileScopeBootstrap=window[Symbol.for('studyDirector.profileScope.v1')];
+const ProfileScopeBootstrap=(window as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.profileScope.v1')] as ProfileScopeValue|undefined;
+function decodeBuildJson(value:string,label:string):unknown{
+  try{return JSON.parse(decodeURIComponent(value)) as unknown;}catch(error){throw new TypeError('Invalid '+label+' build input.',{cause:error});}
+}
 const {
   APP_VERSION,APP_CONFIG,APP_LIMITS,ProfileScope,DEVICE_WIDE_STORAGE_KEYS,STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,EXTERNAL_REPOSITORY_IDENTITIES,APP_META_REGISTRY,
   DATA_CONTRACT,DB_STORES,DB_NAME,DB_VER,DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_NOTES_STORE,DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE,DB_ASSET_STORE,
@@ -124,15 +136,15 @@ const {
   release:'@@SD_RELEASE@@',
   profileScope:ProfileScopeBootstrap,
   raw:Object.freeze({
-    productionLimits:@@SD_PRODUCTION_LIMITS@@,
-    deviceWideStorageKeys:@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@,
-    localStorageKeys:@@SD_LOCAL_STORAGE_KEYS@@,
-    sessionStorageKeys:@@SD_SESSION_STORAGE_KEYS@@,
-    appMetaKeys:@@SD_APP_META_KEYS@@,
-    externalRepositoryIdentities:@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@,
-    appMetaRegistry:@@SD_APP_META_REGISTRY@@,
-    runtimeDataContract:@@SD_RUNTIME_DATA_CONTRACT@@,
-    indexedDbStoreNames:@@SD_INDEXED_DB_STORE_NAMES@@
+    productionLimits:decodeBuildJson('@@SD_PRODUCTION_LIMITS_URI@@','production limits'),
+    deviceWideStorageKeys:decodeBuildJson('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys'),
+    localStorageKeys:decodeBuildJson('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys'),
+    sessionStorageKeys:decodeBuildJson('@@SD_SESSION_STORAGE_KEYS_URI@@','session storage keys'),
+    appMetaKeys:decodeBuildJson('@@SD_APP_META_KEYS_URI@@','AppMeta keys'),
+    externalRepositoryIdentities:decodeBuildJson('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@','external repository identities'),
+    appMetaRegistry:decodeBuildJson('@@SD_APP_META_REGISTRY_URI@@','AppMeta registry'),
+    runtimeDataContract:decodeBuildJson('@@SD_RUNTIME_DATA_CONTRACT_URI@@','runtime data contract'),
+    indexedDbStoreNames:decodeBuildJson('@@SD_INDEXED_DB_STORE_NAMES_URI@@','IndexedDB store names')
   }),
   richText:RICH_TEXT_BOOT_API,
   attachments:AttachmentsModule
@@ -3902,7 +3914,7 @@ const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze({
   }),
   ui:Object.freeze({registerTab:UiTabRegistry.registerTab,goTab,navigationStatus:()=>NavigationController.status(),workspaceHistory:WorkspaceHistoryPublic})
 }));
-window.StudyDirector=StudyDirectorPublicAPI;
+HOST_WINDOW.StudyDirector=StudyDirectorPublicAPI;
 window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT,{detail:Object.freeze({version:StudyDirectorPublicAPI.version,theme:PRESENTATION_KERNEL.activeThemeId(),presentation:PRESENTATION_KERNEL.activePresentationId()})}));
 SessionLifecycle.invalidate('app-restart',{date:todayISO(),autoDate:true,reconcile:false});
 StartupLifecycle.start();

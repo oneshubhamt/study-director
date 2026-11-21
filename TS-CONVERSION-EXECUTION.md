@@ -1,12 +1,13 @@
 # TypeScript conversion — execution record
 
-## P5.13a · ACTIVE · 2026-11-21
+## P5.13b · ACTIVE · 2026-11-21
 
-- **Baseline:** `7c5f0170b8489c3f6c69e85926a572e9bb7986f2`. Canonical scope is P5.13a only: checked generic optional-plugin loading/registration/retry plus checked construction/publication contract for the frozen `window.StudyDirector` capability object.
-- **Audit map:** `foundation-host.ts` already owns checked tab primitives/navigation. The remaining P5.13a algorithms are the `PluginRuntime` block and public API assembly in `source/host/main.js`. P5.13b still owns the rest of main startup/action/DOM composition and bare build-token closure.
-- **Invariants:** preserve optional Guide/Insights filenames and two-attempt semantics, active-tab-only rerendering, capability rejection, setup failure containment, preview-provider registration, single successful registration, public API shape/freeze, and the exact existing publication → ready-event → session invalidation → startup → PWA-install order.
-- **Verification target:** real normal navigation to a shipped optional tab; failed load + retry; tab switch during pending load; active-tab ownership; incompatible capability rejection; single registration through the real public API. Required strict type/build/verify/generated-syntax checks plus affected architecture/runtime-boundary browser evidence; no full QA.
-- **Next action:** extract the P5.13a owner into strict TypeScript, admit it to manifest/compiler/coverage, rewire `main.js` as thin composition, then reconcile the checkpoint end to end.
+- **Baseline:** P5.13 began at `7c5f0170b8489c3f6c69e85926a572e9bb7986f2`; P5.13a extraction/public-API work is published through `a5f6ba51d1`, with the corrected optional retry browser witness awaiting replay. P5.13b now owns strict host-entry checking, remaining action/DOM/startup composition, build-token decoding and final shipping reconciliation.
+- **Audit map:** `source/host/main.js` is the only remaining first-party host runtime outside strict TypeScript. It still owns composition-only adapters, delegated binding, ownership UI projection, startup/publication order and raw build inputs. Private feature algorithms remain in their checked owners.
+- **Invariants:** preserve inline script order; deferred provider initialization; public API publication → ready event → session invalidation → startup → PWA installation; ownership fencing; current canonical data/recovery behavior; no compatibility layer; no vendor changes.
+- **Implementation:** convert the host entry to `main.ts` through the existing position-preserving classic-script erasure path; make JSON build inputs valid typed source and feed them through the existing validated bootstrap contract; type actual private-module/public providers rather than weakening gates.
+- **Verification target:** strict type/lint, fresh build, verify, generated syntax, startup lifecycle/module boundary checks, P5.13 optional-plugin/public-API witnesses, cold/populated core flow and ownership-protected secondary-tab action. Final closure also reconciles every shipped executable first-party source/producer; full QA remains skipped.
+- **Next action:** admit and type the host entry, repair strict diagnostics without suppressions, then run the P5.13 targeted browser/runtime reconciliation.
 
 ## P5.12 · VERIFIED — TARGETED · 2026-11-21 · SECOND DE NOVO AUDIT
 
