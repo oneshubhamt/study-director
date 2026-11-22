@@ -1,11 +1,14 @@
 # TypeScript conversion — execution record
 
-## Post-P5.13 Insights shell removal · OPEN · 2026-11-22
+## Post-P5.13 Insights shell removal · VERIFIED — TARGETED · 2026-11-22
 
-- **Baseline:** `3d9cdc6aa667c7684695065e12dd5847824b3666` on `ts-exp`.
-- **Authorized outcome:** delete the inert tracked `source/external/insights.js` shell and make the Insights runtime topology exactly the six checked TypeScript sources: model, protocol, worker, compute, rendering and retained runtime.
-- **Invariants:** emitted Insights browser asset naming remains unchanged; no Insights behavior or worker protocol changes; generated worker/rich-text JavaScript remains untouched; strict TypeScript closure must leave only the six reproducible generated JavaScript bundles under `source/`.
-- **Planned verification:** strict types/lint, TypeScript inventory/runtime-boundary checks, direct Insights lifecycle/architecture checks, fresh build/generated verification/syntax, P5.13 targeted host gate and Repository Checks. Full QA remains out of scope.
+- **Baseline / implementation head:** owner-authorized cleanup started from `3d9cdc6aa667c7684695065e12dd5847824b3666`; exact implementation/test head is `2000efcc56f7f6ff941c018227d1f497dd7f30e2`.
+- **Topology cleanup:** deleted the inert tracked `source/external/insights.js` shell. The Insights runtime manifest/build invariant now owns exactly six authored TypeScript sources in order: `insights-model.ts`, `insights-protocol.ts`, `insights-worker.ts`, `insights-compute.ts`, `insights-rendering.ts`, `insights-runtime.ts`. The emitted release asset remains JavaScript (`sd.insights*.js`) as expected; no runtime algorithm, protocol or behavior changed.
+- **Regression protection / inventory:** `typescript-pipeline.mjs` now requires every tracked `source/**/*.js` file to be one of the six reproducible generated worker/rich-text bundles; `insights-runtime-boundary.mjs` rejects reintroduction of `external/insights.js`. Exact tree inspection confirms only `attachment-worker.js`, `export-worker.js`, `image-worker.js`, `rich-text.js`, `search-worker.js` and `wordgard.js` remain under `source/`.
+- **Docs:** the Notifications producer inventory now names the checked `insights-runtime.ts` owner rather than the deleted shell.
+- **Insights targeted evidence:** run `45025512721` passed at exact implementation head, including strict TypeScript/lint, direct lifecycle/source witnesses, affected Insights architecture, fresh build, generated verification/syntax, populated/lazy-Lab/retained browser journey **5/5**, and isolated performance journey **5/5**. [Insights targeted run](https://github.com/oneshubhamt/study-director/actions/runs/45025512721)
+- **P5.13 / repository evidence:** P5.13 run `45025512747` passed at the same head: contracts/build/provenance/syntax PASS and browser `core-flow`, optional-plugin `runtime-boundary`, and `multi-tab` each **5/5**. Repository Checks `45025512712` also passed strict types/lint, targeted repository/safety contracts, build, generated verification and syntax. [P5.13 targeted run](https://github.com/oneshubhamt/study-director/actions/runs/45025512747) · [Repository checks](https://github.com/oneshubhamt/study-director/actions/runs/45025512712)
+- **Outcome / limits:** requested shell cleanup is complete with no known remaining `insights.js` source dependency. Full whole-app/device QA was not run; the independent overall Phase-5 audit remains the next programme gate before Phase 6.
 
 ## P5.13 · VERIFIED — TARGETED · 2026-11-22 · DE NOVO CONTRACT-HARDENING CLOSEOUT
 
