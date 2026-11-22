@@ -60,7 +60,7 @@ assert.match(owner,/processing\.open\(inputNode\)/u,'native file-open entry rema
 assert.match(owner,/protection\.ask\(\)/u,'locked backup flows retain password prompting');
 assert.match(ownerTypes,/readonly environment:DeviceBackupInput\['environment'\]/u,'Device Folder composition consumes the actual checked environment contract');
 assert.match(deviceTypes,/showDirectoryPicker:\(\(options:[^\n]+\)\|undefined/u,'the actual Device Backup environment contract represents folder-picker capability explicitly');
-assert.match(host,/showDirectoryPicker:typeof window\.showDirectoryPicker==='function'\?options=>window\.showDirectoryPicker\(options\):undefined/u,'unsupported folder picking uses the typed undefined capability rather than a null sentinel');
+assert.match(host,/showDirectoryPicker:typeof Reflect\.get\(window,'showDirectoryPicker'\)==='function'\?async options=>await Reflect\.apply\(Reflect\.get\(window,'showDirectoryPicker'\)[\s\S]{0,420}:undefined/u,'unsupported folder picking uses the typed undefined capability rather than a null sentinel');
 assert.match(host,/'export-backup': \(\)=>BackupActions\.exportLocal\(\)/u,'file export caller uses the checked P5.7A entry point');
 assert.match(host,/'import-backup': ev=>BackupActions\.importLocal\(ev\)/u,'file import caller uses the checked P5.7A entry point');
 console.log(JSON.stringify({status:'PASS',boundary:'p5.7a-backup-actions-host',protection:true,fileEntries:true,deviceComposition:true,foregroundExclusion:true},null,2));
