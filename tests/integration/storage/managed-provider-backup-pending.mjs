@@ -25,8 +25,7 @@ function runTransaction(mode,operation,strict=false){
 const indexedDb=freeze({
   transaction:(_store,mode,operation)=>runTransaction(mode,operation,false),
   strictTransaction:(_store,mode,operation)=>runTransaction(mode,operation,true),
-  get:async(_store,key)=>structuredClone(rows.get(key)||null),
-  getAll:async()=>[...rows.values()].map(structuredClone)
+  get:async(_store,key)=>structuredClone(rows.get(key)||null)
 });
 const hostKeys=freeze({
   verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
@@ -97,7 +96,7 @@ for(const fault of ['read','write','commit']){
 {
  const h=host();await h.mark('device-folder',{reason:'device-work',nextEligibleAt:new Date().toISOString()});const device=await h.read('device-folder');await h.mark('google-drive',{reason:'drive-work',nextEligibleAt:new Date().toISOString()});await h.clear('google-drive',await h.read('google-drive'));assert.deepEqual(await h.read('device-folder'),device);await h.clear('device-folder',device);intentCases.push('independent providers');
 }
-// Older payload versions are converted once by the compatibility host; the ordinary runtime rejects them.
+// Older payload versions are rejected without conversion.
 for(const version of [1,2,3]){
  const at=new Date().toISOString(),entry={providerId:'google-drive',requestedAt:at};if(version>=2)Object.assign(entry,{nextEligibleAt:at,reason:'legacy-work'});if(version>=3)entry.repositoryScope='actual-repository';
  await assert.rejects(gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version,entries:[entry]},{strict:true}),/not canonical/u);intentCases.push('older payload '+version+' rejected');
@@ -118,7 +117,10 @@ for(const path of ['adopt-complete','adopt-pending','run-complete']){
 {
  const h=host();await h.mark('google-drive',{reason:'canonical',nextEligibleAt:new Date().toISOString()});const valid=structuredClone(rows.get(APP_META_KEYS.repositoryMaintenancePending));
  for(const requestId of [null,'invalid']){const invalid=structuredClone(valid);invalid.value.entries[0].requestId=requestId;rows.set(APP_META_KEYS.repositoryMaintenancePending,invalid);await assert.rejects(h.read('google-drive'),/not canonical/u);}
- rows.set(APP_META_KEYS.repositoryMaintenancePending,valid);await h.clear('google-drive');intentCases.push('noncanonical request identity rejected');
+ const wrongVersion=structuredClone(valid),wrongField=structuredClone(valid);
+ wrongVersion.value.version='4';wrongField.value.entries[0].repositoryScope=123;
+ for(const invalid of [wrongVersion,wrongField]){rows.set(APP_META_KEYS.repositoryMaintenancePending,invalid);await assert.rejects(h.read('google-drive'),/not canonical/u);assert.equal(await h.clear('google-drive'),false);assert.equal(rows.get(APP_META_KEYS.repositoryMaintenancePending),invalid);}
+ rows.set(APP_META_KEYS.repositoryMaintenancePending,valid);await h.clear('google-drive');intentCases.push('noncanonical maintenance intent rejected without rewrite');
 }
 console.log(JSON.stringify({status:'PASS',suite:'repository-maintenance-request-fencing',cases:intentCases.length,intentCases,canonicalMetadataGateway:true,atomicTransactions:true,newerRequestsExecuted:true,restartPersistence:true},null,2));
 

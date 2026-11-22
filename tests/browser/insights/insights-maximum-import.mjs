@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
 import {launchChromium,startReleaseServer,waitFor,withoutPwaChecks} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
@@ -8,7 +9,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.
 let html=fs.readFileSync(path.join(root,'dist','deployment',manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
 if(!html.includes(marker))throw new Error('Insights browser harness hook is unavailable.');
-html=html.replace(marker,`window.__InsightsMaximumQA=Object.freeze({StartupLifecycle,AppData,BackupCodec,PlanData,CompatibilityCodecs,goTab});\n${marker}`);
+html=html.replace(marker,`window.__InsightsMaximumQA=Object.freeze({StartupLifecycle,AppData,BackupCodec,PlanData,DailyRecordCodec,goTab});\n${marker}`);
 html=withoutPwaChecks(html);
 const insightsName=manifest.externalRuntimeFiles.find(name=>name.startsWith('sd.insights.'));
 assert.ok(insightsName,'content-hashed Insights runtime is missing');
@@ -20,7 +21,7 @@ const server=await startReleaseServer();
 let page=null;
 try{
   server.setOverride('deployment','maximum-instrumented.html',html);
-  const preload=`(()=>{try{localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Maximum Import QA',updatedAt:new Date().toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));localStorage.setItem('studyDirector.installNoticeShown.v1','true');}catch{}window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';try{navigator.__qaNativeStorage=navigator.storage;Object.defineProperty(navigator,'storage',{configurable:true,value:{getDirectory:()=>StorageManager.prototype.getDirectory.call(navigator.__qaNativeStorage),persisted:async()=>false,persist:async()=>false,estimate:async()=>({usage:0,quota:268435456})}})}catch{}})();`;
+  const preload=`(()=>{try{(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));localStorage.setItem('studyDirector.installNoticeShown.v1','true');}catch{}window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';try{navigator.__qaNativeStorage=navigator.storage;Object.defineProperty(navigator,'storage',{configurable:true,value:{getDirectory:()=>StorageManager.prototype.getDirectory.call(navigator.__qaNativeStorage),persisted:async()=>false,persist:async()=>false,estimate:async()=>({usage:0,quota:268435456})}})}catch{}})();`;
   page=await browser.createPage(server.url('deployment','maximum-instrumented.html'),{preload});
   await waitFor(()=>page.evaluate(`!!(window.__InsightsMaximumQA&&__InsightsMaximumQA.StartupLifecycle.status().fullyInitialized)`),{timeout:45000,label:'maximum-data Study Director startup'});
   await page.evaluate(insights);
@@ -33,11 +34,12 @@ try{
       const date=new Date(stamp).toISOString().slice(0,10),schedule=[],results={};
       for(let taskIndex=0;taskIndex<8;taskIndex++){
         const id='d'+dayIndex+'-t'+taskIndex;
-        schedule.push({id,start:String(7+taskIndex).padStart(2,'0')+':00',duration:50,name:('Study '+taskIndex+' '+repeated).slice(0,300),kind:'work',area:'Area '+(taskIndex%12),measure:'pages',target:20+taskIndex,note:repeated});
+        schedule.push({id,start:String(7+taskIndex).padStart(2,'0')+':00',duration:50,name:('Study '+taskIndex+' '+repeated).slice(0,${PRODUCTION_LIMITS.maxTaskNameChars}).trim(),kind:'work',area:'Area '+(taskIndex%12),measure:'pages',target:20+taskIndex});
         results[id]={completion:55+(dayIndex+taskIndex)%46,completionSource:'manual',actualSeconds:1800+(taskIndex*120)};
       }
-      records.push(qa.CompatibilityCodecs.dailyRecord({version:13,date,dayName:'Study day',studyQuality:1+(dayIndex%5),schedule,results,practiceRuns:[]}));
+      records.push(qa.DailyRecordCodec.sanitizeCurrentDailyRecord({version:16,recordKind:'study',date,savedAt:date+'T18:00:00.000Z',updatedAt:date+'T18:00:00.000Z',sourceRevision:1,quote:'',reflection:'',carryForwardDraft:'',realTimeSnapshot:null,studyQuality:1+(dayIndex%5),schedule,results,practiceRuns:[]}));
     }
+    if(records.some(record=>record===null))throw new Error('Maximum Insights fixture must contain only current canonical Saved Days.');
     const codec=qa.BackupCodec,counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:0,activeSession:0});
     const manifest=codec.createManifest({studentName:'Maximum Import QA',installationId:'inst_maximum_import_browser',exportedAt:'2026-08-13T00:00:00.000Z',counts},{compression:'none',algorithm:'sha256'});
     const lines=[JSON.stringify(manifest)],hashes=[];let sequence=0,parserYields=0,commitYields=0;
@@ -49,7 +51,7 @@ try{
     lines.push(JSON.stringify(await codec.encodeCompletion(sequence,counts,hashes,'sha256')));
     const metadata=new Blob([lines.join('\\n')+'\\n'],{type:'application/octet-stream'}),blob=codec.createV10Container(metadata,{compression:'none'});
     const started=performance.now();
-    const inspected=await codec.inspectCurrent(blob,{filename:'maximum-data.sdbackup',yieldControl:()=>new Promise(resolve=>requestAnimationFrame(()=>{parserYields++;resolve();}))});
+    const inspected=await codec.inspect(blob,{filename:'maximum-data.sdbackup',yieldControl:()=>new Promise(resolve=>requestAnimationFrame(()=>{parserYields++;resolve();}))});
     const committed=await qa.AppData.dailyRecords.importBatches(inspected.records,{yieldControl:()=>new Promise(resolve=>requestAnimationFrame(()=>{commitYields++;resolve();}))});
     const summaries=await qa.AppData.dailyRecords.summaries();
     localStorage.setItem('studyDirector.insights.window.v1','all');

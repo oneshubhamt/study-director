@@ -136,8 +136,12 @@ assert.equal(await h.app.deletionRecovery.flush(),true);
 assert.equal(h.stores.session.has('active'),false);
 assert.equal(h.sharedLocal.has('deletionRecovery'),false);
 
+// Use the same recovery envelope a failed F29/F30 session save writes.
+const rescueHarness=createHarness(new Map(),null,{failSessionWrite:true});
+assert.equal((await rescueHarness.app.activeSession.save(session)).storage.local,true);
+const currentRecovery=rescueHarness.sharedLocal.get('recovery');
 await h.app.activeSession.save({...session,revision:2,updatedAt:'2026-09-17T11:10:00.000Z'});
-h.sharedLocal.set('recovery',{stale:true});
+h.sharedLocal.set('recovery',structuredClone(currentRecovery));
 controls.failLocalSetKeys=new Set(['deletionRecovery']);
 controls.failLocalRemoveKeys=new Set(['recovery']);
 const failClosedSession=await h.app.activeSession.clear();
@@ -149,7 +153,7 @@ controls.failLocalSetKeys=new Set();controls.failLocalRemoveKeys=new Set();
 assert.equal((await h.app.activeSession.clear()).ok,true);
 
 await h.app.activeSession.save({...session,revision:3,updatedAt:'2026-09-17T11:20:00.000Z'});
-h.sharedLocal.set('recovery',{stale:true});
+h.sharedLocal.set('recovery',structuredClone(currentRecovery));
 controls.failLocalRemoveKeys=new Set(['recovery']);
 const durableSessionDelete=await h.app.activeSession.clear();
 assert.equal(durableSessionDelete.ok,true,'a durable deletion marker may safely commit logical deletion while stale local recovery awaits cleanup');
@@ -162,17 +166,109 @@ assert.equal(await h.app.deletionRecovery.flush(),true);
 assert.equal(h.sharedLocal.has('recovery'),false,'recovery flush must physically retire stale Active Session recovery before clearing its marker');
 assert.equal(h.sharedLocal.has('deletionRecovery'),false);
 
-const legacyLocal=new Map([['syncEmergency',{version:1,entries:[{key:'dailyRecord:2026-09-10',entityType:'dailyRecord',entityId:'2026-09-10',op:'delete',updatedAt:'2026-09-17T06:00:00.000Z'},{key:'areaNote:ethics',entityType:'areaNote',entityId:'ethics',op:'upsert',updatedAt:'2026-09-17T06:00:00.000Z'}]}]]);
-const legacyStores={area:new Map(),sync:new Map([['dailyRecord:2026-09-11',{key:'dailyRecord:2026-09-11',entityType:'dailyRecord',entityId:'2026-09-11',op:'delete',updatedAt:'2026-09-17T07:00:00.000Z'}]]),tombstones:new Map([['dailyRecord:2026-09-12',{key:'dailyRecord:2026-09-12',entityType:'dailyRecord',entityId:'2026-09-12',deletedAt:'2026-09-17T07:30:00.000Z',updatedAt:'2026-09-17T07:30:00.000Z'}]]),reflection:new Map(),daily:new Map([['2026-09-10',day('2026-09-10','2026-09-16T06:00:00.000Z')],['2026-09-11',day('2026-09-11','2026-09-16T06:00:00.000Z')],['2026-09-12',day('2026-09-12','2026-09-16T06:00:00.000Z')]]),summary:new Map(),session:new Map(),meta:new Map()};
-const legacy=createHarness(legacyLocal,legacyStores);
-const migration=await legacy.app.compatibility.migrateDeletionState();
-assert.equal(migration.status,'migrated');
-assert.equal(legacyStores.sync.size,0);assert.equal(legacyStores.tombstones.size,0,'legacy distributed-sync stores become inert after verified conversion');
-assert.equal(legacyLocal.has('syncEmergency'),false,'legacy syncEmergency is retired only after conversion');
-for(const date of ['2026-09-10','2026-09-11','2026-09-12'])assert.equal(legacyStores.daily.has(date),false,`legacy pending delete must not resurrect ${date}`);
-const legacyLedger=await legacy.app.deletionRecovery.savedDays();
-assert.deepEqual(Array.from(legacyLedger,row=>String(row.date)),['2026-09-10','2026-09-11','2026-09-12']);
-assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
+// An unavailable/unknown journal is never treated as an empty queue.
+{
+  const fixture=createHarness(),date='2026-09-17',at='2026-09-17T11:00:00.000Z';
+  await fixture.app.dailyRecords.save(day(date));
+  const entry={key:'dailyRecord:'+date,kind:'dailyRecord',id:date,deletedAt:at};
+  const current={format:'study-director.deletion-recovery',version:1,updatedAt:at,entries:[entry]};
+  for(const unknown of [null,{...current,version:2},{...current,format:'other'},{...current,entries:[entry,null]}]){
+    fixture.sharedLocal.set('deletionRecovery',unknown);
+    assert.throws(()=>fixture.app.deletionRecovery.pending(),/pending deletion recovery/i);
+    assert.equal(await fixture.app.deletionRecovery.flush(),false);
+    await assert.rejects(fixture.app.dailyRecords.remove(date),/pending deletion recovery/i);
+    assert.ok(fixture.stores.daily.has(date),'an unrecognized record cannot authorize deletion');
+    assert.equal(fixture.sharedLocal.get('deletionRecovery'),unknown,'refusal leaves the entire record untouched');
+  }
+  fixture.sharedLocal.set('deletionRecovery',current);
+  assert.equal(await fixture.app.deletionRecovery.flush(),true,'the current envelope still replays');
+  assert.equal(fixture.stores.daily.has(date),false);
+  assert.equal(fixture.sharedLocal.has('deletionRecovery'),false);
+}
+{
+  const fixture=createHarness(),unknown={...currentRecovery,version:currentRecovery.version+1};
+  fixture.sharedLocal.set('recovery',unknown);
+  await assert.rejects(fixture.app.activeSession.load(),/browser copy was preserved/);
+  assert.equal((await fixture.app.maintenance.run({force:true})).status,'failed');
+  assert.equal((await fixture.app.activeSession.clear()).ok,false);
+  assert.equal((await fixture.app.activeSession.save(session,{emergency:true})).storage.idb,true,'an independent canonical save can succeed');
+  assert.equal(fixture.sharedLocal.get('recovery'),unknown,'replay, deletion and saving cannot erase an unreadable session rescue');
+}
+// A session brought in by sync or restore can carry a lower revision than the
+// flush made here just before it. Saved after that flush, it is the session:
+// the flush's rescue copy must not outlive it and win the next load.
+{
+  const fixture=createHarness();
+  const flushed={...session,revision:500,scheduleText:'08:00 30 Flushed here',updatedAt:'2026-09-17T11:30:00.000Z'};
+  const arrived={...session,revision:400,scheduleText:'08:00 30 Arrived by sync',updatedAt:'2026-09-17T11:29:00.000Z'};
+  const first=fixture.app.activeSession.save(flushed,{emergency:true});
+  assert.equal(fixture.sharedLocal.get('recovery')?.revision,500,'the flush writes its rescue copy at once');
+  const flushedCopy=structuredClone(fixture.sharedLocal.get('recovery'));
+  const second=fixture.app.activeSession.save(arrived,{strictDurability:true});
+  assert.equal((await first).storage.idb,true);assert.equal((await second).storage.idb,true);
+  assert.equal(fixture.sharedLocal.has('recovery'),false,'the later committed save retires the earlier rescue copy');
+  const loaded=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(loaded.value?.scheduleText,arrived.scheduleText,'the later save is what loads');
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,arrived.scheduleText);
+  // A later emergency save replaces a copy an earlier save left, whatever
+  // the revisions, and its commit retires it.
+  fixture.sharedLocal.set('recovery',flushedCopy);
+  const later={...session,revision:2,scheduleText:'08:00 30 Leaving the page',updatedAt:'2026-09-17T11:31:00.000Z'};
+  assert.equal((await fixture.app.activeSession.save(later,{emergency:true})).storage.idb,true);
+  assert.equal(fixture.sharedLocal.has('recovery'),false);
+  assert.equal((await fixture.app.activeSession.load(0,{strict:true})).value?.scheduleText,later.scheduleText);
+}
+// A tab without control (a second window beside the app in control) reads the
+// session in full but never reconciles it, and its read does not fail for that:
+// the tab in control reconciles. Seen 2026-11-22: a second Chrome tab's
+// Attachment Library failed with "App ownership is unavailable before
+// reconciling the active session".
+{
+  const controls={},fixture=createHarness(new Map(),null,controls);
+  const saved={...session,revision:10,scheduleText:'08:00 30 Saved',updatedAt:'2026-09-17T12:00:00.000Z'};
+  assert.equal((await fixture.app.activeSession.save(saved)).storage.idb,true);
+  controls.owned=false;
+  const plain=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(plain.ok,true);assert.equal(plain.error,null);
+  assert.equal(plain.value?.scheduleText,saved.scheduleText,'without control, a strict read returns the stored session');
+  const empty=createHarness(new Map(),null,{owned:false});
+  const none=await empty.app.activeSession.load(0,{strict:true});
+  assert.deepEqual([none.ok,none.value,none.error],[true,null,null],'without control, a strict read of no session is empty, not an error');
+  // The tab in control left a newer rescue copy: its emergency save wrote the
+  // copy, and the database write failed.
+  const rescue={...saved,revision:11,scheduleText:'08:00 30 Rescue copy',updatedAt:'2026-09-17T12:01:00.000Z'};
+  controls.owned=true;controls.failSessionWrite=true;
+  await fixture.app.activeSession.save(rescue,{emergency:true}).catch(()=>null);
+  controls.failSessionWrite=false;controls.owned=false;
+  assert.equal(fixture.sharedLocal.get('recovery')?.revision,11,'the rescue copy is kept while the database write failed');
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,saved.scheduleText);
+  const newer=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(newer.value?.scheduleText,rescue.scheduleText,'without control, the newer copy is what reads');
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,saved.scheduleText,'a tab without control writes nothing');
+  assert.equal(fixture.sharedLocal.get('recovery')?.revision,11,'a tab without control leaves the rescue copy to the tab in control');
+  controls.owned=true;
+  const owned=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(owned.value?.scheduleText,rescue.scheduleText);
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,rescue.scheduleText,'the tab in control reconciles the rescue copy into the database');
+  assert.equal(fixture.sharedLocal.has('recovery'),false,'and retires it');
+}
+{
+  const fixture=createHarness(),date='2026-09-17';
+  await fixture.app.dailyRecords.save(day(date));
+  const current=[fixture.stores.daily.get(date)],unknown=[...current,null];
+  fixture.sharedLocal.set('fallback',unknown);
+  assert.equal((await fixture.app.maintenance.run({force:true})).status,'failed');
+  await assert.rejects(fixture.app.dailyRecords.get(date),/fallback daily records contain an unrecognized entry/i);
+  assert.equal(fixture.sharedLocal.get('fallback'),unknown,'maintenance preserves the entire unreadable fallback');
+  fixture.sharedLocal.set('fallback',current);
+  assert.equal((await fixture.app.maintenance.run({force:true})).status,'completed');
+  assert.equal(fixture.sharedLocal.get('fallback').length,0,'current fallback can still replay and retire');
+}
+{
+  const fixture=createHarness(new Map(),null,{rawLocal:new Map([['recovery','']])});
+  assert.equal((await fixture.app.activeSession.clear()).ok,false,'an empty stored payload is unreadable, not an absent copy');
+  assert.equal(fixture.sharedLocal.has('deletionRecovery'),false,'an unreadable copy must not be staged for deletion');
+}
 
 // Deletion ledgers stay bounded: past the limit only the oldest records go.
 // Listing applies the rule, so a full ledger never stops a backup, and data
@@ -186,7 +282,6 @@ assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
   const listed=await bounded.app.deletionRecovery.notes();
   assert.equal(listed.length,1000,'a full ledger lists its newest records');
   assert.deepEqual([0,1,2].map(index=>listed.some(entry=>entry.key===nth(index))),[false,false,false],'the oldest records are the ones left out');
-  assert.equal((await bounded.app.compatibility.verifyDeletionState()).ok,true,'a full ledger is not an integrity failure');
   assert.equal((await bounded.app.maintenance.run({force:true})).status,'completed');
   const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('noteDeletion:'));
   assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has(`noteDeletion:${nth(2)}`),false);
@@ -196,7 +291,7 @@ assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
   assert.equal(replaced.length,1000);assert.ok(replaced.some(entry=>entry.key===noteId('newest')),'a new deletion is always kept');assert.equal(replaced.some(entry=>entry.key===nth(3)),false);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,noteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,legacySyncStateMigrated:true,normalWritesUseNoSyncStores:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,noteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,normalWritesUseNoSyncStores:true},null,2));
 
 // Servicing an older request cannot retire a newer request for the same entity.
 // The second async database read observes a foreground save followed by a

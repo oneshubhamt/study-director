@@ -102,15 +102,17 @@ registry.define('ownership',1,()=>{
     }
     function readOwner(){
       const owner=local.getJson(config.storageKey,null);
-      return owner&&typeof owner==='object'&&(owner.version===1||owner.version===2)&&owner.tabId&&owner.claimId?owner:null;
+      return owner?.version===2&&Object.keys(owner).length===5&&typeof owner.tabId==='string'&&owner.tabId&&
+        typeof owner.pageId==='string'&&owner.pageId&&typeof owner.claimId==='string'&&owner.claimId&&
+        Number.isFinite(owner.expiresAt)?owner:null;
     }
-    function expiresAt(owner){return owner&&typeof owner==='object'?Number(owner.expiresAt)||0:0;}
-    function isSelf(owner){return !!(owner&&owner.tabId===tabId&&(owner.version===1||owner.pageId===pageId));}
+    function expiresAt(owner){return owner?.expiresAt??0;}
+    function isSelf(owner){return !!(owner&&owner.tabId===tabId&&owner.pageId===pageId);}
     function otherActive(owner=readOwner(),now=env.now()){
       return !!(owner&&!isSelf(owner)&&expiresAt(owner)>now);
     }
     function ownersMatch(a,b){
-      return !!(a&&b&&a.tabId===b.tabId&&String(a.pageId||'')===String(b.pageId||'')&&a.claimId===b.claimId);
+      return !!(a&&b&&a.tabId===b.tabId&&a.pageId===b.pageId&&a.claimId===b.claimId);
     }
     function removeIfMatches(owner){
       if(!ownersMatch(readOwner(),owner))return false;
@@ -136,8 +138,8 @@ registry.define('ownership',1,()=>{
     async function completePrimaryHydration(){
       const owner=readOwner();
       if(state!==OWNERSHIP_STATES.HYDRATING||!isSelf(owner)||owner.claimId!==claimId||!fenceValid())return;
-      // Keep ordinary mutation disabled while deferred compatibility work finishes.
-      // Compatibility writers use explicit allowHydrating write tokens, so an
+      // Keep ordinary mutation disabled while canonical hydration finishes.
+      // Hydration writes use explicit allowHydrating write tokens, so an
       // unrelated UI/editor write cannot slip into this takeover window.
       await hooks.finalizeHydration();
       const verified=readOwner();
@@ -250,7 +252,7 @@ registry.define('ownership',1,()=>{
       const promise=new Promise(done=>{resolve=done;});
       const timer=env.setTimeout(()=>resolveProbe(false),config.probeMs);
       probePending={probeId,owner,promise,resolve,timer};
-      post({type:'owner-probe',probeId,targetClaimId:owner.claimId,targetPageId:owner.pageId||''});
+      post({type:'owner-probe',probeId,targetClaimId:owner.claimId,targetPageId:owner.pageId});
       return promise;
     }
     function acquireWebLock(force=false,hydrate=true){
@@ -341,9 +343,9 @@ registry.define('ownership',1,()=>{
           channel=new win.BroadcastChannel(config.channelName);
           channel.onmessage=event=>{
             const message=event&&event.data;
-            if(!message||(message.pageId&&message.pageId===pageId))return;
+            if(typeof message?.pageId!=='string'||!message.pageId||message.pageId===pageId)return;
             if(message.type==='owner-probe'&&message.probeId){
-              if(canMutate()&&(!message.targetClaimId||message.targetClaimId===claimId))post({type:'owner-alive',probeId:message.probeId});
+              if(canMutate()&&message.targetPageId===pageId&&message.targetClaimId===claimId)post({type:'owner-alive',probeId:message.probeId});
               return;
             }
             if(message.type==='owner-alive'&&probePending&&message.probeId===probePending.probeId){resolveProbe(true);return;}

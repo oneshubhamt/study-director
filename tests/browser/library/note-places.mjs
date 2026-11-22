@@ -107,14 +107,69 @@ try{
     // A new, empty note says how tags and links are made.
     document.getElementById('library-note-add').click();box=await dialog();const hintName=box.querySelector('.interaction-input');hintName.value='Hinted';hintName.dispatchEvent(new Event('input',{bubbles:true}));box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(200);
     out.hint=document.querySelector('#library-notes-editor .library-notes-textarea')?.getAttribute('placeholder');
+    // Support Activities and a deleted note open their own menus the same
+    // way, never the browser's: the shared note only what applies to it, a
+    // deleted note Restore and Delete forever. The drawer's open arrow points
+    // up, where its list opens.
+    const items=list=>[...list.querySelectorAll('.library-note-menu-item')].map(item=>item.id.replace('library-note-',''));
+    d.AppData.notes.update('support activities','Support Activities','Shared text','');
+    for(const [key,label] of [['to delete','To delete'],['gone','Gone']])d.AppData.notes.update(key,label,'Soon deleted','');
+    await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(250);
+    // Deleted as a person does, from the note's ⋯ menu: it goes to Recently deleted.
+    for(const key of ['to delete','gone']){row(key).click();await wait(150);document.getElementById('library-note-actions').click();await wait(100);document.getElementById('library-note-delete').click();await until(()=>!row(key));await wait(150);}
+    document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    const support=row('support activities'),supportRect=support.getBoundingClientRect();
+    out.supportPrevented=!support.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:supportRect.left+40,clientY:supportRect.top+10}));
+    menu=await until(()=>{const list=document.querySelector('.library-note-context-menu');return list&&!list.hidden&&list.querySelector('.library-note-menu-item')?list:null;});
+    out.supportMenu={label:menu.getAttribute('aria-label'),items:items(menu)};
+    // Notes inside Support Activities: New note inside from its menu; such a
+    // note has the ordinary menu. The open shared note has a ⋯ menu too.
+    menu.querySelector('#library-note-new-inside').click();box=await dialog();
+    const inside=box.querySelector('.interaction-input');inside.value='Gym log';inside.dispatchEvent(new Event('input',{bubbles:true}));
+    out.supportNew=box.querySelector('.interaction-preview').textContent;
+    box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(200);
+    out.supportNewOpen=document.querySelector('#library-notes-list .active')?.dataset.noteKey;
+    d.AppData.notes.update('support activities > gym log','Support Activities > Gym log','Sets and reps','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(200);
+    out.supportChild={after:keys()[keys().indexOf('support activities')+1],stored:!!d.AppData.notes.get('support activities > gym log')};
+    document.querySelector('.library-note-context-menu')?.hidePopover?.();menu=await open('support activities > gym log');out.childMenu=items(menu);document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    row('support activities').click();await wait(150);document.getElementById('library-note-actions').click();await wait(100);
+    out.supportDots=[...document.querySelectorAll('.library-note-menu')].filter(list=>!list.hidden&&!list.classList.contains('library-note-context-menu')).flatMap(list=>items(list));
+    document.getElementById('library-note-actions').click();await wait(100);
+    // A plan Area with no note cannot go inside Support Activities; a written
+    // note used as a plan Area can, and the plan keeps its Area.
+    const moveIntoSupport=async key=>{
+      row(key).click();await wait(150);document.getElementById('library-note-actions').click();await wait(100);document.getElementById('library-note-move').click();box=await dialog();
+      (await until(()=>box.querySelector('.note-place-option[data-key="support activities"]'))).click();await wait(80);
+      return {preview:box.querySelector('.interaction-preview').textContent,planBox:box.querySelector('.interaction-checks')?(box.querySelector('.interaction-checks').hidden?'hidden':'shown'):'none'};
+    };
+    out.areaIntoSupport=await moveIntoSupport('botany');
+    box.querySelector('.interaction-actions .primary').click();await wait(100);
+    out.areaIntoSupport.refused={open:box.open,error:box.querySelector('.interaction-error')?.textContent};box.querySelector('[data-interaction-cancel]').click();await until(()=>!box.open);
+    d.AppData.notes.update('botany','Botany','Plant notes','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(200);
+    out.noteIntoSupport=await moveIntoSupport('botany');
+    box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(400);
+    out.noteIntoSupport.after={area:d.TimerState.tasks[0]?.area,moved:!!d.AppData.notes.get('support activities > botany'),status:document.getElementById('notes-status').textContent};
+    // The plan editor refuses a work block's Area inside Support Activities.
+    document.getElementById('plan-input').value=start+' | 20 | Gym log | work | Support Activities > Gym | pages | 10';
+    out.workArea={applied:await d.applySchedule({skipNotify:true}),area:d.TimerState.tasks[0]?.area,status:document.getElementById('plan-status').textContent};
+    document.querySelector('.library-note-context-menu')?.hidePopover?.();
+    const toggle=document.getElementById('library-notes-trash-toggle');toggle.click();await wait(150);
+    out.trashArrow=getComputedStyle(toggle,'::before').content;
+    const trashRow=await until(()=>[...document.querySelectorAll('#library-notes-trash-list [data-trash-key]')].find(item=>/To delete/.test(item.textContent)));
+    out.trashNoSelect=getComputedStyle(trashRow).userSelect;
+    const trashRect=trashRow.getBoundingClientRect();
+    out.trashPrevented=!trashRow.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:trashRect.left+40,clientY:trashRect.top+10}));
+    menu=await until(()=>{const list=document.querySelector('.library-note-context-menu');return list&&!list.hidden&&list.querySelector('#library-note-restore')?list:null;});
+    out.trashMenu={label:menu.getAttribute('aria-label'),items:items(menu)};
+    menu.querySelector('#library-note-restore').click();out.restoredFromMenu=await until(()=>!!d.AppData.notes.get('to delete'),3000).catch(()=>false);
     return out;
   })()`);
   // Real input, not a synthetic event: the browser closes a light-dismiss menu
   // on the release of a press that began before it opened. macOS and Linux
   // send contextmenu with the right button still down, and a long press fires
   // under the finger, so the menu must still be open after the release.
-  const realMenu=async(press,release)=>{
-    const at=await page.evaluate(`(async()=>{const d=__PWA6;document.querySelector('.library-note-context-menu')?.hidePopover?.();await new Promise(r=>setTimeout(r,100));const row=document.querySelector('#library-notes-list [data-note-key="gs2"]');row.scrollIntoView({block:'center'});const rect=row.getBoundingClientRect();return {x:Math.round(rect.left+40),y:Math.round(rect.top+rect.height/2)};})()`);
+  const realMenu=async(press,release,selector='#library-notes-list [data-note-key="gs2"]')=>{
+    const at=await page.evaluate(`(async()=>{const d=__PWA6;document.querySelector('.library-note-context-menu')?.hidePopover?.();await new Promise(r=>setTimeout(r,100));const row=document.querySelector(${JSON.stringify(selector)});row.scrollIntoView({block:'center'});const rect=row.getBoundingClientRect();return {x:Math.round(rect.left+40),y:Math.round(rect.top+rect.height/2)};})()`);
     await press(at);await new Promise(resolve=>setTimeout(resolve,650));await release(at);await new Promise(resolve=>setTimeout(resolve,400));
     return page.evaluate(`(()=>{const menu=document.querySelector('.library-note-context-menu');return menu&&!menu.hidden&&menu.matches(':popover-open')?menu.getAttribute('aria-label'):null;})()`);
   };
@@ -122,6 +177,11 @@ try{
   const realRightClick=await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at));
   const touch=(type,{x,y})=>page.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:[{x,y,id:1}]});
   const realLongPress=await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at));
+  // The same, for real, on Support Activities and on a deleted note (Gone is
+  // still in the open Recently deleted list).
+  const supportRow='#library-notes-list [data-note-key="support activities"]',trashRow='#library-notes-trash-list [data-trash-key]';
+  const realSupport=[await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at),supportRow),await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at),supportRow)];
+  const realTrash=[await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at),trashRow),await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at),trashRow)];
   // Deleting a tag while typing takes it out of the tag row by itself (no
   // other redraw): Physics holds the only #formula.
   await page.evaluate(`(async()=>{document.querySelector('.library-note-context-menu')?.hidePopover?.();document.querySelector('#library-notes-list [data-note-key="physics"]').click();await new Promise(r=>setTimeout(r,300));})()`);
@@ -135,6 +195,28 @@ try{
   assert.equal(tagsAfter.includes('#formula'),false,'deleting the only #formula takes it out of the tag row as you type');
   assert.equal(realRightClick,'Actions for GS2','a real right-click leaves the menu open after the button is released');
   assert.equal(realLongPress,'Actions for GS2','a real long press leaves the menu open after the finger lifts');
+  assert.deepEqual(result.supportMenu,{label:'Actions for Support Activities',items:['new-inside','export-one','print']},'Support Activities shows only what applies to the shared note');
+  assert.equal(result.supportNew,'Creates Support Activities › Gym log.','New note inside from the Support Activities menu');
+  assert.equal(result.supportNewOpen,'support activities > gym log');
+  assert.deepEqual(result.supportChild,{after:'support activities > gym log',stored:true},'a note inside Support Activities sits under it');
+  assert.deepEqual(result.childMenu,['rename','move','new-inside','versions','export-one','print','delete'],'a note inside Support Activities has the ordinary menu');
+  assert.deepEqual(result.supportDots,['new-inside','export-one','print'],'the open shared note has a ⋯ menu with the same actions');
+  const insideRefusal='This is an Area of today’s plan, and a work block’s Area can’t be inside Support Activities. Choose another place.';
+  assert.deepEqual(result.areaIntoSupport,{preview:insideRefusal,planBox:'none',refused:{open:true,error:insideRefusal}},'a plan Area with no note cannot go inside Support Activities');
+  assert.equal(result.noteIntoSupport.planBox,'hidden','inside Support Activities, the tick box to rename it in the plans is hidden');
+  assert.equal(result.noteIntoSupport.preview,'Becomes Support Activities › Botany. Today’s plan keeps the Area “Botany”: a work block’s Area can’t be inside Support Activities.');
+  assert.equal(result.noteIntoSupport.after.area,'Botany','the plan keeps its Area');assert.equal(result.noteIntoSupport.after.moved,true);
+  assert.match(result.noteIntoSupport.after.status,/Moved to “Support Activities › Botany”\. Today’s plan still uses the old name\./u);
+  assert.equal(result.workArea.applied,false,'the plan editor refuses a work block Area inside Support Activities');assert.equal(result.workArea.area,'Botany');
+  assert.match(result.workArea.status,/“Gym log” is a work block, so its Area can’t be “Support Activities > Gym”/u);
+  assert.equal(result.supportPrevented,true,'right-click on Support Activities opens the app menu, not the browser one');
+  assert.deepEqual(result.trashMenu,{label:'Actions for To delete',items:['restore','forget']},'a deleted note offers Restore and Delete forever');
+  assert.equal(result.trashPrevented,true,'right-click on a deleted note opens the app menu, not the browser one');
+  assert.equal(result.restoredFromMenu,true,'Restore from the menu brings the note back');
+  assert.equal(result.trashNoSelect,'none','a long press on a deleted note selects no text (the same rule hides the system callout on Safari)');
+  assert.equal(result.trashArrow,'"▴ "','the open drawer\'s arrow points up, where its list opens');
+  assert.deepEqual(realSupport,['Actions for Support Activities','Actions for Support Activities'],'a real right-click and long press on Support Activities');
+  assert.deepEqual(realTrash,['Actions for Gone','Actions for Gone'],'a real right-click and long press on a deleted note');
   assert.equal(result.count,'4','the count is of real notes: GS2, Polity, Physics, Rivers');
   assert.equal(result.newDefault,'Creates GS2 › Rights.','New starts inside the open note');
   assert.equal(result.newPicked,'Creates Physics › Rights.','Change picks another place');

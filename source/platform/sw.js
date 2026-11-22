@@ -13,19 +13,6 @@ const MAX_SHELL_CACHES=3,MAX_CLIENTS=128;
 const RELEASE_META_URL=new URL('./__sd_pwa_release__',self.registration.scope).href;
 const CLIENT_STATE_PREFIX=new URL('./__sd_pwa_clients/',self.registration.scope).href;
 let retirement=null,lastRetirementAt=0;
-// Temporary compatibility companion for the Service Worker execution realm.
-// Retire this object with the main CompatibilityFacade once every supported
-// installed page has crossed the L9 updater baseline.
-const CompatibilityFacade=Object.freeze((()=>{
-  const bridgeCache=CACHE_IDENTITIES.updateBridge;
-  const recoveryCache=CACHE_IDENTITIES.updateRecoveryPrefix+RELEASE_ID;
-  return Object.freeze({
-    async installBridgeRequired(){return !!self.registration.active&&!(await caches.has(bridgeCache));},
-    async prepareBridge(){await caches.open(bridgeCache);await caches.open(recoveryCache);},
-    async prepareCurrent(){await caches.open(bridgeCache);},
-    recoveryHandoff:()=>caches.has(recoveryCache)
-  });
-})());
 const PRECACHE=Object.freeze(JSON.parse('@@SD_PWA_ASSET_MANIFEST@@'));
 const PRECACHE_CONCURRENCY=8;
 const resolveAssets=assets=>new Map(assets.map(asset=>[
@@ -100,10 +87,10 @@ function scopedClient(client){
   try{const url=new URL(client.url),scope=new URL(self.registration.scope);return url.origin===scope.origin&&url.pathname.startsWith(scope.pathname);}catch{return false;}
 }
 async function shellMetadata(name){
-  const cache=await caches.open(name),stored=await cache.match(RELEASE_META_URL);
-  if(stored){const value=await stored.json();if(typeof value.buildId==='string')return value;}
-  const index=await cache.match(INDEX_URL),html=index?await index.text():'';
-  return {buildId:html.match(/<meta\s+name="study-director-build"\s+content="([^"]+)"/u)?.[1]||'',assetId:html.match(/<meta\s+name="study-director-assets"\s+content="([^"]+)"/u)?.[1]||'',state:'legacy'};
+  const stored=await caches.match(RELEASE_META_URL,{cacheName:name});
+  if(!stored)return {};
+  const value=await stored.json();
+  return typeof value?.assetId==='string'&&['installed','active'].includes(value.state)?value:{};
 }
 async function cleanupOldShellCaches({force=false}={}){
   if(retirement)return retirement;
@@ -112,7 +99,7 @@ async function cleanupOldShellCaches({force=false}={}){
   retirement=(async()=>{
     const windows=(await clients.matchAll({type:'window',includeUncontrolled:true})).filter(scopedClient);
     if(windows.length>MAX_CLIENTS)return {state:'deferred',reason:'client-limit'};
-    const control=await caches.open(CACHE_IDENTITIES.updateBridge),liveIds=new Set(windows.map(client=>client.id)),assets=new Set();let unknown=false;
+    const control=await caches.open(CACHE_IDENTITIES.updateControl),liveIds=new Set(windows.map(client=>client.id)),assets=new Set();let unknown=false;
     for(const client of windows){
       const stored=await control.match(CLIENT_STATE_PREFIX+encodeURIComponent(client.id)),state=stored?await stored.json():null;
       if(!state?.ready||typeof state.assetId!=='string'){unknown=true;postToClient(client,{type:'SD_PWA_CLIENT_STATE_REQUEST',releaseId:RELEASE_ID});}
@@ -125,7 +112,7 @@ async function cleanupOldShellCaches({force=false}={}){
     if([...assets].some(asset=>asset!==ASSET_ID&&!rows.some(row=>row.assetId===asset)))return {state:'deferred',reason:'unknown-client-release'};
     // Keep one recent unused generation for history/BFCache return. Live
     // generations remain pinned; installations stop at the cache cap.
-    const previous=[...assets].some(asset=>asset!==ASSET_ID)?'':rows.filter(row=>(row.assetId&&row.assetId!==ASSET_ID||!row.assetId&&row.buildId)&&row.state!=='installed').sort((a,b)=>(Number(b.activatedAt)||0)-(Number(a.activatedAt)||0))[0]?.name;
+    const previous=[...assets].some(asset=>asset!==ASSET_ID)?'':rows.filter(row=>row.assetId&&row.assetId!==ASSET_ID&&row.state==='active').sort((a,b)=>(Number(b.activatedAt)||0)-(Number(a.activatedAt)||0))[0]?.name;
     const removed=[];
     for(const row of rows){
       if(row.name===previous||assets.has(row.assetId)&&row.assetId!==ASSET_ID)continue;
@@ -161,21 +148,15 @@ async function retainedAsset(url,request){
 self.addEventListener('install',event=>{
   event.waitUntil((async()=>{
     try{await installRelease();}catch(error){try{await notifyClients({type:'SD_PWA_INSTALL_FAILED',releaseId:RELEASE_ID,reason:error.code==='SD_PWA_CACHE_LIMIT'?'cache-limit':'asset-unavailable'},{includeUncontrolled:true});}catch{}throw error;}
-    const legacyBridgeRequired=await CompatibilityFacade.installBridgeRequired();
-    if(legacyBridgeRequired){
-      await CompatibilityFacade.prepareBridge();
-      await self.skipWaiting();
-    }else if(!self.registration.active)await self.skipWaiting();
+    if(!self.registration.active)await self.skipWaiting();
     else await notifyClients({type:'SD_PWA_UPDATE_AVAILABLE',releaseId:RELEASE_ID},{includeUncontrolled:true});
   })());
 });
 
 self.addEventListener('activate',event=>{
   event.waitUntil((async()=>{
-    const recoveryHandoff=await CompatibilityFacade.recoveryHandoff();
-    await CompatibilityFacade.prepareCurrent();
+    await caches.open(CACHE_IDENTITIES.updateControl);
     try{const cache=await caches.open(CACHE_NAME);await cache.put(RELEASE_META_URL,new Response(JSON.stringify({releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID,state:'active',activatedAt:Date.now()}),{headers:{'Content-Type':'application/json'}}));}catch{}
-    if(recoveryHandoff)return;
     await clients.claim();
     await notifyClients({type:'SD_PWA_ACTIVATED',releaseId:RELEASE_ID},{includeUncontrolled:true});
   })());
@@ -195,7 +176,7 @@ self.addEventListener('message',event=>{
   }
   if(message.type==='SD_PWA_CLIENT_STATE'&&event.source?.id&&scopedClient(event.source)&&typeof message.assetId==='string'&&/^[a-f0-9]{24}$/u.test(message.assetId)&&message.ready===true){
     event.waitUntil((async()=>{
-      const cache=await caches.open(CACHE_IDENTITIES.updateBridge);
+      const cache=await caches.open(CACHE_IDENTITIES.updateControl);
       await cache.put(CLIENT_STATE_PREFIX+encodeURIComponent(event.source.id),new Response(JSON.stringify({assetId:message.assetId,ready:true}),{headers:{'Content-Type':'application/json'}}));
       await cleanupOldShellCaches({force:true});
     })().catch(()=>{}));

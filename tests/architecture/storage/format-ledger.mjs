@@ -6,7 +6,7 @@ import {SYNCED_RECORDS,LOCAL_RECORDS,SYNCED_FORMAT_LEDGER,CURRENT_SYNCED_FORMATS
 // Any change to a form that travels between devices raises the versions an
 // older build checks first, so that build keeps the new data, uploads
 // nothing over it and asks for an update, instead of misreading it.
-const HOW='Raise the backup and repository-manifest versions (and the claim version for the claim), read the older form through the compatibility layer, and add a row to contracts/format-ledger.mjs (docs/areas/data-and-storage.md#changing-a-synced-form).';
+const HOW='Raise the backup and repository-manifest versions (and the claim version for the claim), explicitly define rollout, and update the current row to contracts/format-ledger.mjs (docs/areas/data-and-storage.md#changing-a-synced-form).';
 const read=file=>fs.readFileSync(file,'utf8');
 const number=(source,pattern,label)=>{const match=pattern.exec(source);assert.ok(match,`${label} not found`);return Number(match[1]);};
 const manifest=number(read('source/core/managed-repository.js'),/REPOSITORY_MANIFEST_VERSION=(\d+)/u,'Repository manifest version');
@@ -19,6 +19,7 @@ assert.deepEqual([...SYNCED_RECORDS,...LOCAL_RECORDS].sort(),Object.keys(CURRENT
 // The last row is what the code writes now.
 const current=SYNCED_FORMAT_LEDGER.at(-1);
 assert.equal(current.release,'current');
+assert.equal(SYNCED_FORMAT_LEDGER.length,1,'Only the current canonical baseline ships.');
 assert.deepEqual({...current.records},{...CURRENT_SYNCED_FORMATS.records},`A synced form's version changed. ${HOW}`);
 assert.equal(current.personalData,personalData,`The personal-data version changed. ${HOW}`);
 assert.equal(current.backup,CURRENT_SYNCED_FORMATS.backup,`The backup version and the ledger disagree. ${HOW}`);

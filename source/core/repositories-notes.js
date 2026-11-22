@@ -186,29 +186,29 @@ const repository=(()=>{
     showSubjectNoteSaveWarning(detail);
   }
   const NOTE_RESCUE_FORMAT='study-director.note-rescue';
-  function normalizeRescueEntries(raw){
-    const out=KeyedRecord.create();
-    const source=raw&&raw.format===NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&raw.entries&&typeof raw.entries==='object'&&!Array.isArray(raw.entries)?raw.entries:{};
-    Object.entries(source).forEach(([rawKey,rawEntry])=>{
-      const key=String((rawEntry&&rawEntry.key)||rawKey||'');if(!key||!rawEntry)return;
-      if(rawEntry.deleted){const updatedAt=normalizeTimestamp(rawEntry.updatedAt,null);if(!NoteKeys.isKey(key))throw canonicalRuntimeError(`Note rescue ${key} is not in the current canonical schema.`);if(updatedAt)out[key]={key,deleted:true,updatedAt};return;}
-      const clean=sanitizeCurrentNote(rawEntry,key);if(!clean)throw canonicalRuntimeError(`Note rescue ${key} is not in the current canonical schema.`);out[key]=clean;
-    });
-    return out;
-  }
-  // Proof that the browser's emergency copy holds only current notes.
-  function verifyRescue(){
-    const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,null);
-    if(LocalStorageContract.lastError)return freeze({ok:false,rows:0,issues:freeze(['note-rescue-unreadable'])});
-    if(!raw)return freeze({ok:true,rows:0,issues:freeze([])});
-    let valid=false;
-    try{valid=raw.format===NOTE_RESCUE_FORMAT&&Number(raw.version)===1&&Number.isFinite(Date.parse(String(raw.updatedAt||'')))&&!!raw.entries&&typeof raw.entries==='object'&&Object.keys(normalizeRescueEntries(raw)).length===Object.keys(raw.entries).length&&jsonByteLength(raw)<=APP_LIMITS.noteRescueBytes;}catch{valid=false;}
-    return freeze({ok:valid,rows:1,issues:freeze(valid?[]:['note-rescue-invalid'])});
-  }
+  const NO_NOTE_RESCUE=Symbol('missing note rescue');
   function readIndependentRescue(){
-    const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,null),error=LocalStorageContract.lastError;
+    const raw=LocalStorageContract.getJson(STORAGE_KEYS.noteRescue,NO_NOTE_RESCUE),error=LocalStorageContract.lastError;
     if(error)throw error;
-    return normalizeRescueEntries(raw);
+    const out=KeyedRecord.create();
+    if(raw===NO_NOTE_RESCUE)return out;
+    const invalid=()=>canonicalRuntimeError('Note rescue is not in the current canonical schema. The browser copy was preserved.');
+    if(raw?.format!==NOTE_RESCUE_FORMAT||raw.version!==1||Object.keys(raw).length!==4||
+      typeof raw.updatedAt!=='string'||!Number.isFinite(Date.parse(raw.updatedAt))||
+      !raw.entries||typeof raw.entries!=='object'||Array.isArray(raw.entries))throw invalid();
+    for(const [key,entry] of Object.entries(raw.entries)){
+      if(!NoteKeys.isKey(key)||entry?.key!==key)throw invalid();
+      if(entry.deleted===true){
+        const updatedAt=normalizeTimestamp(entry.updatedAt,null);
+        if(!updatedAt||Object.keys(entry).length!==3||updatedAt!==entry.updatedAt)throw invalid();
+        out[key]=entry;
+      }else{
+        const clean=sanitizeCurrentNote(entry,key);
+        if(!clean)throw invalid();
+        out[key]=clean;
+      }
+    }
+    return out;
   }
   // Clearing keeps the copy's own ceiling; protecting new notes uses its share
   // of the emergency budget.
@@ -232,7 +232,11 @@ const repository=(()=>{
       entries[entry.key]=entry;
       if(jsonByteLength({format:NOTE_RESCUE_FORMAT,version:1,updatedAt:deletedAt,entries})>room){delete entries[entry.key];complete=false;}
     }
-    const written=Object.keys(entries).length?persistIndependentRescue(entries,room):true;
+    let written=true;
+    if(Object.keys(entries).length){
+      try{readIndependentRescue();written=persistIndependentRescue(entries,room);}
+      catch(error){written=false;AppDiagnostics.capture('notes.rescue-write',error,'warn');}
+    }
     rescueShortfall=candidates.filter(entry=>!entry.deleted&&(!written||!entries[entry.key])).map(entry=>entry.key);
     // A page-exit rescue can fail before its async IndexedDB save is known to
     // have failed. Name the exposed notes immediately, without claiming that
@@ -249,7 +253,10 @@ const repository=(()=>{
     return written&&complete;
   }
   function clearIndependentRescueKeys(keys){
-    const current=readIndependentRescue();if(LocalStorageContract.lastError)return false;let changed=false;
+    let current;
+    try{current=readIndependentRescue();}
+    catch(error){AppDiagnostics.capture('notes.rescue-read',error,'warn');return false;}
+    let changed=false;
     for(const rawKey of keys||[]){const key=String(rawKey||'');if(key&&Object.hasOwn(current,key)){delete current[key];changed=true;}}
     if(!changed)return true;
     if(!Object.keys(current).length)return LocalStorageContract.remove(STORAGE_KEYS.noteRescue);
@@ -621,6 +628,10 @@ const repository=(()=>{
   function flush(options={}){
     const strict=!!(options&&options.strict),backupCapture=options&&options.backupCapture===true;
     if(!appCanMutate())return strict?Promise.reject(new Error('notes cannot flush without write ownership')):lane.settled();
+    if(strict){
+      try{readIndependentRescue();}
+      catch(error){return Promise.reject(error);}
+    }
     const writeNow=()=>{if(dirtyKeys.size&&!lane.pending())lane.schedule();return lane.flush({backupCapture}).then(()=>true,()=>false);};
     const pending=writeNow();
     if(!strict)return pending;
@@ -873,7 +884,7 @@ const repository=(()=>{
       throw e;
     }
   }
-  return Object.freeze({get,update,updateValidatedRich,link,linkedFrom,remove,clearAll:clearAllNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,verifyRescue,recoverAfterStorageLoss});
+  return Object.freeze({get,update,updateValidatedRich,link,linkedFrom,remove,clearAll:clearAllNotes,load,reloadFresh,readFreshPayload,readFreshItems,flush,protectUnsaved,trash,restore,rename,trashSnapshot,purgeExpiredTrash,exportPayload,replace,reconcile,alignByTitle,normalizePayload,metadataSnapshot,searchSnapshot,size,failure,recoverAfterStorageLoss});
 })();
 
     return repository;

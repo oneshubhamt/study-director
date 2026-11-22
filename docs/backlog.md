@@ -18,6 +18,7 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 | 2026-11-05 | iPad | The same, on the first start of a new version (the phone was on the same version as before: so neither an update nor a sync is needed for it, only a cold start or the browser while the app is unused). Safari's data was never cleared; about 1 TB free; no cleaning tool ever used. |
 | 2026-11-08 | Phone, F24 | A block ran, the app was swiped away and the phone locked; 30 minutes later a cold start showed "Browser data was cleared". The session was rescued, the notice offered restore or keep, and the Saved Days (probably all) came back through the restore at Drive sign-in; what else was missing is not known. No other device in use, nothing that clears data used; F24 had worked for three or four opens before. Diagnostics (copied after the sync, so from a later page load: its `startedFresh=false` does not contradict the notice): bookkeeping `state=never`, Device Folder disconnected since 16:13:50 (the likely start), storage persisted. The phone was 97% full (about 125 of 128 GB) and the site used about 4.3 GB of a 15 GB quota. |
 | 2026-11-11 | Phone, F24 | The notice again at a cold start, two days after the last open (installed app, closed by a swipe); Drive's latest version came back in (4 versions, no conflicts). `databases=1` (no old database left beside the new one); attachment cleanup and Drive convergence paused with `reason=storage-reset`. F25's census was not on the phone yet. Usage then 0.25 MB of about 10 GB: the 4.3 GB went with the database, and the quota shrank with the phone's free space. |
+| 2026-11-17 | Device not stated, F29 | Diagnostics copied 01:17 UTC, after Drive had refilled the device. `Database this start: state=fresh, foundVersion=0, openedVersion=9`; `Profile storage: startedFresh=true, databases=1, scoped=false`, profile list present and listing this profile. **No "Database before last loss" line**, so either the loss record in localStorage was not written or this start was not counted as a loss. Drive sync at 01:15:07 restored the latest of 4 versions (16 objects, no conflicts; `startup-restore-recovery recovered=false`, so no interrupted-restore rollback). Storage: usage 12.9 MB of about 10.7 GB, persisted; census measured 6.3 MB, 6.5 MB unexplained, the browser's cache figure (11.2 MB) twice the measured caches (5.0 MB). 15 notes, 17 Saved Days, 7 attachments after the refill. `Format cleanup: state=unknown, retirementReady=false`; `google-drive formats: state=unknown, currentVersions=0` (the formats count was not filled in yet). |
 
 **Ruled out, and why.**
 
@@ -47,10 +48,20 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 4. Faster backups limit the damage whatever the cause: a loss costs only what has not reached Drive or the Device Folder yet (items 18 and 22 once stopped Drive backups for up to 30 minutes).
 5. Still to explain: why the phone on 11-05 showed no automatic recovery (perhaps nothing survived that said data had been there).
 
+**From the 2026-11-17 diagnostics, to check next.** Why no "Database before last loss" record was kept, although localStorage survived (`Local storage health` and the profile list are there). Simulated in Chromium on 2026-11-22: a database deleted while the app is closed keeps the record, also for a second loss with no cold start in between (each start writes its record once the tab controls the data, and its first write counts as data held). So the gap is in the device, not in the record's rules: Copy diagnostics on that device after the next loss. Whether the owner saw "Browser data was cleared" this time. The Drive formats row and Format cleanup belong to F29 (F30 has neither): read them on each device while it still runs F29.
+
 **Related.**
 
 - *No low-space warning:* browsers tell a web app only its quota (about 10.7 GB on the phone) and its own use, not the device's free space.
 - *Device Folder permission lost often on Android,* even between sessions on the same day (on the laptop it holds). Perhaps the same fault, since the chosen folder is remembered in the database; also check how Chrome on Android keeps folder permission between visits.
+
+### Kept versions that keep coming back (owner, 2026-11-16)
+
+After resolving every review on the iPad and on the laptop, they came back again and again, and the status badge's yellow dot came and went (the iPad had last been opened over a week before). Diagnostics then held a session kept at a handoff and a Saved Day kept as `saved-day-deletion` (one device deleted it, the other kept a copy; changed 8 Nov, kept again today). Not yet explained from the code; two leads:
+
+- Each review's default is "keep this device's". Resolved that way on both devices while they hold different versions, the difference remains, and a later sync can find it and keep it again under a new review.
+- Each Continue Here may keep a session for review when the two copies' decisions differ (`yield`, `hand-over`); the trace marks `session-kept-for-review` with its reason.
+- *Next:* Copy diagnostics on the device where a review reappears, right after it does (the "Status badge" line, the Kept version lines and `session-kept-for-review`), and note which item it is. Workaround: on one device choose "Use kept", so both hold the same version.
 
 ### Open
 
@@ -59,8 +70,8 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 - **14. Drive requests are slow on the phone:** 1–4 s each, about six in a row per upload, so a 10 KB upload takes 15–20 s; the catch-up after a bring-in downloaded the same 8 files again. Part of the Drive speed work below.
 - **15. Background work on phones** (decided for now): a backgrounded mobile page is frozen and no service worker can help (Drive sign-in lasts an hour without a server). No background service; any device that completes Drive cleanup tidies it for all.
 - **16. The app feels slow overall** (owner, 2026-11-05). Measure on the phone and iPad first (start-up, tab switches, Library, Plan, Execute, typing, dialogs, sync in the background), then fix the worst. Last among the bugs; includes observation 7.
-- **25. Attachments seen downloading on a cold open** (owner, 2026-11-16: laptop, phone and iPad, at a cold open and its first sync; perhaps uploading too). Not reproduced: in two-device tests, with and without a backup password, through cold opens, catch-ups and uploads after a cold open, each attachment moved once per device and never again (Drive objects are reused by fingerprint). The constant uploads fixed in F28 (item 27) may be what was seen. Next time: Copy diagnostics right after that first sync; its `provider-object-download-start` and `provider-object-upload-start` lines give each object's size, so attachment-sized ones show whether attachments really moved.
 - **26. Editor mount and unmount lifecycle** (owner, 2026-11-16: wanted; after F28 is confirmed on the devices, as its own pull request). One clear owner of when an editor mounts, stays and goes, in place of the runtime, the lifecycle step and each view each deciding part of it. F28 closed the gaps that showed (item 28); more may remain, such as the diary editor or a note open through a date change or a restore.
+- **A full local safety copy before every bring-in** (seen in the item 25 traces, 2026-11-16 and 17: `local-safety-capture` 478,780 and 955,832 bytes, attachments included). That work grows with the library, for every sync, even one that changes one note. To weigh with the Drive speed work.
 
 ### Fixed, to confirm on real devices
 
@@ -68,6 +79,8 @@ Each fix shipped in the build named, or in F25 if none is (the reports were seen
 
 | # | Fixed | Confirm on the devices |
 |---|---|---|
+| 25 | The download count is what is fetched, not attachments already here (F30) | a sync after another device changed a note: the panel shows a few KB, not the attachments' size |
+| Sign-in (open 28) | Signing in again goes straight to the profile's account (no account chooser, also after a reload); the card shows the sign-in and closes instead of "Checking Google Drive…" for up to 20 minutes; changes made while signed out go up at once; another account is refused before Drive is used; Disconnect signs only this device out, and pressed during a sync stops it safely instead of doing nothing (F30) | sign in again after the hour on the iPad and the Mac; Disconnect on one device leaves the others signed in. If a sign-in still hangs on Safari, Copy diagnostics at once (a pop-up that never answers keeps the request pending for 2 minutes) |
 | 1 | Applying a continued session no longer opens the Plan draft for editing | a real handoff |
 | 2 | The "earlier day not saved" reminder clears once any device's Saved Day holds the day | the morning after a handoff |
 | 3 | Kept versions: per-item merge of plans and settings, duplicates merged, the review shows the item, the device and when ("From iPad · Safari, changed 06 Nov, 21:40") | fewer, clearer reviews |
@@ -84,6 +97,16 @@ Each fix shipped in the build named, or in F25 if none is (the reports were seen
 | 24 | No "Previous study day needs review" after a saved day: Save Today pauses a running timer, only the device that ran the day asks, notes after the save leave it saved ([study-session.md](areas/study-session.md)) | a few mornings |
 | 27 | Typing no longer uploads to Drive every few seconds: one upload 20 minutes after the first change, within seconds of a key moment, at once on going to the background (F28, [backup-and-sync.md](areas/backup-and-sync.md)) | Drive activity while typing; Continue Here still quick |
 | 28 | A sync while typing keeps the editor and the cursor (Library note, reflection, Execute note); no raw `WG1:` text; today's reflection takes a click at once with no session (F28, [notes.md](areas/notes.md#which-editors-are-live)) | type while another device syncs; reopen after the app sat in the background |
+| Notes menus | Support Activities and Recently deleted rows open the app's menu on right-click and long press, never the browser's or a text selection: Support Activities New note inside, Export and Print, a deleted note Restore and Delete forever; the open drawer's arrow points up (F30, [notes.md](areas/notes.md)) | right-click and long press on both, on the iPad and the Mac |
+| Notes inside Support Activities | New note inside from its menu; such notes have the ordinary menu; a work block's Area can't be "Support Activities" or inside it, and support blocks keep any Area (F30, [notes.md](areas/notes.md)) | a note inside Support Activities on the iPad; the Plan editor refusing a work block with that Area |
+| Typing goes up after a pause | A note or a reflection being typed uploads 10 s after its last save, never while typing (the 20-minute limit still holds); a reflection typed on a day with no session no longer uploads every few seconds (F30, [backup-and-sync.md](areas/backup-and-sync.md)) | type a note on one device, see it on another within about 20 s |
+| Sync now in the profile panel | The Google Drive row has Sync now while signed in, beside a quieter Disconnect (F30, [status-indicator.md](areas/status-indicator.md)) | the iPad and the Mac |
+| Paste from Word, Apple Notes, Mail | Lists, quotes and tables at the start of a paste stay whole; Word's lists, bold and italic; `•` bullets; task lists as checklists; `###` as level 2 (F30, [notes.md](areas/notes.md)) | paste a list from Word, Apple Notes and Mail on the Mac and the iPad |
+| Review card readable in Director Light | The dark Review card's light text, written as plain rules; the heading names the day under review, not today (F30, [ui.md](areas/ui.md)) | Review in Director Light on the Mac and Android Chrome; a reflection for yesterday shows yesterday in the heading |
+| Insights opens with the entrance | A first Insights open now arrives with the same entrance as a reopen and every other pane, in every look, once its view replaces the loading panel (F30, [ui.md](areas/ui.md)) | open Insights first thing after starting the app, in Director, on the Mac and the phone |
+| Second window: attachments | A tab or window without control (the app open as a PWA and again in a Chrome tab) opens attachments instead of "Attachment operation failed: App ownership is unavailable before reconciling the active session" (F30, [data-and-storage.md](areas/data-and-storage.md#canonical-only-storage)) | the PWA in control and a Chrome tab: open an attachment in the tab |
+| Practice Pacer on a new day's Review | Review shows only the day's own Practice Pacer runs; yesterday's run no longer appears after a rollover and a new plan (F30, [study-session.md](areas/study-session.md)) | the phone the morning after a day with a Pacer run |
+| Day end with a day still loaded | A device that slept through 04:00 saves nothing and closes a covered day quietly (no "Study day auto-saved", no second version); a live one never re-saves a covered day or overwrites another device's Saved Day (F30, [study-session.md](areas/study-session.md)) | leave the laptop's app open overnight after Save Today; in the morning no "auto-saved" notice and no kept version on the phone |
 | Notes D | Support Activities stored under its own name and a fixed id, every copy converted (note, kept versions, browser copy, older backups and versions); backup files v26 and Drive versions 11, so older builds wait for an update; "Format cleanup" also checks the newest Continue Here claim (F29, [notes.md](areas/notes.md#how-notes-and-areas-fit-together)) | every device on F29 at about the same time; Support Activities reads normally; then Copy diagnostics, "Format cleanup" on each device |
 | Obs. 2 | Catch-up when Drive connects: a looping failed catch-up fixed (`2eaf3fe`), faster Drive backups (`5bbc008`), a Connect card showing each step on every tab (`eb8601d`; [status-indicator.md](areas/status-indicator.md#connect-google-drive-card)) | the iPad connecting Drive |
 
@@ -95,9 +118,18 @@ Each fix shipped in the build named, or in F25 if none is (the reports were seen
 4. **Test programme:** resume at step 4a.
 5. **The new backup machinery:** the review, options and requirements below, Device Folder included.
 
+## F30: canonical-only storage, on `refactor/background-coordination`
+
+The owner approved it on 2026-11-17: every device runs F29, and F30 reads only the current formats, F29's data included. The rules are in [data-and-storage.md](areas/data-and-storage.md#canonical-only-storage); the history is in git.
+
+- **What it reads.** Backup files v26, repository manifests v11, ownership claims v4 and the current local records. Older data is refused or held untouched; no converters, historical imports, folder moves or old theme names ship. The inert F29 `dailyRecordMigration` marker is ignored.
+- **Checked.** A real F29 database and F29 exports (encrypted too), a v11 manifest, F29's Drive markers and a Device Folder moved by F29 all open in F30. The release audit (2026-11-21) found two regressions from the strict readers and fixed both with tests: a sync or restore bringing in a session failed its read-back, and one whose attachments were already on the device failed. Fast suite, smoke and the six Drive journeys pass. Also in F30: items 25 and Sign-in in the table above.
+- **Before shipping.** Every device shows Format cleanup `ready` (Drive still held one older version on 11-17; otherwise remove that version from Version history after the update). After the update, the Profiles diagnostics line reads `observed` and the Device Folder shows no old folder.
+- **Not run.** The full promotion suite and real-device certification.
+
 ## Owner's observations (noted 2026-10-25)
 
-Status checked against the code and git history and confirmed by the owner on 2026-11-02. Done: 2 (to confirm, in the table above) and 6 (the notes audit, 2026-11-13; its open findings are under Notes below).
+Status checked against the code and git history and confirmed by the owner on 2026-11-02. Done: 2 (to confirm, in the table above), 6 (the notes audit, 2026-11-13; its open findings are under Notes below) and 9 (the migration code, removed in F30; see F30 below).
 
 | # | Item | Status | Evidence / what is left |
 |---|---|---|---|
@@ -106,7 +138,6 @@ Status checked against the code and git history and confirmed by the owner on 20
 | 5 | Audit the background services twice more (report only). | One of two done | An independent audit and fix programme (21 findings, P0–P6) finished on 2026-11-01 ([history.md](history.md)). The second pass is open. |
 | 7 | **Performance check** on a slow, throttled profile: start-up, tab switches, Library, Insights, typing in notes. | Partly | Insights now opens from an idle pre-computed model (`c24fc30`). The other surfaces have not been measured on a slow profile. |
 | 8 | **Backup speed and safety** for both Drive and the Device Folder. | Partly | Drive backups measured and made faster on 2026-11-01. Device Folder speed and restore speed not measured again. |
-| 9 | Remove the migration code (compatibility layer and Release B). | Waiting on the devices | F29 (Release A) is the last format change: every older form now converts at start or as it is read, and "Format cleanup" checks each (this device's data, the Device Folder's old folder, each location's versions and its newest claim). Release B (F30) deletes every compatibility entry, the old backup-file readers included (owner, 2026-11-16: none needed), once "Format cleanup" reads ready on every device in use ([backup-and-sync.md](areas/backup-and-sync.md#one-format)). Owner, 2026-11-07: retire within days, once every device runs the current build. The goal (owner): converters rewrite old records into the canonical shape and retire the old copies, so all compatibility code can then go, leaving one canonical data shape. All old-format reading sits in the compatibility layer (host, the marked blocks and the registry in `contracts/compatibility.mjs`); it reads only forms released builds wrote (sync baseline v3 with v1 day rows, claim v2 and the plain forms, restore journal v1–v5) and refuses forms only unreleased builds wrote. Until every device updates, a device on F22 or older cannot read a v4 ownership claim, so Continue Here between an updated and an older device can leave both running: update all devices before handing over. |
 | 10 | **Optional size work.** The plain deployment build is not minified; a minified one exists (`stage:firebase:minified`). | Deferred (owner, 2026-11-02) | Later: deploy the minified build, or minify only `wordgard.js`, with a full test run. |
 | 11 | **Whole-app quality pass.** Is the app clean, lean, elegant, efficient and reliable after this round of work? Is the notes system first-class? Measure memory over a long session and CPU and battery while idle and studying, then propose where to trim. | Open | Report only. |
 
@@ -162,14 +193,6 @@ The notes audit's findings A to D are done (D, Support Activities under its own 
 
 - **Real-device check of the notes work of 2026-11-13 to 16.** Not yet tried on Safari, the iPad or the phone: swiping the tag row, the line under each note and its "# Tag" picker, Rename from ⋯ (the fix for a menu handing focus back late), right-click and long press (no system callout or text selection on the rows), New and Move, pinch zoom in the image view, dropping files. One pass per device.
 
-## Kept versions that keep coming back (owner, 2026-11-16)
-
-After resolving every review on the iPad and on the laptop, they came back again and again, and the status badge's yellow dot came and went (the iPad had last been opened over a week before). Diagnostics then held a session kept at a handoff and a Saved Day kept as `saved-day-deletion` (one device deleted it, the other kept a copy; changed 8 Nov, kept again today). Not yet explained from the code; two leads:
-
-- Each review's default is "keep this device's". Resolved that way on both devices while they hold different versions, the difference remains, and a later sync can find it and keep it again under a new review.
-- Each Continue Here may keep a session for review when the two copies' decisions differ (`yield`, `hand-over`); the trace marks `session-kept-for-review` with its reason.
-- *Next:* Copy diagnostics on the device where a review reappears, right after it does (the "Status badge" line, the Kept version lines and `session-kept-for-review`), and note which item it is. Workaround: on one device choose "Use kept", so both hold the same version.
-
 ## Decided, not yet scheduled
 
 - **Better Smart merge** (`mergeThreeWay`). The owner will come back to it; until then, do not audit it or suggest changes.
@@ -184,6 +207,7 @@ After resolving every review on the iPad and on the laptop, they came back again
 - **Very large backups.** Measure restore of a very large library. Aggregate backup size and storage pressure on small devices are deferred until there is concrete evidence of a problem.
 - **Drive maintenance planning** can be expensive on a cold, paginated Drive inventory. Measure it with real Drive before building a resumable planning cursor.
 - **Duplicate local checkpoint captures**: an optimisation to make only if measurement shows it matters.
+- **An unreadable Continue Here claim stops hand-overs** (audit, 2026-11-21; F29 behaves the same). Unreadable upload markers and Device Folder locks age out after a day since F30; a claim cannot, because each new claim is numbered from the newest readable one. Unlikely (a claim is one small file written whole). Seen as Continue Here failing with "could not be verified safely". A fix changes how claims are numbered, so it needs its own design and the hand-over journeys.
 - **Large orchestration modules** (`backup-provider.js`, `backup.js`, `app.html`): no splitting by size alone; consolidate only proven duplication.
 
 ## Not yet checked

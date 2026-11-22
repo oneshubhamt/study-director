@@ -55,8 +55,21 @@ assert.doesNotMatch(coreCss,/text-transform:uppercase/u,'capitalisation is a typ
 assert.match(coreCss,/--sd-type-caps-tracking-scale:1;/u,'Director keeps its capitals tracking through the shared scale.');
 assert.match(glassCss,/--sd-type-caps-tracking-scale:0;/u,'Glass drops capitals tracking through the shared scale rather than per-selector patches.');
 
-assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] :is\(#pane-execute \.cd-card,#pane-review \.review-hero,#pane-plan \.si\.active \.si-card\)\{\s*color-scheme:dark;[\s\S]*?--sd-color-accent-primary:#e8ff00;/u,'Director Light heroes are dark instrument islands that re-declare the semantic roles their children read.');
-assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="light"\] :is\(#pane-execute \.cd-card,#pane-review \.review-hero\)\{\s*color-scheme:dark;/u,'Glass Light heroes are colour islands rather than recoloured light surfaces.');
+// No :is() holding a combinator ("#pane-review .review-hero",
+// ".ui-disclosure>summary"): Chrome 150 skipped such rules while it applied
+// plain ones on the same element, so Director Light's dark cards kept dark
+// text (owner, 2026-11-22). Lists of simple selectors inside :is() work.
+for(const [name,css] of [['core.css',coreCss],['glass.js',glassCss],['aurora.js',auroraCss]]){
+  for(const match of css.matchAll(/:is\(/gu)){
+    let depth=1,index=match.index+4;while(index<css.length&&depth){if(css[index]==='(')depth++;else if(css[index]===')')depth--;index++;}
+    const args=css.slice(match.index+4,index-1);
+    if(/^\)? \(see /u.test(args)||/^\) \(see/u.test(args))continue;
+    assert.doesNotMatch(args,/[^,\s]\s*[>+~]\s*\S|\S\s+[.#[a-zA-Z:]/u,`${name}: :is(${args.slice(0,80)}) holds a combinator; write it as a plain selector list`);
+  }
+}
+// A plain selector list, not :is() (owner's Chrome, 2026-11-22).
+assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #pane-execute \.cd-card,\nhtml\[data-theme="light"\]\[data-presentation="director-current"\] #pane-review \.review-hero,\nhtml\[data-theme="light"\]\[data-presentation="director-current"\] #pane-plan \.si\.active \.si-card\{\s*color-scheme:dark;[\s\S]*?--sd-color-accent-primary:#e8ff00;/u,'Director Light heroes are dark instrument islands that re-declare the semantic roles their children read.');
+assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="light"\] #pane-execute \.cd-card,\nhtml\[data-presentation="glass"\]\[data-theme="light"\] #pane-review \.review-hero\{\s*color-scheme:dark;/u,'Glass Light heroes are colour islands rather than recoloured light surfaces.');
 assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #pane-plan \.si\.active \.si-card:hover:not\(\.no-hover\)\{background:var\(--card-bg\)\}/u,'the dark active Plan row keeps its island background on hover so its light text stays readable.');
 assert.match(glassCss,/@property --sd-aurora-a\{syntax:"<color>"/u,'Glass aurora colours are registered so area moods interpolate.');
 assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::before\{--sd-aurora-a:/u,'each area sets its own Glass atmosphere.');
@@ -64,7 +77,8 @@ assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::bef
 // the document made every tab change restyle the whole page each frame.
 assert.doesNotMatch(glassCss,/@property --sd-aurora-[abcd]\{[^}]*inherits:true/u,'aurora colours must not inherit.');
 assert.match(glassCss,/html\[data-material="glass"\] body::before\{\s*transition:--sd-aurora-a/u,'the aurora glide runs on the background layer.');
-assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?if\(pane\.id==='pane-insights'&&\(!pane\.firstElementChild\|\|pane\.querySelector\('\.plugin-loading-panel'\)\)\)return;/u,'Insights arrives still only while it renders behind its loading panel; a kept view animates like any pane.');
+assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?const loading=\(\)=>!pane\.firstElementChild\|\|!!pane\.querySelector\(':scope>\.plugin-loading-panel'\);\n\s*if\(pane\.id!=='pane-insights'\|\|!loading\(\)\)\{settle\(\);return;\}/u,'a first Insights open keeps the entrance until its view replaces the loading panel.');
+assert.doesNotMatch(html,/function markPaneEntrance\(pane\)\{[^}]*?\)return;\n/u,'no pane skips its entrance.');
 assert.match(html,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\.sdArea=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
 assert.doesNotMatch(coreCss,/--row-name-color:rgba\(/u,'plan row names must not be dimmed with alpha below readable contrast.');
 

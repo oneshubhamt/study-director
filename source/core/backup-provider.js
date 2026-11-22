@@ -22,7 +22,7 @@ registry.define('backup-provider',1,input=>{
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
-  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','readSession','markCompleted','sharedBase','establishBase']);
+  const REPOSITORY_FIELDS=freeze(['manifestVersion','createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','readSession','markCompleted','sharedBase','establishBase']);
   function createRuntime(input){
     exactObject(input,['background','ports','repository'],'Backup provider input');
     const Background=exactObject(input.background,['contractVersion','createCoordinator','format','maintenance','maintenanceActionable'],'Backup provider repository-background dependency');
@@ -32,7 +32,7 @@ registry.define('backup-provider',1,input=>{
     for(const [name,fields] of Object.entries(PORT_FIELDS))exactObject(ports[name],fields,'Backup provider '+name+' port');
     for(const name of ['controller','exports','domain','ownership','environment','diagnostics'])requireFunctions(ports[name],PORT_FIELDS[name],'Backup provider '+name+' port');
     const RepositoryCheckpointPipeline=exactObject(input.repository,REPOSITORY_FIELDS,'Backup provider repository pipeline');
-    requireFunctions(RepositoryCheckpointPipeline,REPOSITORY_FIELDS.filter(key=>key!=='retention'),'Backup provider repository pipeline');
+    requireFunctions(RepositoryCheckpointPipeline,REPOSITORY_FIELDS.filter(key=>key!=='retention'&&key!=='manifestVersion'),'Backup provider repository pipeline');
     if(!RepositoryCheckpointPipeline.retention||!Object.isFrozen(RepositoryCheckpointPipeline.retention))throw new TypeError('Backup provider retention policy is invalid.');
     if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','notice','detail','outcome','locationLabel','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const APP_VERSION=ports.configuration.appVersion,BackupController=ports.controller,Exports=ports.exports,clampText=ports.domain.clampText,requireBackupMutationControl=ports.ownership.requireMutationControl;
@@ -44,16 +44,11 @@ registry.define('backup-provider',1,input=>{
   const VERIFIED_HISTORY_READ_CONCURRENCY=8;
   const RECENT_HISTORY_TTL_MS=30*1000;
   const VERIFIED_HISTORY_INTERPRETATION_VERSION='managed-history-v1:'+APP_VERSION;
-  const {publicationMaxAgeMs:PUBLICATION_MAX_AGE_MS,publicationRenewMs:PUBLICATION_RENEW_MS,publicationStaleMs:PUBLICATION_STALE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
+  const {publicationRenewMs:PUBLICATION_RENEW_MS,publicationStaleMs:PUBLICATION_STALE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticTypedMs:AUTOMATIC_TYPED_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
   const PROVIDER_RECOVERY_MAINTENANCE_POLL_MS=500,PROVIDER_RECOVERY_MAINTENANCE_YIELD_MS=MAINTENANCE_MAX_AGE_MS+PROVIDER_RECOVERY_MAINTENANCE_POLL_MS;
   const SESSION_CLAIM_FORMAT='study-director.active-session-claim',SESSION_CLAIM_VERSION=4,SESSION_CLAIM_MAX_BYTES=4096,SESSION_OWNER_PATTERN=/^inst_[a-z0-9_]{8,128}$/iu,SESSION_CLAIM_TOKEN_PATTERN=/^[a-f0-9]{64}$/u,SESSION_HANDOFF_TOKEN_PATTERN=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
   const MAINTENANCE_MIN_CHECKPOINT_DELETES=16,MAINTENANCE_MAX_CHECKPOINT_DELETES=128,MAINTENANCE_MAX_OBJECT_DELETES=48,PROVIDER_CONVERGENCE_BUSY_RETRY_MS=15*1000,PROVIDER_CONVERGENCE_RETRY_DELAYS=freeze([30*1000,2*60*1000,10*60*1000,30*60*1000]);
   const MAINTENANCE_POLICY=Background.maintenance;
-  // The formats of each location's kept versions, as its last cleanup left them.
-  const formatsByProvider=new Map();
-  // Whether the newest Continue Here claim each location holds is in the
-  // current form or an older one (a device on an older build made it).
-  const claimFormByProvider=new Map();
   // The versions each location's last complete scan could not read (by id).
   const unreadableByProvider=new Map();
   const sessionWatchByProvider=new Map(),ownCommitIds=new Set();
@@ -75,6 +70,7 @@ registry.define('backup-provider',1,input=>{
   // Connect, disconnect and Back up now report to the location they act on.
   let statusSource='';
   let busy=false;
+  const DISCONNECT_WAIT_MS=30*1000;
   let foregroundController=null;
   const presentation=ports.view.presentation;
   let foregroundPresentation=null,foregroundSource='',borrowedPresentation=false;
@@ -171,7 +167,7 @@ registry.define('backup-provider',1,input=>{
     const previous=repositoryScopeByProvider.get(id)||'',pending=maintenanceHooks?await maintenanceHooks.read(id):null,persistedScope=String(pending&&pending.repositoryScope||'');repositoryScopeByProvider.set(id,scope);
     const changed=!!previous&&previous!==scope,stalePersisted=!!pending&&persistedScope!==scope;if(!changed&&!stalePersisted)return false;
     if(changed)await discardProviderPublication(selected);
-    recentHistoryByProvider.delete(id);verifiedHistoryByProvider.delete(id);formatsByProvider.delete(id);unreadableByProvider.delete(id);providerConvergenceRetryAttempts.delete(id);providerBackground(selected).clearAllScheduled();claimFormByProvider.delete(id);
+    recentHistoryByProvider.delete(id);verifiedHistoryByProvider.delete(id);unreadableByProvider.delete(id);providerConvergenceRetryAttempts.delete(id);providerBackground(selected).clearAllScheduled();
     if(stalePersisted)await maintenanceHooks.clear(id,pending);
     OperationDiagnostics.mark('provider-repository-generation-reset',{provider:id,changed:true});return true;
   }
@@ -180,6 +176,9 @@ registry.define('backup-provider',1,input=>{
     label:clampText(config.label||'',40),
     prepare:typeof config.prepare==='function'?config.prepare:null,
     authorize:typeof config.authorize==='function'?config.authorize:null,
+    // verifyAccount: checks right after a sign-in that it is the account
+    // this profile syncs with (Drive), so a wrong one is refused at once.
+    verifyAccount:typeof config.verifyAccount==='function'?config.verifyAccount:null,
     backgroundAvailable:typeof config.backgroundAvailable==='function'?config.backgroundAvailable:null,
     connected:typeof config.connected==='function'?config.connected:null,
     connectionExpiresAt:typeof config.connectionExpiresAt==='function'?config.connectionExpiresAt:null,
@@ -289,7 +288,7 @@ registry.define('backup-provider',1,input=>{
     let history=null;
     if(kind==='checkpoint'&&raw.history&&typeof raw.history==='object'){
       const fingerprint=String(raw.history.logicalFingerprint||'').toLowerCase(),exportedAt=String(raw.history.exportedAt||''),daily=Number(raw.history.counts&&raw.history.counts.dailyRecord),notes=Number(raw.history.counts&&raw.history.counts.note),role=String(raw.history.retention&&raw.history.retention.role||'normal'),protectedUntil=String(raw.history.retention&&raw.history.retention.protectedUntil||''),purpose=String(raw.history.retention&&raw.history.retention.purpose||''),calendarRaw=raw.history.retention&&raw.history.retention.calendar||{},localDate=String(calendarRaw.localDate||''),weekStart=String(calendarRaw.weekStart||''),month=String(calendarRaw.month||''),utcOffsetMinutes=Number(calendarRaw.utcOffsetMinutes),notesFingerprint=String(raw.history.retention&&raw.history.retention.notesFingerprint||'').toLowerCase(),calendar=/^\d{4}-\d{2}-\d{2}$/u.test(localDate)&&/^\d{4}-\d{2}-\d{2}$/u.test(weekStart)&&/^\d{4}-\d{2}$/u.test(month)&&Number.isInteger(utcOffsetMinutes)?freeze({localDate,weekStart,month,utcOffsetMinutes}):null;
-      if(/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library','before-clear-archive'].includes(purpose)))history=freeze({format:Number.isSafeInteger(Number(raw.history.format))&&Number(raw.history.format)>0?Number(raw.history.format):0,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose==='before-clear-archive'?'before-clear-library':(purpose||'before-restore')):'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(notesFingerprint)?notesFingerprint:''}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:Number.isSafeInteger(Number(raw.history.attachmentsMissing))&&Number(raw.history.attachmentsMissing)>0?Number(raw.history.attachmentsMissing):0});
+      if(/^[a-f0-9]{64}$/u.test(notesFingerprint)&&raw.history.format===RepositoryCheckpointPipeline.manifestVersion&&Number.isSafeInteger(raw.history.attachmentsMissing)&&raw.history.attachmentsMissing>=0&&/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library'].includes(purpose)))history=freeze({format:raw.history.format,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose||'before-restore'):'',calendar,notesFingerprint}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:raw.history.attachmentsMissing});
     }
     // A location that reads each version for its summary (the Device Folder)
     // says which ones it could not read, and which wait for the password.
@@ -539,22 +538,22 @@ registry.define('backup-provider',1,input=>{
     const known=unreadableByProvider.get(selected.id),unreadable=pair=>pair.item.unreadable===true||!!known?.has(pair.item.id);
     const retentionRows=[];
     for(const pair of rows){const summary=pair.item.history,calendar=summary?.retention?.calendar;if(!summary||!calendar||unreadable(pair))continue;retentionRows.push(freeze({id:pair.item.id,manifest:freeze({version:summary.format,exportedAt:summary.exportedAt,retention:summary.retention,installationId:String(summary.origin||'')})}));}
-    let retainedIds=null,tiers={},currentFormat=false;
-    if(retentionRows.length){const selection=RepositoryCheckpointPipeline.selectRetention(freeze(retentionRows),{now:new Date(now)});retainedIds=new Set(selection.retained.map(row=>row.id));tiers=selection.tiers;currentFormat=selection.currentFormat===true;}
-    const legacyLimit=Math.max(1,Number(RepositoryCheckpointPipeline.retention?.normalLimit)||15);let legacyKept=0;
+    let retainedIds=null,tiers={};
+    if(retentionRows.length){const selection=RepositoryCheckpointPipeline.selectRetention(freeze(retentionRows),{now:new Date(now)});retainedIds=new Set(selection.retained.map(row=>row.id));tiers=selection.tiers;}
     return freeze(rows.map(pair=>{
       // A version this build cannot read is listed on its own (never matched
       // with another location's copy) so the person can see it and remove it.
-      if(unreadable(pair)){const at=repositoryMetadataTimestamp(pair.item);return Number.isFinite(Date.parse(at))?freeze({logicalId:'unreadable_'+pair.item.id,logicalFingerprint:'',exportedAt:at,counts:null,origin:'',unreadable:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:pair.item.id,exportedAt:at,tier:'unreadable',encrypted:false,verification:'unreadable',legacyMetadata:false,quarantineDeferred:false})}):null;}
+      // So is one listed without the summary every version carries, unless
+      // it waits for the password (its summary comes once it is opened).
+      if(unreadable(pair)||!pair.item.history&&!pair.item.locked){const at=repositoryMetadataTimestamp(pair.item);return Number.isFinite(Date.parse(at))?freeze({logicalId:'unreadable_'+pair.item.id,logicalFingerprint:'',exportedAt:at,counts:null,origin:'',unreadable:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:pair.item.id,exportedAt:at,tier:'unreadable',encrypted:false,verification:'unreadable',quarantineDeferred:false})}):null;}
       const item=pair.item,summary=item.history,exportedAt=summary?.exportedAt||repositoryMetadataTimestamp(item),fingerprint=summary?.logicalFingerprint||item.digest;
       if(!/^[a-f0-9]{64}$/u.test(String(fingerprint||''))||!Number.isFinite(Date.parse(exportedAt)))return null;
       let tier='retained';
       if(summary?.retention?.calendar){if(!retainedIds?.has(item.id))return null;tier=String(tiers[item.id]||'retained');}
       // A version waiting for the password (item.locked) has no summary yet:
       // it is listed as locked, never matched by data with another copy.
-      else{if(currentFormat&&!item.locked||legacyKept>=legacyLimit)return null;legacyKept+=1;tier=legacyKept===1?'latest':'retained';}
-      if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',legacyMetadata:true,quarantineDeferred:quarantined.length>0})});
-      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',legacyMetadata:!summary,quarantineDeferred:quarantined.length>0,attachmentsMissing:Number(summary?.attachmentsMissing)||0})});
+      if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',quarantineDeferred:quarantined.length>0})});
+      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',quarantineDeferred:quarantined.length>0,attachmentsMissing:Number(summary?.attachmentsMissing)||0})});
     }).filter(Boolean));
   }
 
@@ -640,12 +639,12 @@ registry.define('backup-provider',1,input=>{
     if(!repositoryPublicationCapable(selected))return freeze({blocked:false,reason:'publication-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listPublications();}catch(error){if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-publications',error,'warn');return freeze({blocked:true,reason:'publication-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset;let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
-    // A marker that renews and has gone unrenewed past publicationStaleMs was
-    // left by an upload that stopped (a closed or frozen page): it is removed,
-    // so the upload, if it ever resumes, fails its own check before commit. A
-    // marker from an older build that does not renew keeps the full day.
+    // A marker unrenewed past publicationStaleMs (every upload renews its
+    // own) was left by an upload that stopped (a closed or frozen page): it
+    // is removed, so the upload, if it ever resumes, fails its own check
+    // before commit.
     let abandoned=0;
-    for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}const lifetime=row&&row.renews===true?PUBLICATION_STALE_MS:PUBLICATION_MAX_AGE_MS;if(now-created<lifetime){active+=1;const expires=created+lifetime;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}const renewing=lifetime===PUBLICATION_STALE_MS;try{await selected.repository.endPublication(row);if(renewing)abandoned+=1;}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');if(renewing)invalid+=1;}}
+    for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}if(now-created<PUBLICATION_STALE_MS){active+=1;const expires=created+PUBLICATION_STALE_MS;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endPublication(row);abandoned+=1;}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');invalid+=1;}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-publication':invalid>0?'uncertain-publication-state':'',active,invalid,abandoned,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
   }
   // Cleanup leases this page holds now. A mark from this device that this
@@ -766,7 +765,6 @@ registry.define('backup-provider',1,input=>{
       // Going offline or yielding mid-cleanup is not a problem: the next pass retries.
       onError:(kind,error)=>{if(!expectedRequestFailure(error))AppDiagnostics.capture(kind==='checkpoint-delete'?'backup-provider.repository-checkpoint-delete':kind==='incomplete-delete'?'backup-provider.repository-incomplete-delete':'backup-provider.repository-object-gc',error,'warn');}
     }));
-    if(cleaned.formats)formatsByProvider.set(selected.id,freeze({...cleaned.formats,checkedAt:new Date().toISOString()}));
     if(!cleaned.gcPending){const cache=verifiedHistoryByProvider.get(selected.id);if(cache)pruneRepositoryHistoryProofs(selected,cleaned.retained.flatMap(row=>[row.ref.checkpoint,row.ref.commit].filter(Boolean)),cache.scope);}
     return cleaned;
   }
@@ -1030,7 +1028,7 @@ registry.define('backup-provider',1,input=>{
   const automaticByProvider=new Map();
   function automaticState(selected){
     const id=safeId(selected&&selected.id);let state=automaticByProvider.get(id);
-    if(!state){state={connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN};automaticByProvider.set(id,state);}
+    if(!state){state={connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN,typedAt:NaN};automaticByProvider.set(id,state);}
     return state;
   }
   // A change noted while the app runs is a real edit. Before the first one,
@@ -1057,20 +1055,24 @@ registry.define('backup-provider',1,input=>{
     const covered=automaticCovered(selected);return Number.isFinite(current)&&(!Number.isFinite(covered)||current>covered);
   }
   // A backup restarts the countdown: changes made while it ran wait a full
-  // cadence from its end, except a key moment made after the capture.
+  // cadence from its end, except a key moment or typing made after the
+  // capture, which keep their own, shorter deadline.
   function restartAutomaticCountdown(selected,sourceRevision){
     const at=Date.parse(String(sourceRevision||'')),state=automaticState(selected);
     const waiting=automaticNeeded(selected);state.waitingSince=waiting?Date.now():NaN;
     if(!waiting||!(state.urgentSince>at))state.urgentSince=NaN;
+    if(!waiting||!(state.typedAt>at))state.typedAt=NaN;
   }
   // When a location's waiting changes are due: AUTOMATIC_QUIET_MS after the
-  // first one, sooner after a key moment or before a sign-in runs out. NaN
-  // when the waiting changes were found rather than seen (on start or on
-  // reconnect): those go at once.
+  // first one, sooner after a key moment, once typing (a note or a
+  // reflection) has paused for AUTOMATIC_TYPED_MS, or before a sign-in runs
+  // out. NaN when the waiting changes were found rather than seen (on start
+  // or on reconnect): those go at once.
   function automaticDueAt(selected){
     const state=automaticState(selected);if(!Number.isFinite(state.waitingSince))return NaN;
     let due=state.waitingSince+AUTOMATIC_QUIET_MS,expiresAt=NaN;
     if(Number.isFinite(state.urgentSince))due=Math.min(due,state.urgentSince+AUTOMATIC_URGENT_MS);
+    if(Number.isFinite(state.typedAt))due=Math.min(due,state.typedAt+AUTOMATIC_TYPED_MS);
     try{expiresAt=Number(selected.connectionExpiresAt?.());}catch(error){AppDiagnostics.capture('backup-provider.connection-expiry',error,'warn');}
     if(Number.isFinite(expiresAt)&&expiresAt>0)due=Math.min(due,expiresAt-AUTOMATIC_EXPIRY_LEAD_MS);
     return due;
@@ -1079,17 +1081,20 @@ registry.define('backup-provider',1,input=>{
     const deadline=automaticDueAt(selected),at=Number(eligibleAt);
     return automaticNeeded(selected)&&Number.isFinite(deadline)&&Number.isFinite(at)&&deadline>at+50;
   }
-  function scheduleAutomaticBackup(selected,{urgent=false}={}){
+  // Typing moves its deadline with every edit (it waits for a pause); the
+  // first change's 20-minute deadline and a key moment's never move.
+  function scheduleAutomaticBackup(selected,{urgent=false,typed=false}={}){
     if(!automaticNeeded(selected)||!providerConnected(selected))return false;
     const job=providerConvergenceJob(selected);if(!job)return false;
     const state=automaticState(selected),now=Date.now();
     if(!Number.isFinite(state.waitingSince))state.waitingSince=now;
     if(urgent&&!Number.isFinite(state.urgentSince))state.urgentSince=now;
+    if(typed)state.typedAt=now;
     return job.schedule(Math.max(0,automaticDueAt(selected)-now),urgent?'important-change':'automatic','earliest');
   }
   function noteChange(change={}){
-    const urgent=change&&change.urgent===true;changeNoted=true;
-    for(const selected of providers.values())scheduleAutomaticBackup(selected,{urgent});
+    const urgent=change&&change.urgent===true,typed=!urgent&&change&&change.typed===true;changeNoted=true;
+    for(const selected of providers.values())scheduleAutomaticBackup(selected,{urgent,typed});
     notifyStatus();return true;
   }
   // Back up waiting changes now (the app going to the background, an update
@@ -1113,7 +1118,14 @@ registry.define('backup-provider',1,input=>{
   function connectionChanged(selected){
     const state=automaticState(selected),connected=providerConnected(selected),was=state.connected;state.connected=connected;
     if(selected.hosted)return;
-    if(connected){connectedOnceByProvider.add(selected.id);state.noticeShown=false;presentation.resolve(selected.id,'permission');return;}
+    if(connected){
+      connectedOnceByProvider.add(selected.id);state.noticeShown=false;presentation.resolve(selected.id,'permission');
+      // Changes made while signed out go up as soon as the sign-in is back
+      // (with a look at Drive first). With none waiting, Drive is checked at
+      // its usual time, which a long gap has already reached.
+      if(!was&&automaticNeeded(selected))providerConvergenceJob(selected)?.schedule(0,'connection','earliest');
+      return;
+    }
     if(!was||state.noticeShown||!automaticEnabled(selected))return;
     state.noticeShown=true;presentation.notice(selected.id,'permission',`${selected.label} sign-in expired.`);
   }
@@ -1225,31 +1237,9 @@ registry.define('backup-provider',1,input=>{
     return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state,ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date(claimedAt).toISOString()});
   }
   function normalizeSessionClaim(value){
-    if(!value||typeof value!=='object'||Array.isArray(value)||Number(value.version)!==SESSION_CLAIM_VERSION||Object.keys(value).sort().join('|')!==SESSION_CLAIM_KEYS)return null;
+    if(!value||typeof value!=='object'||Array.isArray(value)||value.version!==SESSION_CLAIM_VERSION||Object.keys(value).sort().join('|')!==SESSION_CLAIM_KEYS)return null;
     return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:String(value.handoffToken||'')});
   }
-  async function decodeSessionClaim(value,{signal=null}={}){return normalizeSessionClaim(value)||upgradeOlderSessionClaim(value,{signal});}
-  /* COMPATIBILITY --- Released builds write ownership claims as hashed v2,
-     and Drive can still hold a newest claim in the earlier plain form with a
-     date and device ids. Each is read as a v4 claim without the fields it
-     lacks. Retire with the compatibility layer once every device writes v4
-     (registry: older-session-claims). */
-  async function upgradeOlderSessionClaim(value,{signal=null}={}){
-    if(!value||typeof value!=='object'||Array.isArray(value))return null;
-    const version=Number(value.version),keys=Object.keys(value).sort().join('|');
-    if(version===2&&keys==='claimedAt|epoch|format|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return sessionClaimValue(value,{observedContentFingerprint:'',handoffToken:''});
-    const plain=plainSessionClaim(value);if(!plain)return null;
-    const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',plain.date,{signal}),sessionClaimToken('owner',plain.owner,{signal}),sessionClaimToken('owner',plain.observedOwner,{signal})]);
-    return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch:plain.epoch,state:plain.state,ownerToken,revision:plain.revision,observedOwnerToken,observedRevision:plain.observedRevision,observedContentFingerprint:'',handoffToken:'',claimedAt:plain.claimedAt});
-  }
-  function plainSessionClaim(value){
-    const version=Number(value.version),keys=Object.keys(value).sort().join('|'),v1=version===1&&keys==='claimedAt|date|epoch|format|observedRevision|owner|version',v2=version===2&&keys==='claimedAt|date|epoch|format|observedOwner|observedRevision|owner|revision|state|version';
-    if(!v1&&!v2)return null;
-    const date=String(value.date||''),epoch=Number(value.epoch),owner=String(value.owner||''),observedOwner=v1?owner:String(value.observedOwner||''),observedRevision=Number(value.observedRevision),revision=v1?observedRevision+1:Number(value.revision),state=v1?'owned':String(value.state||''),claimedAt=String(value.claimedAt||'');
-    if(value.format!==SESSION_CLAIM_FORMAT||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!Number.isSafeInteger(epoch)||epoch<1||!SESSION_OWNER_PATTERN.test(owner)||!SESSION_OWNER_PATTERN.test(observedOwner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt)))return null;
-    return freeze({date,epoch,state,owner,revision,observedOwner,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
-  }
-  /* END COMPATIBILITY */
   // A claim file never changes once written; a new claim is a new file. The
   // last verified claim is reused while the listing shows exactly the same
   // file, so each ownership check is one listing rather than a listing and a
@@ -1284,8 +1274,7 @@ registry.define('backup-provider',1,input=>{
         if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,newer:true}));
         throw newerSessionClaim(selected,latest);
       }
-      const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
-      claimFormByProvider.set(selected.id,normalizeSessionClaim(parsed)?'current':'older');
+      const claim=normalizeSessionClaim(parsed);if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
       if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim}));newerSessionClaimGone(selected);
       return freeze({claim,item:latest});
     }finally{
@@ -1294,7 +1283,7 @@ registry.define('backup-provider',1,input=>{
     }
   }
   async function writeRepositorySessionClaim(selected,claim,{signal=null,interactive=false}={}){
-    const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION)throw new TypeError('Active-session ownership claim is invalid.');
+    const normalized=normalizeSessionClaim(claim);if(!normalized)throw new TypeError('Active-session ownership claim is invalid.');
     const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
     try{
       protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});
@@ -1318,15 +1307,15 @@ registry.define('backup-provider',1,input=>{
       return freeze({item:newest,claim:normalized});
     }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
   }
-  // Another device's upload that started first goes first. One whose marker
-  // renews holds the turn only while it keeps renewing (its marker's
-  // createdAt is its last renewal); one from an older build, for the window.
+  // Another device's upload that started first goes first. It holds the turn
+  // only while its marker keeps renewing (the marker's createdAt is its last
+  // renewal).
   // Turns only save wasted work: each upload still checks before its commit
   // that Drive has not moved on.
   async function sharedPublicationTurnHolder(selected,publicationLease){
     if(!publicationLease||!repositoryPublicationCapable(selected))return null;
     const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],began=row=>Date.parse(String(row&&(row.startedAt||row.createdAt)||'')),mine=began(publicationLease),offset=repositoryClockOffset(selected),now=Date.now()+offset;
-    const holders=rows.filter(row=>{const id=String(row&&row.id||''),at=began(row),renewedAt=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&now-at<SYNC_TURN_WINDOW_MS&&(row.renews!==true||Number.isFinite(renewedAt)&&now-renewedAt<SYNC_TURN_RENEWED_MS)&&(at<mine||at===mine&&id<publicationLease.id);}).sort((a,b)=>began(a)-began(b));
+    const holders=rows.filter(row=>{const id=String(row&&row.id||''),at=began(row),renewedAt=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&now-at<SYNC_TURN_WINDOW_MS&&Number.isFinite(renewedAt)&&now-renewedAt<SYNC_TURN_RENEWED_MS&&(at<mine||at===mine&&id<publicationLease.id);}).sort((a,b)=>began(a)-began(b));
     const holder=holders[0];
     return holder?freeze({device:String(holder.device||''),startedAt:new Date(began(holder)-offset).toISOString(),renewedAt:Number.isFinite(Date.parse(String(holder.createdAt||'')))?new Date(Date.parse(holder.createdAt)-offset).toISOString():'',renews:holder.renews===true}):null;
   }
@@ -1690,7 +1679,11 @@ registry.define('backup-provider',1,input=>{
     // versions; one it removed (its version is plain although it built on an
     // encrypted one) is removed here too.
     if(sync&&sharedHead){const ancestors=new Set(row.manifest.reconciliationAncestorIds||[]),removedElsewhere=row.manifest.encrypted!==true&&inventory.pairs.some(other=>ancestors.has(other.item.id)&&other.item.history?.encrypted===true);await Exports.followProtection(freeze({protectionId:String(row.manifest.protectionId||''),encrypted:row.manifest.encrypted===true,removedElsewhere}));}
-    const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest),needed=new Set((row.manifest.objects||[]).map(entry=>entry.objectId)),total=needed.size,totalDownloadBytes=(row.manifest.objects||[]).reduce((sum,entry)=>sum+Math.max(0,Number(entry&&entry.storedBytes)||0),0),downloadSlots=new Map(),downloadProgressBytes=new Map();let started=0,completed=0;
+    const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest),downloadSlots=new Map(),downloadProgressBytes=new Map();let started=0,completed=0,total=0,totalDownloadBytes=0;
+    // The counts are what this read downloads: the pipeline names those
+    // objects before reading, leaving out attachments already on the device.
+    const planDownloads=entries=>{total=entries.length;totalDownloadBytes=entries.reduce((sum,entry)=>sum+Math.max(0,Number(entry&&entry.storedBytes)||0),0);};
+    planDownloads(row.manifest.objects||[]);
     if((row.manifest.objects||[]).some(entry=>quarantined.has(entry.objectId)))throw readFailure(new Error('The selected backup version references an object that is quarantined after an integrity check. Choose another version or create a fresh backup.'));
     progress('inventory',`Preparing selected backup data from ${selected.label}…`);
     // A one-note read fetches a few of the version's objects, so whole-version totals would mislead.
@@ -1725,7 +1718,7 @@ registry.define('backup-provider',1,input=>{
       // upload, so the other devices get it too.
       publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in'||selected.shared===true,sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
-    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
+    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,onPlan:planDownloads,...(note&&mode==='bring-in'?{note}:{})});
   }
   // A protected safety version before a destructive action (Clear Library).
   // It is written in the foreground, preempting background work.
@@ -2342,6 +2335,7 @@ registry.define('backup-provider',1,input=>{
       // Sign-in opens from the click, so preparation runs alongside the
       // background work giving way rather than after it.
       await Promise.all([foreground.settled,selected.prepare?selected.prepare():null]);await authorize(selected,'connect');
+      if(selected.verifyAccount)await selected.verifyAccount();
       statusText('');return true;
     }catch(error){statusText(`Connection failed: ${userProviderMessage(error,`${selected.label} could not be connected.`)}`,false);return false;}
     finally{await release(selected,'connect');setBusy(false);foreground.release();}
@@ -2350,14 +2344,24 @@ registry.define('backup-provider',1,input=>{
   // backups stay where they are.
   async function forgetProvider(selected){
     sessionWatchByProvider.delete(selected.id);
-    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);overtakenByProvider.delete(selected.id);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
+    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN,typedAt:NaN});await discardProviderPublication(selected);overtakenByProvider.delete(selected.id);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
+  // Resolves true once no backup operation runs, false after timeoutMs.
+  function whenIdle(timeoutMs){
+    if(!busy)return Promise.resolve(true);
+    return new Promise(resolve=>{let timer=null;const stop=value=>{statusListeners.delete(check);clearTimeout(timer);resolve(value);},check=()=>{if(!busy)stop(true);};statusListeners.add(check);timer=setTimeout(()=>stop(!busy),timeoutMs);});
+  }
+  // Disconnect is never ignored: work running at this location stops safely
+  // first, as with Cancel, and other work is waited for (up to
+  // DISCONNECT_WAIT_MS); false only if it is still running then.
   async function disconnectProvider(selected){
-    if(busy||!selected||!selected.disconnect)return false;
+    if(!selected||!selected.disconnect)return false;
+    if(busy){cancelForeground('Stopped so this device could disconnect.',selected.id);if(!await whenIdle(DISCONNECT_WAIT_MS))return false;}
     const foreground=beginForeground(selected);if(!foreground)return false;
     statusSource=selected.id;setBusy(true);statusText(`Disconnecting ${selected.label}…`);
     try{
-      await foreground.settled;await authorize(selected,'disconnect');
+      // Signing this device out needs no sign-in.
+      await foreground.settled;
       await selected.disconnect();await forgetProvider(selected);
       statusText('');return true;
     }catch(error){
@@ -2389,7 +2393,7 @@ registry.define('backup-provider',1,input=>{
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   // Sync state of each shared location, for diagnostics: times and flags only.
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),waitingFor:String(state.turnHolder?.device||''),waitingSince:String(state.turnHolder?.startedAt||''),waitingRenewedAt:String(state.turnHolder?.renewedAt||''),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
-  function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,claimForm:claimFormByProvider.get(selected.id)||'',scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
+  function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
   return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,readSessionHandoffSource,claimSessionOwnership,releaseSessionClaim,readSessionClaim,watchSession,bringInSessionVersions,scheduleSharedSync,suspendBackground,repositoryScope});
 

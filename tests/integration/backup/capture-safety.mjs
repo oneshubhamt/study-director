@@ -12,7 +12,7 @@ function harness(overrides={}){
   const token=()=>revision.toString(16).padStart(32,'0'),sourceRevision=()=>new Date(Date.UTC(2026,8,28,0,revision)).toISOString();
   const load=async()=>{await hook('sessionRead');return {ok:true,error:null,value:session,storage:{idb:true}};};
   const capture=module.create(freeze({
-    configuration:freeze({backupVersion:20,limits:freeze({backupChunkItems:100}),portableAssets:true}),
+    configuration:freeze({limits:freeze({backupChunkItems:100})}),
     data:freeze(overrides.data||{
       activeSession:freeze({save:async value=>({ok:true,value,storage:{idb:true}}),settled:async()=>{},load}),
       dailyRecords:freeze({backupDates:async()=>{await hook('datesRead');return {dates:[...dates],canonical:true};},backupMonth:async()=>[]}),
@@ -84,7 +84,7 @@ for(const route of ['canonical','assumed-settled','rescue','incremental'])for(co
   controls.failNextDailyWrite=true;await h.app.dailyRecords.remove(date);
   assert.equal(h.stores.daily.has(date),true);assert.ok(h.sharedLocal.has('deletionRecovery'));assert.equal((await h.app.deletionRecovery.savedDays()).length,0);
   const host={AppData:h.app,backupFastFenceReady:true,richAssetReferenceRevision:0,captureMutationGeneration:0,currentBackupSourceRevision:()=> '2026-09-17T10:00:00.000Z',PlanData:{exportData:async()=>({})},document:{getElementById:()=>null},AttachmentStorage:{list:async()=>[]},AppDiagnostics:{capture(){}}};vm.createContext(host);
-  vm.runInContext(appSource.slice(appSource.indexOf('async function legacyBackupSnapshotRevision('),appSource.indexOf('const NoteReconciliationUI=')),host);
+  vm.runInContext(appSource.slice(appSource.indexOf('async function contentBackupSnapshotRevision('),appSource.indexOf('const NoteReconciliationUI=')),host);
   let failing=true;const settlements=[];
   const flush=async()=>{
     if(failing&&fault==='throws')throw new Error('Temporary deletion reconciliation failure');
@@ -111,7 +111,7 @@ for(const route of ['canonical','assumed-settled','rescue','incremental'])for(co
 }
 // Without write control, only a canonical fast fence proves settled state.
 for(const proven of [true,false]){
-  const base=harness({session:freeze({canMutate:()=>false,cancelLiveDraftSave(){},captureSnapshot:()=>null,hasTasks:()=>false,toActiveSession:value=>value}),persistence:freeze({storageGeneration:()=>0,sourceRevision:async()=> '2026-10-01T12:00:00.000Z',snapshotRevision:async()=>proven?'study-director.fast-capture-fence.v1|'+'a'.repeat(32)+'|stable':'legacy-unsettled',dailyRecordDocuments:async dates=>dates.map(date=>({date}))})});
+  const base=harness({session:freeze({canMutate:()=>false,cancelLiveDraftSave(){},captureSnapshot:()=>null,hasTasks:()=>false,toActiveSession:value=>value}),persistence:freeze({storageGeneration:()=>0,sourceRevision:async()=> '2026-10-01T12:00:00.000Z',snapshotRevision:async()=>proven?'study-director.fast-capture-fence.v1|'+'a'.repeat(32)+'|stable':'content-unsettled',dailyRecordDocuments:async dates=>dates.map(date=>({date}))})});
   const captured=await base.capture.captureLogicalCheckpoint();assert.equal(captured.completeness.complete,proven);assert.equal(captured.completeness.deletionState,proven?'canonical':'uncertain');assert.ok(!base.calls.includes('deletionSettle'),'read-only capture must not reconcile deletions');await base.capture.assertLogicalCheckpointCurrent(captured);
   cases.push('read-only completeness requires '+(proven?'proven':'unavailable')+' canonical fence');
 }
@@ -145,8 +145,8 @@ for(const rescued of [false,true]){
   assert.match(captured.warning,/Partial attachment recovery/u,'a missing attachment must produce explicit success warning');
 }
 
-// The actual host freshness/receipt functions must not certify a backup from
-// absent canonical revision evidence or an uncommitted local receipt.
+// Backup receipts must become visible only after commit; failed reads/writes
+// never fabricate a durable receipt. Retirement-proof checks no longer exist.
 {
   const appSource=fs.readFileSync('source/app.html','utf8');
   const first=appSource.indexOf('const VERIFIED_RECOVERY_META_KEY='),last=appSource.indexOf('// Compare policy identity',first);
@@ -165,28 +165,24 @@ for(const rescued of [false,true]){
     AppData:{mutationEpoch:{latestChangeAt:async recorded=>changedAt||recorded}}
   };
   vm.createContext(sandbox);
-  vm.runInContext(appSource.slice(first,last)+'\n globalThis.freshnessTest={recordBackupCopy,verifyFreshCurrentBackup,receipt:()=>verifiedRecoveryState};',sandbox);
+  vm.runInContext(appSource.slice(first,last)+'\n globalThis.freshnessTest={recordBackupCopy,readVerifiedRecoveryState,receipt:()=>verifiedRecoveryState};',sandbox);
   const api=sandbox.freshnessTest;
-  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'missing canonical change clock cannot certify a fresh copy');
   changedAt='2026-10-01T12:00:00.000Z';
   let unlock;writeGate=new Promise(resolve=>{unlock=resolve;});
   const pending=api.recordBackupCopy({source:'google-drive',sourceRevision:changedAt,attachmentsComplete:true});
   await Promise.resolve();
   assert.equal(Object.keys(api.receipt().providers).length,0,'pending local receipt must not appear durable before commit');
   unlock();await pending;writeGate=null;
-  assert.equal((await api.verifyFreshCurrentBackup()).ok,true,'durable full copy at canonical revision is fresh');
   assert.ok(api.receipt().providers['google-drive'],'completed local metadata commit becomes visible');
   changedAt='2026-10-01T12:00:01.000Z';
-  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'stale copy cannot satisfy newer canonical revision');
   failWrite=true;
   await assert.rejects(api.recordBackupCopy({source:'device-folder',sourceRevision:changedAt,attachmentsComplete:true}),/Injected receipt commit failure/);
   assert.equal(api.receipt().providers['device-folder'],undefined,'failed durable receipt write must not update memory');
   failWrite=false;failRead=true;
-  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'unreadable receipt must fail closed');
+  await assert.rejects(api.readVerifiedRecoveryState(),/Injected receipt read failure/);
   failRead=false;
   await api.recordBackupCopy({source:'google-drive',sourceRevision:changedAt,attachmentsComplete:false});
   assert.equal(api.receipt().providers['google-drive'].format,null,'known partial attachment copy cannot certify full recovery');
-  assert.equal((await api.verifyFreshCurrentBackup()).ok,false,'known partial attachment backup cannot prove fully fresh recovery');
   assert.ok(diagnostics.some(row=>String(row[0]).includes('freshness-write')),'failed local receipt must leave diagnostics');
 }
 
@@ -255,7 +251,7 @@ for(const rescued of [false,true]){
     const sandbox={Date,Object,Error,String,
       IndexedDb:{lifecycle:()=>({startedFresh:fresh})},appCanMutate:()=>primary,
       readStorageHealth:()=>({...health}),writeStorageHealth:patch=>{calls.writes++;Object.assign(health,patch);return true;},
-      AppData:{local:{getJson:()=>({...health})}},STORAGE_KEYS:{storageHealth:'health'},
+      readStoredStorageHealth:()=>({...health}),
       beginStorageResetHold:clearedAt=>{const hold={clearedAt,reloaded:false};calls.holds.push(hold);return hold;},
       showStorageResetDecision:()=>{calls.decisions++;},
       storageResetConnectionsChanged:()=>{calls.connections=(calls.connections||0)+1;return false;},
@@ -295,13 +291,13 @@ for(const rescued of [false,true]){
   vm.runInThisContext(fs.readFileSync('source/core/profiles.js','utf8'));
   const profiles=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
   const removed='prof_removed_abcdef_12345678',live='prof_live_abcdef_12345679',registryKey='profiles-test-registry';
-  const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
+  const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',email:'',folder:'',fresh:false,from:null,createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
   const store=new Map([[registryKey,JSON.stringify(registryRow)],['noteRescue~'+removed,'unsaved'],['noteRescue~'+live,'current']]);
   const events=[],fail={db:true,opfs:false,local:false};
   const controller=profiles.createController(freeze({ports:freeze({
     scope:freeze({pattern:/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,registryKey,scope:live,separator:'~'}),
     storage:freeze({read:()=>store.get(registryKey)||null,write:value=>{store.set(registryKey,value);return true;},keys:()=>[...store.keys()],remove:key=>{if(fail.local)return false;return store.delete(key);}}),
-    names:freeze({database:'study-db',directories:freeze(['assets','rollback']),keys:freeze(['noteRescue']),legacyDirectory:'legacy-assets'}),
+    names:freeze({database:'study-db',directories:freeze(['assets','rollback']),keys:freeze(['noteRescue'])}),
     platform:freeze({deleteDatabase:async name=>{events.push('db:'+name);if(fail.db)throw new Error('Blocked IDB delete');return true;},removeDirectory:async name=>{events.push('opfs:'+name);if(fail.opfs)throw new Error('Blocked OPFS delete');},listen:()=>()=>{},now:()=>Date.now(),random:()=> '12345678',reload:()=>{}}),
     limits:freeze({maxName:60})
   })}));

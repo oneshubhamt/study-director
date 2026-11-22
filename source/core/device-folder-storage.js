@@ -11,8 +11,7 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 // repository folder ("Study Director - Ana - iPhone Safari"), known by the
 // marker file inside rather than by its name: objects/, checkpoints/ and
 // commits/, and pub_*.sdpublication / mnt_*.sdmaintenance markers in objects/.
-// The layout functions find it, make it, take over another one, and move in
-// the single repository folder earlier versions used.
+// The layout functions find it, make it, and take over another one.
 registry.define('device-folder-storage',1,()=>{
   const freeze=Object.freeze;
   const KINDS=freeze({
@@ -20,6 +19,7 @@ registry.define('device-folder-storage',1,()=>{
     checkpoint:freeze({directory:'checkpoints',suffix:'.sdcheckpoint',pattern:/^(cp_[a-f0-9]{32})\.sdcheckpoint$/u}),
     commit:freeze({directory:'commits',suffix:'.sdcommit',pattern:/^(cp_[a-f0-9]{32})\.sdcommit$/u})
   });
+  const UNREADABLE_LOCK_MAX_AGE_MS=24*60*60*1000;
   const LOCKS=freeze({
     publication:freeze({prefix:'pub_',suffix:'.sdpublication',format:'study-director.repository-publication',pattern:/^(pub_[a-f0-9]{32})\.sdpublication$/u}),
     maintenance:freeze({prefix:'mnt_',suffix:'.sdmaintenance',format:'study-director.repository-maintenance',pattern:/^(mnt_[a-f0-9]{32})\.sdmaintenance$/u})
@@ -28,9 +28,9 @@ registry.define('device-folder-storage',1,()=>{
   function createStorage(input){
     exactObject(input,['checksum','environment','folder','identities','inspectManifest','limits','owner'],'Device Folder storage input');
     functions(input.environment,['canMutate','clearTimeout','now','setTimeout','yieldTask'],'Device Folder storage environment');
-    exactObject(input.identities,['checkpoints','commits','legacyRoot','objects','prefix','root'],'Device Folder storage identities');
+    exactObject(input.identities,['checkpoints','commits','objects','prefix','root'],'Device Folder storage identities');
     if(typeof input.owner!=='function')throw new TypeError('Device Folder storage owner port is invalid.');
-    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','publicationRenewMs','publicationStaleMs','responseTimeoutMs'],'Device Folder storage limits');
+    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationRenewMs','publicationStaleMs','responseTimeoutMs'],'Device Folder storage limits');
     if(typeof input.folder!=='function'||typeof input.checksum!=='function'||typeof input.inspectManifest!=='function')throw new TypeError('Device Folder storage ports are invalid.');
     const environment=input.environment,identities=input.identities,limits=input.limits;
     const summaryCache=new Map(),digestCache=new Map();
@@ -63,12 +63,35 @@ registry.define('device-folder-storage',1,()=>{
       if(!name)throw Object.assign(new Error('The Device Folder backups are still being prepared.'),{code:'DEVICE_REPOSITORY_PENDING'});
       return name;
     }
+    const selectedRoots=new WeakMap();
+    function select(folder,name,id){selectedRoots.set(folder,{name,id});}
+    let repair=null;
+    // A removed repository directory can be recreated in an existing chosen folder.
+    // An existing directory with a missing or unreadable marker is held untouched.
+    async function currentRoot(folder,name){
+      try{return await ownedRoot(folder,name);}
+      catch(error){if(error.name!=='NotFoundError')throw error;}
+      if(!repair){
+        repair=(async()=>{
+          if(!environment.canMutate()||!validOwner(owner()))throw new Error('Study control and a profile are required to recreate the backup folder.');
+          if(!await childDirectory(folder,name)){
+            const root=await makeChild(folder,name);
+            if(!(await childNames(root)).size){
+              const id=randomId();
+              await writeFile(root,SCOPE_FILE,markerBlob(id));select(folder,name,id);
+            }
+          }
+        })().finally(()=>{repair=null;});
+      }
+      await repair;
+      return ownedRoot(folder,name);
+    }
     async function directories(){
       const folder=chosenFolder();
       try{
-        const root=await folder.getDirectoryHandle(rootName(),{create:true});
+        const {root,marker}=await currentRoot(folder,rootName());
         const [objects,checkpoints,commits]=await Promise.all([root.getDirectoryHandle(identities.objects,{create:true}),root.getDirectoryHandle(identities.checkpoints,{create:true}),root.getDirectoryHandle(identities.commits,{create:true})]);
-        return freeze({root,objects,checkpoints,commits});
+        return freeze({root,objects,checkpoints,commits,repositoryScope:`device-folder:1:${marker.id}`});
       }catch(error){
         if(!error||error.name!=='NotFoundError')throw error;
         const missing=new Error('The backup folder is no longer available. Choose the backup folder again.');missing.code='DEVICE_FOLDER_MISSING';throw missing;
@@ -87,24 +110,34 @@ registry.define('device-folder-storage',1,()=>{
     }
     // Each repository folder carries a random identity, so caches and pending
     // maintenance never carry over to a different folder. The same marker says
-    // which profile and device it belongs to (version 2). The single folder
-    // of earlier versions has none.
+    // which profile and device it belongs to (version 2).
     const randomId=()=>globalThis.crypto.randomUUID().replace(/-/gu,'');
+    const profileId=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
+    const validOwner=value=>typeof value.profile==='string'&&profileId.test(value.profile)&&
+      (value.scope===''||typeof value.scope==='string'&&profileId.test(value.scope))&&
+      typeof value.device==='string'&&/^inst_[a-z]+_[a-z]+_[a-z0-9]{6,12}_[a-f0-9]{8}$/u.test(value.device);
     function parseMarker(text){
-      try{const value=JSON.parse(text),version=Number(value&&value.version);if(value&&value.format===SCOPE_FORMAT&&version===2&&/^[a-f0-9]{32}$/u.test(String(value.id||'')))return freeze({id:String(value.id),version,profile:String(value.profile||''),scope:String(value.scope||''),device:String(value.device||''),moving:String(value.moving||''),movedFrom:String(value.movedFrom||'')});}catch{}
-      return null;
+      let value;
+      try{value=JSON.parse(text);}catch{return null;}
+      if(value?.format!==SCOPE_FORMAT||value.version!==2||typeof value.id!=='string'||!/^[a-f0-9]{32}$/u.test(value.id)||!validOwner(value))return null;
+      // A completed move on F29 can leave this provenance on a current repository.
+      const hasOrigin=Object.hasOwn(value,'movedFrom');
+      if(Object.keys(value).length!==(hasOrigin?7:6)||hasOrigin&&value.movedFrom!=='Study-Director-Automatic-Backup-Repository')return null;
+      return value;
     }
     async function readMarker(directory){const file=await fileOrNull(directory,SCOPE_FILE);return file?parseMarker(await file.text()):null;}
     // A profile is known on this device by its scope, which never changes; its
     // id is recorded too, and follows it.
     function owner(){const value=input.owner()||{};return freeze({profile:String(value.profile||''),scope:String(value.scope||''),device:String(value.device||'')});}
-    function markerBlob(id,extra={}){const mine=owner();return new Blob([JSON.stringify({format:SCOPE_FORMAT,version:2,id,profile:mine.profile,scope:mine.scope,device:mine.device,...extra})],{type:'application/json'});}
+    function markerBlob(id){const mine=owner();return new Blob([JSON.stringify({format:SCOPE_FORMAT,version:2,id,profile:mine.profile,scope:mine.scope,device:mine.device})],{type:'application/json'});}
+    async function ownedRoot(folder,name){
+      const root=await folder.getDirectoryHandle(name),marker=await readMarker(root),mine=owner();
+      const selected=selectedRoots.get(folder);
+      if(!marker||marker.scope!==mine.scope||marker.device!==mine.device||(selected?.name===name&&marker.id!==selected.id))throw new Error('The backup folder identity changed or is unreadable. Choose the folder again.');
+      return {root,marker};
+    }
     async function scope(){
-      const {root}=await directories(),existing=await readMarker(root);
-      if(existing)return `device-folder:1:${existing.id}`;
-      const id=randomId();
-      await writeFile(root,SCOPE_FILE,markerBlob(id));
-      return `device-folder:1:${id}`;
+      return (await directories()).repositoryScope;
     }
     async function digestOf(file,cacheKey,signal,{fresh=false}={}){
       // File name, size and lastModified are only a performance hint, not proof.
@@ -133,7 +166,7 @@ registry.define('device-folder-storage',1,()=>{
     }
     async function list({kind,signal=null,freshDigests=false}={}){
       const spec=KINDS[kind];if(!spec)throw new Error('Device Folder storage list kind is invalid.');
-      const dirs=await directories(),repositoryScope=await scope(),items=[];let ignored=0;
+      const dirs=await directories(),repositoryScope=dirs.repositoryScope,items=[];let ignored=0;
       for(const [name,handle] of await entries(dirs[spec.directory],`Device Folder ${kind} folder`,signal)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
@@ -180,7 +213,7 @@ registry.define('device-folder-storage',1,()=>{
         if(!/^[a-f0-9]{64}$/u.test(expected)||existing.size!==file.blob.size||await input.checksum(file.blob,{})!==expected||await input.checksum(existing,{})!==expected)
           throw new Error('Device Folder repository identity collision: existing verified backup bytes were preserved.');
         await checks();
-        return freeze({...await describe(file.kind,file.id,name,existing,await scope(),null),serverDigest:expected});
+        return freeze({...await describe(file.kind,file.id,name,existing,dirs.repositoryScope,null),serverDigest:expected});
       }
       await writeFile(directory,name,file.blob,{checks,onProgress:file.onProgress});
       const written=await fileOrNull(directory,name);
@@ -188,7 +221,7 @@ registry.define('device-folder-storage',1,()=>{
       const expected=String(file.digest||''),actual=await input.checksum(written,{});
       if(expected&&actual!==expected){try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);}catch{}throw new Error('A Device Folder backup file failed verification after it was written.');}
       // The read-back checksum is the folder's receipt, as Drive's server checksum is.
-      return freeze({...await describe(file.kind,file.id,name,written,await scope(),null),serverDigest:actual});
+      return freeze({...await describe(file.kind,file.id,name,written,dirs.repositoryScope,null),serverDigest:actual});
     }
     async function remove(item){
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
@@ -207,14 +240,16 @@ registry.define('device-folder-storage',1,()=>{
     // An upload lock says it renews: its upload rewrites it while it runs, so
     // one left unrewritten too long was abandoned (see publicationStaleMs).
     const lockBody=(kind,id)=>{const spec=LOCKS[kind];return new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs()),...(kind==='publication'?{renews:true}:{})})],{type:'application/json'});};
-    async function lockRenews(kind,file){
-      if(kind!=='publication')return false;
-      try{const parsed=JSON.parse(await bounded(file.text(),'Device Folder lock contents'));return parsed&&parsed.renews===true;}catch{return false;}
+    async function readLock(kind,file,id){
+      const value=JSON.parse(await bounded(file.text(),'Device Folder lock contents'));
+      if(!value||Object.keys(value).length!==(kind==='publication'?5:4)||typeof value.startedAt!=='string'||value.format!==LOCKS[kind].format||value.version!==1||value.id!==id||!Number.isFinite(Date.parse(String(value.startedAt||'')))||(kind==='publication'&&value.renews!==true))throw new Error('Device Folder lock could not be verified. Retry the backup.');
+      return value;
     }
     async function beginLock(kind){
       const spec=LOCKS[kind],id=spec.prefix+globalThis.crypto.randomUUID().replace(/-/gu,''),name=id+spec.suffix,{objects}=await directories();
       await writeFile(objects,name,lockBody(kind,id));
       const written=await fileOrNull(objects,name);if(!written)throw new Error('The Device Folder lock could not be written.');
+      await readLock(kind,written,id);
       return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs()),sameDevice:true,renews:kind==='publication'});
     }
     async function listLocks(kind){
@@ -222,7 +257,12 @@ registry.define('device-folder-storage',1,()=>{
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:await lockRenews(kind,file)}));}catch{ignored+=1;}
+        // A lock this build cannot read is waited for, but not past a day by
+        // the file's own time: no upload or cleanup lasts that long. One that
+        // could not be opened at all still counts as uncertain.
+        let file=null;
+        try{file=await bounded(handle.getFile(),`Device Folder lock ${name}`);await readLock(kind,file,match[1]);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:kind==='publication'}));}
+        catch{if(!(file&&nowMs()-Number(file.lastModified)>UNREADABLE_LOCK_MAX_AGE_MS))ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }
@@ -230,10 +270,9 @@ registry.define('device-folder-storage',1,()=>{
       const spec=LOCKS[kind],id=String(lease&&lease.id||''),name=String(lease&&lease.name||'');
       if(!spec.pattern.test(name)||name!==id+spec.suffix)throw new Error('Device Folder lock is invalid.');
       const {objects}=await directories(),file=await fileOrNull(objects,name);if(!file)throw new Error('Device Folder lock disappeared. Retry the backup.');
-      let parsed=null;try{parsed=JSON.parse(await file.text());}catch{}
-      if(!parsed||parsed.format!==spec.format||Number(parsed.version)!==1||parsed.id!==id)throw new Error('Device Folder lock could not be verified. Retry the backup.');
+      await readLock(kind,file,id);
       // A renewing upload lock must be renewed well before cleanup could take it for abandoned.
-      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?(parsed.renews===true?limits.publicationStaleMs-limits.publicationRenewMs:limits.publicationMaxAgeMs-limits.publicationAssertionMarginMs):limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
+      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?(limits.publicationStaleMs-limits.publicationRenewMs):limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
       if(!Number.isFinite(age)||age<0||age>=window)throw new Error('Device Folder lock is too old to continue safely. Retry the backup.');
       return true;
     }
@@ -245,8 +284,12 @@ registry.define('device-folder-storage',1,()=>{
       return freeze({...lease,createdAt:iso(written.lastModified||nowMs())});
     }
     async function endLock(kind,lease){
-      const spec=LOCKS[kind],name=String(lease&&lease.name||'');if(!spec.pattern.test(name))return false;
-      const {objects}=await directories();try{await bounded(objects.removeEntry(name),`Device Folder lock ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
+      const spec=LOCKS[kind],name=lease?.name,id=lease?.id;
+      if(!spec.pattern.test(name)||name!==id+spec.suffix)return false;
+      const {objects}=await directories(),file=await fileOrNull(objects,name);
+      if(!file)return false;
+      await readLock(kind,file,id);
+      try{await bounded(objects.removeEntry(name),`Device Folder lock ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
     // An operation view checks its signal and protection before every file
     // call, so long cleanups can keep their lease renewed while listing.
@@ -277,98 +320,55 @@ registry.define('device-folder-storage',1,()=>{
       }
       return freeze({versions,newest:newest?iso(newest):''});
     }
-    // The Study Director repository folders in the chosen folder: those made
-    // for a profile and device, and the single one of earlier versions.
+    // The Study Director repository folders in the chosen folder, each made
+    // for a profile and device.
     async function inspect(){
-      const folder=chosenFolder(),repositories=[];let legacy=null;
+      const folder=chosenFolder(),repositories=[];
       for(const [name,handle] of await entries(folder,'Device Folder',null)){
-        if(!handle||handle.kind!=='directory')continue;
-        if(name===identities.legacyRoot){legacy=freeze({name:String(name),...await versionsIn(handle)});continue;}
-        if(!String(name).startsWith(identities.prefix))continue;
-        const marker=await readMarker(handle);if(!marker||marker.version!==2||!marker.profile)continue;
-        repositories.push(freeze({name:String(name),profile:marker.profile,scope:marker.scope,device:marker.device,moving:marker.moving,movedFrom:marker.movedFrom,...await versionsIn(handle)}));
+        if(!handle||handle.kind!=='directory'||!String(name).startsWith(identities.prefix))continue;
+        const marker=await readMarker(handle);if(!marker)continue;
+        repositories.push(freeze({name:String(name),id:marker.id,profile:marker.profile,scope:marker.scope,device:marker.device,...await versionsIn(handle)}));
       }
-      return freeze({repositories:freeze(repositories),legacy});
+      return freeze({repositories:freeze(repositories)});
     }
     // What the chosen folder holds, by name, as its listing says.
     async function childNames(folder){const names=new Set();for(const [name] of await entries(folder,'Device Folder',null))names.add(String(name));return names;}
     // A name not yet taken: "Study Director - Ana - iPhone Safari", then " (2)"…
     // Names are plain ASCII: some file systems map other characters onto
     // another folder, which would mix backups with the chosen folder itself.
-    async function freeName(base){
-      const folder=chosenFolder(),clean=String(base||'').trim();
+    async function freeName(folder,base){
+      const clean=String(base||'').trim();
       if(!clean.startsWith(identities.prefix)||!/^[\x20-\x7e]{1,200}$/u.test(clean))throw new Error('The backup folder name is invalid.');
       const taken=await childNames(folder);
       for(let index=1;index<100;index++){const name=index===1?clean:`${clean} (${index})`;if(!taken.has(name))return name;}
       throw new Error('No free name was found for the backup folder.');
     }
     // A new folder must then be listed in the chosen folder under its name.
-    async function makeChild(name){
-      const folder=chosenFolder(),made=await bounded(folder.getDirectoryHandle(name,{create:true}),`Device Folder ${name}`);
+    async function makeChild(folder,name){
+      const made=await bounded(folder.getDirectoryHandle(name,{create:true}),`Device Folder ${name}`);
       if(!(await childNames(folder)).has(name))throw new Error('This folder cannot hold a backup folder of that name. Choose another folder.');
       return made;
     }
     async function create(base){
-      const name=await freeName(base),root=await makeChild(name);
-      await writeFile(root,SCOPE_FILE,markerBlob(randomId()));
+      if(!validOwner(owner()))throw new Error('The backup profile and device must be ready before choosing a folder.');
+      const folder=chosenFolder(),name=await freeName(folder,base),root=await makeChild(folder,name);
+      if((await childNames(root)).size)throw new Error('The new backup folder is already in use. Choose the folder again.');
+      const id=randomId();
+      await writeFile(root,SCOPE_FILE,markerBlob(id));select(folder,name,id);
       return name;
     }
     // This device takes over another repository folder (after a browser data
     // clear, the same backups under a new device id): it keeps its identity.
-    async function claim(name){
-      const root=await childDirectory(chosenFolder(),String(name||''));if(!root)throw Object.assign(new Error('That backup folder is no longer there.'),{code:'DEVICE_FOLDER_MISSING'});
-      const marker=await readMarker(root);if(!marker)throw new Error('That folder does not hold Study Director backups.');
-      await writeFile(root,SCOPE_FILE,markerBlob(marker.id,marker.movedFrom?{movedFrom:marker.movedFrom}:{}));
+    async function claim(selected){
+      const {name}=selected;
+      const folder=chosenFolder(),root=await childDirectory(folder,String(name||''));if(!root)throw Object.assign(new Error('That backup folder is no longer there.'),{code:'DEVICE_FOLDER_MISSING'});
+      const marker=await readMarker(root);if(!validOwner(owner())||!marker||['id','profile','scope','device'].some(key=>marker[key]!==selected[key]))throw new Error('The selected backup folder changed. Choose the folder again.');
+      await writeFile(root,SCOPE_FILE,markerBlob(marker.id));select(folder,name,marker.id);
       summaryCache.clear();digestCache.clear();
       return String(name);
     }
-    const LOCK_FILE=/^(?:pub|mnt)_[a-f0-9]{32}\.(?:sdpublication|sdmaintenance)$/u;
-    // Moves the single repository folder of earlier versions into this
-    // profile and device's own: every file is copied and its contents checked, the marker
-    // keeps its identity and records the move, and only then is the old folder
-    // deleted. An interrupted move continues where it stopped.
-    async function move(base,{onProgress=null}={}){
-      const folder=chosenFolder(),legacyName=identities.legacyRoot,source=await childDirectory(folder,legacyName);
-      if(!source)return '';
-      const sourceMarker=await readMarker(source),id=sourceMarker?.id||randomId(),mine=owner();
-      const existing=(await inspect()).repositories.find(row=>row.scope===mine.scope&&row.device===mine.device&&row.moving===legacyName);
-      const name=existing?existing.name:await freeName(base),target=await makeChild(name);
-      await writeFile(target,SCOPE_FILE,markerBlob(id,{moving:legacyName}));
-      const plan=[];
-      for(const directoryName of [identities.objects,identities.checkpoints,identities.commits]){
-        const from=await childDirectory(source,directoryName);if(!from)continue;
-        const to=await bounded(target.getDirectoryHandle(directoryName,{create:true}),`Device Folder ${directoryName}`);
-        for(const [fileName,handle] of await entries(from,`Device Folder ${directoryName}`,null))if(handle&&handle.kind==='file'&&!LOCK_FILE.test(String(fileName)))plan.push({handle,to,name:String(fileName),object:directoryName===identities.objects});
-      }
-      let done=0;onProgress?.(0,plan.length);
-      const original=item=>bounded(item.handle.getFile(),`Device Folder ${item.name}`),digest=async file=>String(await input.checksum(file,{}));
-      for(const item of plan){
-        // A stored object an interrupted move already copied is kept only when
-        // its contents match; versions and markers are small and always copied.
-        const file=await original(item),present=item.object?await fileOrNull(item.to,item.name):null;
-        if(!present||present.size!==file.size||await digest(present)!==await digest(file))await writeFile(item.to,item.name,file);
-        const copied=await fileOrNull(item.to,item.name);
-        if(!copied||copied.size!==file.size)throw new Error('A backup file could not be copied to the new backup folder. The old folder was kept.');
-        // Every file, stored objects too, is compared by contents against a
-        // fresh read of the original before the old folder can go.
-        if(await digest(copied)!==await digest(await original(item)))throw new Error('A copied backup file did not match. The old folder was kept.');
-        done+=1;onProgress?.(done,plan.length);if(done%LIST_YIELD_EVERY===0)await environment.yieldTask();
-      }
-      await writeFile(target,SCOPE_FILE,markerBlob(id,{movedFrom:legacyName}));
-      // Everything is in the new folder; an old folder that cannot be deleted
-      // now is deleted at a later start.
-      await removeLegacy().catch(()=>false);
-      summaryCache.clear();digestCache.clear();
-      return name;
-    }
-    // Deletes the folder of earlier versions once its files are in the new one.
-    async function removeLegacy(){
-      try{await bounded(chosenFolder().removeEntry(identities.legacyRoot,{recursive:true}),'Device Folder old backups',null,limits.responseTimeoutMs*6);return true;}
-      catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
-    }
-    const legacyPresent=async()=>!!await childDirectory(chosenFolder(),identities.legacyRoot);
     return freeze({
-      layout:freeze({inspect,create,claim,move,removeLegacy,legacyPresent}),
+      layout:freeze({inspect,create,claim,select,ownedRoot}),
       list,upload,download,delete:remove,scope,beginOperation,historyReadConcurrency:8,
       beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),renewPublication:lease=>renewLock('publication',lease),endPublication:lease=>endLock('publication',lease),
       beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:lease=>assertLock('maintenance',lease),renewMaintenance:lease=>renewLock('maintenance',lease),endMaintenance:lease=>endLock('maintenance',lease)

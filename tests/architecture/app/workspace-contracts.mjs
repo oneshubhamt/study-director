@@ -77,12 +77,13 @@ assert.match(repositories,/getDailyRecordsForWindow[\s\S]*recordKind==='study'/u
 assert.match(app,/getDailySummaries\(\)[\s\S]*recordKind==='study'/u,'Insights summaries must exclude diary-only records.');
 assert.match(backup,/manualOnly:true/u,'Diary reflection conflicts must use explicit manual reconciliation.');
 assert.match(backup,/requireContent:kinds\.every\(kind=>kind==='diary'\)/u,'Diary-only reflection conflicts must reject an empty custom canonical result.');
-assert.match(backupCodec,/version<DATA_CONTRACT\.schemas\.DailyRecord\.version\?CompatibilityCodec\.dailyRecord\(record\):null/u,'Managed repository records from the prior DailyRecord schema must use compatibility conversion.');
 assert.match(library,/title:'New Reflection'[\s\S]*min:earliestSupportedSavedDate\(\),max:todayISO\(\)/u,'New Reflection must constrain the native date picker to the supported retrospective range.');
 assert.match(interactions,/options\.inputType==='date'\)[\s\S]*inputElement\.min=cleanText\(options\.min,32\);inputElement\.max=cleanText\(options\.max,32\)/u,'Native date inputs must receive min/max constraints.');
 assert.match(app,/data-tab="execute"[^>]*>[\s\S]*Execute<\/button>/u,'Execute must be the canonical execution surface identity.');
 assert.match(app,/data-tab="library"[^>]*>[\s\S]*Library<\/button>/u,'Library must be the canonical library surface identity.');
-assert.match(review,/function syncReviewSurfaceMode\(\)[\s\S]*review-stats[\s\S]*review-summary[\s\S]*practice-review[\s\S]*review-blocks-collapse[\s\S]*quality-wrap[\s\S]*copy-report-control/u,'Reflection-only Review must suppress study-only surfaces.');
+assert.match(review,/function syncReviewSurfaceMode\(\)[\s\S]*review-stats[\s\S]*review-summary[\s\S]*review-blocks-collapse[\s\S]*if\(!hasStudyDay\)hidePracticeReview\(\);[\s\S]*quality-wrap[\s\S]*copy-report-control/u,'Reflection-only Review must suppress study-only surfaces.');
+assert.match(review,/function renderPracticeReview\(\)\{[\s\S]*?show=reviewHasStudyDay\(\)&&\(!!runs\.length\|\|active\);\n\s*if\(!show\)\{hidePracticeReview\(\);return;\}/u,'the Practice Pacer panel shows only a study day with runs, and empties when hidden.');
+assert.doesNotMatch(review.match(/function syncReviewSurfaceMode\(\)\{[\s\S]*?\n\}/u)?.[0]||'',/practice-review/u,'the surface mode never shows the Practice Pacer panel by itself.');
 assert.match(review,/if\(!reviewHasStudyDay\(\)\)return queueReflectionOnlySave/u,'Reflection-only Review autosave must use canonical Daily Reflection persistence.');
 assert.match(review,/if\(!reviewHasStudyDay\(\)\)return saveReflectionOnlyRecord\(\)/u,'The Review save action must become reflection-only when no Study Day exists.');
 assert.match(review,/settled:\(\)=>Promise\.all\(\[AppData\.activeSession\.settled\(\),reflectionLane\.tail\(\)\]\)/u,'Reflection-only writes must participate in Review quiescence.');

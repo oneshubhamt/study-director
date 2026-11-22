@@ -73,7 +73,7 @@ assert.equal(idbDurability.strict,libraryStrictBefore+1,'library-clear journal r
 assert.equal(idbDurability.normal,libraryNormalBefore,'library-clear journal retirement must not fall back to a normal durability transaction');
 assert.equal(await app.libraryClearJournal.read(),null,'library-clear journal should clear its state and chunk payload together');
 
-// Older restore-journal payloads are converted once by the compatibility host;
+// Older restore-journal payloads are not converted;
 // the ordinary journal store accepts only the current version.
 const legacyId='restore_qa-journal-legacy1',legacyTime='2026-09-13T05:00:00.000Z';
 const backupFile=Object.freeze({name:'backup-123e4567-e89b-12d3-a456-426614174000',size:64,hash:'a'.repeat(64)});

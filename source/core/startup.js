@@ -20,9 +20,9 @@ registry.define('startup-lifecycle',1,()=>{
       'planDraft','preferences','activeSession','notes','deletionRecovery'
     ],'Startup/lifecycle flushers');
     functions(input.startup,[
-      'migrateCompatibility','restoreAppearance','bindDom','recoverInterruptedLibraryClear','recoverInterruptedRestore','loadNotes','hydrateDrafts','previewPlan',
+      'censusData','restoreAppearance','bindDom','recoverInterruptedLibraryClear','recoverInterruptedRestore','loadNotes','hydrateDrafts','previewPlan',
       'startClock','startHeaderClock','refreshCoreUi','renderRecovery','checkBackup',
-      'showEmptyIfNeeded','openInitialTab','restoreActiveSession','showNameSetup','inspectStorage','reconcileLifecycle','applyLaunchRoute','verifyReady','markReady','reportFailure','clearFailure'
+      'showEmptyIfNeeded','openInitialTab','restoreActiveSession','showNameSetup','inspectStorage','reconcileLifecycle','applyLaunchRoute','markReady','reportFailure','clearFailure'
     ],'Startup stages');
     functions(input.activation,['publish'],'Startup activation adapter');
 
@@ -168,7 +168,7 @@ registry.define('startup-lifecycle',1,()=>{
         try{
           await runStage('ownership-install',ownership.install);
           await runStage('ownership-evaluate',ownership.evaluate);
-          await runStage('compatibility-migration',startup.migrateCompatibility);
+          await runStage('unsupported-data-census',startup.censusData);
           await runStage('lifecycle-install',installLifecycle);
           await runStage('appearance-restore',startup.restoreAppearance);
           await runStage('dom-bindings-install',installDomBindings);
@@ -189,9 +189,8 @@ registry.define('startup-lifecycle',1,()=>{
           await runStage('launch-route',startup.applyLaunchRoute);
           await runStage('name-setup',startup.showNameSetup);
           await runStage('storage-inspection',startup.inspectStorage);
-          const proof=await runStage('canonical-verification',startup.verifyReady);
           fullyInitialized=true;lifecycleState='ready';
-          await runStage('startup-ready',()=>startup.markReady(proof));
+          await runStage('startup-ready',startup.markReady);
         }catch(error){
           fullyInitialized=false;lifecycleState='failed';failedStage=currentStage||'startup';currentStage='';
           lastFailure=freeze({code:'STARTUP_INITIALIZATION_FAILED',message:'Study Director could not safely finish loading stored data.',at:new Date().toISOString()});

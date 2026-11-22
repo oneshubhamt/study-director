@@ -20,23 +20,21 @@ const raw=`(async()=>{${idb}return dump();})()`;
 const prefsKey=APP_META_KEYS.personalPreferences;
 const REVIEW_ID='pr_'+'a1'.repeat(16),REVIEW_KEY=APP_META_KEYS.pendingReviewPrefix+REVIEW_ID;
 const cases=[
-  // SDVB75F24 kept a session for review in ActiveSession format 10. F25 reads
-  // sessions as 11, so the review was held as if from a newer version and
-  // Drive sync paused for good. Start-up converts it in place (only the kept
-  // session's version changes), so nothing is held and the review stays.
-  {name:'session kept for review by SDVB75F24',converted:true,
+  {name:'older session kept for review stays untouched',held:{settings:1},
     prepare:`(async()=>{await ${runSession('Kept')};return (await __PWA6.AppData.activeSession.load()).value;})()`,
-    seed:session=>`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:${JSON.stringify(REVIEW_KEY)},version:1,updatedAt:'2026-11-14T08:00:00.000Z',
-      value:{version:2,id:${JSON.stringify(REVIEW_ID)},subject:'session',ref:'session',keptAt:'2026-11-14T08:00:00.000Z',keptFrom:'',keptChangedAt:'',kept:{...${JSON.stringify(session)},version:10},base:null,resolvedAt:''}});await done(tx);db.close();return ${JSON.stringify(REVIEW_KEY)};})()`,
-    inPage:async page=>{
-      assert.equal(await page.evaluate(`__PWA6.UnsupportedData.held()`),false,'nothing is held, so Drive sync is not paused');
-      assert.deepEqual(await page.evaluate(`(async()=>(await __PWA6.AppData.pendingReviews.list()).filter(row=>!row.resolvedAt).map(row=>row.id))()`),[REVIEW_ID],'the review is still waiting');
-    },
-    stored:({before,after})=>{
-      const was=before.stores.appMeta.values.find(row=>row.key===REVIEW_KEY),now=after.stores.appMeta.values.find(row=>row.key===REVIEW_KEY);
-      assert.equal(now.value.kept.version,11,'the kept session is in the current format');
-      assert.deepEqual({...now.value,kept:{...now.value.kept,version:10}},was.value,'only the kept session\'s version changed');
-    }},
+    seed:session=>`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:${JSON.stringify(REVIEW_KEY)},version:1,updatedAt:'2026-11-14T08:00:00.000Z',value:{version:2,id:${JSON.stringify(REVIEW_ID)},subject:'session',ref:'session',keptAt:'2026-11-14T08:00:00.000Z',keptFrom:'',keptChangedAt:'',kept:{...${JSON.stringify(session)},version:10},base:null,resolvedAt:''}});await done(tx);db.close();return ${JSON.stringify(REVIEW_KEY)};})()`,
+    stored:({before,after})=>assert.deepEqual(after.stores.appMeta.values.find(row=>row.key===REVIEW_KEY),before.stores.appMeta.values.find(row=>row.key===REVIEW_KEY))},
+  {name:'older note stays untouched',older:true,held:{notes:1},
+    seed:`(async()=>{${idb}const db=await open(),tx=db.transaction('notes','readwrite'),os=tx.objectStore('notes'),row=(await req(os.getAll())).find(r=>r.label==='Ethics');os.put({...row,version:2});await done(tx);db.close();return row.key;})()`,
+    write:{store:'notes',value:key=>({key,version:3,label:'Ethics',text:'overwritten',updatedAt:new Date().toISOString()})},clear:'notes'},
+  {name:'older database is never upgraded',blocked:true,older:true,
+    seed:`(async()=>{${idb}await req(indexedDB.deleteDatabase('sdmLocalAppDB.v1'));const db=await open(8,db=>db.createObjectStore('notes',{keyPath:'key'}));const tx=db.transaction('notes','readwrite');tx.objectStore('notes').put({key:'sentinel',text:'preserve'});await done(tx);db.close();return 8;})()`},
+  {name:'inert F29 marker does not block current data',
+    seed:`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:'dailyRecordMigration',version:1,value:{recordVersion:16,summaryVersion:5,complete:true,recordCount:0},updatedAt:'2026-11-14T08:00:00.000Z'});await done(tx);db.close();return 'dailyRecordMigration';})()`,
+    stored:({before,after})=>assert.deepEqual(after.stores.appMeta.values.find(row=>row.key==='dailyRecordMigration'),before.stores.appMeta.values.find(row=>row.key==='dailyRecordMigration'))},
+  {name:'newer envelope at the reserved marker key is held',held:{settings:1},
+    seed:`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:'dailyRecordMigration',version:2,value:{future:true},updatedAt:'2026-11-14T08:00:00.000Z'});await done(tx);db.close();return 'dailyRecordMigration';})()`,
+    stored:({before,after})=>assert.deepEqual(after.stores.appMeta.values.find(row=>row.key==='dailyRecordMigration'),before.stores.appMeta.values.find(row=>row.key==='dailyRecordMigration'))},
   {name:'newer database with a store this build does not know',
     seed:`(async()=>{${idb}const db=await open(),v=db.version;db.close();(await open(v+1,created=>created.createObjectStore('futureThings',{keyPath:'id'}))).close();return v+1;})()`,
     check:async({page,before,after})=>{
@@ -53,6 +51,7 @@ const cases=[
     write:{store:'dailyRecords',value:date=>({version:16,recordKind:'diary',date,reflection:'overwritten'})},
     clear:'dailyRecords'},
   {name:'setting saved by a newer version',held:{settings:1},
+    prepare:`__PWA6.AppData.personalPreferences.write({version:2,studentName:'QA',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,updatedAt:new Date().toISOString()})`,
     seed:`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite'),os=tx.objectStore('appMeta'),row=await req(os.get(${JSON.stringify(prefsKey)}));if(!row)throw new Error('no preferences row');os.put({...row,value:{...row.value,version:99,future:true}});await done(tx);db.close();return row.key;})()`,
     write:{store:'appMeta',value:key=>({key,version:1,value:{version:2},updatedAt:new Date().toISOString()})}},
   {name:'setting this build does not know',held:{settings:1},
@@ -84,7 +83,7 @@ try{
       page=await browser.createPage(server.url('deployment','instrumented.html'),{preload});
       if(testCase.blocked){
         await waitFor(()=>page.evaluate(`document.documentElement.dataset.studyDirectorStartupState==='failed'`),{label:'start-up stops',timeout:20000});
-        assert.equal(await page.evaluate(`__PWA6.NoticeCoordinator.eventStatus().events.some(event=>event.source==='unsupported-data'&&event.id==='blocked'&&/needs a newer version/u.test(event.title))`),true,'the profile says it needs a newer version');
+        assert.equal(await page.evaluate(`__PWA6.NoticeCoordinator.eventStatus().events.some(event=>event.source==='unsupported-data'&&event.id==='blocked'&&/${testCase.older?'earlier version':'needs a newer version'}/u.test(event.title))`),true,'the profile says it needs a newer version');
         assert.equal(await page.evaluate(`__PWA6.NoticeCoordinator.status?.().active?.id==='startup-failure'`),false,'not the generic start-up failure');
       }else{
         await waitForStudyDirector(page,{instrumented:true,timeout:20000});
@@ -98,7 +97,7 @@ try{
       if(testCase.held){
         assert.equal(await page.evaluate(`__PWA6.UnsupportedData.held()`),true,'protected data is held, so clean-up and Drive uploads wait');
         assert.equal(await page.evaluate(`__PWA6.NoticeCoordinator.eventStatus().events.some(event=>event.source==='unsupported-data'&&event.id==='held')`),true,'the person is told once');
-        assert.equal(await page.evaluate(`!document.getElementById('unsupported-data').hidden&&/newer version/u.test(document.getElementById('unsupported-data-text').textContent)`),true,'Library → Data says what is kept');
+        assert.equal(await page.evaluate(`!document.getElementById('unsupported-data').hidden&&/${testCase.older?'earlier version':'version'}/u.test(document.getElementById('unsupported-data-text').textContent)`),true,'Library → Data says what is kept');
       }else if(!testCase.blocked){
         // Nothing held: the Library → Data row stays out of sight (its layout
         // once overrode the hidden attribute and showed an empty row).

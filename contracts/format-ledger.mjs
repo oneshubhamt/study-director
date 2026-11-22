@@ -9,34 +9,33 @@ const freeze=Object.freeze;
 // must raise its container's version; otherwise an older build would read
 // the new form as damaged, or misread it.
 //
-// One row per set of synced forms, oldest first, starting with the oldest
-// build still in use. Changing a synced form: raise its version, raise
-// `backup` and `manifest` (and `claim` for the claim), read the older form
-// through the compatibility layer, and add a row here
-// (docs/areas/data-and-storage.md#changing-a-synced-form).
-// tests/architecture/storage/format-ledger.mjs checks the rows against the code.
+// Current canonical baseline only. Future shape changes must raise their
+// container versions and explicitly define rollout; no older-form readers
+// ship in this build. Git history records retired baselines.
 export const SYNCED_RECORDS=freeze(['DailyRecord','Note','ActiveSession','SessionSnapshot','PendingReview','CheckpointMetadata','CheckpointProtectedManifest']);
 // Stored on this device only: their own version is checked when read here.
 export const LOCAL_RECORDS=freeze(['DailySummary','LocalRecoveryEnvelope','AppMeta']);
 const row=value=>freeze({...value,records:freeze({...value.records})});
 export const SYNCED_FORMAT_LEDGER=freeze([
-  row({release:'SDVB75F18',backup:23,manifest:8,claim:2,personalData:2,
-    records:{DailyRecord:16,Note:3,ActiveSession:10,SessionSnapshot:6,PendingReview:1,CheckpointMetadata:1,CheckpointProtectedManifest:3}}),
-  // Kept versions name their device (PendingReview 2); the claim names the
-  // handoff and the content it observed (claim 4).
-  row({release:'SDVB75F24',backup:24,manifest:9,claim:4,personalData:2,
-    records:{DailyRecord:16,Note:3,ActiveSession:10,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}}),
-  // A day can be finished: ActiveSession 11 adds status 'finished', so Finish
-  // Today is final on every device. Every device must update at about the
-  // same time: an older build keeps a version-10 Drive version as it is,
-  // uploads nothing over it and asks for an update.
-  row({release:'SDVB75F28',backup:25,manifest:10,claim:4,personalData:2,
-    records:{DailyRecord:16,Note:3,ActiveSession:11,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}}),
-  // Support Activities is stored under its own name and a fixed id, no longer
-  // under a reserved title; notes keep Note 3. Every device must update at
-  // about the same time: an older build keeps a version-11 Drive version as
-  // it is, uploads nothing over it and asks for an update.
   row({release:'current',backup:26,manifest:11,claim:4,personalData:2,
     records:{DailyRecord:16,Note:3,ActiveSession:11,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}})
 ]);
 export const CURRENT_SYNCED_FORMATS=freeze({backup:EXTERNAL_FORMATS.completeBackup.metadataVersion,records:freeze(Object.fromEntries(SYNCED_RECORDS.map(name=>[name,CURRENT_SCHEMA_VERSIONS[name]])))});
+
+// These records grant authority outside the synced containers. Tests compare the
+// bytes or properties produced by the actual adapters with these current forms.
+const shape=(constants,fields,optional=[])=>freeze({constants:freeze(constants),fields:freeze([...Object.keys(constants),...fields]),optional:freeze(optional)});
+const driveCoordination={studyDirectorRepository:'true',studyDirectorSecurity:'1'};
+const driveFields=['studyDirectorRepositoryId','studyDirectorVersion','exportedAt'];
+export const OPERATIONAL_FORMATS=freeze({
+  deviceScope:shape({format:'study-director.device-folder-scope',version:2},['id','profile','scope','device']),
+  devicePublication:shape({format:'study-director.repository-publication',version:1,renews:true},['id','startedAt']),
+  deviceMaintenance:shape({format:'study-director.repository-maintenance',version:1},['id','startedAt']),
+  driveLibrary:shape({studyDirectorFolder:'true'},['studyDirectorProfile']),
+  driveDeletion:shape({},['studyDirectorDeletedProfile']),
+  drivePublication:shape({...driveCoordination,studyDirectorRepositoryKind:'publication',studyDirectorRepositoryVersion:'1',sdPublicationRenews:'1'},driveFields,['sdPublicationDevice','sdPublicationStartedAt']),
+  driveMaintenance:shape({...driveCoordination,studyDirectorRepositoryKind:'maintenance',studyDirectorRepositoryVersion:'2'},driveFields,['sdMaintenanceDevice']),
+  appOwner:shape({version:2},['tabId','pageId','claimId','expiresAt']),
+  mutationLock:shape({version:1},['tabId','pageId','claimId','expiresAt','kind','id']),
+  attachment:shape({version:2,storage:'opfs'},['file','hash','size','type','name','library'])
+});

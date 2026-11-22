@@ -46,12 +46,17 @@ const cases=[];
 }
 {
   const {catalogue}=fixture();
-  assert.deepEqual({...catalogue.normalizeName('  GS2 >  Polity ')},{key:'gs2 > polity',label:'GS2 > Polity',reserved:false});
+  assert.deepEqual({...catalogue.normalizeName('  GS2 >  Polity ')},{key:'gs2 > polity',label:'GS2 > Polity',reserved:false,reservedArea:false});
   assert.equal(catalogue.normalizeName('   '),null);
-  for(const name of ['Support Activities','support activities > res'])assert.equal(catalogue.normalizeName(name).reserved,true,`${name} is reserved`);
-  assert.equal(catalogue.normalizeName('GS2 > Support Activities').reserved,false,'only the start of a path is reserved');
+  // No other note takes the shared note's name; notes inside it are ordinary.
+  assert.equal(catalogue.normalizeName('Support Activities').reserved,true,'the shared note’s name is reserved');
+  assert.equal(catalogue.normalizeName('support activities > Gym log').reserved,false,'a note inside Support Activities is allowed');
+  // No work block's Area is Support Activities or inside it.
+  for(const name of ['Support Activities','support activities > res'])assert.equal(catalogue.normalizeName(name).reservedArea,true,`${name} is not a work Area`);
+  assert.equal(catalogue.normalizeName('GS2 > Support Activities').reservedArea,false,'only the start of an Area is checked');
+  assert.equal(catalogue.reservedArea('support activities > res'),true);
   assert.equal(catalogue.reserved(SUPPORT.key),false,'the shared note itself is not refused');
-  cases.push('names: normalised, and Support Activities reserved');
+  cases.push('names: normalised; Support Activities reserved as a note name and as the start of a work Area');
   const ordered=catalogue.order([{key:'b',label:'B',text:'x'},{key:'a > c',label:'A > C',ephemeral:true},{key:'a',label:'A'}]);
   assert.deepEqual(ordered.map(entry=>[entry.key,entry.hasNote,entry.ephemeral,entry.depth]),[['a',false,false,0],['a > c',false,true,1],['b',true,false,0]]);
   cases.push('order merges rows and nests them');

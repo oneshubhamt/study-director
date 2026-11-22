@@ -1,6 +1,6 @@
 # Data and storage
 
-Where Study Director keeps data on the device, how it is named and protected, and how older data is read. Backups and sync are in [backup-and-sync.md](backup-and-sync.md).
+Where Study Director keeps data on the device, how it is named and protected, and how unsupported data is held. Backups and sync are in [backup-and-sync.md](backup-and-sync.md).
 
 ## Where data lives
 
@@ -18,7 +18,7 @@ Decisions (owner, 2026-10-18):
 - Device-wide, and nothing else: the profile list, the device ID, the install notice and the update check (with the service worker).
 - Switching reloads every open tab into the chosen profile. With one profile its backup key is kept on the device (a non-extractable key, never the password); with several, each start asks ("Not now" keeps sync and encrypted backups waiting). It is not a privacy lock: browser data is not encrypted. A forgotten password cannot be recovered, by design.
 - **Device names.** Nobody types one. The device ID says what the device is (`inst_<type>_<browser>_<first-use time>_<random>`), and any device can name any other from it ("iPhone · Safari", with "(since 12 Oct)" only when two would look the same).
-- **First start.** Someone new gives a name, an optional password (set before Drive is used, so no unencrypted version reaches it) and optionally connects Drive; joining a library from the form takes its name and settings. Existing data becomes the first profile with no form. Add profile opens the same form.
+- **First start.** Someone new gives a name, an optional password (set before Drive is used, so no unencrypted version reaches it) and optionally connects Drive; joining a library from the form takes its name and settings. A completed profile opens directly. Creating the first profile or adding another opens the form.
 
 ## What is stored
 
@@ -36,23 +36,9 @@ Temporary UI projections are not authoritative. After protected operations, cont
 
 ## Record names
 
-**Record names.** appMeta records have stable names without versions (`planDraft`, `restoreJournalState`, `repositoryMaintenancePending`, …); the version lives only inside the value. Older suffixed names (`planDraft.v1`, `reconciliationBase.v2`, …) are listed in `RENAMED_APP_META_KEYS` and are moved once, in one strict transaction, as the first compatibility step; an old and a new copy that differ stop the move. Browser-storage keys keep their names: several are read before the compatibility step runs (theme, storage health, ownership leases), so renaming them would need a second read path. The one exception is the emergency copy of unsaved notes, which nothing reads before that step.
+appMeta families have stable names (`planDraft`, `restoreJournalState`, `repositoryMaintenancePending`, …); versions live inside values. IndexedDB version 9 has six current stores: `dailyRecords`, `dailySummaries`, `notes`, `activeSessions`, `appMeta`, `assets`. Canonical identities and their validation owners live in `contracts/canonical-identities.mjs` and `contracts/data-architecture.mjs`.
 
-**Note and Device Folder names.** Notes once carried the internal name "area note" and the Device Folder settings "automatic device backup". Everything now uses the plain names, stored data included:
-
-| Where | Name now | Name before |
-|---|---|---|
-| Notes store | `notes` (database version 9) | `areaNotes` (database version 7 and earlier) |
-| Note deletion records | `noteDeletion:`, format `study-director.note-deletion` | `areaNoteDeletion:` (and `areaNoteDeletion.v1:`), format `study-director.area-note-deletion` |
-| Device Folder settings | `deviceFolder`, format `study-director.device-folder-settings` | `automaticDeviceBackup`, format `study-director.device-backup-settings` |
-| Emergency copy of unsaved notes | `studyDirector.noteRescue.v1`, format `study-director.note-rescue` | `studyDirector.areaNoteRescue.v1`, format `study-director.area-note-rescue` |
-| Interrupted-restore journal | version 5, `noteDeletions` | version 4 and earlier, `areaNoteDeletions` |
-| Backup file | version 26, entity `note`, with `pendingReview` v2 | versions 24 and 25 (Support Activities under its reserved title; 24 also with ActiveSession v10); version 23 (kept versions in their v1 form); versions 20 and earlier, entity `areaNote` (21 and 22 came only from unreleased builds and are refused) |
-| Protected checkpoint manifest | version 3, `noteDeletions`, authority `notes` | version 2, `areaNoteDeletions`, authority `areaNotes` |
-| Repository checkpoint | version 11, kind `note`, with `pendingReview` v2 | versions 9 and 10 (Support Activities under its reserved title; 9 also with ActiveSession v10); version 8 (kept versions in their v1 form); versions 5 and earlier, kind `areaNote` (6 and 7 came only from unreleased builds and are refused) |
-| Version kept for review | `PendingReview` v2, with `keptFrom` and `keptChangedAt` | v1, which names no device: stored rows are rewritten at start (compatibility entry `pending-review-v1`) |
-
-The store is renamed in place inside the upgrade (rows are never copied): an older database opens at bridge version 8, which renames it, and the compatibility step then retires the bridge stores at version 9. The records and the emergency copy move in the first compatibility step, their value format renamed with them. Older backup files and checkpoints are read under the names they were written with: checksums, completion proofs, pack shards and the logical-state fingerprint are all checked against the written names, and what they hold is then read under the current ones. An older build refuses the version 9 database and the new backup versions until it is updated. Device Folder and Drive upload each note once more after the change, because the note objects are now written under the new kind.
+Notes use permanent `n_` IDs and Note v3; Support Activities has its own name and fixed identity. Device Folder settings use `deviceFolder` v4. Backup files use metadata v26, repository manifests v11, protected manifests v3 and ownership claims v4. `contracts/format-ledger.mjs` records this single current baseline. Canonical readers require the current record formats.
 
 ## Last backup record
 
@@ -64,9 +50,9 @@ The store is renamed in place inside the upgrade (rows are never copied): an old
 
 ## Storage health
 
-**Storage health** keeps three facts in browser storage: the change clock's fast copy (`lastLocalSaveAt`), when study data was last saved here (`lastStudyDataSaveAt`: notes, Saved Days, sessions, plans or kept versions, made here or taken in by a sync, the same things the empty-device check counts; settings alone, such as a name or theme, and the start-up compatibility step do not) and an unresolved browser-data clear. The two save times only move forward: each tab writes the later of the stored time and its own, so an older tab never hides a newer save. Issues are shown live and never stored. The browser's storage estimate is measured at launch and again on returning to the app (at most hourly), and kept in memory for diagnostics. When the database fails, the record is rewritten once to show at once whether browser storage can still be written. The Device Folder settings record (version 4) holds only the folder handle and `baseline`, the change from which it backs up on its own.
+**Storage health** reads and writes one version-3 record with three facts: the change clock's fast copy (`lastLocalSaveAt`), when study data was last saved here (`lastStudyDataSaveAt`: notes, Saved Days, sessions, plans or kept versions, made here or taken in by a sync, the same things the empty-device check counts; settings alone, such as a name or theme do not) and an unresolved browser-data clear. The two save times only move forward: each tab writes the later of the stored time and its own, so an older tab never hides a newer save. Unknown health records supply no save or clear evidence. Issues are shown live and never stored. The browser's storage estimate is measured at launch and again on returning to the app (at most hourly), and kept in memory for diagnostics. When the database fails, the record is rewritten once to show at once whether browser storage can still be written. The Device Folder settings record (version 4) holds only the folder handle and `baseline`, the change from which it backs up on its own.
 
-**Storage census and database record (diagnostics).** Copy diagnostics measures what this site's storage holds, read-only and within about 2.4 s (`storage-census.js`): the browser's estimate with its own breakdown where offered (`usageDetails`), database records and approximate bytes per store and appMeta by family, file storage (OPFS) by folder at its root (attachments, backup scratch, the retired attachment folder, anything else), cached app files, and the gap between what the app measured and the browser's figure. A part that runs out of time shows as partial and no gap is claimed. A small record in browser storage (`databaseLifecycle`), written by the tab in control, keeps this start (new or existing database, the version found, store counts), the last committed write, storage faults by name and unexpected closes, and the start before the last database loss, since browser storage survived both losses on the phone. Counts, sizes, times and error names only.
+**Storage census and database record (diagnostics).** Copy diagnostics measures what this site's storage holds, read-only and within about 2.4 s (`storage-census.js`): the browser's estimate with its own breakdown where offered (`usageDetails`), database records and approximate bytes per store and appMeta by family, file storage (OPFS) by folder at its root (attachments, backup scratch, anything else), cached app files, and the gap between what the app measured and the browser's figure. A part that runs out of time shows as partial and no gap is claimed. A small record in browser storage (`databaseLifecycle`), written by the tab in control, keeps this start (new or existing database, the version found, store counts), the last committed write, storage faults by name and unexpected closes, and the start before the last database loss, since browser storage survived both losses on the phone. Counts, sizes, times and error names only.
 
 ## Data this version cannot read
 
@@ -74,14 +60,14 @@ The store is renamed in place inside the upgrade (rows are never copied): an old
 
 | What | Held as |
 |---|---|
-| A record whose `version` is above this build's (Saved Day, summary, note, session, attachment) | newer; a Saved Day and its summary are held together |
-| An appMeta row whose envelope `version` is above 1, or whose key this build does not know (and is not one it retires) | newer or unknown |
+| A record whose version differs from this build's (Saved Day, summary, note, session, attachment) | older or newer; a Saved Day and its summary are held together |
+| An appMeta row whose envelope `version` is above 1, or whose key this build does not know (except the inert F29 conversion marker) | newer or unknown |
 | An appMeta value whose `version` is above its family's schema and that this build cannot validate | newer |
-| An appMeta value still unreadable once the compatibility steps are done | unreadable |
+| An appMeta value that the current validator cannot read | unreadable |
 
 The storage layer (`persistence.js`) then keeps held records out of every read, refuses a write or delete of one (`STUDY_DIRECTOR_UNSUPPORTED_DATA`) and leaves them in place on a clear or a range delete; with nothing held, every transaction is the plain browser one. Bookkeeping whose family is `operational` in the data contract (leases, maintenance progress, caches) is held too but replaced as usual. While protected data is held, local clean-up waits (it decides what nothing refers to, and held data may refer to attachments) and Drive uploads wait (a version without that data would read as its deletion on other devices); Device Folder and file backups go on with what this build can read. The person is told once, Library → Data names what is held, and diagnostics has an "Unsupported data" row.
 
-A newer database opens as it is, never upgraded or downgraded. If a store this build needs is gone or keyed differently, the profile does not open: start-up says it needs a newer version and offers another profile, and nothing in it is touched. A profile list from a newer version is used read-only: nothing in it is rewritten, and adding, switching or removing profiles (and deleting removed profiles' data) waits for an update. On Drive, a version this build cannot read shows muted in Version History with Restore disabled and Remove in red; sync waits on it ("Needs app update") instead of retrying, and never uploads over it.
+An older database is left untouched and startup is blocked; an empty version-1 database from an interrupted first creation may initialize the current stores. A newer database opens as it is, never upgraded or downgraded. If a store this build needs is gone or keyed differently, the profile does not open: start-up says it needs a newer version and offers another profile, and nothing in it is touched. A newer or malformed profile list is read-only: nothing in it is rewritten, and adding, switching or removing profiles (and deleting removed profiles' data) waits for an update. On Drive, a version this build cannot read shows muted in Version History with Restore disabled and Remove in red; sync waits on it ("Needs app update") instead of retrying, and never uploads over it.
 
 For this to keep working, a later build bumps a record's `version` when its shape changes, gives new appMeta families names an older build does not know, and treats removing or re-keying a store as a change that older builds meet by leaving the profile alone.
 
@@ -97,16 +83,7 @@ What travels between devices is read inside a container whose version every buil
 
 ### Changing a synced form
 
-`contracts/format-ledger.mjs` lists the synced forms and the container versions they travel in, one row per set of forms, starting with the oldest build in use (F18); `tests/architecture/storage/format-ledger.mjs` fails until a change follows these steps:
-
-1. Raise the form's own version (`CURRENT_SCHEMA_VERSIONS`, or the codec's for personal data and the claim).
-2. Raise the backup version and the repository manifest version (a claim change raises only the claim version, keeping its format name).
-3. Read the older form through the compatibility layer, with a registry entry (`contracts/compatibility.mjs`), never in the current codec.
-4. Add a row to the ledger, and say in the pull request that every device must update at about the same time.
-
-A change of value inside an unchanged record shape (F29: Support Activities' title) keeps the record's version and still raises the containers, so an older build waits for an update instead of misreading it; the current codec refuses the old value, which only the compatibility layer converts.
-
-A new kind of stored data is classed in the ledger as synced or local-only; a local-only form relies on its own version and the census above.
+`contracts/format-ledger.mjs` also records the fields and version markers written for external repository ownership, publication and maintenance, tab leases and attachment metadata. The synced ledger records only the current synced and local forms. Future shape changes must raise the record version and the backup/repository containers that carry it (claims have their own version). Define rollout explicitly before shipping such a change; do not quietly add an older-format reader to a current codec. Git history retains earlier baselines.
 
 ## Emergency copies
 
@@ -124,21 +101,12 @@ Attachment bytes live in OPFS and are published only after write and read-back v
 
 PDF attachments retain their OPFS reader while an in-app iframe or an external viewer needs the Blob URL. The in-app viewer releases on overlay close as before. An external native viewer with a readable popup handle is observed until it closes; the URL/reader and interval are released on closure or origin pagehide. For fallback options, Open under a direct click attempts a tracked `noopener` popup and otherwise uses the browser's ordinary noopener link with a **10-minute bounded lease**; Download uses native link handling with **2-minute bounded lease**. The options overlay closes after handoff and on pagehide so a BFCache-returned page does not display invalid links. Unreadable window handles cannot supply an exact close signal. Timeouts are conservative cleanup limits and **cannot guarantee** that an external PDF viewer continues working after its opener unloads or beyond the bounded fallback expiry. These are user-gesture file-handling policies, not PWA scheduled work.
 
-## Compatibility and migration
+## Canonical-only storage
 
-**The rule (owner, 2026-10-10).** Older data is read once, converted into the current canonical form, verified and retired, never used again. Only the compatibility host (`compatibility-host.js`, plus repository adapters where a transaction requires it) reads old forms; the ordinary runtime reads only current forms. Every conversion is listed in `contracts/compatibility.mjs` with its retirement condition. Only formats a released build wrote need a reader; formats that existed only in unreleased builds are refused (owner, 2026-10-18).
+F30 retires the F29 upgrade machinery on the owner's assumption that all devices have already upgraded. Startup runs the read-only unsupported-data census; it does not convert data, rename stores, import old files or prove migration readiness. Older backup files, repository versions and ownership claims are refused. Unknown files/folders and held records are never silently removed or rewritten.
 
-Compatibility is deliberately isolated. Current canonical repositories/codecs do not depend on historical representations for ordinary operation.
+The tab owner lease is version 2. Its page ID and claim distinguish a reloaded page or a second tab from the writer. The lease, storage-health record and their consumers use the current formats under the existing storage keys. Only the tab in control reconciles the session's rescue copy into IndexedDB. A tab without control (a second window, or a tab handing over) still reads the newer of the two copies in full, strict reads included, and its read does not fail for that.
 
-The compatibility layer covers live-install migration and historical external formats. None of it is removed until "Format cleanup" reads ready on every device in use; then all of it goes in one release (Release B).
+Recovery readers validate the whole current session, Note, Saved Day fallback or pending-deletion record before using its contents. Unreadable copies stay in place and block replay or cleanup. A session save replaces a readable rescue copy, and its commit retires it, whatever the two revisions. Save order decides, as it does in IndexedDB: a session brought in by sync or restore can carry a lower revision than the flush made here just before it.
 
-The layer is reached through a fixed set of entry points, pinned by `compatibility-isolation`: the facade's four call sites (start-up migration and proof, a tab taking over writing, opening a backup file), the IndexedDB upgrade bridge (its store rename and conversions), and `AppData.compatibility`, which only the facade uses. The repositories keep their migrations in one marked block (`/* COMPATIBILITY … END COMPATIBILITY */`); ordinary code never calls into it or reads the `dailyRecordMigration` marker. Retiring the layer deletes:
-
-1. `compatibility.js`, `compatibility-host.js`, `compatibility-codecs.js` and their module loads.
-2. In `app.html`: the facade block, its three start-up uses (keeping a plain start-up path), `RuntimeBackupCodec.inspect` (back to the current reader), the IndexedDB upgrade bridge, its store rename and legacy store names, and the `compatibilityAppMeta`/`compatibilityCodec`/`legacyStores`/`legacyKeys` inputs to AppData.
-3. In the repositories: the marked block, which holds every Daily Record, Active Session and note conversion (the notes repository has none), and the namespace that closes it; the Insights conversions it calls (`migrateLegacyEnvelope`, `verifyCanonicalEnvelope`) and `AttachmentStorage.cleanupLegacy`.
-4. In `backup-provider.js`: the marked block that reads ownership claims older devices write (`upgradeOlderSessionClaim`, `plainSessionClaim`); `decodeSessionClaim` then returns the current reader alone.
-5. In the contracts: the compatibility registry, the obsolete and renamed identity lists and the `dailyRecordMigration` family.
-6. Their tests (`compatibility-*`, `retirement-readiness`) and legacy fixtures.
-
-Readers for old backup files and older repository checkpoints go too (owner, 2026-11-16: no old `.sdbackup` file needs to open again), so retirement leaves one current format everywhere. Version 20 differs from today's in note names and ids and has no versions kept for review (registry: `name-keyed-notes-in-backups`). Backup file version 23 and checkpoint version 8 differ only in holding kept versions in their v1 form (registry: `pending-review-v1`, which also rewrites this device's stored v1 rows at start).
+F29 left `dailyRecordMigration` in appMeta. The census exempts the reserved key in its version-1 envelope, so an upgraded installation can open with the marker present. Startup leaves its value untouched. Crash recovery, failed-write rescue, restore journals, validation, integrity checks and in-session schedule progress remapping operate on current data.

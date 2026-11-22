@@ -439,3 +439,23 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'a parent with no note moves the notes under it',
   'a cleared note with nothing on its bar is removed after a week'
 ]},null,2));
+
+// A wrong envelope must stop adoption or cleanup even if a row inside looks current.
+{
+  const h=createHarness(),at='2026-09-17T11:00:00.000Z',id=noteId('Emergency');
+  const current={format:'study-director.note-rescue',version:1,updatedAt:at,entries:{[id]:{version:3,key:id,label:'Emergency',text:'Rescue me',updatedAt:at}}};
+  const unknown={...current,version:2};
+  await h.app.notes.load();
+  h.app.notes.update('Draft','Draft','another note','');
+  h.sharedLocal.set('noteRescue',unknown);
+  assert.equal(h.app.notes.protectUnsaved(),false,'a new emergency copy cannot replace an unwritten format');
+  await assert.rejects(h.app.notes.flush({strict:true}),/Note rescue is not in the current canonical schema/);
+  await assert.rejects(createHarness(h.sharedLocal,h.stores).app.notes.load(),/browser copy was preserved/);
+  assert.equal(h.sharedLocal.get('noteRescue'),unknown);
+  h.sharedLocal.set('noteRescue',current);
+  const reopened=createHarness(h.sharedLocal,h.stores);
+  await reopened.app.notes.load();
+  assert.equal(reopened.app.notes.get('Emergency').text,'Rescue me');
+  await reopened.app.notes.flush({strict:true});
+  assert.equal(h.sharedLocal.has('noteRescue'),false);
+}

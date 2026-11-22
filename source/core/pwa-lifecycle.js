@@ -167,7 +167,13 @@ registry.define('pwa-lifecycle',1,()=>{
       bootReady=true;if(!supported||attempt||reloading)return false;if(bootTask)return bootTask;
       bootTask=(async()=>{
         let expected=null;
-        try{const raw=environment.window.sessionStorage.getItem(reloadSessionKey);if(raw){try{expected=JSON.parse(raw);}catch{expected={releaseId:raw};}}}catch(error){capture('pwa.boot-marker',error);throw error;}
+        try{
+          const raw=environment.window.sessionStorage.getItem(reloadSessionKey);
+          const marker=JSON.parse(raw)||null;
+          if(marker?.version===2&&typeof marker.releaseId==='string'&&marker.releaseId)expected=marker;
+        }catch(error){
+          if(error?.name!=='SyntaxError'){capture('pwa.boot-marker',error);throw error;}
+        }
         const worker=serviceWorker.controller;
         if(!worker||worker.state!=='activated'){if(expected){bootState='pending';if(!checking&&!registrationTask)publishRestingState();else publish();}return false;}
         const identity=await identify(worker);

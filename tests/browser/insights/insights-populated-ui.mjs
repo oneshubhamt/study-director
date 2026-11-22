@@ -25,7 +25,7 @@ async function waitFor(fn,{timeout=45000,interval=100,label='condition'}={}){
 
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,CompatibilityCodecs,goTab});\n';
+const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,DailyRecordCodec,goTab});\n';
 if(!main.includes(marker))throw new Error('Insights UI browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
@@ -62,17 +62,14 @@ try{
   const seeded=await page.evaluate(`(async()=>{
     const total=590,now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
     const iso=day=>new Date(day*86400000).toISOString().slice(0,10);
-    const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     for(let index=0;index<total;index+=1){
       const date=iso(end-total+1+index),recent=true,recentIndex=index;
       const pace=recent?125-recentIndex*.06:65+index*.12,targetMs=60000,actualMs=Math.max(1000,Math.round(targetMs*pace/100));
       const completionA=Math.max(5,Math.min(100,recent?45+recentIndex*.05:95-index*.08));
       const completionB=Math.max(0,100-completionA/2),actualSecondsA=Math.round(completionA*18),actualSecondsB=1200;
-      const completedEquivalentMinutes=30*completionA/100+30*completionB/100,actualFocusMinutes=(actualSecondsA+actualSecondsB)/60;
-      const taskA='a-'+index,taskB='b-'+index,dayOfWeek=new Date(date+'T00:00:00Z').getUTCDay();
-      records.push({version:13,date,dayOfWeek,dayName:dayNames[dayOfWeek],savedAt:date+'T18:00:00.000Z',sourceRevision:1,
+      const taskA='a-'+index,taskB='b-'+index;
+      records.push({version:16,recordKind:'study',date,savedAt:date+'T18:00:00.000Z',updatedAt:date+'T18:00:00.000Z',sourceRevision:1,
         quote:'',reflection:'',carryForwardDraft:'',studyQuality:index%5+1,realTimeSnapshot:null,
-        metrics:{originalPlannedStudyMinutes:60,completedEquivalentMinutes,actualFocusMinutes,completionPercent:completedEquivalentMinutes/60*100,averageBlockCompletion:(completionA+completionB)/2,actualVsPlannedMinutes:actualFocusMinutes-60,actualVsCompletedMinutes:actualFocusMinutes-completedEquivalentMinutes,shiftedStudyBlocks:0,totalScheduleShiftMinutes:0,netScheduleShiftMinutes:0},
         schedule:[
           {id:taskA,start:'08:00',duration:30,name:'Practice set',kind:'work',area:'Practice',measure:'questions',target:4},
           {id:taskB,start:'08:30',duration:30,name:'Review set',kind:'work',area:'Review',measure:'items',target:10}
@@ -83,13 +80,23 @@ try{
         },
         practiceRuns:[{taskId:taskA,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
     }
-    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const converted=__InsightsUiDebug.CompatibilityCodecs.dailyRecord(record);if(!converted)throw new Error('Invalid legacy fixture at '+index+': '+JSON.stringify(record));return converted;}));
+    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const canonical=__InsightsUiDebug.DailyRecordCodec.sanitizeCurrentDailyRecord(record);if(!canonical)throw new Error('Invalid canonical fixture at '+index+': '+JSON.stringify(record));return canonical;}));
     localStorage.setItem('studyDirector.insights.window.v1','all');
+    // A first open shows the loading panel, then the view replaces it; the view
+    // must arrive with the pane entrance, like a reopen (docs/areas/ui.md).
+    const pane=document.getElementById('pane-insights'),loadingPanel=node=>!!node.classList?.contains('plugin-loading-panel');window.__InsightsArrival=null;let seenLoading=false;
+    const arrival=new MutationObserver(records=>{
+      if([...pane.children].some(loadingPanel)||records.some(record=>[...record.removedNodes].some(loadingPanel)))seenLoading=true;
+      const view=pane.querySelector(':scope>.insights-wrap');if(!view)return;arrival.disconnect();
+      window.__InsightsArrival={loadingFirst:seenLoading,marked:pane.hasAttribute('data-sd-enter'),animated:view.getAnimations().some(a=>/^sd-pane-enter-/u.test(a.animationName||''))};});
+    arrival.observe(pane,{childList:true});
     const started=performance.now();__InsightsUiDebug.goTab('insights');
     return {saved,started,total};
   })()`);
   assert.equal(seeded.total,590);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&!!window.__StudyDirectorInsightsLastProfile`),{timeout:15000,label:'dense Insights render'});
+  assert.deepEqual(await page.evaluate('window.__InsightsArrival'),{loadingFirst:true,marked:true,animated:true},'a first open: the view replaces the loading panel and arrives with the pane entrance');
+  await waitFor(()=>page.evaluate(`!document.getElementById('pane-insights').hasAttribute('data-sd-enter')`),{timeout:3000,label:'entrance marker cleared after the first open'});
   const desktop=await page.evaluate(`(()=>{
     const pane=document.getElementById('pane-insights');
     const evidence=[...pane.querySelectorAll('.insights-evidence-item')].map(item=>({label:item.querySelector('.l')?.textContent||'',value:item.querySelector('.v')?.textContent||'',note:item.querySelector('.n')?.textContent||''}));
@@ -140,8 +147,7 @@ try{
   assert.deepEqual(page.events,[]);
 
   // Reopened, Insights shows the view it kept and animates like every other
-  // pane (Glass and Director skins); only a first open, rendering behind its
-  // loading panel, arrives still.
+  // pane, as a first open does once its view lands.
   const reopened=await page.evaluate(`(async()=>{const d=__InsightsUiDebug,pane=document.getElementById('pane-insights'),wait=ms=>new Promise(r=>setTimeout(r,ms));
     d.goTab('plan');await wait(1000);d.goTab('insights');let entered=false;for(let i=0;i<20&&!entered;i++){entered=pane.hasAttribute('data-sd-enter');if(!entered)await wait(10);}
     return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);

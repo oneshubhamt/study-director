@@ -10,7 +10,7 @@ registry.define('app-meta',1,()=>{
   function create(input){
     exactObject(input,['indexedDb','store','registry'],'appMeta gateway input');
     if(!Object.isFrozen(input.indexedDb)||!Object.isFrozen(input.registry))throw new TypeError('appMeta gateway contracts must be frozen.');
-    functions(input.indexedDb,['transaction','strictTransaction','get','getAll'],'appMeta IndexedDB contract');
+    functions(input.indexedDb,['transaction','strictTransaction','get'],'appMeta IndexedDB contract');
     const storeName=String(input.store||'');if(!storeName)throw new TypeError('appMeta store name is required.');
     const definitions=new Map(),exactKeys=new Map(),prefixes=[];
     for(const [name,raw] of Object.entries(input.registry)){
@@ -138,17 +138,7 @@ registry.define('app-meta',1,()=>{
       const resolved=resolveKey(row&&row.key);if(!resolved)return false;
       try{entryFromRow(resolved.definition,resolved.key,resolved.suffix,row);return true;}catch{return false;}
     }
-    async function verifyAll(){
-      const issues=[];let rows=[];
-      try{rows=await input.indexedDb.getAll(storeName,'app metadata verification aborted');}
-      catch(error){return freeze({ok:false,rows:0,issues:freeze([`read:${String(error&&error.message||error)}`])});}
-      for(const row of rows||[]){
-        const key=String(row&&row.key||''),resolved=resolveKey(key);if(!resolved){issues.push(`unclassified:${key||'?'}`);continue;}
-        try{entryFromRow(resolved.definition,resolved.key,resolved.suffix,row);}catch(error){issues.push(`${resolved.definition.name}:${String(error&&error.message||error)}`);}
-      }
-      return freeze({ok:issues.length===0,rows:(rows||[]).length,issues:freeze(issues)});
-    }
-    return freeze({format:'study-director.app-meta-gateway',contractVersion:1,registerValidators,bind,resolve:key=>{const resolved=resolveKey(key);return resolved&&freeze({family:resolved.definition.name,kind:resolved.definition.kind,key:resolved.key,suffix:resolved.suffix,owner:resolved.definition.owner,validatorOwner:resolved.definition.validatorOwner,schema:resolved.definition.schema,protection:resolved.definition.protection});},readable,verifyAll});
+    return freeze({format:'study-director.app-meta-gateway',contractVersion:1,registerValidators,bind,resolve:key=>{const resolved=resolveKey(key);return resolved&&freeze({family:resolved.definition.name,kind:resolved.definition.kind,key:resolved.key,suffix:resolved.suffix,owner:resolved.definition.owner,validatorOwner:resolved.definition.validatorOwner,schema:resolved.definition.schema,protection:resolved.definition.protection});},readable});
   }
   return freeze({format:'study-director.app-meta',contractVersion:1,create});
 });

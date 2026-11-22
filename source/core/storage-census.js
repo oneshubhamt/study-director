@@ -16,7 +16,7 @@ registry.define('storage-census',1,()=>{
   const META_FAMILIES=freeze([['reconciliationBase','reconciliation'],['pendingReview:','review'],['libraryClearJournal','journal'],['restoreJournal','journal'],['backupPreparationUnit:','preparation'],['savedDayDeletion:','deletion'],['noteDeletion:','deletion'],['attachmentDeletion:','deletion'],['planDraft','plan'],['planLibrary','plan']]);
   // The browser's own breakdown (StorageManager usageDetails, where offered).
   const REPORTED=freeze({indexedDB:'reportedDatabaseBytes',fileSystem:'reportedFileBytes',caches:'reportedCacheBytes',serviceWorkerRegistrations:'reportedWorkerBytes'});
-  const FOLDER_KINDS=freeze(['attachment','scratch','oldFolder']);
+  const FOLDER_KINDS=freeze(['attachment','scratch']);
   // Storage error names worth keeping; anything else is an app-level refusal,
   // not a storage fault.
   const ERROR_NAMES=freeze(['AbortError','ConstraintError','DataCloneError','DataError','InvalidAccessError','InvalidStateError','NotFoundError','NotReadableError','QuotaExceededError','ReadOnlyError','SecurityError','TimeoutError','TransactionInactiveError','UnknownError','VersionError','IDB_OPEN_TIMEOUT','IDB_OPEN_BLOCKED']);

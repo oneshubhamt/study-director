@@ -18,7 +18,6 @@ export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Mark
   const utf8=value=>new TextEncoder().encode(value);
   async function checksum(value,algorithm='sha256'){
     const bytes=value instanceof Blob?new Uint8Array(await value.arrayBuffer()):utf8(typeof value==='string'?value:JSON.stringify(value));
-    if(algorithm==='fnv1a32'){let hash=0x811c9dc5;for(const byte of bytes){hash^=byte;hash=Math.imul(hash,0x01000193)>>>0;}return hash.toString(16).padStart(8,'0');}
     if(algorithm!=='sha256')throw new Error('Unsupported backup checksum algorithm.');
     return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
   }
@@ -61,9 +60,12 @@ export function createProcessingEngine(renderMarkdown=()=>{throw new Error('Mark
       if(utf8(line).length>data.maxLineBytes)throw new Error('A backup chunk exceeds the safe line-size limit.');
       return {line,checksum:hash};
     }
-    if(type==='parseBlob'){
-      if(data.file.size>data.maxBytes)throw new Error('Legacy JSON backup is too large.');
-      const text=await data.file.text();if(utf8(text).length>data.maxBytes)throw new Error('Legacy JSON backup exceeds the safe in-memory limit after reading.');return JSON.parse(text);
+    if(type==='repository.readManifest'){
+      const limitMessage='Repository checkpoint exceeds the safe JSON size limit.';
+      if(data.file.size>data.maxBytes)throw new Error(limitMessage);
+      const text=await data.file.text();
+      if(utf8(text).length>data.maxBytes)throw new Error(limitMessage);
+      return JSON.parse(text);
     }
     if(type==='decode.open'){const id=++sequence;sessions.set(id,{iterator:decoded(data.file,data)[Symbol.asyncIterator]()});return id;}
     if(type==='decode.next'){const session=sessions.get(data.id);if(!session)throw new Error('Backup reader expired.');const next=await session.iterator.next();if(next.done)sessions.delete(data.id);return next;}

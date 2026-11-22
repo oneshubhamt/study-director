@@ -9,11 +9,12 @@ import {LOCAL_STORAGE_KEYS} from '../../contracts/data-architecture.mjs';
 export const PROFILE_KEY=LOCAL_STORAGE_KEYS.profiles||'studyDirector.profiles.v1';
 export const preload=`(()=>{(localStorage.getItem(${JSON.stringify(PROFILE_KEY)})||localStorage.setItem(${JSON.stringify(PROFILE_KEY)},JSON.stringify({version:1,active:${JSON.stringify(QA_PROFILE_ID)},profiles:[{id:${JSON.stringify(QA_PROFILE_ID)},scope:'',name:'QA',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 // Google's sign-in script, as far as Study Director uses it. Each token
-// request is counted so a reload can show the sign-in was kept.
-export const GIS=`window.__gisTokenRequests=0;window.google={accounts:{oauth2:{
+// request is counted so a reload can show the sign-in was kept, and what it
+// asked for (prompt, login_hint) is kept; so is any revoke.
+export const GIS=`window.__gisTokenRequests=0;window.__gisRequests=[];window.__gisRevokes=0;window.google={accounts:{oauth2:{
   hasGrantedAllScopes(response,scope){return String(response&&response.scope||'').split(/\\s+/).includes(scope);},
-  initTokenClient(config){return {requestAccessToken(){window.__gisTokenRequests+=1;setTimeout(()=>config.callback({access_token:'token-'+Date.now()+'-'+window.__gisTokenRequests,expires_in:3600,token_type:'Bearer',scope:'https://www.googleapis.com/auth/drive.file'}),0);}};},
-  revoke(token,callback){setTimeout(()=>callback&&callback({successful:true}),0);}
+  initTokenClient(config){return {requestAccessToken(options){window.__gisTokenRequests+=1;window.__gisRequests.push({prompt:options&&options.prompt,login_hint:options&&options.login_hint});setTimeout(()=>config.callback({access_token:'token-'+Date.now()+'-'+window.__gisTokenRequests,expires_in:3600,token_type:'Bearer',scope:'https://www.googleapis.com/auth/drive.file'}),0);}};},
+  revoke(token,callback){window.__gisRevokes+=1;setTimeout(()=>callback&&callback({successful:true}),0);}
 }}};`;
 export const CORS=[{name:'Access-Control-Allow-Origin',value:'*'},{name:'Access-Control-Allow-Headers',value:'*'},{name:'Access-Control-Allow-Methods',value:'GET,POST,PUT,PATCH,DELETE'},{name:'Access-Control-Expose-Headers',value:'*'}];
 

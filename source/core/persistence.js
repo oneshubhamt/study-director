@@ -28,8 +28,9 @@ registry.define('persistence',1,()=>{
       getJson(key,fallback=null){
         try{
           const raw=globalThis.localStorage.getItem(key);
+          const value=raw===null?fallback:JSON.parse(raw);
           lastError=null;onOk('read');
-          return raw?JSON.parse(raw):fallback;
+          return value;
         }catch(error){lastError=error;onError('read',error);return fallback;}
       },
       setJson(key,value){
@@ -128,27 +129,18 @@ registry.define('persistence',1,()=>{
   }
   function createIndexedDb(input){
     if(!input||!Object.isFrozen(input))throw new TypeError('IndexedDB input must be frozen.');
-    const inputKeys=Object.keys(input).sort(),allowedKeys=['config','hooks','upgrade'];
-    if(inputKeys.some(key=>!allowedKeys.includes(key))||!inputKeys.includes('config')||!inputKeys.includes('hooks'))throw new TypeError('IndexedDB input is incomplete, mutable, or contains unexpected fields.');
-    exactObject(input.config,['dbName','dbVersion','bridgeVersion','stores','legacyStores'],'IndexedDB config');
+    exactObject(input,['config','hooks'],'IndexedDB input');
+    exactObject(input.config,['dbName','dbVersion','stores'],'IndexedDB config');
     exactObject(input.config.stores,['dailyRecords','dailySummaries','notes','activeSessions','appMeta','assets'],'IndexedDB stores');
-    exactObject(input.config.legacyStores,['syncQueue','tombstones','reflectionDrafts'],'IndexedDB legacy stores');
     functions(input.hooks,Object.hasOwn(input.hooks,'onReset')?['onError','onOk','capture','onReset']:['onError','onOk','capture'],'IndexedDB hooks');
-    if(input.upgrade!==undefined)functions(input.upgrade,['renameStores','apply'],'IndexedDB upgrade adapter');
-    const applyUpgrade=input.upgrade?input.upgrade.apply:()=>false,renameStores=input.upgrade?input.upgrade.renameStores:()=>0;
     const DB_NAME=input.config.dbName;
     const DB_VER=input.config.dbVersion;
-    const BRIDGE_VER=input.config.bridgeVersion;
     const DB_DAILY_RECORD_STORE=input.config.stores.dailyRecords;
     const DB_DAILY_SUMMARY_STORE=input.config.stores.dailySummaries;
     const DB_NOTES_STORE=input.config.stores.notes;
     const DB_ACTIVE_SESSION_STORE=input.config.stores.activeSessions;
     const DB_APP_META_STORE=input.config.stores.appMeta;
     const DB_ASSET_STORE=input.config.stores.assets;
-    const DB_LEGACY_SYNC_QUEUE_STORE=input.config.legacyStores.syncQueue;
-    const DB_LEGACY_TOMBSTONE_STORE=input.config.legacyStores.tombstones;
-    const DB_RETIRED_REFLECTION_DRAFT_STORE=input.config.legacyStores.reflectionDrafts;
-    const LEGACY_STORES=freeze([DB_LEGACY_SYNC_QUEUE_STORE,DB_LEGACY_TOMBSTONE_STORE,DB_RETIRED_REFLECTION_DRAFT_STORE]);
     const markStorageHealthError=input.hooks.onError;
     const markStorageHealthOk=input.hooks.onOk;
     const AppDiagnostics=freeze({capture:input.hooks.capture});
@@ -157,6 +149,8 @@ registry.define('persistence',1,()=>{
     let appDbOpenPromise=null;
     // The key each current store is read by (null: the key is given apart from the record).
     const STORE_KEY_PATHS=new Map([[DB_DAILY_RECORD_STORE,'date'],[DB_DAILY_SUMMARY_STORE,'date'],[DB_NOTES_STORE,'key'],[DB_ACTIVE_SESSION_STORE,'id'],[DB_APP_META_STORE,'key'],[DB_ASSET_STORE,null]]);
+    // A database another version of Study Director made, newer or older than
+    // this one: it opens as it is, never upgraded or downgraded.
     let newerDatabase=null;
     const freshlyCreatedDatabases=new WeakSet();
     // A database created after this page already held a connection was not
@@ -196,13 +190,6 @@ registry.define('persistence',1,()=>{
       if(!db.objectStoreNames.contains(DB_APP_META_STORE))db.createObjectStore(DB_APP_META_STORE,{keyPath:'key'});
       if(!db.objectStoreNames.contains(DB_ASSET_STORE))db.createObjectStore(DB_ASSET_STORE);
     }
-    function ensureLegacyStores(db){
-      if(!db.objectStoreNames.contains(DB_LEGACY_SYNC_QUEUE_STORE))db.createObjectStore(DB_LEGACY_SYNC_QUEUE_STORE,{keyPath:'key'});
-      if(!db.objectStoreNames.contains(DB_LEGACY_TOMBSTONE_STORE))db.createObjectStore(DB_LEGACY_TOMBSTONE_STORE,{keyPath:'key'});
-    }
-    function removeLegacyStores(db){
-      for(const name of LEGACY_STORES)if(db.objectStoreNames.contains(name))db.deleteObjectStore(name);
-    }
     function attachConnection(db){
       appDbConnection=db;establishedConnection=true;
       db.onversionchange=()=>{
@@ -223,7 +210,7 @@ registry.define('persistence',1,()=>{
         return openAttempt(version,options,true);
       });
     }
-    function openAttempt(version,{legacyBridge=false,retireLegacy=false,fresh=false}={},last=true){
+    function openAttempt(version,options={},last=true){
       return new Promise((resolve,reject)=>{
         if(typeof globalThis.indexedDB?.open!=='function'){markStorageHealthError('IndexedDB unavailable');reject(new Error('IndexedDB unavailable'));return;}
         let settled=false,blocked=false;
@@ -237,14 +224,13 @@ registry.define('persistence',1,()=>{
         req.onupgradeneeded=e=>{
           // An open that was given up on never upgrades in the background.
           if(settled){try{e.target.transaction&&e.target.transaction.abort();}catch(abortError){}return;}
+          // Only an empty database is upgraded, from its first version (no
+          // stores) to the current stores.
           try{
-            const db=e.target.result,tx=e.target.transaction;
-            if(version===null&&Number(e.oldVersion||0)===0)freshlyCreatedDatabases.add(db);
-            if(!fresh)renameStores(Object.freeze({db,transaction:tx}));
-            ensureCurrentStores(db);
-            if(legacyBridge)ensureLegacyStores(db);
-            if(retireLegacy)removeLegacyStores(db);
-            if(!fresh)applyUpgrade(Object.freeze({oldVersion:Number(e.oldVersion||0),db,transaction:tx,appMetaStore:DB_APP_META_STORE}));
+            const db=e.target.result,oldVersion=Number(e.oldVersion||0);
+            if(version===null&&oldVersion===0)freshlyCreatedDatabases.add(db);
+            else if(oldVersion>1||!options.create||db.objectStoreNames.length>0)throw new Error('A Study Director database is never upgraded from an earlier version.');
+            else ensureCurrentStores(db);
           }catch(error){
             try{e.target.transaction&&e.target.transaction.abort();}catch(abortError){}
             noteFault(error);markStorageHealthError((error&&error.message)||'IndexedDB upgrade failed');
@@ -262,22 +248,22 @@ registry.define('persistence',1,()=>{
     async function openBootstrapDatabase(){
       let db=await openRequest(null,{fresh:true});
       if(foundVersion===null)foundVersion=freshlyCreatedDatabases.has(db)?0:Number(db.version)||0;
-      // A brand-new versionless database is created at v1. Promote it directly
-      // to the current lean topology; there is no historical state to bridge.
-      if(Number(db.version)===1&&freshlyCreatedDatabases.has(db)){
+      // A brand-new database is created at version 1, with no stores: it
+      // takes the current stores at once. So does one left empty at version 1
+      // by a page that closed between the two opens.
+      if(Number(db.version)===1&&(freshlyCreatedDatabases.has(db)||db.objectStoreNames.length===0)){
         db.close();
-        db=await openRequest(DB_VER,{retireLegacy:true,fresh:true});
+        db=await openRequest(DB_VER,{create:true});
         if(establishedConnection)noteRecreatedDatabase();else startedFresh=true;
         return db;
       }
-      if(Number(db.version)<BRIDGE_VER){
-        db.close();
-        db=await openRequest(BRIDGE_VER,{legacyBridge:true});
-      }
-      // A newer Study Director upgraded this database. It opens as it is
-      // (never upgraded, never downgraded); the stores this build knows are
-      // used where they still have their shape, everything else is left alone.
+      // A newer Study Director upgraded this database. It opens as it is; the
+      // stores this build knows are used where they still have their shape,
+      // everything else is left alone.
       if(Number(db.version)>DB_VER)newerDatabase=inspectNewerDatabase(db);
+      // An older Study Director made this database, in a form this version
+      // does not read: it opens as it is, and the start-up census stops
+      // before anything reads or changes it.
       return db;
     }
     function inspectNewerDatabase(db){
@@ -299,29 +285,8 @@ registry.define('persistence',1,()=>{
     }
     async function topology(){
       const db=await openAppDB();
-      const stores=[...db.objectStoreNames],newer=Number(db.version)>DB_VER?(newerDatabase||inspectNewerDatabase(db)):null;
-      return freeze({version:Number(db.version),stores:freeze(stores),legacyStores:freeze(LEGACY_STORES.filter(name=>stores.includes(name))),current:stores.filter(name=>LEGACY_STORES.includes(name)).length===0&&Number(db.version)===DB_VER,newer:!!newer,usable:newer?newer.usable:true,missing:newer?newer.missing:freeze([]),changed:newer?newer.changed:freeze([])});
-    }
-    async function hasStore(name){const db=await openAppDB();return db.objectStoreNames.contains(String(name));}
-    async function getAllIfPresent(storeName,abortMessage='read aborted'){
-      if(!(await hasStore(storeName)))return [];
-      return idbGetAll(storeName,abortMessage);
-    }
-    async function retireLegacyStores(){
-      const current=await openAppDB();
-      const present=LEGACY_STORES.filter(name=>current.objectStoreNames.contains(name));
-      if(Number(current.version)===DB_VER){
-        if(present.length)throw new Error('Current IndexedDB version still contains retired compatibility stores.');
-        return freeze({status:'current',version:DB_VER,removed:0});
-      }
-      // A newer build owns this topology: nothing is retired or upgraded.
-      if(Number(current.version)>DB_VER)return freeze({status:'newer',version:Number(current.version),removed:0});
-      clearAppDBConnection(current);try{current.close();}catch(error){}
-      const upgraded=await openRequest(DB_VER,{retireLegacy:true});
-      attachConnection(upgraded);
-      const remaining=LEGACY_STORES.filter(name=>upgraded.objectStoreNames.contains(name));
-      if(remaining.length)throw new Error(`Obsolete IndexedDB stores remain after topology retirement: ${remaining.join(', ')}`);
-      return freeze({status:present.length?'retired':'upgraded',version:DB_VER,removed:present.length});
+      const stores=[...db.objectStoreNames],newer=Number(db.version)>DB_VER?(newerDatabase||inspectNewerDatabase(db)):null,older=Number(db.version)<DB_VER;
+      return freeze({version:Number(db.version),stores:freeze(stores),current:Number(db.version)===DB_VER,newer:!!newer,older,usable:older?false:newer?newer.usable:true,missing:newer?newer.missing:freeze([]),changed:newer?newer.changed:freeze([])});
     }
     let strictDurabilitySupport=0;
     function createIdbTransaction(db,stores,mode,strict=false){
@@ -345,8 +310,9 @@ registry.define('persistence',1,()=>{
         throw error;
       }
     }
-    // Data this build cannot read: records a newer Study Director wrote, or
-    // ones in a shape this build does not know. They stay exactly as they are.
+    // Data this build cannot read: records another Study Director version
+    // wrote (newer, or older than the current form), or ones in a shape this
+    // build does not know. They stay exactly as they are.
     // Reads do not see them; a write or delete of one is refused, and a clear
     // or a range delete leaves them in place. The list is empty for almost
     // every start, and then every transaction is the plain browser one.
@@ -370,8 +336,11 @@ registry.define('persistence',1,()=>{
       return freeze({total,protected:protectedTotal,stores:freeze(stores),reasons:freeze(reasons)});
     }
     const unsupportedKeys=storeName=>freeze([...(unsupported.get(String(storeName||''))?.values()||[])].map(row=>row.key));
-    function unsupportedDataError(storeName){
-      return Object.assign(new Error('This was saved by a newer version of Study Director, so this version keeps it as it is and does not change it. Update the app to change it.'),{name:'UnsupportedDataError',code:'STUDY_DIRECTOR_UNSUPPORTED_DATA',store:String(storeName||'')});
+    function unsupportedDataError(storeName,reason=''){
+      const message=reason==='older'
+        ?'This was saved by an earlier version of Study Director, in a form this version no longer reads, so this version keeps it as it is and does not change it.'
+        :'This was saved by a newer version of Study Director, so this version keeps it as it is and does not change it. Update the app to change it.';
+      return Object.assign(new Error(message),{name:'UnsupportedDataError',code:'STUDY_DIRECTOR_UNSUPPORTED_DATA',store:String(storeName||''),reason:String(reason||'')});
     }
     const isRange=value=>typeof globalThis.IDBKeyRange==='function'&&value instanceof globalThis.IDBKeyRange;
     const passThrough=(target,prop)=>{const value=Reflect.get(target,prop,target);return typeof value==='function'?value.bind(target):value;};
@@ -410,12 +379,12 @@ registry.define('persistence',1,()=>{
         if(key!==undefined||typeof keyPath!=='string')return key;
         let current=value;for(const part of keyPath.split('.'))current=current&&typeof current==='object'?current[part]:undefined;return current;
       };
-      const refuse=()=>{const error=unsupportedDataError(name);state.error=error;try{transaction.abort();}catch{}throw error;};
+      const refuse=row=>{const error=unsupportedDataError(name,row&&row.reason);state.error=error;try{transaction.abort();}catch{}throw error;};
       // A write or delete of a held record: bookkeeping is taken back (and
       // held again if the transaction does not commit); anything else is refused.
       const claim=key=>{
         const row=heldRow(name,key);if(!row)return;
-        if(!row.replaceable)refuse();
+        if(!row.replaceable)refuse(row);
         unsupported.get(name).delete(keyId(key));
         transaction.addEventListener('abort',()=>{if(!heldRow(name,key))hold(name,row.key,row.reason,{replaceable:true});});
       };
@@ -502,7 +471,7 @@ registry.define('persistence',1,()=>{
     // holds each one classify names a reason for (a string, or {reason,replaceable}). A store this build
     // knows but the database lacks reads as empty.
     async function scanUnsupported(storeName,classify,abortMessage='unsupported data scan aborted'){
-      if(!(await hasStore(storeName)))return 0;
+      if(!(await openAppDB()).objectStoreNames.contains(String(storeName)))return 0;
       return runIdbTransaction(storeName,'readonly',(tx,finish)=>{
         const request=tx.objectStore(storeName).openCursor();let found=0;
         request.onerror=()=>finish(false,request.error||new Error(abortMessage));
@@ -525,7 +494,7 @@ registry.define('persistence',1,()=>{
       format:'study-director.indexeddb-primitives',contractVersion:2,
       isAvailable:()=>typeof globalThis.indexedDB?.open==='function',clearConnection:clearAppDBConnection,open:openAppDB,
       transaction:idbTransaction,strictTransaction:idbStrictTransaction,storeTransaction:idbStoreTransaction,strictStoreTransaction:idbStrictStoreTransaction,
-      get:idbGet,getAll:idbGetAll,getAllIfPresent,hasStore,topology,retireLegacyStores,
+      get:idbGet,getAll:idbGetAll,topology,
       unsupported:freeze({scan:scanUnsupported,hold,has:(storeName,key)=>isHeld(String(storeName||''),key),keys:unsupportedKeys,summary:unsupportedSummary}),
       lifecycle:()=>freeze({startedFresh,resets:resetCount,lastResetAt,foundVersion,version:appDbConnection?Number(appDbConnection.version)||0:null,lastWriteAt,errors:faultCount,lastError:lastFault,lastErrorAt:lastFaultAt,closes:closeCount,versionChanges:versionChangeCount})
     });

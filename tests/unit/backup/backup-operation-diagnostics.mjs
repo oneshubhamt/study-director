@@ -85,3 +85,9 @@ for(const name of ['provider-publication-retained','provider-publication-resumed
 uploadTrace.fail(Object.assign(new Error('private repository detail'),{code:'BACKUP_REPOSITORY_BASE_CHANGED'}),{},uploadTraceId);
 const uploadReport=uploadTrace.text();assert.match(uploadReport,/provider-publication-retained/u);assert.match(uploadReport,/provider-publication-resumed/u);assert.match(uploadReport,/BACKUP_REPOSITORY_BASE_CHANGED/u);assert.doesNotMatch(uploadReport,/private-upload-session|private repository detail/u);
 console.log(JSON.stringify({status:'PASS',suite:'upload-continuation-diagnostics',progressPhasesPreserved:true,sessionLocationPrivate:true},null,2));
+
+// A refused older database is a current protection outcome, not a conversion.
+stored='';const heldDatabase=make(),heldId=heldDatabase.start('standalone-import','Local data');
+heldDatabase.fail(Object.assign(new Error('private database detail'),{code:'STUDY_DIRECTOR_PROFILE_TOO_OLD'}),{},heldId);
+assert.equal(heldDatabase.snapshot()[0].phases.at(-1).details.errorCode,'STUDY_DIRECTOR_PROFILE_TOO_OLD');
+assert.doesNotMatch(heldDatabase.text(),/private database detail/u);

@@ -124,9 +124,9 @@ const MIN_IMAGE_WIDTH_PCT = 20,
   MAX_TABLE_DIMENSION = 15,
   MIN_TABLE_COLUMN_PCT = 50 / MAX_TABLE_DIMENSION,
   MIN_TABLE_CELL_PX = 120,
-  LEGACY_MIN_TABLE_WIDTH_PCT = 45,
-  LEGACY_MIN_TABLE_ROW_HEIGHT = 34,
-  LEGACY_MAX_TABLE_ROW_HEIGHT = 240;
+  STORED_MIN_TABLE_WIDTH_PCT = 45,
+  STORED_MIN_TABLE_ROW_HEIGHT = 34,
+  STORED_MAX_TABLE_ROW_HEIGHT = 240;
 const IMAGE_POSITION_ERROR = 'Image position is no longer available. Choose Image and try again.',
   IMAGE_TABLE_ERROR = 'Images cannot go inside tables.';
 
@@ -379,13 +379,20 @@ function syncAudioPlayerState(player: HTMLAudioElement, status: HTMLElement | nu
 }
 
 const Highlight = Mark.define('SDHighlight', {rank: 35, shape: {element: 'mark'}});
-const Checklist = Mark.define('SDChecklist', {target: BulletList, shape: {attribute: 'data-sd-checklist', value: () => 'true'}});
+// A checklist is read back from HTML (a copied checklist, a Markdown task
+// list) by the parse rules; its shapes only write it.
+const Checklist = Mark.define('SDChecklist', {
+  target: BulletList,
+  shape: {attribute: 'data-sd-checklist', value: () => 'true'},
+  parseRules: [{attribute: 'data-sd-checklist', value: 'true'}]
+} as any);
 const ChecklistRole = Mark.define('SDChecklistRole', {
   target: ListItem,
   rank: 60,
   keepOnSplit: true,
-  shape: {attributes: {role: 'checkbox', 'aria-checked': 'false', 'aria-keyshortcuts': 'Control+Enter Meta+Enter'}}
-});
+  shape: {attributes: {role: 'checkbox', 'aria-checked': 'false', 'aria-keyshortcuts': 'Control+Enter Meta+Enter'}},
+  parseRules: [{attribute: 'role', value: 'checkbox', consuming: false}]
+} as any);
 const ChecklistChecked = Mark.Type.define<boolean>('SDChecklistChecked', {
   target: ListItem,
   rank: 61,
@@ -393,12 +400,13 @@ const ChecklistChecked = Mark.Type.define<boolean>('SDChecklistChecked', {
   validate: value => {
     if (typeof value !== 'boolean') throw new RangeError('Invalid checklist state.');
   },
-  shape: {attribute: 'aria-checked', value: value => String(value)}
-});
+  shape: {attribute: 'aria-checked', value: value => String(value)},
+  parseRules: [{attribute: 'aria-checked', readAttribute: (value: string) => (value === 'true' ? true : value === 'false' ? false : parse.Reject)}]
+} as any);
 const TableWidth = Mark.Type.define<number>('SDTableWidth', {
   target: Table,
   validate: value => {
-    if (!finiteWithin(value, LEGACY_MIN_TABLE_WIDTH_PCT, 100)) throw new RangeError('Invalid table width.');
+    if (!finiteWithin(value, STORED_MIN_TABLE_WIDTH_PCT, 100)) throw new RangeError('Invalid table width.');
   },
   shape: {attribute: 'style/width', value: value => `${value}%`}
 });
@@ -412,7 +420,7 @@ const CellWidth = Mark.Type.define<number>('SDCellWidth', {
 const CellHeight = Mark.Type.define<number>('SDCellHeight', {
   target: Node.Group.TableCell,
   validate: value => {
-    if (!finiteWithin(value, LEGACY_MIN_TABLE_ROW_HEIGHT, LEGACY_MAX_TABLE_ROW_HEIGHT)) throw new RangeError('Invalid table row height.');
+    if (!finiteWithin(value, STORED_MIN_TABLE_ROW_HEIGHT, STORED_MAX_TABLE_ROW_HEIGHT)) throw new RangeError('Invalid table row height.');
   },
   shape: {attribute: 'style/height', value: value => `${value}px`}
 });
@@ -849,7 +857,6 @@ const markAction = (mark: Mark): HeadlessAction =>
 const paragraphAction = editableAction(Command.bind(setTypographyPreset, 'N'), state => typographyState(state).preset === 'N');
 const h1Action = editableAction(Command.bind(setTypographyPreset, 'H1'), state => typographyState(state).preset === 'H1');
 const h2Action = editableAction(Command.bind(setTypographyPreset, 'H2'), state => typographyState(state).preset === 'H2');
-const headingAction = h2Action; // Compatibility alias: Study Director's historical Heading is Wordgard H2.
 const strongAction = markAction(Strong),
   emphasisAction = markAction(Emphasis),
   underlineAction = markAction(Underline),
@@ -1567,6 +1574,71 @@ function autoLinkBeforeCursor(wg: Wordgard) {
   wg.dispatch({changes: {from, to, add: Link.of(href)}, userEvent: 'autolink'});
   return true;
 }
+// A list, quote or table at either end of a paste goes in whole. Left open,
+// as the editor leaves a paste's ends, the first item joined the line it was
+// pasted on and lost its list (a numbered list then went on as bullets), and
+// a table on its own was dropped (owner, 2026-11-21).
+const WHOLE_PASTE_BLOCKS = new Set(['UL', 'OL', 'BLOCKQUOTE', 'TABLE']);
+function keepWholeBlocks(element: Element) {
+  return WHOLE_PASTE_BLOCKS.has(element.tagName) ? 'closed' : null;
+}
+// A formatted copy with no formatting in it, only lines in <div>, <p> or
+// <span> (as code editors and some chat apps copy): its plain text says the
+// same, and keeps the lines, which nested <div>s ran together into one.
+function plainWrapper(root: Element) {
+  return [...root.querySelectorAll('*')].every(
+    element =>
+      ['DIV', 'P', 'SPAN', 'BR'].includes(element.tagName) &&
+      !/(?:font-weight|font-style|text-decoration|vertical-align|background-color)/i.test(element.getAttribute('style') || '')
+  );
+}
+function plainLinesHtml(text: string) {
+  return (
+    text
+      .split(/(?:\r\n?|\n)+/)
+      .filter(line => line.length)
+      .map(line => `<p>${escapeHtml(line)}</p>`)
+      .join('') || '<p></p>'
+  );
+}
+// Word (and Outlook) copy a list as paragraphs, each marked "mso-list:l0
+// level1 lfo1", with its bullet or number as text in a "mso-list:Ignore" span.
+// They become a list again, nested by level: numbered when the marker is a
+// number or letter, bulleted otherwise.
+function wordLists(root: HTMLElement) {
+  const doc = root.ownerDocument,
+    level = (element: Element | null) =>
+      element && element.tagName === 'P' ? Number(/mso-list\s*:\s*l\d+\s+level(\d+)/i.exec(element.getAttribute('style') || '')?.[1]) || 0 : 0;
+  const done = new Set<Element>();
+  for (const first of [...root.querySelectorAll('p')]) {
+    if (done.has(first) || !level(first) || level(first.previousElementSibling)) continue;
+    const items: Element[] = [];
+    for (let item: Element | null = first; level(item); item = item!.nextElementSibling) items.push(item!);
+    items.forEach(item => done.add(item));
+    const lists = doc.createDocumentFragment(),
+      open: {level: number; list: HTMLElement}[] = [];
+    for (const item of items) {
+      const depth = level(item),
+        marker = item.querySelector('span[style*="mso-list:Ignore" i]'),
+        ordered = /^(?:\d+|[a-z]|[ivxlcdm]+)[.)]$/i.test(String(marker?.textContent || '').trim());
+      marker?.remove();
+      while (open.length && open[open.length - 1]!.level > depth) open.pop();
+      if (!open.length || open[open.length - 1]!.level < depth) {
+        const list = doc.createElement(ordered ? 'ol' : 'ul');
+        if (open.length) (open[open.length - 1]!.list.lastElementChild || open[open.length - 1]!.list).append(list);
+        else lists.append(list);
+        open.push({level: depth, list});
+      }
+      const entry = doc.createElement('li'),
+        paragraph = doc.createElement('p');
+      paragraph.append(...item.childNodes);
+      entry.append(paragraph);
+      open[open.length - 1]!.list.append(entry);
+    }
+    first.replaceWith(lists);
+    items.slice(1).forEach(item => item.remove());
+  }
+}
 function sanitizePastedHtml(html: string) {
   try {
     const body = parseInertHTML(String(html || '')),
@@ -1599,6 +1671,7 @@ function sanitizePastedHtml(html: string) {
         'H1',
         'H2'
       ]);
+    wordLists(body);
     body.querySelectorAll('*').forEach(element => {
       const style = String(element.getAttribute('style') || '');
       if (
@@ -1612,11 +1685,34 @@ function sanitizePastedHtml(html: string) {
         element.remove();
         return;
       }
+      // <b> and <i> are bold and italic, as <strong> and <em> are, except a
+      // wrapper that says it is not: Google Docs wraps a whole copy in
+      // <b style="font-weight:normal">.
+      if (element.tagName === 'B' || element.tagName === 'I') {
+        const plain =
+          element.tagName === 'B'
+            ? /(?:^|;)\s*font-weight\s*:\s*(?:normal|400|lighter)\s*(?:;|$)/i.test(style)
+            : /(?:^|;)\s*font-style\s*:\s*normal\s*(?:;|$)/i.test(style);
+        if (plain) element.replaceWith(...element.childNodes);
+        else {
+          const styled = parsed.createElement(element.tagName === 'B' ? 'strong' : 'em');
+          styled.append(...element.childNodes);
+          element.replaceWith(styled);
+        }
+        return;
+      }
+      if (element.tagName === 'STRIKE' || element.tagName === 'DEL') {
+        const struck = parsed.createElement('s');
+        struck.append(...element.childNodes);
+        element.replaceWith(struck);
+        return;
+      }
+      // A note has two heading levels: deeper headings become level 2.
       if (!allowed.has(element.tagName)) {
         if (['H3', 'H4', 'H5', 'H6', 'PRE'].includes(element.tagName)) {
-          const paragraph = parsed.createElement('p');
-          paragraph.append(...element.childNodes);
-          element.replaceWith(paragraph);
+          const block = parsed.createElement(element.tagName === 'PRE' ? 'p' : 'h2');
+          block.append(...element.childNodes);
+          element.replaceWith(block);
         } else element.replaceWith(...element.childNodes);
         return;
       }
@@ -1635,7 +1731,25 @@ function sanitizePastedHtml(html: string) {
           )
           .filter(Boolean)
           .join('; ');
+      // A checklist keeps what marks it one (a note's own copy, or a task
+      // list read from Markdown).
+      const checklist = element.tagName === 'UL' && element.getAttribute('data-sd-checklist') === 'true',
+        checked =
+          element.tagName === 'LI' && element.getAttribute('role') === 'checkbox' && element.parentElement?.getAttribute('data-sd-checklist') === 'true'
+            ? element.getAttribute('aria-checked')
+            : null;
+      // Wordgard's own copy markers (which ends of a copy are open), so a copy
+      // made in a note is read as Wordgard wrote it.
+      const open = element.getAttribute('wg-open'),
+        marker = ['wg-content', 'wg-wrap'].filter(name => element.getAttribute(name) === 'true');
       for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
+      if (open === 'start' || open === 'end' || open === 'start end') element.setAttribute('wg-open', open);
+      marker.forEach(name => element.setAttribute(name, 'true'));
+      if (checklist) element.setAttribute('data-sd-checklist', 'true');
+      if (checked === 'true' || checked === 'false') {
+        element.setAttribute('role', 'checkbox');
+        element.setAttribute('aria-checked', checked);
+      }
       if (element.tagName === 'A' && !href) {
         element.replaceWith(...element.childNodes);
         return;
@@ -3354,12 +3468,52 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
   const markdownPasteParser = Wordgard.clipboardTextParser.of((text, state) => {
     if (readOnly || !looksLikeMarkdown(text)) return null;
     try {
-      const slice = parse.slice(state.schema, parseInertHTML(sanitizePastedHtml(markdownToHtml(text))), {collapseWhiteSpace: true});
+      const slice = parse.slice(state.schema, parseInertHTML(sanitizePastedHtml(markdownToHtml(text))), {
+        collapseWhiteSpace: true,
+        isOpen: keepWholeBlocks
+      });
       markdownPasteText = text;
       return slice;
     } catch {
       return null;
     }
+  });
+  // A formatted paste the editor would get wrong is read here: a copy that is
+  // only a plain wrapper is read from its plain text (as Markdown when it is
+  // Markdown), and one with a list, quote or table keeps those whole. Through
+  // Wordgard's own paste hook only, so a newer Wordgard can take this over.
+  // Left to Wordgard: Shift-paste (plain, Shift tracked here from the keys)
+  // and a copy made in a note, whose markers Wordgard reads itself.
+  let shiftHeld = false;
+  const formattedPaste = Wordgard.pasteHandler.of((wg, event: InputEvent | ClipboardEvent) => {
+    if (readOnly || wg.state.readOnly || shiftHeld) return false;
+    const data = (event as InputEvent).dataTransfer || (event as ClipboardEvent).clipboardData,
+      html = data?.getData('text/html') || '',
+      text = data?.getData('text/plain') || '';
+    if (!html || /\swg-content=["']?true/i.test(html)) return false;
+    let dom = parseInertHTML(sanitizePastedHtml(html)),
+      markdown = false,
+      plain = false;
+    if (text.trim() && plainWrapper(dom)) {
+      markdown = looksLikeMarkdown(text);
+      plain = !markdown;
+      dom = parseInertHTML(markdown ? sanitizePastedHtml(markdownToHtml(text)) : plainLinesHtml(text));
+    } else if (!dom.querySelector('ul,ol,blockquote,table')) return false;
+    let slice;
+    try {
+      slice = parse.slice(wg.state.schema, dom, {collapseWhiteSpace: !plain, isOpen: keepWholeBlocks});
+    } catch {
+      return false;
+    }
+    const {from, to} = wg.state.selection.replacementRange;
+    if (markdown) markdownPasteText = text;
+    wg.dispatch({
+      changes: {correct: {from, to, insert: slice, fit: true}, local: true},
+      selection: (cx: any, changes: any) => GardSelection.near(cx, changes.mapPos(to, 1), -1),
+      userEvent: 'input.paste',
+      scrollIntoView: true
+    });
+    return true;
   });
   const watchMarkdownPaste = Wordgard.transactionListener.of(transactions => {
     const text = markdownPasteText,
@@ -3389,12 +3543,7 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
     hideMarkdownNotice();
     if (!pasted || destroyed || editor.state.readOnly) return;
     // As a plain paste reads it: one paragraph per line.
-    const html = pasted.text
-      .split(/(?:\r\n?|\n)+/)
-      .filter(line => line.length)
-      .map(line => `<p>${escapeHtml(line)}</p>`)
-      .join('');
-    const slice = parse.slice(editor.state.schema, parseInertHTML(html), {collapseWhiteSpace: false});
+    const slice = parse.slice(editor.state.schema, parseInertHTML(plainLinesHtml(pasted.text)), {collapseWhiteSpace: false});
     editor.dispatch({
       changes: {correct: {from: pasted.from, to: pasted.to, insert: slice, fit: true}, local: true},
       userEvent: 'input.paste.plain',
@@ -3429,6 +3578,7 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
         }
       }),
       Wordgard.pasteHandler.of(autoLinkPaste),
+      formattedPaste,
       Wordgard.clipboardInputHTMLFilter.of(sanitizePastedHtml),
       markdownPasteParser,
       watchMarkdownPaste,
@@ -3438,6 +3588,12 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
     ]
   });
   editor.dom.classList.add('sd-rte-wordgard');
+  const trackShift = (event: KeyboardEvent) => {
+    shiftHeld = event.shiftKey;
+  };
+  editor.contentDOM.addEventListener('keydown', trackShift, true);
+  editor.contentDOM.addEventListener('keyup', trackShift, true);
+  editor.contentDOM.addEventListener('blur', () => (shiftHeld = false));
   editor.contentDOM.classList.add('sd-rte-content', 'sd-rte-editor');
   editor.contentDOM.addEventListener('focusout', publish);
   editor.contentDOM.spellcheck = !readOnly;
@@ -4584,7 +4740,7 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
       table = textTable || nodeTable,
       rows = table && table.node.isPlot ? table.node.content.length : 0,
       columns = table && table.node.isPlot && table.node.firstChild?.isPlot ? table.node.firstChild.content.length : 0,
-      isHeading = textSelection && actionActive(headingAction),
+      isHeading = textSelection && actionActive(h2Action),
       isParagraph = textSelection && actionActive(paragraphAction),
       isChecklist = !!list && list.node.type === BulletList.type && !!Checklist.isInSet(list.node.marks),
       header =

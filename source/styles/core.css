@@ -803,8 +803,13 @@ html[data-theme="light"] .display-tools-trigger{background:var(--sd-color-surfac
    the paper desk, a white writing sheet for notes, and a dark instrument
    panel for the countdown. The instrument is a Director Dark island: the
    card re-declares the dark roles locally, so every child keeps reading
-   semantic tokens and the lime-on-black identity survives in daylight. */
-html[data-theme="light"][data-presentation="director-current"] :is(#pane-execute .cd-card,#pane-review .review-hero,#pane-plan .si.active .si-card){
+   semantic tokens and the lime-on-black identity survives in daylight.
+   A plain selector list, not :is(): on the owner's Chrome the :is() form
+   left the Review card dark with dark text (2026-11-22), while every plain
+   rule on the same card applied. */
+html[data-theme="light"][data-presentation="director-current"] #pane-execute .cd-card,
+html[data-theme="light"][data-presentation="director-current"] #pane-review .review-hero,
+html[data-theme="light"][data-presentation="director-current"] #pane-plan .si.active .si-card{
   color-scheme:dark;
   --sd-color-text-primary:#f0f2ff;--sd-color-text-secondary:#8f95ae;--sd-color-text-tertiary:#f0f2ff;--sd-color-text-muted:#4d5270;
   --sd-color-text-secondary-strong:#a9aec6;--sd-color-text-accessible-muted:#aab0c9;
@@ -1725,6 +1730,9 @@ button.profile-row:disabled{cursor:default;opacity:.55;background:none}
 /* The one compact button for row actions. */
 .profile-act{min-height:var(--profile-act-height);min-width:0;padding:0 12px;border-radius:var(--sd-shape-control-radius);font-size:var(--sd-type-role-caption-size);font-weight:600;line-height:1.2;white-space:nowrap;--btn-border:var(--sd-color-border-2);--btn-hover-border:var(--sd-state-accent-line-strong);--btn-hover-color:var(--sd-color-accent-primary)}
 .profile-act[hidden]{display:none!important}
+.profile-act:disabled{opacity:.55;cursor:default}
+.profile-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.profile-act-muted{--btn-border:transparent;--btn-bg:transparent;--btn-color:var(--sd-color-text-secondary);box-shadow:none}
 .profile-act-quiet{min-height:26px;padding:0 10px;--btn-border:transparent;--btn-bg:transparent;--btn-color:var(--sd-color-accent-primary);box-shadow:none}
 /* Sync & backups: the status first, then the settings rows. */
 .profile-status{--status-ok:var(--sd-color-info);--status-warn:var(--sd-color-warning);--status-error:var(--sd-color-danger);--status-review:var(--status-warn);--status-info:var(--sd-color-info)}
@@ -2030,7 +2038,7 @@ button.profile-more-row{display:block;min-height:40px;padding:8px var(--profile-
    callout or text selection on the rows to compete with it, on any device
    (iPad, iPhone and Android long press; a Mac selects the word under a
    right-click). */
-.library-note-tree-item{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.library-note-tree-item,.library-note-trash-item{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .library-note-tree-item::before{display:none}
 .library-note-tree-item:not([aria-expanded]) .library-note-twisty::before{content:"";width:3px;height:3px;background:var(--sd-color-border-2)}
 .library-note-tree-item.active:not([aria-expanded]) .library-note-twisty::before{background:var(--sd-color-accent-primary)}
@@ -2049,7 +2057,7 @@ button.profile-more-row{display:block;min-height:40px;padding:8px var(--profile-
 .library-notes-trash{position:sticky;bottom:-8px;z-index:2;display:flex;flex-direction:column;margin:auto -8px -8px;padding:4px 8px 8px;border-top:1px solid var(--sd-color-border-1);background:var(--sd-material-inset)}
 .library-notes-trash-list{display:flex;flex-direction:column;gap:2px;max-height:min(240px,40dvh);overflow-y:auto;padding-bottom:4px}
 .library-notes-trash-toggle{width:100%;min-height:30px;padding:4px 6px;border:1px solid transparent;color:var(--sd-color-text-secondary);font-family:var(--sd-font-mono);font-size:var(--sd-type-role-caption-size);text-align:left}
-.library-notes-trash-toggle::before{content:"▸ ";display:inline-block;width:1.2em}.library-notes-trash-toggle[aria-expanded="true"]::before{content:"▾ "}
+.library-notes-trash-toggle::before{content:"▸ ";display:inline-block;width:1.2em}.library-notes-trash-toggle[aria-expanded="true"]::before{content:"▴ "}
 .library-note-trash-item .library-note-nav-name{font-weight:650}
 .library-note-action.danger:hover:not(:disabled){border-color:var(--sd-color-danger);color:var(--sd-color-danger)}
 .library-note-nav-item.empty-note{color:var(--sd-color-text-secondary)}

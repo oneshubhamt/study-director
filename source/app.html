@@ -106,10 +106,6 @@
     'dark':freeze({id:'dark',label:'Dark'}),
     'light':freeze({id:'light',label:'Light'})
   });
-  // Earlier releases stored Director-prefixed theme IDs. Stored
-  // preferences, startup mirrors and backups keep them verbatim; every read
-  // resolves them here, and the next deliberate change writes the new ID.
-  const legacyThemes=freeze({'director-dark':'dark','director-light':'light'});
   const breakpoints=freeze({
     core:freeze({
       widePlan:1100,
@@ -384,7 +380,6 @@
     version:1,
     defaults:freeze({theme:'dark',preferredPresentation:'glass',fallbackPresentation:'director-current'}),
     themes,
-    legacyThemes,
     presentations,
     breakpoints,
     tokens:freeze({
@@ -421,8 +416,7 @@
   const owns=(record,value)=>Object.prototype.hasOwnProperty.call(record,value);
   const safePresentationId=value=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
   const normalizeThemeId=value=>{
-    const raw=String(value||'').trim();
-    const candidate=owns(manifest.legacyThemes,raw)?manifest.legacyThemes[raw]:raw;
+    const candidate=String(value||'').trim();
     return owns(manifest.themes,candidate)?candidate:manifest.defaults.theme;
   };
   const normalizePresentationId=value=>{
@@ -1086,8 +1080,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <button class="mini-btn ui-btn" id="review-kept-versions" type="button" data-action="review-kept-versions">Review</button>
         </div>
         <div class="backup-location-row unsupported-data-row" id="unsupported-data" role="status" hidden>
-          <div class="backup-row-copy"><span class="ui-label">Data from a newer app version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
-          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Update app</button>
+          <div class="backup-row-copy"><span class="ui-label" id="unsupported-data-label">Data from a newer app version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
+          <button class="mini-btn ui-btn" id="unsupported-data-update" type="button" data-action="check-unsupported-update">Update app</button>
         </div>
         <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
@@ -1183,7 +1177,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span id="file-processing-status" class="ui-status" role="status" aria-live="polite"></span>
                 </div>
                 <div class="backup-inline-note ui-helper" id="backup-file-status" role="status" aria-live="polite" hidden></div>
-                <input aria-label="Import a Study Director backup file" class="file-input" type="file" id="import-file" accept=".sdbackup,.sdbackup.gz,.json,application/json,application/gzip" data-change="import-backup">
+                <input aria-label="Import a Study Director backup file" class="file-input" type="file" id="import-file" accept=".sdbackup" data-change="import-backup">
               </section>
               <section class="backup-section backup-advanced-section" aria-label="Backup encryption">
                 <div class="backup-security-group">
@@ -1482,7 +1476,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="profile-act ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
             <ul class="profile-status-items" id="profile-status-items"></ul>
           </div>
-          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><span class="profile-row-actions"><button class="profile-act ui-btn" id="profile-drive-sync" type="button" data-action="sync-status-action" data-sync-action="sync-now" hidden>Sync now</button><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
           <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span></span><button class="profile-act ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></div>
           <button class="profile-row profile-link-row" type="button" data-action="sync-status-action" data-sync-action="open-data"><span class="profile-row-text"><span class="profile-row-label">Backup details</span><span class="profile-row-value">Versions and backup files in Library → Data</span></span><span class="profile-chevron" aria-hidden="true"></span></button>
         </div>
@@ -1493,7 +1487,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <ul class="profile-list" id="profile-list"></ul>
           <button class="profile-row profile-add" id="profile-add" type="button" data-action="add-profile"><span class="profile-add-mark" aria-hidden="true">+</span><span class="profile-row-label">Add profile</span></button>
         </div>
-        <p class="profile-note" id="profile-unsupported" hidden>This profile list was saved by a newer version of Study Director. Update the app to add, switch or remove profiles; the list stays as it is.</p>
+        <p class="profile-note" id="profile-unsupported" hidden>This build cannot read the complete profile list. The list and its data are being preserved. Adding, switching and removing profiles are paused.</p>
         <p class="profile-caption" id="profile-device"></p>
       </section>
       <section class="profile-section profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
@@ -1570,8 +1564,6 @@ if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-
 const AttachmentsModule=INTERNAL_MODULES.load('attachments',1,'study-director.attachments-module',1);
 const AttachmentIngestModule=INTERNAL_MODULES.load('attachment-ingest',1,'study-director.attachment-ingest',1);
 const AssetStorageModule=INTERNAL_MODULES.load('asset-storage',1,'study-director.asset-storage',3);
-const CompatibilityModule=INTERNAL_MODULES.load('compatibility',1,'study-director.compatibility-module',1);
-const CompatibilityHostModule=INTERNAL_MODULES.load('compatibility-host',1,'study-director.compatibility-host-module',1);
 const OperationLifecycle=INTERNAL_MODULES.load('operation-lifecycle',1,'study-director.operation-lifecycle',1);
 const AssetMaintenanceModule=INTERNAL_MODULES.load('asset-maintenance',1,'study-director.asset-maintenance-module',2,Object.freeze({lifecycle:OperationLifecycle}));
 const PersistenceModule=INTERNAL_MODULES.load('persistence',1,'study-director.persistence-primitives',1);
@@ -1579,7 +1571,6 @@ const AppMetaModule=INTERNAL_MODULES.load('app-meta',1,'study-director.app-meta'
 const HostMetadataModule=INTERNAL_MODULES.load('host-metadata',1,'study-director.host-metadata-module',1);
 const ReconciliationBaselineModule=INTERNAL_MODULES.load('reconciliation-baseline',1,'study-director.reconciliation-baseline-module',1);
 const RecordCodecsModule=INTERNAL_MODULES.load('record-codecs',1,'study-director.record-codecs',1);
-const CompatibilityCodecsModule=INTERNAL_MODULES.load('compatibility-codecs',1,'study-director.compatibility-codecs-module',1);
 const BackupCodecModule=INTERNAL_MODULES.load('backup-codec',1,'study-director.backup-codec',1);
 const CanonicalModule=INTERNAL_MODULES.load('canonical',1,'study-director.canonical',1);
 const ReconciliationModule=INTERNAL_MODULES.load('reconciliation',1,'study-director.reconciliation-module',1,Object.freeze({canonical:CanonicalModule}));
@@ -1692,13 +1683,9 @@ const ProfileScope=window[Symbol.for('studyDirector.profileScope.v1')];
 const DEVICE_WIDE_STORAGE_KEYS=Object.freeze(@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@);
 const STORAGE_KEYS=Object.freeze(Object.fromEntries(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).map(([name,key])=>[name,DEVICE_WIDE_STORAGE_KEYS.includes(name)?key:ProfileScope.scoped(key)])));
 const SESSION_STORAGE_KEYS=Object.freeze(@@SD_SESSION_STORAGE_KEYS@@);
-const OBSOLETE_STORAGE_KEYS=Object.freeze(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@);
 const APP_META_KEYS=Object.freeze(@@SD_APP_META_KEYS@@);
 const EXTERNAL_REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@);
 const APP_META_REGISTRY=Object.freeze(Object.fromEntries(Object.entries(@@SD_APP_META_REGISTRY@@).map(([name,definition])=>[name,Object.freeze(definition)])));
-const OBSOLETE_APP_META_KEYS=Object.freeze(@@SD_OBSOLETE_APP_META_KEYS@@);
-const RENAMED_APP_META_KEYS=Object.freeze(@@SD_RENAMED_APP_META_KEYS@@);
-const RENAMED_VALUE_FORMATS=Object.freeze(@@SD_RENAMED_VALUE_FORMATS@@);
 const FACTORY_DEFAULTS = {
   studentName: APP_CONFIG.defaultName,
   scheduleText: APP_CONFIG.factorySchedule
@@ -1710,21 +1697,15 @@ const DATA_CONTRACT=(()=>{
   return Object.freeze({...raw,storage:Object.freeze({...raw.storage,stores}),schemas});
 })();
 const DB_STORES=Object.freeze(@@SD_INDEXED_DB_STORE_NAMES@@);
-const OBSOLETE_DB=Object.freeze(@@SD_OBSOLETE_INDEXED_DB@@);
-const OBSOLETE_DB_STORES=OBSOLETE_DB.stores;
 const DB_NAME=ProfileScope.scoped(DATA_CONTRACT.storage.dbName);
 const DB_DAILY_RECORD_STORE=DB_STORES.dailyRecords;
 const DB_DAILY_SUMMARY_STORE=DB_STORES.dailySummaries;
 const DB_NOTES_STORE=DB_STORES.notes;
 const DB_ACTIVE_SESSION_STORE=DB_STORES.activeSessions;
 const DB_APP_META_STORE=DB_STORES.appMeta;
-const DB_LEGACY_SYNC_QUEUE_STORE=OBSOLETE_DB_STORES.syncQueue;
-const DB_LEGACY_TOMBSTONE_STORE=OBSOLETE_DB_STORES.tombstones;
 const DB_ASSET_STORE=DB_STORES.assets;
-const DB_RETIRED_REFLECTION_DRAFT_STORE=OBSOLETE_DB_STORES.reflectionDrafts;
 const DB_VER=DATA_CONTRACT.storage.dbVersion;
 const ACTIVE_SESSION_ID=DATA_CONTRACT.schemas.ActiveSession.key;
-const LEGACY_BACKUP_SCHEMA_VERSION=@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@;
 const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
   pluginApi:1,
   tabRegistry:1,
@@ -1775,6 +1756,15 @@ const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
   onOk:operation=>StorageHealthController?.observeLocalStorage(operation,null)
 }));
+function readStoredStorageHealth(local=LocalStorageContract){
+  const value=local.getJson(STORAGE_KEYS.storageHealth,null);
+  if(value?.version!==3||Object.keys(value).length!==4)return null;
+  for(const field of ['lastLocalSaveAt','lastStudyDataSaveAt','browserDataClearedAt']){
+    const time=value[field];
+    if(time!==null&&(typeof time!=='string'||!Number.isFinite(Date.parse(time))))return null;
+  }
+  return value;
+}
 function createStorageHealthController(local){
   const sourceLabels=Object.freeze({
     'indexedDB':'Browser database','localStorage.read':'Browser storage read','localStorage.write':'Browser storage write',
@@ -1784,8 +1774,7 @@ function createStorageHealthController(local){
   });
   const issueMap=new Map();
   let active=false,mirroring=false;
-  const stored=local.getJson(STORAGE_KEYS.storageHealth,null);
-  let history=Object.assign(emptyStorageHealth(),stored&&typeof stored==='object'?stored:{},{version:3});
+  let history=readStoredStorageHealth(local)||emptyStorageHealth();
   const initialReadError=local.lastError;
   if(initialReadError){
     issueMap.set('localStorage.read',Object.freeze({
@@ -1816,17 +1805,22 @@ function createStorageHealthController(local){
     const recovered=issueMap.delete(key);
     const hasPatch=!!(patch&&typeof patch==='object'&&Object.keys(patch).length);
     if(!recovered&&!hasPatch)return snapshot();
-    if(hasPatch){history=Object.assign({},history,patch,{version:3});if(!options||options.mirror!==false)mirror();}
+    if(hasPatch)patchHistory(patch,options?.mirror!==false);
     notify();
     return snapshot();
   }
   // Each tab mirrors its own copy of this record. An unresolved browser-data
   // clear is kept as stored unless this tab set or resolved it itself.
   let clearMarkerOwned=false;
+  function patchHistory(patch,write=true){
+    const {lastLocalSaveAt=history.lastLocalSaveAt,lastStudyDataSaveAt=history.lastStudyDataSaveAt,browserDataClearedAt=history.browserDataClearedAt}=patch;
+    const marker=Object.hasOwn(patch,'browserDataClearedAt');
+    history={version:3,lastLocalSaveAt,lastStudyDataSaveAt,browserDataClearedAt};
+    if(write)mirror({marker});
+    if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
+  }
   function updateHistory(patch){
-    const marker=!!patch&&typeof patch==='object'&&Object.hasOwn(patch,'browserDataClearedAt');
-    history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:3});
-    mirror({marker});if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
+    patchHistory(patch);
     notify();return snapshot();
   }
   function observeLocalStorage(operation,error){
@@ -1847,7 +1841,7 @@ function createStorageHealthController(local){
     if(mirroring)return false;
     mirroring=true;
     try{
-      const stored=local.getJson(STORAGE_KEYS.storageHealth,null),known=stored&&typeof stored==='object'?stored:{};
+      const known=readStoredStorageHealth(local)||emptyStorageHealth();
       history=Object.assign({},history,{lastLocalSaveAt:laterTime(history.lastLocalSaveAt,known.lastLocalSaveAt),lastStudyDataSaveAt:laterTime(history.lastStudyDataSaveAt,known.lastStudyDataSaveAt)});
       if(!clearMarkerOwned&&!marker)history=Object.assign({},history,{browserDataClearedAt:known.browserDataClearedAt||null});
       return local.setJson(STORAGE_KEYS.storageHealth,history);
@@ -1915,7 +1909,7 @@ const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freez
     keys:()=>LocalStorageContract.keys(),
     remove:key=>LocalStorageContract.remove(key)
   }),
-  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key)),legacyDirectory:'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'}),
+  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
   platform:Object.freeze({
     deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));request.onblocked=()=>reject(new Error('Profile deletion is waiting for another open Study Director tab. Close the other tabs and retry; your recovery data remains protected.'));}),
     listen:handler=>{const listener=event=>{if(event.storageArea===localStorage)handler(event.key);};window.addEventListener('storage',listener);return ()=>window.removeEventListener('storage',listener);},
@@ -2807,7 +2801,6 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
       return result;
     },
     finalizeHydration:async()=>{
-      await CompatibilityFacade.migrateLive();
       await hydrateSavedDrafts({forcePreferences:true,failClosed:true});
     },
     resume:()=>{resumeTimerLoopAfterPrimaryRestore();askProfilePassword();},
@@ -2929,7 +2922,7 @@ function togglePause(){const result=togglePauseTimer();sendSessionChangeSoon(Tim
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
 function notifyBackupChange(change){
-  try{BackupProviderRuntime?.noteChange(Object.freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')}));return true;}
+  try{BackupProviderRuntime?.noteChange(Object.freeze({urgent:change?.urgent===true,typed:change?.typed===true,reason:String(change?.reason||'change')}));return true;}
   catch(error){AppDiagnostics.capture('backup.change-provider',error,'warn');return false;}
 }
 // Changes still waiting for an automatic backup go out at once when the app
@@ -4537,7 +4530,7 @@ function writeActiveSessionNow(snapshot,options={}){
   return saveActiveSession(session,options);
 }
 function saveActiveSession(session,options){
-  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
+  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true,typed:options.typed===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
@@ -5020,13 +5013,7 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
       activeSessions:DB_ACTIVE_SESSION_STORE,
       appMeta:DB_APP_META_STORE,
       assets:DB_ASSET_STORE
-    }),
-    bridgeVersion:OBSOLETE_DB.bridgeVersion,
-    legacyStores:Object.freeze({syncQueue:DB_LEGACY_SYNC_QUEUE_STORE,tombstones:DB_LEGACY_TOMBSTONE_STORE,reflectionDrafts:DB_RETIRED_REFLECTION_DRAFT_STORE})
-  }),
-  upgrade:Object.freeze({
-    renameStores:context=>CompatibilityModule.renameIndexedDbStores(Object.freeze({...context,renamedStores:Object.freeze(Object.fromEntries(Object.entries(OBSOLETE_DB.renamedStores).map(([id,from])=>[DB_STORES[id],from])))})),
-    apply:context=>CompatibilityModule.applyIndexedDbUpgrade(Object.freeze({...context,dailyRecordMigrationKey:APP_META_KEYS.dailyRecordMigration}))
+    })
   }),
   hooks:Object.freeze({
     onError:message=>{markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`);try{DatabaseLifecycle.fault();}catch{}},
@@ -5037,64 +5024,75 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
 const AppMetaGateway=AppMetaModule.create(Object.freeze({
-  indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get,getAll:IndexedDb.getAll}),
+  indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get}),
   store:DB_APP_META_STORE,
   registry:APP_META_REGISTRY
 }));
 // Data this build cannot read stays exactly as it is. Every start, before
-// anything reads stored data, the census finds it: a record whose version is
-// above this build's, an appMeta row of a family this build does not know or
-// in a newer shape and, once the compatibility steps are done, an appMeta row
-// this build still cannot read. The storage layer then keeps it out of every
-// read and refuses every change to it, and the app works with everything else
-// (local clean-up and Drive uploads wait while any of it is here, since both
-// would read its absence as a deletion). Bookkeeping the data contract lets
-// any build replace (leases, maintenance progress, caches) is replaced as
-// usual. A database a newer build changed so much that a store this build
-// needs is gone, or keyed differently, is not opened: the profile waits for
-// an update and the person can use another profile meanwhile.
+// anything reads stored data, the census finds it: a record in a version
+// other than this build's (newer, or older than the current one), and an
+// appMeta row of a family this build does not know or in a shape it cannot
+// read. The storage layer then keeps it out of every read and refuses every
+// change to it, and the app works with everything else (local clean-up and
+// Drive uploads wait while any of it is here, since both would read its
+// absence as a deletion). Bookkeeping the data contract lets any build
+// replace (leases, maintenance progress, caches) is replaced as usual. A
+// database in another layout is not opened: one a newer build changed so
+// much that a store this build needs is gone or keyed differently, or one an
+// earlier build made. The person can use another profile meanwhile.
 const UnsupportedData=(()=>{
   const schemaVersion=schema=>{const match=/\.v(\d+)$/u.exec(String(schema||''));return match?Number(match[1]):0;};
+  // A Daily Summary carries its version as summaryVersion; every other record as version.
+  const versionField=store=>store===DB_DAILY_SUMMARY_STORE?'summaryVersion':'version';
   const recordStores=Object.freeze(Object.entries(DATA_CONTRACT.storage.stores).filter(([id])=>id!=='appMeta').map(([id,value])=>Object.freeze([DB_STORES[id],schemaVersion(value.schema)])));
   const envelopeVersion=Number(DATA_CONTRACT.schemas.AppMeta?.version)||1;
-  const retired=Object.freeze([...Object.values(OBSOLETE_APP_META_KEYS),...Object.values(RENAMED_APP_META_KEYS).flat()].map(String));
-  const isRetired=key=>retired.some(old=>old.endsWith(':')?key.startsWith(old):key===old);
-  const newerRecord=max=>value=>value&&typeof value==='object'&&Number(value.version)>max?'newer':'';
-  // settled: the compatibility steps are done, so a row this build cannot
-  // read is no longer one they will convert.
-  function metaVerdict(row,settled){
+  // This reserved bookkeeping key can be present on an upgraded installation.
+  // Its value is unused and must not block access to the library.
+  const EARLIER_CONVERSION_MARKER='dailyRecordMigration';
+  const versionVerdict=(version,max)=>version>max?'newer':version<max?'older':'';
+  const recordVerdict=(store,max)=>value=>{
+    // An attachment kept as a bare file is the first attachment format.
+    if(value instanceof Blob)return 'older';
+    const version=value&&typeof value==='object'&&!Array.isArray(value)?Number(value[versionField(store)]):NaN;
+    return Number.isFinite(version)?versionVerdict(version,max):'unreadable';
+  };
+  function metaVerdict(row){
     const key=String(row&&row.key||'');if(!key)return '';
-    if(row&&typeof row==='object'&&Number(row.version)>envelopeVersion)return 'newer';
+    if(Number(row.version)>envelopeVersion)return 'newer';
+    if(key===EARLIER_CONVERSION_MARKER&&row.version===envelopeVersion)return '';
     const family=AppMetaGateway.resolve(key);
-    if(!family)return isRetired(key)?'':'unknown';
+    if(!family)return 'unknown';
     if(AppMetaGateway.readable(row))return '';
-    const value=row&&row.value,newer=!!value&&typeof value==='object'&&Number(value.version)>schemaVersion(family.schema);
-    if(!newer&&!settled)return '';
-    return Object.freeze({reason:newer?'newer':'unreadable',replaceable:family.protection==='operational'});
+    const value=row&&row.value,version=value&&typeof value==='object'?Number(value.version):NaN;
+    return Object.freeze({reason:Number.isFinite(version)&&versionVerdict(version,schemaVersion(family.schema))||'unreadable',replaceable:family.protection==='operational'});
   }
   let blocked=null;
   async function census(){
     const topology=await IndexedDb.topology();
-    if(topology.newer&&!topology.usable){
-      blocked=Object.freeze({version:topology.version,missing:topology.missing,changed:topology.changed});
-      throw Object.assign(new Error(`This profile was saved by a newer version of Study Director (database ${topology.version}), which this version cannot open.`),{code:'STUDY_DIRECTOR_PROFILE_NEEDS_UPDATE'});
+    if(!topology.usable){
+      blocked=Object.freeze({version:topology.version,older:topology.older,missing:topology.missing,changed:topology.changed});
+      throw Object.assign(new Error(topology.older
+        ?`This profile was saved by an earlier version of Study Director (database ${topology.version}), which this version no longer opens.`
+        :`This profile was saved by a newer version of Study Director (database ${topology.version}), which this version cannot open.`),{code:topology.older?'STUDY_DIRECTOR_PROFILE_TOO_OLD':'STUDY_DIRECTOR_PROFILE_NEEDS_UPDATE'});
     }
-    for(const [store,max] of recordStores)await IndexedDb.unsupported.scan(store,newerRecord(max));
+    for(const [store,max] of recordStores)await IndexedDb.unsupported.scan(store,recordVerdict(store,max));
     // A Saved Day and its summary are one item: either one held holds the other.
     for(const [from,to] of [[DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE],[DB_DAILY_SUMMARY_STORE,DB_DAILY_RECORD_STORE]])for(const key of IndexedDb.unsupported.keys(from))IndexedDb.unsupported.hold(to,key,'same-day');
-    await IndexedDb.unsupported.scan(DB_APP_META_STORE,row=>metaVerdict(row,false));
+    await IndexedDb.unsupported.scan(DB_APP_META_STORE,metaVerdict);
     return summary();
   }
-  const settle=async()=>{await IndexedDb.unsupported.scan(DB_APP_META_STORE,row=>metaVerdict(row,true));return summary();};
   // What the person is told about: Saved Days, notes, attachments, a session
-  // and settings, never the bookkeeping this build replaces.
+  // and settings, never the bookkeeping this build replaces. origin: 'older'
+  // when all of it is from earlier versions, 'newer' when all of it may be
+  // from a newer one, 'mixed' otherwise.
   function summary(){
     const keys=store=>IndexedDb.unsupported.keys(store),days=new Set([...keys(DB_DAILY_RECORD_STORE),...keys(DB_DAILY_SUMMARY_STORE)].map(String));
     const meta=keys(DB_APP_META_STORE).filter(key=>{const family=AppMetaGateway.resolve(key);return !family||family.protection!=='operational';}).length;
     const items=Object.freeze({days:days.size,notes:keys(DB_NOTES_STORE).length,attachments:keys(DB_ASSET_STORE).length,sessions:keys(DB_ACTIVE_SESSION_STORE).length,settings:meta});
     const total=Object.values(items).reduce((sum,count)=>sum+count,0);
-    const stored=IndexedDb.unsupported.summary();
-    return Object.freeze({total,held:stored.total,protected:stored.protected,stores:stored.stores,reasons:stored.reasons,items,blocked});
+    const stored=IndexedDb.unsupported.summary(),reasons=Object.keys(stored.reasons).filter(reason=>reason!=='same-day');
+    const origin=reasons.length&&reasons.every(reason=>reason==='older')?'older':reasons.some(reason=>reason==='older')?'mixed':'newer';
+    return Object.freeze({total,held:stored.total,protected:stored.protected,stores:stored.stores,reasons:stored.reasons,origin,items,blocked});
   }
   // Protected data is held (bookkeeping this build replaces does not count).
   const held=()=>IndexedDb.unsupported.summary().protected>0;
@@ -5102,27 +5100,37 @@ const UnsupportedData=(()=>{
     const parts=[['days','Saved Day'],['notes','note'],['attachments','attachment'],['sessions','study session'],['settings','setting']].filter(([id])=>state.items[id]>0).map(([id,label])=>`${state.items[id]} ${label}${state.items[id]===1?'':'s'}`);
     return parts.length>1?`${parts.slice(0,-1).join(', ')} and ${parts.at(-1)}`:parts[0]||'';
   }
+  // Who saved it, for the messages: an update helps only with newer data.
+  const savedBy=state=>state.origin==='older'?'an earlier version of Study Director, in a form this version no longer reads':state.origin==='mixed'?'other versions of Study Director':'a newer version of Study Director';
   let noticeShown=false;
   function announce(){
     const state=summary();if(!state.total||noticeShown)return false;noticeShown=true;
+    const older=state.origin==='older';
     NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:true,
-      title:'Some data is from a newer version',
-      message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
-      action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
+      title:older?'Some data is from an earlier version':'Some data is from another version',
+      message:`This device has ${describe(state)} saved by ${savedBy(state)}. This version leaves ${state.total===1?'it':'them'} exactly as ${state.total===1?'it is':'they are'} and works with everything else; Drive sync waits${older?'':' until the app is updated'}.`,
+      ...(older?{}:{action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}})});
     return true;
   }
   // The profile cannot be opened: shown instead of the start-up failure.
   function reportBlocked(){
     if(!blocked)return false;
     const others=Profiles.list().filter(row=>row.scope!==ProfileScope.scope);
+    const other=others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}};
     NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:false,
-      title:'This profile needs a newer version',
-      message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
-      action:{label:'Check for update',opens:true,run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
-      secondaryAction:others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}}});
+      ...(blocked.older?{
+        title:'This profile is from an earlier version',
+        message:'This profile was saved by an earlier version of Study Director, in a form this version no longer opens. This version leaves it exactly as it is. Use another profile, or restore a backup into a new one.',
+        action:other
+      }:{
+        title:'This profile needs a newer version',
+        message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
+        action:{label:'Check for update',opens:true,run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
+        secondaryAction:other
+      })});
     return true;
   }
-  return Object.freeze({census,settle,summary,held,describe,announce,reportBlocked,blocked:()=>blocked});
+  return Object.freeze({census,summary,held,describe,savedBy,announce,reportBlocked,blocked:()=>blocked});
 })();
 const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Object.freeze({
   limits:APP_LIMITS,
@@ -5148,7 +5156,6 @@ AppMetaGateway.registerValidators('host',HostMetadataModule.createAppMetaValidat
   })
 })));
 const RepositoryAppMeta=AppMetaGateway.bind('repositories');
-const CompatibilityAppMeta=AppMetaGateway.bind('compatibility');
 const JournalAppMeta=AppMetaGateway.bind('repository-journals');
 const HostAppMeta=AppMetaGateway.bind('host');
 const ExportsAppMeta=AppMetaGateway.bind('exports');
@@ -5181,7 +5188,7 @@ const AttachmentIngest=AttachmentIngestModule.create({
 });
 window.addEventListener('pagehide',()=>AttachmentIngest.destroy());
 const AttachmentStorage=AssetStorageModule.create({
-  name:DB_NAME,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),legacyDirectory:ProfileScope.scope?'':'@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@',maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
+  name:DB_NAME,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
   storage:navigator.storage,locks:navigator.locks,protocol:location.protocol,ingest:AttachmentIngest,onReleased:()=>notifyRichTextAssetLeaseReleased(),
   canMutate:()=>appCanMutate(),issueToken:options=>AppOwnership.issueWriteToken('write attachment',options),assertToken:token=>AppOwnership.assertWriteToken(token,'write attachment'),
   read:id=>IndexedDb.get(DB_ASSET_STORE,id,'attachment metadata read aborted'),
@@ -5346,23 +5353,6 @@ async function installVerifiedRecoveryFreshness(){
   verifiedRecoveryState=await readVerifiedRecoveryState();
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
 }
-async function verifyFreshCurrentBackup(){
-  const unknown=()=>Object.freeze({ok:false,verifiedCopies:0,latestVerifiedAt:''});
-  let currentRevision;
-  try{
-    // Canonical commits write the mutation epoch inside their transaction;
-    // the localStorage health clock alone is not proof of the latest change.
-    currentRevision=await AppData.mutationEpoch.latestChangeAt(currentBackupSourceRevision());
-  }catch(error){AppDiagnostics.capture('backup.freshness-epoch-read',error,'warn');return unknown();}
-  const currentSave=Date.parse(String(currentRevision||''));
-  if(!Number.isFinite(currentSave))return unknown();
-  let state;
-  try{state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));}
-  catch(error){AppDiagnostics.capture('backup.freshness-receipt-read',error,'warn');return unknown();}
-  // A missing, invalid or untrusted clock cannot authorize destructive work.
-  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&Date.parse(entry.sourceRevision)>=currentSave);
-  return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
-}
 // Compare policy identity and ownership inside the same typed metadata transaction.
 function mutateBackupProtection(value,options){
   return ExportsAppMeta.transaction('readwrite',(meta,tx,finish)=>{
@@ -5378,20 +5368,6 @@ function mutateBackupProtection(value,options){
     tx.oncomplete=()=>finish(true,true);
   },{abortMessage:'backup encryption update aborted'});
 }
-const CompatibilityCodecs=CompatibilityCodecsModule.create(Object.freeze({
-  limits:APP_LIMITS,
-  dataContract:DATA_CONTRACT,
-  keyedRecord:KeyedRecord,
-  dailyRecordCodec:DailyRecordCodec,
-  activeSessionCodec:ActiveSessionCodec,
-  personalDataCodec:PersonalDataCodec,
-  pendingReviewCodec:PendingReviewCodec,
-  helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent,editorContentWithinLimits,sameDataValue,sanitizePracticeRun,activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText}),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp}),
-  domain:DomainModule,
-  installationId:()=>InstallationIdentity.getId()
-}));
-
 /* APPDATA REPOSITORY FACADE */
 function handleRepositoryDailyRecordsChanged(change){
   richAssetReferenceRevision++;
@@ -5448,8 +5424,8 @@ function handleCanonicalCommit(event){
   const committedAt=event&&event.committedAt||new Date().toISOString();
   // Study data was saved here: notes, Saved Days, sessions, plans, kept
   // versions, whether made here or taken in by a sync: what the empty-device
-  // check counts. Settings alone (a name, a theme) and the start-up
-  // compatibility step are not.
+  // check counts. Settings alone (a name, a theme) and writes made while the
+  // app starts are not.
   const studyData=!!event&&event.startup!==true&&event.settingsOnly!==true&&STUDY_DATA_COMMITS.has(event.entityType);
   writeStorageHealth(studyData?{lastLocalSaveAt:committedAt,lastStudyDataSaveAt:committedAt}:{lastLocalSaveAt:committedAt});
   renderStorageHealth();
@@ -5457,8 +5433,11 @@ function handleCanonicalCommit(event){
     const badgeActive=event.operation==='delete'?false:persistedActiveSessionUnfinished(event.value);
     if(NativeCapabilities.status().badgeActive!==badgeActive)void NativeCapabilities.updateBadge(badgeActive);
   }
+  // A Saved Day change is a key moment (Save Today, a restore); typing in a
+  // note or a reflection goes up once the typing pauses.
   if(event?.backupCapture!==true)notifyBackupChange({
-    urgent:event&&event.entityType==='dailyRecord',
+    urgent:!!event&&event.entityType==='dailyRecord'&&event.typed!==true,
+    typed:!!event&&(event.entityType==='note'||event.typed===true),
     reason:String(event&&event.entityType||'canonical-commit')
   });
   if(referencesChanged&&event?.backupCapture!==true){
@@ -5489,11 +5468,9 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   local:LocalStorageContract,
   indexedDb:IndexedDb,
   appMeta:RepositoryAppMeta,
-  compatibilityAppMeta:CompatibilityAppMeta,
   installationIdentity:InstallationIdentity,
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
-  compatibilityCodec:CompatibilityCodecs,
   personalDataCodec:PersonalDataCodec,
   pendingReviewCodec:PendingReviewCodec,
   keyedRecord:KeyedRecord,
@@ -5509,17 +5486,13 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     activeSessions:DB_ACTIVE_SESSION_STORE,
     appMeta:DB_APP_META_STORE
   }),
-  legacyStores:Object.freeze({syncQueue:DB_LEGACY_SYNC_QUEUE_STORE,tombstones:DB_LEGACY_TOMBSTONE_STORE}),
   keys:Object.freeze({
     recovery:STORAGE_KEYS.recovery,
     fallbackDailyRecords:STORAGE_KEYS.fallbackDailyRecords,
     noteRescue:STORAGE_KEYS.noteRescue,
-    deletionRecovery:STORAGE_KEYS.deletionRecovery,
-    legacySyncEmergency:OBSOLETE_STORAGE_KEYS.syncEmergency
+    deletionRecovery:STORAGE_KEYS.deletionRecovery
   }),
-  legacyKeys:Object.freeze({notesPending:OBSOLETE_STORAGE_KEYS.notesPending,noteRecoveryPrefix:OBSOLETE_APP_META_KEYS.noteRecoveryPrefix}),
   metaKeys:Object.freeze({
-    dailyRecordMigration:APP_META_KEYS.dailyRecordMigration,
     planDraft:APP_META_KEYS.planDraft,
     planLibrary:APP_META_KEYS.planLibrary,
     personalPreferences:APP_META_KEYS.personalPreferences,
@@ -5530,9 +5503,8 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
     savedDayDeletionPrefix:APP_META_KEYS.savedDayDeletionPrefix,
     noteDeletionPrefix:APP_META_KEYS.noteDeletionPrefix,
     attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
-    pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix,
+    pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix
   }),
-  obsoleteMetaKeys:Object.freeze(Object.values(OBSOLETE_APP_META_KEYS)),
   activeSessionId:ACTIVE_SESSION_ID,
   clock:Object.freeze({nowMs:DecisionClock.nowMs}),
   helpers:Object.freeze({
@@ -6788,9 +6760,18 @@ function renderSyncStatusPanel(model){
   const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
   const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
   const primary=document.getElementById('profile-status-primary');
-  // Sync now (shown only while waiting) is a quiet link beside the sentence;
-  // Try again keeps the full button.
-  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}}
+  // Sync now is in the Google Drive row while signed in (owner, 2026-11-22),
+  // so the sentence keeps only Try again.
+  const shown=!!model.action&&model.action.action!=='sync-now';
+  if(primary){primary.hidden=!shown;if(shown){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;}}
+  // Greyed while a sync runs, except one waiting for another device's turn,
+  // which Sync now goes ahead of.
+  const syncNow=document.getElementById('profile-drive-sync');
+  if(syncNow){
+    const working=model.ring==='syncing'&&!model.slow;
+    syncNow.hidden=!BackupProviderRuntime.locationStatus('google-drive')?.connected;
+    syncNow.disabled=working||model.ring==='blocked'||model.ring==='offline';syncNow.textContent=working?'Syncing…':'Sync now';
+  }
   // Rebuilt only when the items change, so a focused button keeps focus.
   const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
   if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
@@ -6834,7 +6815,8 @@ function renderProfilePanel(){
   const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
   if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
-  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
+  // Signed in, Disconnect is the quieter button beside Sync now.
+  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.classList.toggle('profile-act-muted',!!drive?.connected);driveAction.disabled=!!drive?.engineBusy;}
   const passwordValue=document.getElementById('profile-password-value'),passwordAction=document.getElementById('profile-password-action');
   if(passwordValue)passwordValue.textContent=protection.enabled?(protection.unlocked?'On':'On · Not entered on this device yet'):'Off';
   if(passwordAction)passwordAction.textContent=protection.enabled?(protection.unlocked?'Change…':'Enter…'):'Set…';
@@ -6861,7 +6843,7 @@ function renderProfile(){renderProfileBadge();renderProfilePanel();}
 function openProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
   const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
-  dialog.showModal();renderProfilePanel();NotificationRecent.opened();return true;
+  dialog.showModal();renderProfilePanel();scheduleSyncStatus();NotificationRecent.opened();return true;
 }
 function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
 function installProfileDialogs(){
@@ -6898,8 +6880,15 @@ function handleProfileNameKey(e){
   return true;
 }
 async function profileDriveAction(){
-  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return BackupProviderRuntime.disconnect('google-drive');
+  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return disconnectDrive();
   return connectDriveForProfile();
+}
+// Disconnect stops Drive work running here first; if work is still finishing
+// after that, the person is told rather than left wondering.
+async function disconnectDrive(){
+  if(await BackupProviderRuntime.disconnect('google-drive'))return true;
+  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)Interactions.notify({key:'drive-disconnect',title:'Google Drive is still connected',message:'Google Drive was still finishing its work. Disconnect again in a moment.'});
+  return false;
 }
 function switchProfile(ev){
   const id=String(ev?.target?.closest?.('[data-profile]')?.dataset.profile||'');
@@ -6981,7 +6970,9 @@ const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
 // The indicator shows Connecting… from the click until the sign-in settles,
 // and the Connect card follows the first sync to its end.
 function connectDriveForProfile(){
-  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
+  // A profile that already has its Drive library signs in again to it; only
+  // a first connect follows the first sync on the card.
+  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard({reconnect:!!Profiles.current()?.folder});scheduleSyncStatus();
   const settled=ok=>{
     driveConnecting=false;
     if(driveConnectCard&&driveConnectCard.phase==='signing-in'){
@@ -6994,9 +6985,9 @@ function connectDriveForProfile(){
 }
 // The Connect card (docs/areas/status-indicator.md, Connect card): it reads what Drive
 // reports and decides nothing itself.
-function startDriveConnectCard(){
+function startDriveConnectCard({reconnect=false}={}){
   clearTimeout(driveConnectCardHide);driveConnectCardHide=null;
-  driveConnectCard={startedAt:Date.now(),phase:'signing-in',error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
+  driveConnectCard={startedAt:Date.now(),phase:'signing-in',reconnect,error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
 }
 function endDriveConnectCard(){clearTimeout(driveConnectCardHide);driveConnectCardHide=null;driveConnectCard=null;renderDriveConnectCard();}
 function driveRunningOperation(){
@@ -7018,7 +7009,7 @@ function renderDriveConnectCard(){
     const drive=namedTurnDevice(BackupProviderRuntime.locationStatus('google-drive')),operation=driveRunningOperation();
     if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
     if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
-    model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
+    model=BackupPresentation.connectProgress({phase:state.phase,reconnect:state.reconnect===true,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
   }catch(error){AppDiagnostics.capture('drive-connect-card.render',error,'warn');root.hidden=true;return;}
   root.hidden=false;root.dataset.tone=model.tone;
   setTextSafe('drive-connect-title',model.title);
@@ -7072,14 +7063,13 @@ async function bindDriveLibrary(info){
   const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
   if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
   if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
-  if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
   if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
   driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
   if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
-  if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
+  if(!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
   FirstStart.joined();
   await recordDriveLibrary(email,folder);
-  return found?'adopt':'claim';
+  return 'adopt';
 }
 // First start (and Add profile): name, an optional password and Google
 // Drive. Someone joining their own Drive library takes its name and settings
@@ -7147,7 +7137,7 @@ const FirstStart=(()=>{
 async function startProfile(){
   const name=getStudentNameFromDisplay(),named=!isDefaultStudentName(name);
   let mine=Profiles.current();
-  if(!mine)mine=Profiles.ensure(named?name:'',{fresh:!named&&await canonicalLocalRecoveryEmpty()===true});
+  if(!mine)mine=Profiles.ensure(named?name:'');
   else if(named)Profiles.rename(name);
   renderProfile();
   if(mine?.fresh&&appCanMutate())FirstStart.open();
@@ -7183,14 +7173,17 @@ function onQuoteChange(options={}){
   if(disp)disp.textContent=v;
   saveQuoteDraft();
 }
+// A clock tick far behind the last one means the page was asleep (a laptop
+// left open, a phone in the background), not live, while the day changed.
+const CLOCK_WAKE_GAP_MS=3*60*1000;let lastClockTickMs=0;
 function tickClock(){
-  const n=new Date();
+  const n=new Date(),gapMs=lastClockTickMs?n.getTime()-lastClockTickMs:0;lastClockTickMs=n.getTime();
   setTextSafe('clock',n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}));
   const dd=document.getElementById('day-date');
   const autoDate=todayISO(n);
   // Previous-day Review is an explicit recovery choice, not a live study
   // session eligible for automatic rollover or a surprise Day save.
-  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
+  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover({woke:gapMs>CLOCK_WAKE_GAP_MS});return;}
   if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate){
     SessionLifecycle.runSync('date-rollover',{date:autoDate,autoDate:true,},()=>{
       dd.value=autoDate;return true;
@@ -7213,7 +7206,9 @@ function updateHeaderInfo(){
   const sbDate=document.getElementById('sb-date');if(sbDate)sbDate.textContent=`${dowShort} · ${monShort} ${dd} · ${yyyy}`;
   const statusDate=document.getElementById('status-date');if(statusDate)statusDate.textContent=`${dowShort} ${monShort} ${dd}`;
   const schedTitle=document.getElementById('sched-title');if(schedTitle)schedTitle.textContent=`${dowFull} · ${monFull} ${dd}`;
-  const rptDate=document.getElementById('review-date');if(rptDate)rptDate.textContent=`${dowFull} · ${monFull} ${dd}`;
+  // The Review heading names the day under review (setReviewDateTitle), not
+  // the clock's: writing today's date here showed "Sunday · Nov 22" over
+  // Saturday's reflection.
   document.title=`STUDY DIRECTOR · ${monShort} ${dd}`;
   const workBlocks=TASKS.filter(isWorkBlock);
   const totalMin=workBlocks.reduce((a,t)=>a+positiveMinutes(t.dur),0);
@@ -7600,17 +7595,23 @@ function captureNavigationState(context){
   const active=document.activeElement;
   navigationFocusState.set(context.generation,Object.freeze({departingHadFocus:!!(pane&&active&&pane.contains(active))}));
 }
-const paneEntranceTimers=new Map();
+const paneEntranceTimers=new Map(),paneEntranceWatchers=new Map();
 function markPaneEntrance(pane){
   // Presentation-owned entrance: CSS animates the arriving pane's sections for
   // one beat. The marker is cleared afterwards so later re-renders stay still.
-  // Insights renders progressively behind its own loading panel the first
-  // time; animating that render made it about 300 ms slower, so a first open
-  // arrives still. Reopened, it shows the view it kept and animates like any pane.
-  if(pane.id==='pane-insights'&&(!pane.firstElementChild||pane.querySelector('.plugin-loading-panel')))return;
+  // A first Insights open shows a loading panel while its view renders, so the
+  // marker waits for the view to replace it: the view then arrives like any
+  // pane, however long the first render takes. (Measured 2026-11-22: animating
+  // that render costs nothing measurable; an earlier ~300 ms cost is gone.)
   clearTimeout(paneEntranceTimers.get(pane.id));
+  paneEntranceWatchers.get(pane.id)?.disconnect();paneEntranceWatchers.delete(pane.id);
   pane.setAttribute('data-sd-enter','');
-  paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
+  const settle=()=>paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
+  const loading=()=>!pane.firstElementChild||!!pane.querySelector(':scope>.plugin-loading-panel');
+  if(pane.id!=='pane-insights'||!loading()){settle();return;}
+  const watcher=new MutationObserver(()=>{if(loading())return;watcher.disconnect();paneEntranceWatchers.delete(pane.id);settle();});
+  watcher.observe(pane,{childList:true});
+  paneEntranceWatchers.set(pane.id,watcher);
 }
 async function presentTabCommit(context,update){
   // Primary tab changes are intentionally immediate. Navigation owns state,
@@ -8402,13 +8403,14 @@ const DailyReflectionPersistence=(()=>{
     const current=await AppData.dailyRecords.get(date),currentCanonical=String(current?.reflection||'');
     if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     if(currentCanonical===candidate)return snapshot(current);
-    const backupCapture=options.backupCapture===true,hasContent=!!String(candidate||'').trim();
-    if(current?.recordKind==='study')await AppData.dailyRecords.save({...current,reflection:candidate,updatedAt:new Date().toISOString()},{backupCapture});
+    // typed: the reflection's editor saving as it is typed (not a deletion).
+    const backupCapture=options.backupCapture===true,typed=options.typed===true,hasContent=!!String(candidate||'').trim();
+    if(current?.recordKind==='study')await AppData.dailyRecords.save({...current,reflection:candidate,updatedAt:new Date().toISOString()},{backupCapture,typed});
     else if(hasContent){
       const diary=createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
       if(!diary)throw new Error('Daily Reflection failed canonical validation.');
-      await AppData.dailyRecords.save(diary,{backupCapture});
-    }else if(current?.recordKind==='diary')await AppData.dailyRecords.remove(date,{backupCapture});
+      await AppData.dailyRecords.save(diary,{backupCapture,typed});
+    }else if(current?.recordKind==='diary')await AppData.dailyRecords.remove(date,{backupCapture,typed});
     const fresh=await AppData.dailyRecords.get(date);
     if(hasContent&&String(fresh?.reflection||'')!==candidate)throw new Error('Daily Reflection did not pass its save read-back check.');
     if(!hasContent&&current?.recordKind==='study'&&(!fresh||fresh.recordKind!=='study'||String(fresh.reflection||'').trim()))throw new Error('Daily Reflection clear did not pass its save read-back check.');
@@ -8436,7 +8438,7 @@ const LibraryDiaryEditor=(()=>{
   async function write(field,state,value,options={}){
     const candidate=clampEditorContent(value,APP_LIMITS.maxReflectionChars);
     if(!editorContentWithinLimits(candidate))throw new Error('Diary reflection exceeds the rich-text limit.');
-    const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true}),fresh=saved.record;
+    const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true,typed:true}),fresh=saved.record;
     state.canonical=saved.canonical;state.revision=saved.revision;state.recordKind=saved.recordKind||'diary';
     field.dataset.diaryRevision=String(state.revision);richTextSyncField(field);state.onSaved?.(fresh);return fresh;
   }
@@ -9056,7 +9058,8 @@ const PlanRuntime=PlanModule.createController(Object.freeze({ports:Object.freeze
   domain:Object.freeze({
     clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,
     makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,
-    scheduleToken,scheduleWarningsMessage,taskAreaKey:noteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey
+    scheduleToken,scheduleWarningsMessage,taskAreaKey:noteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey,
+    reservedArea:key=>NoteCatalogue.reservedArea(key)
   }),
   parser:Object.freeze({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
   clock:Object.freeze({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
@@ -9475,7 +9478,11 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
       runLifecycleSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation),
       saveLiveDraft,setReviewDateTitle,setSessionPanelMode,stopTimerExecution:()=>TimerEngine.stopExecution(),
-      appCanMutate,writeLiveDraftNow
+      appCanMutate,writeLiveDraftNow,
+      // The stored session against its Saved Day. A live device writes its
+      // session just before the rollover asks, so this is the session as it stands.
+      storedSessionCovered:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});return !!loaded?.value&&await savedDayCoversActiveSession(loaded.value);},
+      reconsiderStoredSession:()=>attemptAutoRestoreActiveSession()
     }),
     notesDefaults:Object.freeze({
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField:field=>richTextCloseField(field),commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
@@ -10063,8 +10070,11 @@ const KeptVersions=(()=>{
 function renderUnsupportedData(){
   scheduleSyncStatus();
   const state=UnsupportedData.summary(),row=document.getElementById('unsupported-data'),text=document.getElementById('unsupported-data-text');
+  const label=document.getElementById('unsupported-data-label'),update=document.getElementById('unsupported-data-update'),older=state.origin==='older';
   if(row)row.hidden=!state.total;
-  if(text)text.textContent=state.total?`${UnsupportedData.describe(state)} on this device ${state.total===1?'was':'were'} saved by a newer version of Study Director. ${state.total===1?'It is':'They are'} kept safe but hidden here, and Drive sync is paused until you update the app.`:'';
+  if(label)label.textContent=older?'Data from an earlier app version':state.origin==='mixed'?'Data from other app versions':'Data from a newer app version';
+  if(update)update.hidden=older;
+  if(text)text.textContent=state.total?`${UnsupportedData.describe(state)} on this device ${state.total===1?'was':'were'} saved by ${UnsupportedData.savedBy(state)}. ${state.total===1?'It is':'They are'} kept safe but hidden here, and Drive sync is paused${older?'':' until you update the app'}.`:'';
 }
 // Update app: look for the newer version; say so when there is none yet.
 async function checkUnsupportedUpdate(){
@@ -10206,7 +10216,6 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   }),
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
-  legacy:Object.freeze({schemaVersion:LEGACY_BACKUP_SCHEMA_VERSION,tombstoneLimit:APP_LIMITS.maxLegacyImportTombstones}),
   entityTypes:BACKUP_ENTITY_TYPES,
   keyedRecord:KeyedRecord,
   entities:Object.freeze({entityDefinition,entityIdentity}),
@@ -10214,147 +10223,9 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
   richText:Object.freeze({assetIds:value=>RichTextApi.scanAttachmentReferences(value).assetIds,assetIdValid:AttachmentsModule.validId,imageMimeTypeValid:AttachmentsModule.validType}),
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
-  compatibilityCodec:CompatibilityCodecs,
   personalDataCodec:PersonalDataCodec,
   pendingReviewCodec:PendingReviewCodec
 }));
-
-const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
-  baselineId:APP_VERSION,
-  facadeFactory:CompatibilityModule.createFacade,
-  keys:Object.freeze({
-    storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale,storageHealth:STORAGE_KEYS.storageHealth}),
-    renamedAppMeta:Object.freeze(Object.entries(RENAMED_APP_META_KEYS).flatMap(([name,from])=>[from].flat().map(old=>Object.freeze([old,APP_META_KEYS[name]])))),
-    renamedLocal:Object.freeze([Object.freeze([OBSOLETE_STORAGE_KEYS.noteRescueLegacy,STORAGE_KEYS.noteRescue])]),
-    renamedFormats:RENAMED_VALUE_FORMATS,
-    obsolete:Object.freeze({
-      schedule:OBSOLETE_STORAGE_KEYS.schedule,defaults:OBSOLETE_STORAGE_KEYS.defaults,quote:OBSOLETE_STORAGE_KEYS.quote,nudge:OBSOLETE_STORAGE_KEYS.nudge,
-      reflectionDrafts:OBSOLETE_STORAGE_KEYS.reflectionDrafts,reflectionLegacy:OBSOLETE_STORAGE_KEYS.reflectionLegacy,
-      deviceId:OBSOLETE_STORAGE_KEYS.deviceId,liveDraft:OBSOLETE_STORAGE_KEYS.liveDraft,activeSession:OBSOLETE_STORAGE_KEYS.activeSession,
-      storageCapability:OBSOLETE_STORAGE_KEYS.storageCapability,diagnostics:OBSOLETE_STORAGE_KEYS.diagnostics,
-      legacyOwnershipLease:OBSOLETE_STORAGE_KEYS.legacyOwnershipLease,attachmentMaintenanceAttemptDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceAttemptDay,
-      attachmentMaintenanceDay:OBSOLETE_STORAGE_KEYS.attachmentMaintenanceDay,attachmentMaintenancePending:OBSOLETE_STORAGE_KEYS.attachmentMaintenancePending,nameSetupSkipped:OBSOLETE_STORAGE_KEYS.nameSetupSkipped
-    }),
-    appMeta:Object.freeze({
-      personalPreferences:APP_META_KEYS.personalPreferences,dataMaintenance:APP_META_KEYS.dataMaintenance,verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,
-      attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,restoreJournalPayload:APP_META_KEYS.restoreJournalPayload,
-      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix,
-      reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
-      libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
-      archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy,
-      backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix,
-      pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix
-    })
-  }),
-  local:Object.freeze({
-    getText:(key,fallback)=>AppData.local.getText(key,fallback),getJson:(key,fallback)=>AppData.local.getJson(key,fallback),
-    setText:(key,value)=>AppData.local.setText(key,value),remove:key=>AppData.local.remove(key),lastError:()=>AppData.lastStorageError
-  }),
-  ownership:Object.freeze({
-    issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
-    assertWriteToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason),isOwnershipLostError:error=>AppOwnership.isOwnershipLostError(error)
-  }),
-  plan:Object.freeze({
-    hydrate:()=>PlanData.hydrate(),library:()=>PlanData.library(),readDraft:()=>PlanData.readDraft(),
-    writeDraft:(value,options)=>PlanData.writeDraft(value,options),writeLibrary:(value,options)=>PlanData.writeLibrary(value,options),
-    settled:()=>PlanData.settled(),readCanonical:()=>AppData.planData.read()
-  }),
-  preferences:Object.freeze({
-    readRawRow:()=>IndexedDb.get(DB_APP_META_STORE,APP_META_KEYS.personalPreferences,'portable Preferences compatibility read aborted'),
-    held:()=>IndexedDb.unsupported.has(DB_APP_META_STORE,APP_META_KEYS.personalPreferences),
-    read:()=>AppData.personalPreferences.read(),write:(value,options)=>AppData.personalPreferences.write(value,options),
-    current:value=>PersonalDataCodec.currentPortablePreferences(value),legacy:value=>CompatibilityCodecs.protectedPreferences(value),
-    create:value=>PersonalDataCodec.portablePreferences(value),plans:value=>PersonalDataCodec.plans(value),
-    accept:value=>acceptProtectedPreferences(value),refreshMirrors:value=>refreshAppearanceMirrors(value),applyRuntime:value=>applyPortablePreferencesToRuntime(value),
-    normalizeTheme:value=>PRESENTATION_KERNEL.normalizeThemeId(value),normalizePresentation:value=>PRESENTATION_KERNEL.normalizePresentationId(value),
-    normalizeFontScale:value=>normalizeFontScale(value),normalizeStudentName:value=>normalizeStudentName(value),
-    normalizeQuote:value=>clampText(value,APP_LIMITS.maxQuoteChars),normalizePracticeCueMode:value=>sanitizePracticeCueMode(value),
-    normalizePracticeTargetMs:value=>validPracticeMs(value,{min:APP_LIMITS.minPracticeTargetMs})||null
-  }),
-  identity:Object.freeze({getId:()=>InstallationIdentity.getId(),installationKey:STORAGE_KEYS.installationId,legacyKey:OBSOLETE_STORAGE_KEYS.deviceId}),
-  metadata:Object.freeze({
-    readRow:key=>IndexedDb.get(DB_APP_META_STORE,String(key),'historical host metadata read aborted'),
-    listRows:()=>IndexedDb.getAll(DB_APP_META_STORE,'historical host metadata list aborted'),
-    isCurrentDataMaintenance:value=>RepositoryAppMetaValidators.dataMaintenance(value)===true,
-    writeValue:(key,value,updatedAt)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const timestamp=Number.isFinite(Date.parse(String(updatedAt||'')))?new Date(String(updatedAt)).toISOString():new Date().toISOString(),request=store.put({key:String(key),version:1,value,updatedAt:timestamp});request.onerror=()=>finish(false,request.error||new Error('historical host metadata write failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata write aborted'),
-    removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
-    releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
-    normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),normalizeRepositoryIntegrityTarget:value=>normalizeRepositoryIntegrityTarget(value),
-    legacyPendingReview:value=>CompatibilityCodecs.pendingReview(value),
-    updateStorageHealth:patch=>{writeStorageHealth(patch);return true;},
-    // Moves every renamed record in one transaction, renaming its value format
-    // with it; an old and a new copy that disagree stop the move with nothing
-    // changed.
-    renameRows:(pairs,formats)=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{
-      const request=store.getAll();request.onerror=()=>finish(false,request.error||new Error('renamed records could not be read'));
-      request.onsuccess=()=>{
-        const rows=request.result||[],byKey=new Map(rows.map(row=>[String(row&&row.key||''),row]));let count=0;
-        for(const row of rows){
-          const key=String(row&&row.key||''),pair=pairs.find(([from])=>from.endsWith(':')?key.startsWith(from):key===from);if(!pair)continue;
-          const target=pair[1]+key.slice(pair[0].length),existing=byKey.get(target),format=row.value&&typeof row.value==='object'?String(row.value.format||''):'';
-          const value=Object.hasOwn(formats,format)?{...row.value,format:formats[format]}:row.value;
-          if(existing&&!sameDataValue(existing.value,value)){try{tx.abort();}catch{}finish(false,new Error(`Record ${key} and its renamed copy ${target} differ. Nothing was renamed.`));return;}
-          if(!existing){store.put({...row,key:target,value});byKey.set(target,{...row,key:target,value});}store.delete(key);count++;
-        }
-        tx.oncomplete=()=>finish(true,count);
-      };
-    },'renamed record transaction aborted')
-  }),
-  live:Object.freeze({
-    migrateActiveSession:()=>AppData.compatibility.migrateActiveSession(),migrateNotes:()=>AppData.compatibility.migrateNotes(),
-    migrateNoteRecovery:()=>AppData.compatibility.migrateNoteRecovery(),migrateDeletionState:()=>AppData.compatibility.migrateDeletionState(),
-    migrateDailyRecords:()=>AppData.compatibility.migrateDailyRecords(),migrateInsightsRevisionEnvelope:()=>AppData.compatibility.migrateInsightsRevisionEnvelope(),
-    cleanupLegacyAttachments:()=>AttachmentStorage.cleanupLegacy(),cleanupObsoleteMetadata:()=>AppData.compatibility.cleanupObsoleteMetadata(),
-    settleUnsupported:()=>UnsupportedData.settle()
-  }),
-  topology:Object.freeze({retire:()=>IndexedDb.retireLegacyStores()}),
-  verification:Object.freeze({
-    activeSession:()=>AppData.compatibility.verifyActiveSession(),notes:()=>AppData.compatibility.verifyNotes(),
-    noteRecovery:()=>AppData.compatibility.verifyNoteRecovery(),deletionState:()=>AppData.compatibility.verifyDeletionState(),
-    dailyRecords:()=>AppData.compatibility.verifyDailyRecords(),insightsRevisionEnvelope:()=>AppData.compatibility.verifyInsightsRevisionEnvelope(),
-    legacyAttachments:()=>AttachmentStorage.verifyLegacyClean(),
-    canonicalStores:async()=>{
-      const issues=[];
-      try{
-        const [noteRows,sessionRows,appMetaProof,repositoryMetadata,libraryState,libraryChunks,restoreState,restorePayload]=await Promise.all([
-          IndexedDb.getAll(DB_NOTES_STORE,'canonical Note verification aborted'),
-          IndexedDb.getAll(DB_ACTIVE_SESSION_STORE,'canonical active-session verification aborted'),
-          AppMetaGateway.verifyAll(),
-          AppData.metadata.verifyCurrent(),
-          JournalAppMeta.read('libraryClearJournalState'),
-          JournalAppMeta.list('libraryClearJournalPayloadPrefix'),
-          JournalAppMeta.read('restoreJournalState'),
-          JournalAppMeta.read('restoreJournalPayload')
-        ]);
-        if(!appMetaProof?.ok)for(const issue of appMetaProof?.issues||[])issues.push(`app-meta:${issue}`);
-        if(!repositoryMetadata?.ok)for(const issue of repositoryMetadata?.issues||[])issues.push(`app-meta:${issue}`);
-        for(const row of noteRows||[]){const clean=DailyRecordCodec.sanitizeCurrentNote(row,row&&row.key);if(!clean||!sameDataValue(row,clean))issues.push(`note:${String(row&&row.key||'?')}`);}
-        for(const row of sessionRows||[]){const clean=ActiveSessionCodec.sanitizeCurrent(row);if(!clean||!sameDataValue(row,clean))issues.push(`active-session:${String(row&&row.id||'?')}`);}
-        if(libraryChunks.length&&!libraryState)issues.push('app-meta-library-orphan-chunks');
-        if(libraryState||libraryChunks.length){try{await AppData.libraryClearJournal.read();}catch(error){issues.push(`app-meta-library-integrity:${String(error&&error.message||error)}`);}}
-        if(!!restoreState!==!!restorePayload)issues.push('app-meta-restore-pair');
-        if(restoreState||restorePayload){try{await AppData.restoreJournal.read();}catch(error){issues.push(`app-meta-restore-integrity:${String(error&&error.message||error)}`);}}
-        const assetKeys=await AttachmentStorage.keys(),assetRows=await AttachmentStorage.list();if(assetKeys.length!==assetRows.length)issues.push('attachment-metadata-noncanonical');
-      }catch(error){issues.push(`verification-error:${String(error&&error.message||error||'unknown')}`);}
-      return Object.freeze({ok:issues.length===0,issues:Object.freeze(issues)});
-    },
-    obsoleteMetadata:()=>AppData.compatibility.verifyObsoleteMetadata(),
-    topology:async()=>{
-      const state=await IndexedDb.topology(),expected=Object.values(DB_STORES).slice().sort(),actual=state.stores.slice().sort();
-      // A newer build's database keeps its own topology; it holds what this build needs.
-      if(state.newer)return Object.freeze({ok:state.usable,newer:true,version:state.version,stores:Object.freeze(actual),legacyStores:state.legacyStores});
-      return Object.freeze({ok:state.version===DB_VER&&state.legacyStores.length===0&&sameDataValue(actual,expected),version:state.version,stores:Object.freeze(actual),legacyStores:state.legacyStores});
-    },
-    freshBackup:verifyFreshCurrentBackup
-  }),
-  backups:Object.freeze({inspectCurrent:(file,options)=>BackupCodec.inspectCurrent(file,options),inspectLegacy:(file,options)=>BackupCodec.inspectLegacy(file,options)}),
-  helpers:Object.freeze({same:sameDataValue,randomUuid:()=>crypto.randomUUID(),nowIso:()=>new Date().toISOString(),isNoteKey:DailyRecordCodec.noteKeys.isKey})
-}));
-const RuntimeBackupCodec=Object.freeze(Object.fromEntries([
-  ...Object.entries(BackupCodec).filter(([key])=>!['inspectCurrent','inspectLegacy'].includes(key)),
-  ['inspect',(file,options)=>CompatibilityFacade.inspectBackup(file,options)]
-]));
-
 async function reconcileNotesThroughLifecycle(importedNotes,deletions=[]){
   return SessionLifecycle.run('reconciled-notes',{
     date:getReviewDate(),
@@ -10456,7 +10327,7 @@ async function verifyRestoredSessionRuntime(expected,scheduleText=''){
 async function importBackupAttachments(items,{signal,replace=false}={}){
   return AttachmentStorage.during(async()=>{
     const token=AppOwnership.issueWriteToken('restore attachments'),staged=[],rows=[],contents=new Map();
-    const local=new Map((await AttachmentStorage.list()).map(row=>[row.hash+':'+row.size,row]));
+    const local=new Map((await AttachmentStorage.list()).map(({id,...row})=>[row.hash+':'+row.size,row]));
     const check=()=>{AppOwnership.assertWriteToken(token,'restore attachments');if(signal?.aborted)throw Object.assign(new Error('Restore cancelled.'),{name:'AbortError'});};
     try{
       for(const item of items){
@@ -10475,23 +10346,23 @@ async function importBackupAttachments(items,{signal,replace=false}={}){
   });
 }
 function currentBackupSourceRevision(){
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),memory=readStorageHealth();let latest='',latestAt=NaN;
+  const stored=readStoredStorageHealth(),memory=readStorageHealth();let latest='',latestAt=NaN;
   for(const value of [stored&&stored.lastLocalSaveAt,memory.lastLocalSaveAt]){
     const revision=String(value||''),at=Date.parse(revision);
     if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
   }
   return latest;
 }
-async function legacyBackupSnapshotRevision(){
+async function contentBackupSnapshotRevision(){
   return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
 }
 async function backupSnapshotRevision(options={}){
-  if(options&&options.legacy===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return legacyBackupSnapshotRevision();
+  if(options&&options.full===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return contentBackupSnapshotRevision();
   try{
     const epoch=await AppData.mutationEpoch.read();
-    if(!epoch)return legacyBackupSnapshotRevision();
+    if(!epoch)return contentBackupSnapshotRevision();
     return `study-director.fast-capture-fence.v1|${epoch.token}|${captureMutationGeneration}|${currentBackupSourceRevision()}`;
-  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return legacyBackupSnapshotRevision();}
+  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return contentBackupSnapshotRevision();}
 }
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze({ports:Object.freeze({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
@@ -10605,7 +10476,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     removeMetadata:assetIds=>AttachmentLibrary.removeMetadata(assetIds),
     scheduleMaintenance:delay=>scheduleRichTextAssetMaintenance(delay)
   }),
-  codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}),
+  codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:BackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}),
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
   noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
   exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
@@ -10705,18 +10576,8 @@ BackupPresentation.subscribe(()=>{
 const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
 const REPOSITORY_MAINTENANCE_VERSION=4;
 let repositoryMaintenanceWriteChain=Promise.resolve();
-function maintenanceReason(value){const reason=String(value||'legacy').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'legacy';}
+function maintenanceReason(value){const reason=String(value||'').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'catch-up';}
 function maintenanceIso(value,fallback=''){const text=String(value||'');return Number.isFinite(Date.parse(text))?text:fallback;}
-function normalizeRepositoryMaintenancePending(value){
-  const entries=[],seen=new Set(),rows=value&&value.format===REPOSITORY_MAINTENANCE_FORMAT&&Number(value.version)===REPOSITORY_MAINTENANCE_VERSION&&Array.isArray(value.entries)?value.entries:[];
-  for(const raw of rows){
-    const providerId=String(raw&&raw.providerId||''),requestedAt=maintenanceIso(raw&&raw.requestedAt),nextEligibleAt=maintenanceIso(raw&&raw.nextEligibleAt,requestedAt),reason=maintenanceReason(raw&&raw.reason),repositoryScope=String(raw&&raw.repositoryScope||''),requestId=String(raw&&raw.requestId||'');
-    if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!requestedAt||!nextEligibleAt)continue;
-    if(repositoryScope.length>320||requestId&&!/^[a-f0-9-]{36}$/u.test(requestId))continue;seen.add(providerId);entries.push(Object.freeze({providerId,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}));
-  }
-  return Object.freeze({format:REPOSITORY_MAINTENANCE_FORMAT,version:REPOSITORY_MAINTENANCE_VERSION,entries:Object.freeze(entries)});
-}
-async function readRepositoryMaintenancePending({throwOnError=false}={}){try{return normalizeRepositoryMaintenancePending(await BackupAppMeta.read('repositoryMaintenancePending'));}catch(error){AppDiagnostics.capture('backup.repository-maintenance-read',error,'warn');if(throwOnError)throw error;return normalizeRepositoryMaintenancePending(null);}}
 function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=undefined){
   const id=String(providerId||'');if(!/^[a-z][a-z0-9-]{0,40}$/u.test(id))return Promise.resolve(false);
   const task=repositoryMaintenanceWriteChain.then(()=>BackupAppMeta.transaction('readwrite',(view,tx,finish)=>{
@@ -10724,7 +10585,7 @@ function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=un
     handle.request.onerror=()=>finish(false,handle.request.error||new Error('Maintenance intent could not be read.'));
     handle.request.onsuccess=()=>{
       try{
-        const current=normalizeRepositoryMaintenancePending(handle.value()),byId=new Map(current.entries.map(entry=>[entry.providerId,entry])),previous=byId.get(id)||null;
+        const current=handle.value(),byId=new Map(current?.entries.map(entry=>[entry.providerId,entry])),previous=byId.get(id)||null;
         if(expected!==undefined&&(!previous!==!expected||expected&&['requestId','requestedAt','nextEligibleAt','reason','repositoryScope'].some(key=>String(previous?.[key]||'')!==String(expected[key]||'')))){outcome='superseded';return;}
         if(mode==='mark'){
           const now=new Date().toISOString(),requestedAt=previous?.requestedAt||now,nextEligibleAt=maintenanceIso(state&&state.nextEligibleAt,now),reason=maintenanceReason(state&&state.reason||previous?.reason||'catch-up'),repositoryScope=String((state&&state.repositoryScope)??previous?.repositoryScope??'').slice(0,320),requestId=state.newRequest!==true&&expected!==undefined&&previous?.requestId?previous.requestId:crypto.randomUUID();
@@ -10739,7 +10600,7 @@ function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=un
   },{strict:true,abortMessage:'Maintenance intent transaction aborted'})).catch(error=>{AppDiagnostics.capture('backup.repository-maintenance-write',error,'warn');return false;});
   repositoryMaintenanceWriteChain=task.then(()=>{});return task;
 }
-const repositoryMaintenanceState=async providerId=>(await readRepositoryMaintenancePending({throwOnError:true})).entries.find(entry=>entry.providerId===String(providerId||''))||null;
+const repositoryMaintenanceState=async providerId=>(await BackupAppMeta.read('repositoryMaintenancePending'))?.entries.find(entry=>entry.providerId===providerId)||null;
 const markRepositoryMaintenancePending=(providerId,state={},expected=undefined)=>mutateRepositoryMaintenancePending(providerId,'mark',state,expected);
 const clearRepositoryMaintenancePending=(providerId,expected=undefined)=>mutateRepositoryMaintenancePending(providerId,'clear',{},expected);
 BackupProviderRuntime.configureRepositoryMaintenance(Object.freeze({read:repositoryMaintenanceState,mark:markRepositoryMaintenancePending,clear:clearRepositoryMaintenancePending}));
@@ -10972,7 +10833,7 @@ function noteDatabaseRemovedWhileClosed(){
 // A reload or a takeover in another tab brings back an unresolved clear.
 function resumeUnresolvedStorageReset(){
   noteDatabaseRemovedWhileClosed();
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),clearedAt=String(stored&&stored.browserDataClearedAt||readStorageHealth().browserDataClearedAt||'');
+  const stored=readStoredStorageHealth(),clearedAt=stored?stored.browserDataClearedAt:readStorageHealth().browserDataClearedAt;
   if(!clearedAt||storageResetHold||!appCanMutate())return false;
   beginStorageResetHold(clearedAt).reloaded=true;showStorageResetDecision();storageResetConnectionsChanged();return true;
 }
@@ -11027,12 +10888,12 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
   transport:(folder,repository)=>DeviceFolderStorageModule.createStorage(Object.freeze({
     folder,
-    identities:Object.freeze({root:repository,legacyRoot:ProfileScope.scoped(EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot),prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    identities:Object.freeze({root:repository,prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
     owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
-    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:Object.freeze({publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }))
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
@@ -11674,18 +11535,6 @@ function currentBackupDiagnosticStates(){
   sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:pwaUpdateCheckDueAt>0,nextEligibleAt:pwaUpdateCheckDueAt?new Date(pwaUpdateCheckDueAt).toISOString():'',completedAt:pwaLastUpdateCheckAt()?new Date(pwaLastUpdateCheckAt()).toISOString():'',retryAttempt:pwaUpdateCheckFailureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
   sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
   for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
-  // The proof that the code reading older formats can be removed (release B):
-  // this device's data is canonical (checked at start), the Device Folder's
-  // old backup folder is gone, and every connected location keeps versions in
-  // the current format only (a version it cannot read may be in any format).
-  sample('Format cleanup',()=>({local:canonicalProof,device:DeviceBackup.status(),locations:BackupProviderRuntime.diagnosticConnections().filter(row=>row.connected)}),value=>{
-    // A newest Continue Here claim in an older form means a device on an
-    // older build last took the session there; the next claim from a current
-    // build replaces it.
-    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older||row.formats.unreadable||row.claimForm==='older'?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,unreadableVersions:row.formats?.unreadable??0,olderClaim:row.claimForm==='older',completedAt:row.formats?.checkedAt||''}));
-    const ready=value.local?.retirementDataReady===true&&!value.device.oldFolder&&rows.every(row=>row.state==='ready');
-    return [{job:'Format cleanup',state:ready?'ready':!value.local||rows.some(row=>row.state==='unknown')?'unknown':'pending',canonical:value.local?.canonical===true,retirementReady:value.local?.retirementDataReady===true,oldFolder:value.device.oldFolder===true,completedAt:value.local?.checkedAt||''},...rows];
-  });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
   sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
@@ -11703,7 +11552,6 @@ function keptReviewCause(review){
   return 'settings';
 }
 // The start-up check of this device's data (verifyCanonicalInstallation).
-let canonicalProof=null;
 async function readDataDiagnosticStates(){
   const samples=[
     // Which storage this page opened. It tells a browser wipe (no profile
@@ -11726,7 +11574,7 @@ async function readDataDiagnosticStates(){
         request.onsuccess=()=>{const cursor=request.result;if(!cursor){finish(true,true);return;}if(visit(cursor.primaryKey,cursor.value)===false){finish(true,false);return;}cursor.continue();};
       }),
       fileRoot:typeof navigator.storage?.getDirectory==='function'?()=>navigator.storage.getDirectory():null,
-      classifyFolder:name=>{const is=base=>name===base||name.startsWith(base+ProfileScope.separator);return is('@@SD_ATTACHMENT_OPFS_DIRECTORY@@')?'attachment':is('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')?'scratch':is('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@')?'oldFolder':'other';},
+      classifyFolder:name=>{const is=base=>name===base||name.startsWith(base+ProfileScope.separator);return is('@@SD_ATTACHMENT_OPFS_DIRECTORY@@')?'attachment':is('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')?'scratch':'other';},
       caches:typeof caches==='undefined'?null:caches
     }),project:value=>[{...value.summary,job:'Storage census'},{...value.database,job:'Storage census database'},{...value.meta,job:'Storage census settings data'},{...value.files,job:'Storage census files'},{...value.caches,job:'Storage census caches'}]},
     {job:'Database this start',read:()=>DatabaseLifecycle.snapshot(),project:value=>[
@@ -11779,7 +11627,7 @@ const CLICK_ACTIONS=Object.freeze({
   'open-version-history': ()=>withBackupPassword(()=>BackupRecoveryHost.history.open()),
   'connect-drive-backup': connectDriveForProfile,
   'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
-  'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
+  'disconnect-drive-backup': ()=>disconnectDrive(),
   'refresh-version-history': ()=>BackupRecoveryHost.history.refresh(),
   'close-version-history': ()=>BackupRecoveryHost.history.close(),
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),
@@ -12337,7 +12185,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     deletionRecovery:AppData.deletionRecovery.flush
   }),
   startup:Object.freeze({
-    migrateCompatibility:async()=>{await UnsupportedData.census();return CompatibilityFacade.migrateLive();},
+    censusData:()=>UnsupportedData.census(),
     restoreAppearance:()=>{
       if(protectedPreferencesHydrated){applyPortablePreferencesToRuntime(protectedPreferencesState);return;}
       applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false});
@@ -12365,13 +12213,10 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     applyLaunchRoute:applyPwaLaunchRoute,
     showNameSetup:startProfile,
     inspectStorage:async()=>{const state=await inspectStorageCapability();await NativeCapabilities.offerInstallNotice();return state;},
-    verifyReady:()=>CompatibilityFacade.verifyCanonicalInstallation(),
-    markReady:async proof=>{
+    markReady:async()=>{
       backupFastFenceReady=false;
-      if(proof&&proof.canonical===true){
-        try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
-        catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
-      }
+      try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
+      catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       // The durable mutation epoch must repair the fast mirror before the
       // startup gate opens any automatic provider work.
       await reconcileStartupChangeClock();
@@ -12380,22 +12225,18 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword({start:true});
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
-      canonicalProof=proof;document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
-      document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';
       document.documentElement.dataset.studyDirectorStartupState='ready';
       document.documentElement.dataset.studyDirectorReady='true';
       NoticeCoordinator.dismiss('startup-failure');
-      window.dispatchEvent(new CustomEvent('studydirector:canonicalstatus',{detail:proof}));
-      window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical,retirementDataReady:proof.retirementDataReady})}));
+      window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION})}));
       scheduleInsightsPreload();
       void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
       setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
-      return proof;
     },
     reportFailure:failure=>{
       document.documentElement.dataset.studyDirectorStartupState='failed';
       document.documentElement.dataset.studyDirectorReady='false';
-      if(UnsupportedData.reportBlocked()){setPlanStatus('This profile needs a newer version of Study Director. Its data is left as it is.',false);return;}
+      if(UnsupportedData.reportBlocked()){setPlanStatus(UnsupportedData.blocked()?.older?'This profile is from an earlier version of Study Director. Its data is left as it is.':'This profile needs a newer version of Study Director. Its data is left as it is.',false);return;}
       const message='Study Director could not safely finish loading your stored data. Your existing data has not been replaced. Reload or restore from backup if the problem continues.';
       NoticeCoordinator.publish('startup-failure',{visible:true,kind:'safety',title:'Study Director could not finish starting',message,compact:noticeCanCompact(message)});
       setPlanStatus(`Startup stopped safely at ${String(failure&&failure.stage||'startup')}. Reload the app before making changes.`,false);
@@ -12451,7 +12292,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     // This device, named on Drive's upload markers.
     device:()=>AppData.provenance.installationId(),
     // The active profile, and who decides which Drive library it may use.
-    profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
+    profile:Object.freeze({id:()=>Profiles.current()?.id||'',email:()=>Profiles.current()?.email||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
     providers:Object.freeze({
       register:BackupProviderRuntime.register,
       list:BackupProviderRuntime.list

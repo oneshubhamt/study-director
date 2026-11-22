@@ -82,7 +82,7 @@ session running on another device, app update ready, no backup in over a week.
 - **Headline:** one sentence, for example "Synced at 12:04. This device is up to date."
 - **When next:** "Uploads by 12:24, or when you leave the app" (from the
   automatic-backup schedule), "Next try at 12:10", or "Checks Google Drive again
-  when you return to the app". A button only when something waits (owner, 2026-11-08): **Sync now** while this device waits for another device's upload (it uploads without waiting for that turn) or retries after a failure, and **Try again** once retries ran out. None while syncing works normally. The first-sync card shows the same Sync now on its upload step while waiting.
+  when you return to the app". A button only when something waits (owner, 2026-11-08): **Sync now** while this device waits for another device's upload (it uploads without waiting for that turn) or retries after a failure, and **Try again** once retries ran out. None while syncing works normally. The first-sync card shows the same Sync now on its upload step while waiting. Since 2026-11-22 (owner) the panel's Google Drive row has **Sync now** whenever the device is signed in, beside a quieter Disconnect: it catches up with Drive and uploads at once (going ahead of another device's turn), greyed and reading "Syncing…" while a sync runs (not while it waits for another device), and greyed offline or while a password or update is needed. The sentence then shows only Try again, so there is one Sync now.
 - **Needs you:** one row per item with its own button — Sign in, Enter password,
   Update app, Review (sync), Review (kept versions), Allow access (Device Folder),
   Details (storage, backup check, Device Folder failing), Go to Execute (session
@@ -142,7 +142,7 @@ one compact button (32 px, 36 px on touch screens).
 
 ## Connect Google Drive card
 
-- **When.** From any Connect or Sign in (profile panel, Library → Data, first start, the permission notice) until that first sync ends, on every tab.
+- **When.** From a profile's first Connect (profile panel, Library → Data, first start) until that first sync ends, on every tab. Signing in again to the profile's library (Sign in, the permission notice, or Connect after Disconnect) shows the sign-in step alone, then "Signed in to Google Drive" with the last sync time, and closes after 6 s; syncing then goes on at its usual times, in the indicator. (Until 2026-11-21 it waited for a sync and read "Checking Google Drive…" for up to 20 minutes while nothing ran.)
 - **Where.** A card of the notification stack (top right on a laptop, above the bottom bar on a phone): first after the pinned cards, counted in "+N more", closed by Clear all.
 - **What.** Three steps — sign in to Google, bring in what's on Google Drive, upload this device's data — each waiting, working (spinner), done (✓) or failed (×); one sentence for where it is; the running stage with its counts ("Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB") and a bar (a sweep when there are no counts yet). While this device's upload waits for another device, the step line reads amber, the sentence names that device by type and browser ("Waiting for Windows · Chrome to finish saving…") and **Sync now** sits at the end of that step's line as a quiet link; a retry's **Try now** sits the same way on its step. No bar moves while a step only waits. Every other action (Enter password, Review, Sign in, Update) is the card's button.
 - **Endings.** Synced (closes itself after 6 s; offers Review when the sync kept versions for review); needs the backup password, a review or an app update (stays, with the button); offline (continues when back online); couldn't finish (says when it tries again, with Try now); sign-in didn't finish (Try again). Declining or refusing a library closes it; the existing toast explains.
@@ -152,7 +152,7 @@ one compact button (32 px, 36 px on touch screens).
 ## Hand-off row, counts and pop-ups
 
 - **Hand-off row.** A session suspended on another device is a panel row, "Today’s session was suspended on Laptop. Continue it here when you’re ready.", with Continue here (no badge: it is an offer). That button and the hand-off pop-up's Continue here open Execute first, so the Continue Here steps show; the pop-up closes once Continue Here starts.
-- **Counts.** While a catch-up or upload runs, the panel's line under the headline shows its stage and counts, for example "Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB".
+- **Counts.** While a catch-up or upload runs, the panel's line under the headline shows its stage and counts, for example "Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB". A download counts only what it fetches: attachments already on the device are reused and left out.
 - **Pop-ups.** As in "Noise rules" above. Kept versions pop up once ("Kept for review", Review); not those present at start-up, not while the Connect card shows (it reports them), and not a session this device just handed over (its own pop-up says so). The Connect card is amber while a sync retries or is signed out, red once retries ran out or a sign-in fails.
 - **Mechanism.** `notice-coordinator.setStudying` holds news without showing or timing it; the host sets it from the timer mode and the current block (work blocks only).
 

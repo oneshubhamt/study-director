@@ -220,13 +220,15 @@ registry.define('backup-presentation',1,()=>{
     // a catch-up or an upload ran since); this only decides. Phase 3 of
     // docs/areas/status-indicator.md.
     function connectProgress(value={}){
-      const phase=String(value.phase||'signing-in'),drive=value.drive||null,sync=drive?.sync||{},op=value.operation||null,seen=value.seen||{},online=value.online!==false;
+      // reconnect: signing in again to the profile's library. Its card is the
+      // sign-in alone; syncing then goes on at its usual times, in the ring.
+      const phase=String(value.phase||'signing-in'),drive=value.drive||null,sync=drive?.sync||{},op=value.operation||null,seen=value.seen||{},online=value.online!==false,reconnect=value.reconnect===true;
       const started=Number(value.startedAt)||0,syncedAt=Date.parse(String(sync.syncedAt||''))||0,kept=Math.max(0,Number(value.keptNew)||0);
       const syncing=!!(sync.syncing||op?.kind==='sync'),uploading=!!(op?.kind==='upload'&&['upload','commit','complete'].includes(String(op.progress?.stage||''))),working=syncing||!!drive?.backingUp||!!op;
       const p=op?.progress||{},fraction=p.total>0?Math.min(1,(Number(p.current)||0)/p.total):p.totalBytes>0?Math.min(1,(Number(p.completedBytes)||0)/p.totalBytes):null;
       const opDetail=operationText(op);
       const steps=(active,failed='',waiting=false)=>{
-        const order=['sign-in','bring-in','upload'],at=order.indexOf(active);
+        const order=reconnect?['sign-in']:['sign-in','bring-in','upload'],at=order.indexOf(active);
         const labels={
           'sign-in':at>0||active==='done'?'Signed in to Google':'Sign in to Google',
           'bring-in':active==='done'?(seen.sync?'Brought in changes from Google Drive':'Nothing new on Google Drive'):at>1?(seen.sync?'Brought in changes from Google Drive':'Checked Google Drive'):'Bring in what’s on Google Drive',
@@ -240,7 +242,8 @@ registry.define('backup-presentation',1,()=>{
       // and Try now, which only skip a wait); otherwise it is the card's button.
       const act=(action,label,step='')=>freeze({action,label,...(step?{step}:{})});
       if(phase==='failed')return result('error','Google Drive wasn’t connected',String(value.error||'Sign-in didn’t finish.'),'sign-in',{failed:'sign-in',action:act('sign-in','Try again')});
-      if(phase==='signing-in')return result('working','Connecting Google Drive','Signing in to Google…','sign-in');
+      if(phase==='signing-in')return result('working',reconnect?'Signing in to Google Drive':'Connecting Google Drive','Signing in to Google…','sign-in');
+      if(reconnect&&drive?.connected){const when=timeText(sync.syncedAt);return result('done','Signed in to Google Drive',when?`Signed in again. Last synced at ${when}.`:'Signed in again.','done',{done:true});}
       if(!drive?.connected)return result('attention','Google Drive signed out','Sign in again to finish syncing.','bring-in',{failed:'bring-in',waiting:true,action:act('sign-in','Sign in')});
       // After a catch-up, what remains is this device's upload. Waiting for
       // another device's turn comes only after Drive's latest is here.

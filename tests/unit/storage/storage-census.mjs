@@ -37,7 +37,7 @@ const root=folder('',[
   folder(PRIVATE+'-folder',[file('x',3)]),
   file(PRIVATE+'-stray',2)
 ]);
-const classifyFolder=name=>{const is=base=>name===base||name.startsWith(base+'~');return is('study-director-assets-v2')?'attachment':is('study-director-backup-files-v1')?'scratch':is('study-director-assets-v1')?'oldFolder':'other';};
+const classifyFolder=name=>{const is=base=>name===base||name.startsWith(base+'~');return is('study-director-assets-v2')?'attachment':is('study-director-backup-files-v1')?'scratch':'other';};
 const response=(size,type='basic')=>({type,blob:async()=>new Blob([new Uint8Array(size)])});
 const cacheStorage={keys:async()=>['shell-a','shell-b'],open:async name=>({keys:async()=>name==='shell-a'?['index','app']:['opaque'],match:async request=>request==='opaque'?response(0,'opaque'):response(request==='index'?1000:2000)})};
 const usageDetails={indexedDB:1000,fileSystem:4_000_000_200,caches:3000,serviceWorkerRegistrations:40,other:5};
@@ -56,8 +56,7 @@ assert.ok(result.database.savedDayBytes>100,'record sizes are counted');
 assert.ok(result.meta.reconciliationMetaBytes>50&&result.meta.reviewMetaBytes>20&&result.meta.planMetaBytes>10&&result.meta.otherMetaBytes>0,'appMeta is grouped by family, never by key');
 assert.deepEqual([result.files.attachmentFiles,result.files.attachmentFileBytes],[2,150]);
 assert.deepEqual([result.files.scratchFiles,result.files.scratchFileBytes,result.files.unreadableFiles],[3,4_000_000_010,1],'a file another task holds open is counted as unreadable, not skipped');
-assert.deepEqual([result.files.oldFolderFiles,result.files.oldFolderFileBytes],[1,7]);
-assert.deepEqual([result.files.otherEntries,result.files.otherFiles,result.files.otherFileBytes],[2,2,5],'a folder or file the app does not know shows up as other');
+assert.deepEqual([result.files.otherEntries,result.files.otherFiles,result.files.otherFileBytes],[3,3,12],'a folder or file the app does not know shows up as other');
 assert.deepEqual([result.caches.caches,result.caches.cacheRequests,result.caches.cacheBytes,result.caches.unmeasuredResponses],[2,3,3000,1]);
 const measured=result.database.databaseBytes+result.files.fileBytes+result.caches.cacheBytes;
 assert.equal(result.summary.measuredBytes,measured);

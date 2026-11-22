@@ -66,8 +66,8 @@ let deadline,resolveLate;const late=new Promise(resolve=>{resolveLate=resolve;})
 context.navigator.clipboard.writeText=async()=>{throw new Error('clipboard denied');};assert.equal(await context.copyBackupDiagnostics(),false);assert.equal(notices.at(-1)[0],'failed');assert.equal(errors.length,1);
 
 // Exercise the actual storage-health projection: issues are shown live and never stored.
-Object.assign(context,{STORAGE_KEYS:{storageHealth:'health'},APP_LIMITS:{maxStatusMessageChars:1000},clampText:(value,limit)=>value.slice(0,limit),emptyStorageHealth:()=>({version:2}),refreshStorageFallbackWarning:()=>{}});
-const start=source.indexOf('function createStorageHealthController(local){'),end=source.indexOf('StorageHealthController=createStorageHealthController',start);vm.runInContext(source.slice(start,end),context);
+Object.assign(context,{STORAGE_KEYS:{storageHealth:'health'},APP_LIMITS:{maxStatusMessageChars:1000},clampText:(value,limit)=>value.slice(0,limit),emptyStorageHealth:()=>({version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null}),refreshStorageFallbackWarning:()=>{}});
+const start=source.indexOf('function readStoredStorageHealth('),end=source.indexOf('StorageHealthController=createStorageHealthController',start);vm.runInContext(source.slice(start,end),context);
 let stored;const health=context.createStorageHealthController({getJson:()=>null,setJson:(_,value)=>{stored=value;return true;}});
 let state=health.issue('repositoryIntegrity','Verification is unavailable. Previous findings are retained.',{level:'warn'});assert.equal(state.issues[0].label,'Backup verification');assert.equal(state.issues[0].level,'warn');
 health.issue('attachmentIntegrity','Attachment verification is unavailable.',{level:'warn'});assert.equal(stored,undefined,'an issue writes nothing to browser storage');
@@ -84,5 +84,22 @@ state=health.recover('repositoryIntegrity');assert.equal(state.issues.some(row=>
   assert.equal(older.snapshot().lastStudyDataSaveAt,'2026-11-07T10:00:00.000Z','and that tab now knows the later time');
   older.updateHistory({lastLocalSaveAt:'2026-11-07T11:00:00.000Z'});assert.equal(record().lastLocalSaveAt,'2026-11-07T11:00:00.000Z','a later save still moves the time forward');
   newer.updateHistory({browserDataClearedAt:'2026-11-07T12:00:00.000Z'});older.updateHistory({lastLocalSaveAt:'2026-11-07T12:30:00.000Z'});assert.equal(record().browserDataClearedAt,'2026-11-07T12:00:00.000Z','an unresolved clear set by another tab is kept');
+}
+// Every consumer sees only current health. An obsolete timestamp cannot
+// turn into backup authority or a pending browser-clear decision.
+{
+  const at='2026-11-07T10:00:00.000Z',current={version:3,lastLocalSaveAt:at,lastStudyDataSaveAt:at,browserDataClearedAt:at};
+  for(const invalid of [{...current,version:2,lastBackupAt:at},{...current,version:4},{...current,lastLocalSaveAt:42},{...current,extra:true}]){
+    let persisted=invalid;
+    const local={getJson:()=>persisted,setJson:(_,value)=>{persisted=value;return true;}};
+    assert.equal(context.readStoredStorageHealth(local),null);
+    const health=context.createStorageHealthController(local);
+    assert.equal(health.snapshot().lastStudyDataSaveAt,null);
+    assert.equal(health.snapshot().browserDataClearedAt,null);
+    health.updateHistory({lastLocalSaveAt:at});
+    assert.deepEqual({...persisted},{version:3,lastLocalSaveAt:at,lastStudyDataSaveAt:null,browserDataClearedAt:null});
+  }
+  const local={getJson:()=>current};
+  assert.deepEqual(context.readStoredStorageHealth(local),current,'recognize the exact F29 record');
 }
 console.log(JSON.stringify({status:'PASS',suite:'background-diagnostics',currentStates:true,clipboardSuccessAndFailure:true,privateContentExcluded:true,verificationLabels:true},null,2));

@@ -11,7 +11,7 @@ const sha256=async blob=>createHash('sha256').update(Buffer.from(await blob.arra
 const unexpected=()=>{throw new Error('Unexpected backup-pipeline operation in Active Session claim test.');};
 const pipeline=freeze({
   createPublication:unexpected,publish:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,verifyObject:unexpected,scrub:unexpected,cleanup:unexpected,inspectCommit:unexpected,
-  retention:freeze({}),validatePolicy:unexpected,classifyState:unexpected,activeProtected:unexpected,selectRetention:unexpected,projectHistory:unexpected,noteObject:unexpected,readNote:unexpected,readSession:unexpected,markCompleted:unexpected,sharedBase:unexpected,establishBase:unexpected
+  retention:freeze({}),validatePolicy:unexpected,classifyState:unexpected,activeProtected:unexpected,manifestVersion:11,selectRetention:unexpected,projectHistory:unexpected,noteObject:unexpected,readNote:unexpected,readSession:unexpected,markCompleted:unexpected,sharedBase:unexpected,establishBase:unexpected
 });
 const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
@@ -99,25 +99,16 @@ await assert.rejects(()=>a.claimSessionOwnership('google-drive',{date:DATE,obser
 assert.equal(await a.releaseSessionClaim('google-drive',claimed.claim),false,'only the newest claim can be compensated');
 assert.equal(await a.releaseSessionClaim('google-drive',again.claim),true,'a failed local takeover can restore the previous owner with a higher epoch');
 const rolledBack=await b.readSessionClaim('google-drive');assert.equal(rolledBack.handoffToken,OTHER_TOKEN,'compensation retains the exact attempt identity');assert.equal(rolledBack.state,'owned');assert.equal(rolledBack.applies,true);assert.equal(rolledBack.ownedHere,true);assert.equal(rolledBack.revision,55);
-// Released builds write the hashed v2 form, and Drive can still hold a plain
-// form with a date and device ids. Both are read as v4 claims without the
-// fields they lack, through the one compatibility path.
+// Older claims cannot authorize takeover or be rewritten as current claims.
 const lastStored=[...files.values()].sort((p,q)=>p.id.localeCompare(q.id)).at(-1);
 const oldValue=JSON.parse(await lastStored.blob.text());
 const replaceLast=async value=>{const blob=new Blob([JSON.stringify(value)]);files.set(lastStored.id,freeze({...lastStored,blob,size:blob.size,digest:await sha256(blob)}));};
-const v2Value={...oldValue,version:2};delete v2Value.observedContentFingerprint;delete v2Value.handoffToken;
-const claimFormBefore=b.diagnosticConnections().find(row=>row.id==='google-drive')?.claimForm;
-await replaceLast(v2Value);
-const v2Projected=await b.readSessionClaim('google-drive');
-assert.equal(claimFormBefore,'current','a device that last read a current claim reports it current');
-assert.equal(v2Projected.state,oldValue.state);assert.equal(v2Projected.applies,true,'a v2 claim from an older device still applies to today');
-assert.equal(v2Projected.revision,oldValue.revision);assert.equal(v2Projected.observedContentFingerprint,'');assert.equal(v2Projected.handoffToken,'');
-const claimForm=runtime=>runtime.diagnosticConnections().find(row=>row.id==='google-drive')?.claimForm;
-assert.equal(claimForm(b),'older','Format cleanup learns the newest claim is in an older form');
-await replaceLast({format:'study-director.active-session-claim',version:1,date:DATE,epoch:oldValue.epoch,owner:A,observedRevision:50,claimedAt:'2026-10-27T09:00:00.000Z'});
-const plainProjected=await a.readSessionClaim('google-drive');
-assert.equal(plainProjected.applies,true);assert.equal(plainProjected.ownedHere,true,'a plain claim naming this device reads as owned here');
-assert.equal(plainProjected.state,'owned');assert.equal(plainProjected.revision,51,'a plain v1 claim implies the next revision');
+for(const version of [1,2,3]){
+  await replaceLast({...oldValue,version});const before=[...files.values()].map(row=>[row.id,row.digest]);
+  await assert.rejects(b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN');
+  await assert.rejects(b.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:headId,handoffToken:OTHER_TOKEN,revision:57}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN');
+  assert.deepEqual([...files.values()].map(row=>[row.id,row.digest]),before,'no claim is written or removed');
+}
 // A claim a newer build wrote (this format, a higher version) is not read:
 // it reads as owned elsewhere by a device this build cannot follow, and
 // Continue Here, sync and upload wait for an app update. Nothing is written.
@@ -175,6 +166,8 @@ assert.equal(b.diagnosticSync().find(row=>row.id==='google-drive')?.needsUpdate,
   }finally{Date.now=realNow;oddWatch={ignored:0,ignoredCommits:0};}
 }
 // Version 3 was written only by unreleased builds; it is refused like any unknown form.
+await replaceLast({...oldValue,version:'4'});
+await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN');
 const v3Value={...oldValue,version:3};delete v3Value.handoffToken;
 await replaceLast(v3Value);
 await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN','a version-3 claim is refused');

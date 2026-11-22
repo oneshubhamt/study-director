@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
-import {OPFS_IDENTITIES,OBSOLETE_OPFS_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
+import {OPFS_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
 
 const render=source=>source
-  .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments)
-  .replaceAll('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@',OBSOLETE_OPFS_IDENTITIES.attachmentsV1);
+  .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments);
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:webcrypto,Symbol,TypeError,Error};
 context.globalThis=context;vm.createContext(context);
 vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'source/core/internal.js'});
@@ -16,7 +16,7 @@ const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset
 let now=1000;const lease=mod.createLease(1500,()=>now);
 assert.equal(lease.protect('x'),'x');assert.equal(lease.isProtected('x'),true);now=2600;assert.equal(lease.isProtected('x'),false);lease.protect('y');assert.equal(lease.release('y'),true);
 
-const metadata=new Map(),files=new Map(),legacyFiles=new Map();let seq=0,sharedReaders=0,tokenSeq=0,mutating=true,verifyCalls=0;
+const metadata=new Map(),files=new Map();let seq=0,sharedReaders=0,tokenSeq=0,mutating=true,verifyCalls=0;
 const hash=async blob=>Array.from(new Uint8Array(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
 const notFound=()=>Object.assign(new Error('missing'),{name:'NotFoundError'});
 function fileDirectory(map){return {
@@ -24,10 +24,7 @@ function fileDirectory(map){return {
   async removeEntry(name){if(!map.delete(name))throw notFound();},
   async *entries(){for(const name of map.keys())yield [name,{kind:'file'}];}
 };}
-const currentDir=fileDirectory(files),legacyDir=fileDirectory(legacyFiles),root={legacyPresent:false,
-  async getDirectoryHandle(name,{create=false}={}){if(name===OPFS_IDENTITIES.attachments)return currentDir;if(name===OBSOLETE_OPFS_IDENTITIES.attachmentsV1&&this.legacyPresent)return legacyDir;if(name===OBSOLETE_OPFS_IDENTITIES.attachmentsV1&&!create)throw notFound();throw notFound();},
-  async removeEntry(name){if(name!==OBSOLETE_OPFS_IDENTITIES.attachmentsV1||!this.legacyPresent)throw notFound();this.legacyPresent=false;legacyFiles.clear();}
-};
+const currentDir=fileDirectory(files),root={async getDirectoryHandle(name){if(name===OPFS_IDENTITIES.attachments)return currentDir;throw notFound();}};
 const locks={async request(name,options,callback){if(typeof options==='function'){callback=options;options={};}
   if(name.includes('retention')&&options.mode==='shared'){sharedReaders++;try{return await callback({name});}finally{sharedReaders--;}}
   if(name.includes('retention')&&options.ifAvailable&&sharedReaders)return callback(null);
@@ -50,9 +47,7 @@ const store=mod.create(ports),A='att-aaaaaaaaaaaaaaaaaaaa',B='att-bbbbbbbbbbbbbb
 assert.equal(store.supported(),true);store.requireAvailable();await assert.rejects(()=>store.get('bad'),/Invalid attachment identity/);
 const unsupported=mod.create({...ports,protocol:'file:'});assert.equal(unsupported.supported(),false);assert.throws(()=>unsupported.requireAvailable(),/opened directly/);
 
-let verification=await store.verifyLegacyClean();assert.equal(verification.ok,true);
-metadata.set('att-eeeeeeeeeeeeeeeeeeee',new Blob(['legacy']));root.legacyPresent=true;verification=await store.verifyLegacyClean();assert.equal(verification.ok,false);assert.equal(verification.legacyMetadata,1);assert.equal(verification.legacyDirectory,true);
-const cleaned=await store.cleanupLegacy();assert.equal(cleaned.removed,1);assert.equal(cleaned.directoryRemoved,true);assert.equal((await store.cleanupLegacy()).removed,0);
+assert.equal(store.cleanupLegacy,undefined);assert.equal(store.verifyLegacyClean,undefined);
 
 const pdf=new Blob(['same-pdf-bytes'],{type:'application/pdf'}),audio=new Blob(['audio-bytes'],{type:'audio/mpeg'});
 await assert.rejects(()=>store.put(A,new Blob([],{type:'application/pdf'})),/supported file limits/);
@@ -68,6 +63,14 @@ assert.equal((await store.list()).length,1);assert.equal((await store.rename(A,'
     /injected strict attachment metadata commit failure/u);
   assert.equal(metadata.has(key),false,'failed metadata commit cannot expose an attachment');
   assert.deepEqual([...files.keys()].filter(name=>!before.has(name)),[],'failed metadata commit reclaims the staged OPFS blob');
+}
+{
+  const original=metadata.get(A),invalid={...original,unexpected:true};
+  assertOperationalFormat('attachment',original);metadata.set(A,invalid);
+  for(const operation of [()=>store.list(),()=>store.get(A),()=>store.removeMetadata([A]),()=>store.verifyMetadata([{id:A,...invalid}]),()=>store.collect(gc=>gc.sweep())]){
+    await assert.rejects(operation,/metadata is invalid/);assert.equal(metadata.get(A),invalid);assert.ok(files.has(original.file));
+  }
+  metadata.set(A,original);
 }
 const b=await store.put(B,pdf,{name:'B.pdf',library:true});assert.equal(metadata.get(A).file,b.file);assert.equal(metadata.get(B).file,b.file);verifyCalls=0;assert.equal(await store.verifyMetadata([{id:A,...metadata.get(A)},{id:B,...metadata.get(B)}]),2);assert.equal(verifyCalls,1,'metadata verification must hash one shared physical attachment source once per verification phase while validating both logical IDs');
 const staged=await store.put(C,audio,{name:'C.mp3',library:true,stage:true,token:77});assert.equal(metadata.has(C),false);await store.publish([[C,staged]],77,()=>{});assert.equal(metadata.has(C),true);
@@ -87,7 +90,7 @@ const rowB=metadata.get(B);const restored={id:B,...rowB,name:'incoming.pdf',libr
 await store.publish([[B,{...rowB,name:'incoming.pdf',library:false}]],100,()=>{}, {restoreLabels:true,replaceAll:true});assert.equal(metadata.get(B).name,'incoming.pdf');
 await assert.rejects(()=>store.publish([[B,{...metadata.get(B),hash:'f'.repeat(64)}]],101,()=>{}),/conflicts with an existing file/);
 
-console.log(JSON.stringify({status:'PASS',suite:'asset-storage-contract',commits:commits.length,metadataRows:metadata.size,files:files.size,lease:true,legacyCleanup:true,publication:true,collection:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'asset-storage-contract',commits:commits.length,metadataRows:metadata.size,files:files.size,lease:true,publication:true,collection:true},null,2));
 
 // Physical collection releases the retention/metadata locks between bounded
 // opportunities, while rebuilding the retained set for every continuation.

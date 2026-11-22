@@ -17,7 +17,7 @@ const SAMPLES=3;
 const B=PERFORMANCE_BUDGETS;
 
 const server=await startReleaseServer();
-const exposed=instrumentedHtml('deployment',{expose:['CompatibilityCodecs']});
+const exposed=instrumentedHtml('deployment',{expose:['DailyRecordCodec']});
 server.setOverride('deployment','instrumented.html',process.env.SD_SECURITY_TEST==='1'
   ?exposed.replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">")
   :exposed);
@@ -29,19 +29,19 @@ const url=server.url('deployment','instrumented.html');
 // day without changing how many there are.
 const records=(quality=null)=>`(()=>{
   const total=${B.referenceInsightsDays},now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
-  const iso=day=>new Date(day*86400000).toISOString().slice(0,10),dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const iso=day=>new Date(day*86400000).toISOString().slice(0,10);
   for(let index=0;index<total;index+=1){
     const date=iso(end-total+1+index),pace=125-index*.06,targetMs=60000,actualMs=Math.max(1000,Math.round(targetMs*pace/100));
-    const a='a-'+index,b='b-'+index,completionA=Math.max(5,Math.min(100,45+index*.05)),completionB=Math.max(0,100-completionA/2),dayOfWeek=new Date(date+'T00:00:00Z').getUTCDay();
-    records.push({version:13,date,dayOfWeek,dayName:dayNames[dayOfWeek],savedAt:date+'T18:00:00.000Z',sourceRevision:1,studyQuality:index===total-1&&${JSON.stringify(quality)}!==null?${JSON.stringify(quality)}:index%5+1,
+    const a='a-'+index,b='b-'+index,completionA=Math.max(5,Math.min(100,45+index*.05)),completionB=Math.max(0,100-completionA/2);
+    records.push({version:16,recordKind:'study',date,savedAt:date+'T18:00:00.000Z',updatedAt:date+'T18:00:00.000Z',sourceRevision:1,quote:'',reflection:'',carryForwardDraft:'',realTimeSnapshot:null,studyQuality:index===total-1&&${JSON.stringify(quality)}!==null?${JSON.stringify(quality)}:index%5+1,
       schedule:[{id:a,start:'08:00',duration:30,name:'Practice set',kind:'work',area:'Practice',measure:'questions',target:4},{id:b,start:'08:30',duration:30,name:'Review set',kind:'work',area:'Review',measure:'items',target:10}],
       results:{[a]:{completion:completionA,completionSource:'manual',actualSeconds:Math.round(completionA*18)},[b]:{completion:completionB,completionSource:'manual',actualSeconds:1200}},
       practiceRuns:[{taskId:a,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
   }
   return records;
 })()`;
-const seed=`(async()=>{const records=${records()};await __PWA6.AppData.dailyRecords.saveBatch(records.map(record=>__PWA6.CompatibilityCodecs.dailyRecord(record)));localStorage.setItem('studyDirector.insights.window.v1','all');return records.length;})()`;
-const changeLatestDay=quality=>`(async()=>{const records=${records(quality)};await __PWA6.AppData.dailyRecords.saveBatch(records.slice(-1).map(record=>__PWA6.CompatibilityCodecs.dailyRecord(record)));return true;})()`;
+const seed=`(async()=>{const records=${records()};await __PWA6.AppData.dailyRecords.saveBatch(records.map(record=>__PWA6.DailyRecordCodec.sanitizeCurrentDailyRecord(record)));localStorage.setItem('studyDirector.insights.window.v1','all');return records.length;})()`;
+const changeLatestDay=quality=>`(async()=>{const records=${records(quality)};await __PWA6.AppData.dailyRecords.saveBatch(records.slice(-1).map(record=>__PWA6.DailyRecordCodec.sanitizeCurrentDailyRecord(record)));return true;})()`;
 
 async function open(preload=''){
   const page=await browser.createPage(url,{preload});pages.push(page);await waitForStudyDirector(page,{instrumented:true});return page;

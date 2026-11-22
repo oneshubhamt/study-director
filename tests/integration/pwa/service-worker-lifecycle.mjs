@@ -92,16 +92,21 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.seed('study-director-shell-orphan','b'.repeat(24),{state:'installed'});h.self.registration.waiting={};await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-orphan'),true);h.self.registration.waiting=null;await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-orphan'),false);cases.push('waiting candidate is retained and a later abandoned candidate is reclaimed');
 }
 {
- const h=fixture({active:{}});h.seed(current,assetId);h.seed('study-director-shell-old','b'.repeat(24));h.stores.set(CACHE_STORAGE_IDENTITIES.updateRecoveryPrefix+'current',new Map());await h.emit('activate');assert.equal(h.claims.includes('claim'),false);assert.equal(h.messages.some(row=>row.type==='SD_PWA_ACTIVATED'),false);assert.equal(h.stores.has('study-director-shell-old'),true);cases.push('legacy recovery handoff preserves its no-claim path and old assets');
-}
-{
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.stores.set('study-director-shell-downloading',new Map());h.self.registration.installing={};await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-downloading'),true,'an installing cache without final metadata must remain intact');h.self.registration.installing=null;await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-downloading'),false);cases.push('retirement cannot delete a downloading candidate before metadata is written');
 }
 {
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.seed('study-director-shell-previous','b'.repeat(24),{activatedAt:2});h.stores.set('study-director-shell-partial',new Map([[scope+'index.html',new Response('<meta name="study-director-build" content="candidate"><meta name="study-director-assets" content="'+ 'c'.repeat(24)+'">')]]));h.self.registration.installing={};await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-partial'),true,'candidate index cannot turn an incomplete cache into an eligible old shell');cases.push('candidate protection survives a downloaded index before final install metadata');
 }
 {
- const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.stores.set('study-director-shell-legacy',new Map([[scope+'index.html',new Response('<meta name="study-director-build" content="old-build">')]]));await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-legacy'),true,'one previous legacy shell is retained for history return');cases.push('previous-generation retention also covers legacy pages without asset metadata');
+ const h=fixture({active:{}}),older=h.client('older'),page=h.client('page'),olderAsset='b'.repeat(24),shell='study-director-shell-unidentified';
+ h.windows.push(older,page);h.seed(current,assetId);
+ h.stores.set(shell,new Map([[scope+'index.html',new Response(`<meta name="study-director-assets" content="${olderAsset}">`)]]));
+ await h.report(page,assetId);await h.report(older,olderAsset);
+ assert.ok(h.messages.some(row=>row.type==='SD_PWA_CACHE_STATUS'&&row.reason==='unknown-client-release'));
+ assert.equal(h.stores.has(shell),true,'unverified metadata cannot evict an open page’s assets');
+ h.windows.shift();await h.report(page,assetId);
+ assert.equal(h.stores.has(shell),false,'an unidentified shell is collectible once all live pages have known assets');
+ cases.push('HTML never supplies shell identity and unidentified live pages defer cleanup');
 }
 // A system notification focuses an existing app, even when its URL differs
 // from the notification's root URL. No navigation/save-unaware reload is allowed.

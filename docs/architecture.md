@@ -19,7 +19,7 @@ Large feature areas remain separate when their failure models differ. Google Dri
 | `source/external/` | Workers, the Drive transport, the rich-text editor and Wordgard, skins, Insights |
 | `source/styles/` | Core styles and skin styles |
 | `rich-text/`, `portable/` | Authored sources for the generated editor and worker bundles |
-| `contracts/` | Data, limits, compatibility and identity contracts that code and tests share |
+| `contracts/` | Data, limits, format and identity contracts that code and tests share |
 | `build/` | Build, bundling, verification and deployment staging |
 | `tests/` | unit, integration, browser and architecture tests ([tests/README.md](../tests/README.md)) |
 | `release.config.mjs` | The one source of release identity |
@@ -29,7 +29,7 @@ Main modules by area:
 
 | Area | Modules |
 |---|---|
-| [Data and storage](areas/data-and-storage.md) | `persistence.js`, `repositories.js`, `repositories-notes.js`, `record-codecs.js`, `canonical.js`, `app-meta.js`, `profiles.js`, `compatibility*.js`, `asset-storage.js`, `attachments.js` |
+| [Data and storage](areas/data-and-storage.md) | `persistence.js`, `repositories.js`, `repositories-notes.js`, `record-codecs.js`, `canonical.js`, `app-meta.js`, `profiles.js`, `asset-storage.js`, `attachments.js` |
 | [Backup and sync](areas/backup-and-sync.md) | `backup-provider.js` (the engine), `managed-repository.js`, `backup.js`, `backup-capture.js`, `backup-codec.js`, `device-folder-storage.js`, `device-backup.js`, `external/drive.js`, `reconciliation*.js`, `managed-recovery.js`, `backup-recovery-host.js` |
 | [Study session](areas/study-session.md) | `session-lifecycle.js`, `timer-engine.js`, `timer-state.js`, `plan.js`, `pomodoro.js`, `practice-pacer.js` |
 | [Notes](areas/notes.md) | `repositories-notes.js`, `save-lane.js`, `note-links.js`, `note-export.js`, `note-catalogue.js`, `note-search.js`, `library-notes.js`, `external/rich-text.js`, `rich-text/` |
@@ -49,7 +49,7 @@ The following invariants should be preserved by future changes:
 4. Foreground Backup/Restore must not be permanently blocked by abandoned background-maintenance state.
 5. External deletion/recreation of a provider repository must not poison future provider state.
 6. Provider-specific failure models remain provider-specific below the shared repository semantics.
-7. Compatibility retirement removes the readers of historical backups too (owner, 2026-11-16); it waits until "Format cleanup" reads ready on every device in use.
+7. F30 reads only current canonical formats. The owner confirms all devices completed the F29 upgrade; unsupported data is held untouched, without conversion or cleanup. Current recovery remains.
 8. Temporary UI locks must release into state derived from the current runtime, not a stale pre-operation DOM snapshot.
 9. Generated deployment output is derived from source and is never the canonical place to make changes.
 10. Data a build cannot read is never changed, deleted or uploaded over; the build works with everything else ([data-and-storage.md](areas/data-and-storage.md#data-this-version-cannot-read)).

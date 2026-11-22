@@ -25,8 +25,8 @@ const identity=async keys=>({noteCount:keys.length,noteKeyFingerprint:await code
 // whole-record ones: for the session, and for each Saved Day it names.
 const cur=spec=>freeze({...spec,version:4,sessionContentFingerprint:spec.sessionFingerprint===null?null:spec.sessionFingerprint?'f'.repeat(64):'',
   semanticDays:freeze(Object.fromEntries(Object.entries(spec.days||{}).map(([month,days])=>[month,days===null?null:freeze(Object.fromEntries(Object.keys(days).map(date=>[date,'e'.repeat(64)])))])))});
-// The first base is a full write; older bases are dropped by the compatibility
-// host (tests/integration/storage/compatibility-host.mjs).
+// The first base is a full write; older bases are held by the census.
+// F30 never converts them.
 const seed=cur({format:'study-director.reconciliation-base-update',version:4,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',personalFingerprint:'',personalFields:null,sessionFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v1'}),[P]:freeze({label:'Polity',text:'polity v1'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(1),seed),true);
 const first=await store.readHeader();
@@ -68,8 +68,7 @@ const hash='a'.repeat(64),fields=freeze({format:'study-director.reconciliation-p
 });
 assert.equal(codec.normalizePersonalFields(fields)?.version,1);
 assert.equal(codec.normalizePersonalFields({...fields,order:['plan-unknown']}),null,'unmatched saved-plan ids cannot prove ancestry');
-// Older headers are not read: the compatibility host drops them before the
-// app starts (tests/integration/storage/compatibility-host.mjs).
+// Older headers are not read or converted; the startup census holds them.
 const older=freeze({format:'study-director.reconciliation-base',version:3,checkpointId:cp(6),establishedAt:new Date().toISOString(),noteCount:1,
   noteKeyFingerprint:await codec.keyFingerprint([S]),personalFingerprint:'a'.repeat(64),sessionFingerprint:''});
 assert.equal(codec.normalizeHeader(older),null,'a version 3 header is not read');

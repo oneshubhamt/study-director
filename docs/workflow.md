@@ -25,7 +25,7 @@ Run targeted tests for each affected surface; run the full suites only after sub
 
 | Change | Tests |
 |---|---|
-| Persistence or codecs | Repository, migration, recovery and import tests |
+| Persistence or codecs | Repository, unsupported-data, recovery and import tests |
 | Backup or sync | Backup, Drive and Device Folder transport, managed repository, maintenance and recovery tests. The main fault-injection suites: `backup-persistence`, `pending-provider-recovery`, `repository-checkpoint`, `repository-restore`, `restore-assets`, `device-folder-storage`, `drive-security`, `automatic-provider-backup` |
 | Active Session or timer | Session lifecycle, timer state and engine, restore and mutation-protection tests |
 | Plan, Review, Library | Their unit and integration tests, plus affected persistence and protection contracts |
@@ -67,7 +67,7 @@ A pull request titled as a bug fix (`fix: …`) that changes a sensitive area mu
 - `LICENSE` stays identical to `source/legal/LICENSE.txt`.
 - `npm run stage:firebase:minified` builds a self-contained, minified Firebase deployment under `dist/`; ship it as generated, never hand-edited.
 - **Wordgard.** To take a new version, replace `vendor/wordgard`, run `npm run build:richtext` and record it in `build/wordgard-metadata.mjs`; a build-time rewrite whose upstream text moved fails by name ([notes.md](areas/notes.md#the-editor-wordgard)).
-- Remove code only when it is proven dead, with a regression check. Keep compatibility and migration code until the stored-data population no longer needs it ([data-and-storage.md](areas/data-and-storage.md#compatibility-and-migration)).
+- Remove code only when it is proven dead, with a regression check. F30 assumes devices have completed the F29 upgrade; retain only current-format readers and refusal/recovery safeguards ([data-and-storage.md](areas/data-and-storage.md#canonical-only-storage)).
 - Before distributing source: no `node_modules/`, no `dist/`, no QA or coverage output.
 
 ## Continuous integration

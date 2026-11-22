@@ -49,8 +49,8 @@ registry.define('reconciliation-baseline',1,()=>{
         draft:raw.draft,defaultId:raw.defaultId,savedPlanOrder:raw.savedPlanOrder,
         savedPlans:freeze(Object.fromEntries(Object.entries(plans).sort(([a],[b])=>a.localeCompare(b)))),order:freeze([...order])});
     }
-    // ReconciliationBase.v5. Older headers are dropped by the compatibility
-    // host before the app reads them; this reads only the current form.
+    // ReconciliationBase.v5 is the only readable form. Unknown headers
+    // cannot establish ancestry.
     const HEADER_KEYS=freeze(['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint','personalFields','sessionContentFingerprint']);
     function normalizeHeader(value){
       if(!value||value.version!==5||!exactKeys(value,HEADER_KEYS)||value.format!=='study-director.reconciliation-base'||

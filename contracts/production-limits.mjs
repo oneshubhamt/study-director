@@ -23,7 +23,6 @@ export const PRODUCTION_LIMITS=Object.freeze({
   backupChunkTargetBytes:512*KiB,
   backupChunkItems:100,
   backupImportBatchSize:250,
-  maxLegacyImportTombstones:30000,
   maxBackupChunks:25000,
   maxImportRecords:10000,
   maxScheduleRows:160,
@@ -81,7 +80,7 @@ export const PRODUCTION_LIMITS=Object.freeze({
 export const CAPACITY_PROFILES=Object.freeze({
   fieldBoundaries:Object.freeze(['schedule','reflection','note','richText','asset','backupEntry','backupLine']),
   countBoundaries:Object.freeze(['dailyRecords','notes','savedDayDeletions','assets']),
-  byteBoundaries:Object.freeze(['legacyImport','compressedBackup','uncompressedBackup','portableBackup']),
+  byteBoundaries:Object.freeze(['compressedBackup','uncompressedBackup','portableBackup']),
   denseTextMetadata:Object.freeze({
     description:'Dense plain-text backup metadata without image assets or rich-document payloads.',
     dailyRecords:500,

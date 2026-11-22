@@ -533,7 +533,7 @@ function tick(){
 function syncTimerAfterWake(){
   try{
     rebaseTimerAfterBackwardClockJump(nowMs());
-    if(studyDayRolledOver()){handleStudyDayRollover();return true;}
+    if(studyDayRolledOver()){handleStudyDayRollover({woke:true});return true;}
     if(TimerState.runtime&&TimerState.runtime.startMs!==null&&!TimerState.paused){tick();TimerPresentation.start();return false;}
     if(TimerState.runtime)TimerState.patchRuntime({lastTickMs:nowMs()});
     if(TimerState.paused)updateBreakMeter();
