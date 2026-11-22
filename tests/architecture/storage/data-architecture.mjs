@@ -157,7 +157,7 @@ assert.ok(attachmentsSource.includes(`m.format!=='${literal(EXTERNAL_FORMATS.att
 assert.doesNotMatch(read('source/external/drive.ts'),/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
 assert.match(app,/appMetaRegistry:decodeBuildJson\('@@SD_APP_META_REGISTRY_URI@@','AppMeta registry'\)/u,'host must decode the typed appMeta registry at the bootstrap boundary');
 assert.match(dataBootstrap,/const APP_META_REGISTRY=freeze\(Object\.fromEntries\(Object\.entries\(input\.raw\.appMetaRegistry\)/u,'typed bootstrap must deep-freeze each appMeta registry definition before strict validation');
-assert.match(app,/function exactAppMetaFamily\(capability,key,label=/u,'typed exact-key adapters must enforce logical appMeta ownership');
+assert.match(app,/function exactAppMetaFamily\(capability\s*,key\s*,label\s*=/u,'typed exact-key adapters must enforce logical appMeta ownership after offset-preserving type erasure');
 assert.match(app,/JournalAppMeta\.read\('restoreJournalPayload'\)/u,'temporary backup-file retention must read the typed restore-journal family only');
 assert.match(appMeta,/function registerValidators\(validationOwner\s*,ownerValidators\s*\)/u,'appMeta gateway must register validators independently by validation owner');
 assert.match(appMeta,/function bind\(owner\s*\)/u,'appMeta gateway must expose separately owner-scoped capabilities');
