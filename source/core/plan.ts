@@ -241,7 +241,7 @@ function createScheduleRow(row:PlanTimelineRow,rt:PlanRealtimeState){
   if(momentElapsed>=0){
     wrap.classList.add('sd-just-done');wrap.style.setProperty('--sd-moment-offset',`${-Math.round(momentElapsed)}ms`);
     // Clear the marker once played so re-showing the pane cannot replay it.
-    on(wrap,'animationend',event=>{if(event.animationName==='sd-moment-settle')wrap.classList.remove('sd-just-done');});
+    on(wrap,'animationend',(event:AnimationEvent)=>{if(event.animationName==='sd-moment-settle')wrap.classList.remove('sd-just-done');});
   }
   const tm=document.createElement('div');tm.className='si-time ui-mono';
   tm.append(document.createTextNode(studyMinuteToHHMM(row.startMin)),document.createElement('br'),document.createTextNode(studyMinuteToHHMM(row.endMin)));

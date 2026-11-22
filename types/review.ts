@@ -5,7 +5,7 @@ import type {SaveLaneModule} from './pilot.ts';
 import type {SessionContext,SessionOptions} from './session-lifecycle.ts';
 import type {SessionResult} from './repositories.ts';
 import type {TimerMode} from './timer-state.ts';
-import type {ActualRecordSnapshot} from './timer-engine.ts';
+import type {NoticeCoordinator} from '../source/core/notice-coordinator.ts';
 
 export type ReviewQuality=number|null;
 export type ReviewTimerModes=Readonly<{EMPTY?:TimerMode;READY?:TimerMode;RUNNING?:TimerMode;PAUSED?:TimerMode;DONE:TimerMode;SUSPENDED?:TimerMode}>;
@@ -14,7 +14,7 @@ export interface ReviewCurrentState extends ReviewState{readonly unfinished:stri
 export interface ReviewSnapshot{readonly reflection:string;readonly studyQuality:ReviewQuality}
 export interface ReviewStateInput{reflection?:unknown;studyQuality?:unknown}
 export interface ReviewRichInputMeta{readonly format:'study-director.rich-validated-input';readonly version:1;readonly canonical:string;readonly plain:string}
-export interface ReviewHydrateOptions{readonly date?:string;readonly snapshotReview?:ReviewStateInput|null}
+export interface ReviewHydrateOptions{readonly date?:string;readonly snapshotReview?:ReviewStateInput|null;readonly source?:string}
 export interface ReviewSaveOptions{readonly event?:Event|null;readonly strict?:boolean;readonly markChanged?:boolean;readonly backupCapture?:boolean;readonly allowDuringRecoveryQuiescence?:boolean}
 export type ReviewReflectionBinding=Pick<ReviewState,'date'|'reflection'>;
 export type ReviewReflectionPending=
@@ -45,7 +45,11 @@ export interface ReviewPracticeController{
   status():ReviewPracticeStatus;
 }
 export type ReviewEvidenceClock=ClockRecord;
-export type ReviewActualRecord=Partial<ActualRecordSnapshot>;
+export interface ReviewActualRecord{
+  readonly firstStartedAt?:string|null;readonly lastStartedAt?:string|null;readonly lastEndedAt?:string|null;
+  readonly activeSeconds?:number;readonly pausedSeconds?:number;readonly pauseCount?:number;readonly status?:string;readonly sessionCount?:number;
+  readonly sessions?:readonly unknown[];readonly pauseEvents?:readonly PauseEvent[];
+}
 export interface ReviewTaskProgress{readonly done?:number|null;readonly total?:number|null}
 export interface ReviewNoteInfo{
   readonly exactKey:string;readonly exactLabel:string;readonly exactText:string;
@@ -123,10 +127,8 @@ export interface ReviewReportContext extends ReviewReportSelectorContext{
   readonly m:ReviewMetrics;readonly rec:ReviewRecordView;readonly reviewDay:Date;readonly quality:ReviewQuality;readonly refl:string;readonly dowFull:string;readonly monFull:string;
   readonly reportTasks:readonly ReviewRecordViewTask[];readonly subjectEntries:readonly Readonly<{key:string;label:string;text:string}>[];readonly unfinished:string;
 }
-export interface ReviewNotificationOperation{
-  read():Readonly<{kind?:string}>|null;
-  finish(lifecycle:string,message:string,options?:Readonly<Record<string,unknown>>):boolean;
-}
+export type ReviewNotificationOperation=ReturnType<ReturnType<NoticeCoordinator['presentation']>['begin']>;
+export type ReviewNotificationsPort=Pick<ReturnType<NoticeCoordinator['presentation']>,'begin'|'feedback'>;
 export interface ReviewSubsystemInput{
   readonly constants:Readonly<{limits:Limits;dataContract:Readonly<{schemas:Readonly<{DailyRecord:Readonly<{version:number}>}>}>;
     completionSources:Readonly<{UNITS:'units';MANUAL:'manual';TIME:'time';FINISHED_TIME:'finished-time';FINISHED_UNVERIFIED:'finished-unverified';SKIPPED:'skipped';NONE:'none'}>;
@@ -141,7 +143,7 @@ export interface ReviewSubsystemInput{
     currentIndex():number;timerMode():TimerMode;isPaused():boolean;pendingGap():unknown;carryForward():string;originalSchedule():unknown;setSafetyMessage(value:string):void;
   }>;
   readonly ports:Readonly<{
-    notifications:Readonly<{begin(options:Readonly<Record<string,unknown>>):ReviewNotificationOperation;feedback(options:Readonly<Record<string,unknown>>):unknown}>;
+    notifications:Readonly<ReviewNotificationsPort>;
     domain:Readonly<Pick<RecordHelpers,'boundedInt'|'clampText'|'clampEditorContent'|'editorContentWithinLimits'> & {
       plainTextContent(value:unknown):string;classifyTaskOutcome(task:Task|ReviewRecordViewTask|SavedDayPresentationTask):TaskOutcome;cleanDayRevision(value:unknown):number;
       emptyTaskOutcomeCounts():Record<TaskOutcome,number>;finiteNumber(value:unknown):number|null;
@@ -172,7 +174,7 @@ export interface ReviewSubsystemInput{
       lifecycleCanWrite():boolean;markDayContentChanged():unknown;markDayContentSaved(date:string,revision:number):unknown;resetRuntimeSessionState(options:Readonly<Record<string,unknown>>):unknown;
       runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;
       saveLiveDraft(options?:Readonly<Record<string,unknown>>):unknown;setReviewDateTitle(date:string):unknown;setSessionPanelMode(mode:string,value?:unknown):unknown;stopTimerExecution():unknown;
-      appCanMutate():boolean;writeCanonicalNow(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean}>):PromiseLike<SessionResult>;writeLiveDraftNow(options?:Readonly<Record<string,unknown>>):PromiseLike<Readonly<{ok:boolean;error?:unknown}>>;
+      appCanMutate():boolean;writeCanonicalNow(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean}>):PromiseLike<SessionResult|null>;writeLiveDraftNow(options?:Readonly<{markChanged?:boolean;backupCapture?:boolean;allowDuringRecoveryQuiescence?:boolean}>):PromiseLike<SessionResult|null>;
     }>;
     notesDefaults:Readonly<{
       noteStoredValueForKey(key:string):string;bindTaskNoteEditor(field:HTMLTextAreaElement,index:number,source:string):unknown;closeRichTextField(field:HTMLTextAreaElement|null):unknown;
