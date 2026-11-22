@@ -26,7 +26,7 @@ try{
   const result=spawnSync(path.join(root,'node_modules/.bin',gate),args,{cwd:temp,encoding:'utf8'});
   assert.equal(result.signal,null,`${name}: tool terminated by signal`);
   assert.equal(result.error,undefined);assert.equal(result.status===0,pass,`${name}: ${result.stdout} ${result.stderr}`);
-  if(!pass)assert.match(result.stdout+result.stderr,gate==='tsc'?/error TS\d+/u:/error typescript\(/u,`${name}: failure must be a real diagnostic`);
+  if(!pass)assert.match(result.stdout+result.stderr,gate==='tsc'?/error TS\d+/u:/typescript\([^)]+\)/u,`${name}: failure must be a real diagnostic`);
  }
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
 
