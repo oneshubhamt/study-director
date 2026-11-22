@@ -19,7 +19,7 @@ const noop=()=>{};
     queueReviewSave:options=>{captured=options;return true;}
   };
   vm.createContext(context);
-  const start=hostMain.indexOf('const INPUT_ACTIONS=Object.freeze({'),end=hostMain.indexOf('const BLUR_ACTIONS=Object.freeze({',start);
+  const start=hostMain.indexOf('const INPUT_ACTIONS'),end=hostMain.indexOf('const BLUR_ACTIONS',start);
   assert.ok(start>=0&&end>start,'input action table must be executable from the production host');
   vm.runInContext(hostMain.slice(start,end)+';globalThis.__inputActions=INPUT_ACTIONS;',context);
   const event={kind:'validated-rich-input'};

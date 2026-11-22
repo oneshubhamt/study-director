@@ -74,7 +74,7 @@ function fixture(options={}){
 // best-effort flush path that persistence blocking suppresses.
 {
   const host=readRuntimeSource('source/host/main.ts');
-  assert.match(host,/writeCanonicalNow:\(operation,options\)=>ActiveSessionRuntime\.writeCanonicalNow\(operation,options\),writeLiveDraftNow/u);
+  assert.match(host,/writeCanonicalNow:\(operation,options\)=>requireActiveSessionRuntime\(\)\.writeCanonicalNow\(operation,options\),writeLiveDraftNow/u);
   const review=readRuntimeSource('source/core/review.ts');
   assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the Study Day Active Session checkpoint'\);\s*if\(closesSession\)activeSessionPersistenceBlocked=true/u);
   assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the rollover Active Session checkpoint'\);[\s\S]{0,420}await runLifecycle\('study-day-rollover'[\s\S]{0,700}activeSessionPersistenceBlocked=true/u);
