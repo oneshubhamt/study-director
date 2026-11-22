@@ -3467,7 +3467,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<PwaRuntimeIn
     flushPendingReview:async()=>await flushPendingReviewSave({strict:true,allowDuringRecoveryQuiescence:true})!==false,settleReviewEditor:()=>ReviewEditor.settled(),
     writeLiveDraft:allowDuringRecoveryQuiescence=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence}),flushNotes:()=>AppData.notes.flush(),noteFailure:()=>AppData.notes.failure(),
     flushDeletionRecovery:async()=>await AppData.deletionRecovery.flush()!==false,settleActiveSession:()=>AppData.activeSession.settled(),loadActiveSession:()=>AppData.activeSession.load(),
-    activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded)
+    activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue({ok:!loaded.error,value:ActiveSessionCodec.sanitizeCurrent(loaded.value),error:loaded.error??null,storage:{local:false,idb:loaded.storage?.idb===true}})
   }),
   effects:Object.freeze<PwaRuntimeInput['effects']>({
     automaticBackupsWaiting:()=>automaticBackupsWaiting(),flushAutomaticBackups:async reason=>{await flushAutomaticBackups(reason);},pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
@@ -3518,7 +3518,7 @@ function currentBackupDiagnosticStates(){
   sample('Note saving',()=>AppData.notes.failure(),value=>({job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}));
   sample('Write ownership',()=>({primary:appCanMutate(),...requireMutationCoordinator().status()}),value=>({job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}));
   sample('Backup controller',()=>BackupController.status(),value=>({job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}));
-  sample('Device backup',()=>requireDeviceBackup().status(),value=>({job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalePermissionResponses:value.stalePermissionResponses,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}));
+  sample('Device backup',()=>requireDeviceBackup().status(),value=>({job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}));
   sample('Provider operation',()=>BackupProviderRuntime.status(),value=>({job:'Provider operation',...OperationLifecycle.snapshot(value)}));
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
   sample('Backup encryption',()=>BackupProtection.status(),value=>({job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}));
@@ -3526,25 +3526,24 @@ function currentBackupDiagnosticStates(){
     if(!DataMaintenanceJob)throw new Error('Canonical maintenance job is unavailable.');
     const status=DataMaintenanceJob.status();return {...status,busy:status.busy||AppData.maintenance.status().busy};
   },value=>({job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}));
-  sample('Attachment cleanup',()=>RichTextAssetMaintenance.status(),value=>({job:'Attachment cleanup',state:String(value.state||value.status||'observed'),...value}));
-  sample('Backup scratch cleanup',()=>BackupFiles.status(),value=>({job:'Backup scratch cleanup',state:String(value.state||value.status||'observed'),...value}));
-  sample('Attachment processor',()=>AttachmentIngest.status(),value=>({job:'Attachment processor',state:String(OperationLifecycle.snapshot(value).state||'observed'),...OperationLifecycle.snapshot(value)}));
-  sample('File processor',()=>Exports.status(),value=>({job:'File processor',state:String(OperationLifecycle.snapshot(value).state||'observed'),...OperationLifecycle.snapshot(value)}));
+  sample('Attachment cleanup',()=>RichTextAssetMaintenance.status(),value=>({...value,job:'Attachment cleanup'}));
+  sample('Backup scratch cleanup',()=>BackupFiles.status(),value=>({...value,job:'Backup scratch cleanup'}));
+  sample('Attachment processor',()=>AttachmentIngest.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy,pending:value.pending>0}),job:'Attachment processor'}));
+  sample('File processor',()=>Exports.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy,pending:value.pending>0}),job:'File processor',phase:value.phase}));
   sample('App update',()=>PwaLifecycle.status(),pwa=>{const update=PwaRuntime.diagnostics();return {job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:update.nextCheckAt>0,nextEligibleAt:update.nextCheckAt?new Date(update.nextCheckAt).toISOString():'',completedAt:update.lastSuccessfulCheckAt?new Date(update.lastSuccessfulCheckAt).toISOString():'',retryAttempt:update.failureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''};});
   for(const row of BackupIntegrity?.diagnosticRows()||[])states.push(row as DiagnosticRow);
   sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:requireKeptVersions().count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>({job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}));
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>({job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}));
-  sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values.map(value=>({job:String(value.job||value.providerId||'Provider background'),state:String(value.state||'observed'),...value})));
+  sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values as readonly DiagnosticRow[]);
   return states;
 }
 // Why a version was kept, for diagnostics: the kind of difference, not its content.
 type DiagnosticPendingReview=Awaited<ReturnType<typeof AppData.pendingReviews.list>>[number];
 function keptReviewCause(review:DiagnosticPendingReview){
-  const kept=review.kept;
-  if(review.subject==='note')return !kept?'note-deletion':typeof kept.text==='string'&&typeof kept.label==='string'?'note-text-title':typeof kept.text==='string'?'note-text':'note-title';
-  if(review.subject==='savedDay')return kept?'saved-day':'saved-day-deletion';
-  if(review.subject==='session')return kept?'session':'session-absent';
+  if(review.subject==='note'){const kept=review.kept;return !kept?'note-deletion':typeof kept.text==='string'&&typeof kept.label==='string'?'note-text-title':typeof kept.text==='string'?'note-text':'note-title';}
+  if(review.subject==='savedDay')return review.kept?'saved-day':'saved-day-deletion';
+  if(review.subject==='session')return review.kept?'session':'session-absent';
   return 'settings';
 }
 type AsyncDiagnosticSpec=Readonly<{job:string;run():Promise<readonly DiagnosticRow[]>}>;
@@ -3622,8 +3621,8 @@ type DelegatedHostInput=Parameters<typeof FoundationHostModule.createDelegated>[
 const CLICK_ACTIONS:DelegatedHostInput['CLICK_ACTIONS']=Object.freeze({
   'recheck-device-integrity':()=>requestRepositoryIntegrityRecheck('device-folder'),
   'recheck-drive-integrity':()=>requestRepositoryIntegrityRecheck('google-drive'),
-  'apply-pwa-update': applyPwaUpdateFromUi,
-  'protect-local-data': protectLocalData,
+  'apply-pwa-update': ()=>applyPwaUpdateFromUi(),
+  'protect-local-data': ()=>protectLocalData(),
   'install-notice-action': ()=>runInstallationAction({dismissNotice:true}),
   'check-unsupported-update': ()=>void checkUnsupportedUpdate(),
   'dismiss-install-notice': ()=>CapabilityInstallation.dismissInstallNotice(),
@@ -3643,7 +3642,7 @@ const CLICK_ACTIONS:DelegatedHostInput['CLICK_ACTIONS']=Object.freeze({
   'recover-managed-version': ev=>BackupRecoveryHost.history.recover(ev),
   'compare-managed-note': ev=>BackupRecoveryHost.history.recover(ev),
   'remove-managed-version': ev=>BackupRecoveryHost.history.removeVersion(ev),
-  'toggle-pause': togglePause,
+  'toggle-pause': ()=>togglePause(),
   'practice-mode': ev=>PracticePacer.setSetupMode(ev.target instanceof Element?ev.target.closest<HTMLElement>('[data-practice-mode]')?.dataset['practiceMode']:undefined),
   'practice-total-toggle': ()=>PracticePacer.toggleTotal(),
   'practice-cue-toggle': ()=>PracticePacer.toggleCueMode(),
@@ -3655,45 +3654,45 @@ const CLICK_ACTIONS:DelegatedHostInput['CLICK_ACTIONS']=Object.freeze({
   'practice-reset-cancel': ()=>PracticePacer.cancelReset(),
   'practice-delete-run': ev=>deletePracticeRun(ev),
   'practice-toggle': ()=>{const result=PracticePacer.toggle();schedulePwaUpdateEvaluation(150);return result;},
-  'practice-finish': finishPracticePacer,
-  'mark-done': markDone,
-  'skip-task': skipTask,
-  'jump-scheduled-now': recoveryJumpToScheduledNow,
-  'start-scheduled-full': recoveryStartScheduledFull,
-  'start-remaining-window': recoveryStartRemainingWindow,
-  'shift-remaining-day': recoveryShiftRemainingDay,
-  'generate-carry-forward': recoveryGenerateCarryForward,
-  'copy-carry-forward': copyCarryForward,
-  'close-unfinished-note': closeUnfinishedNotePanel,
-  'save-day': saveDayRecord,
-  'copy-review': copyReview,
-  'toggle-copy-report-menu': toggleCopyReportMenu,
-  'reset-copy-report': resetCopyReportSelection,
-  'render-library': LibraryView.render,
+  'practice-finish': ()=>finishPracticePacer(),
+  'mark-done': ()=>markDone(),
+  'skip-task': ()=>skipTask(),
+  'jump-scheduled-now': ()=>recoveryJumpToScheduledNow(),
+  'start-scheduled-full': ()=>recoveryStartScheduledFull(),
+  'start-remaining-window': ()=>recoveryStartRemainingWindow(),
+  'shift-remaining-day': ()=>recoveryShiftRemainingDay(),
+  'generate-carry-forward': ()=>recoveryGenerateCarryForward(),
+  'copy-carry-forward': ()=>copyCarryForward(),
+  'close-unfinished-note': ()=>closeUnfinishedNotePanel(),
+  'save-day': ()=>saveDayRecord(),
+  'copy-review': ()=>copyReview(),
+  'toggle-copy-report-menu': ()=>toggleCopyReportMenu(),
+  'reset-copy-report': ()=>resetCopyReportSelection(),
+  'render-library': ()=>LibraryView.render(),
   'open-library-day': ev=>LibraryView.openDay(ev.target instanceof Element?ev.target.closest<HTMLElement>('[data-library-date]')?.dataset['libraryDate']:undefined),
   'export-backup': ()=>BackupActions.exportLocal(),
-  'clear-library': LibraryView.clearAll,
+  'clear-library': ()=>LibraryView.clearAll(),
   'backup-protection': ()=>BackupActions.manageProtection(),
   'copy-backup-diagnostics': ()=>copyBackupDiagnostics(),
   'cancel-standalone-import': ()=>BackupActions.cancelStandalone(),
   'pick-import-file': ()=>BackupActions.pickImportFile(),
   'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
-  'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
-  'restore-session': SessionActions.restoreSessionAction,
-  'suspend-session': suspendTodaySession,
-  'finish-session': finishTodaySession,
-  'reset-session': resetTodaySession,
-  'edit-plan': PlanDraftEditor.enter,
+  'toggle-pomodoro': ()=>Pomodoro.configuration.toggleNudges(),
+  'restore-session': ()=>SessionActions.restoreSessionAction(),
+  'suspend-session': ()=>suspendTodaySession(),
+  'finish-session': ()=>finishTodaySession(),
+  'reset-session': ()=>resetTodaySession(),
+  'edit-plan': ()=>PlanDraftEditor.enter(),
   'confirm-plan-edit': ()=>uploadSoonAfterPlanApply(PlanDraftEditor.confirm()),
-  'cancel-plan-edit': PlanDraftEditor.cancel,
-  'load-default': loadDefaultPlan,
-  'apply-schedule': SessionActions.applyScheduleAction,
-  'clear-schedule-draft': PlanDraftEditor.clear,
-  'open-notes': openNotesLibrary,
-  'toggle-pnote-info': togglePnoteInfo,
+  'cancel-plan-edit': ()=>PlanDraftEditor.cancel(),
+  'load-default': ()=>loadDefaultPlan(),
+  'apply-schedule': ()=>SessionActions.applyScheduleAction(),
+  'clear-schedule-draft': ()=>PlanDraftEditor.clear(),
+  'open-notes': ()=>openNotesLibrary(),
+  'toggle-pnote-info': ()=>togglePnoteInfo(),
   'toggle-backup-info': ev=>toggleBackupInfo(ev),
-  'load-more-library': LibraryView.loadMore,
+  'load-more-library': ()=>LibraryView.loadMore(),
   'close-nudge': ()=>Pomodoro.stop({dismiss:true,audio:false}),
   'take-pomodoro-break': ()=>{
     const request=Pomodoro.acceptedBreak({dismissIfMissing:true,activeSec:currentTimerActiveSeconds()});
@@ -3701,49 +3700,49 @@ const CLICK_ACTIONS:DelegatedHostInput['CLICK_ACTIONS']=Object.freeze({
   },
   'gap-focus': ()=>classifyInactiveGap('focus'),
   'gap-break': ()=>classifyInactiveGap('break'),
-  'gap-split': showInactiveGapSplit,
+  'gap-split': ()=>showInactiveGapSplit(),
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
-  'gap-apply': applyInactiveGapSplit,
-  'dismiss-storage-warning': dismissStorageWarning,
-  'sync-status-action': syncStatusAction,
+  'gap-apply': ()=>applyInactiveGapSplit(),
+  'dismiss-storage-warning': ()=>dismissStorageWarning(),
+  'sync-status-action': ev=>syncStatusAction(ev),
   // Hiding the card leaves the work running; the indicator still shows it.
   'close-drive-connect': ()=>endDriveConnectCard(),
   'recent-action': ev=>NotificationRecent.run(ev),
   'recent-more': ()=>NotificationRecent.toggle(),
-  'rename-profile': startProfileRename,
+  'rename-profile': ()=>startProfileRename(),
   'clear-recent': ()=>NotificationRecent.clear(),
   'review-kept-versions': ()=>KeptVersions.review(),
-  'open-profile': openProfilePanel,
-  'close-profile': closeProfilePanel,
-  'profile-drive': profileDriveAction,
-  'switch-profile': switchProfile,
-  'add-profile': addProfile,
-  'delete-profile': deleteThisProfile,
+  'open-profile': ()=>openProfilePanel(),
+  'close-profile': ()=>closeProfilePanel(),
+  'profile-drive': ()=>profileDriveAction(),
+  'switch-profile': ev=>switchProfile(ev),
+  'add-profile': ()=>addProfile(),
+  'delete-profile': ()=>deleteThisProfile(),
   'first-start-drive': ()=>FirstStart.connect(),
   'first-start-continue': ()=>FirstStart.finish(),
   'first-start-skip': ()=>FirstStart.skip(),
   'font-smaller': ()=>stepFontScale(-1),
   'font-reset': ()=>setFontScale(1),
   'font-larger': ()=>stepFontScale(1),
-  'set-theme': handleThemeSelection,
-  'set-presentation': handlePresentationSelection,
-  'toggle-display-tools': toggleDisplayTools,
-  'toggle-fullscreen': toggleFS
+  'set-theme': ev=>handleThemeSelection(ev),
+  'set-presentation': ev=>handlePresentationSelection(ev),
+  'toggle-display-tools': ()=>toggleDisplayTools(),
+  'toggle-fullscreen': ()=>toggleFS()
 });
 const CHANGE_ACTIONS:DelegatedHostInput['CHANGE_ACTIONS']=Object.freeze({
   'render-library': ()=>LibraryView.render(),
   'import-backup': ev=>BackupActions.importLocal(ev),
   'change-reflection-date': ()=>requireReviewSavedDayRuntime().selectReviewDate(),
-  'sound-mode': handleSoundModeChange,
+  'sound-mode': event=>handleSoundModeChange(event),
   'keep-screen-awake': ev=>CapabilityInstallation.setKeepAwake(ev.target instanceof HTMLInputElement&&ev.target.checked)
 });
 const INPUT_ACTIONS:DelegatedHostInput['INPUT_ACTIONS']=Object.freeze({
   'first-start-password': ()=>FirstStart.confirmField(),
-  'pnote-progress': onPnoteChange,
+  'pnote-progress': ()=>onPnoteChange(),
   'save-reflection': event=>queueReviewSave({event}),
-  'quote': onQuoteChange,
-  'schedule-draft': PlanDraftEditor.composerInput,
-  'render-library': LibraryView.requestRender,
+  'quote': ()=>onQuoteChange(),
+  'schedule-draft': ()=>PlanDraftEditor.composerInput(),
+  'render-library': ()=>LibraryView.requestRender(),
   'unfinished-note': ()=>{syncUnfinishedNoteDraft();ReviewView.sync();},
   'practice-setup': ()=>PracticePacer.previewSetup()
 });
@@ -3804,7 +3803,7 @@ const OwnershipUiProjection=(()=>{
   const TRANSITIONAL_STATES=new Set<OwnershipStateValue>([
     OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
   ]);
-  const ACTION_BINDINGS=Object.freeze([
+  const ACTION_BINDINGS:readonly Readonly<{attribute:string;actions:ReadonlySet<string>}>[]=Object.freeze([
     Object.freeze({attribute:'data-action',actions:OWNER_REQUIRED_CLICK_ACTIONS}),
     Object.freeze({attribute:'data-change',actions:OWNER_REQUIRED_CHANGE_ACTIONS}),
     Object.freeze({attribute:'data-input',actions:OWNER_REQUIRED_INPUT_ACTIONS}),
@@ -4025,14 +4024,15 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze<Parameters<ty
 }));
 /* PUBLIC PLUGIN API */
 PluginRuntime.registerPlaceholders();
-const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<Parameters<typeof PluginRuntime.createPublicApi>[0]>({
+type PublicApiInput=Parameters<typeof PluginRuntime.createPublicApi>[0];
+const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<PublicApiInput>({
   version:APP_VERSION,
   data:Object.freeze({contract:DATA_CONTRACT,deviceState:InsightsDeviceState}),
   insights:AppInsights,
   logic:InsightsBoundary.logic,
   plan:Object.freeze({getDraft:getPlanDraftText,loadDraft:loadScheduleIntoDraft}),
   preview:InsightsBoundary.publicPreview,
-  backup:Object.freeze({
+  backup:Object.freeze<PublicApiInput['backup']>({
     createCheckpoint:CheckpointPipeline.create,
     inspect:CheckpointPipeline.inspect,
     releaseFile:file=>Exports.run('file.release',{file}),
@@ -4043,20 +4043,20 @@ const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<Paramet
     maxFileBytes:APP_LIMITS.backupMaxFileBytes,
     repositoryPolicy:RepositoryPolicyModule.protocol,
     device:()=>AppData.provenance.installationId(),
-    profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
-    providers:Object.freeze({register:BackupProviderRuntime.register,list:BackupProviderRuntime.list})
+    profile:Object.freeze<PublicApiInput['backup']['profile']>({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
+    providers:Object.freeze<PublicApiInput['backup']['providers']>({register:config=>BackupProviderRuntime.register(config),list:()=>BackupProviderRuntime.list()})
   }),
-  installation:Object.freeze({
-    status:NativeCapabilities.status,promptInstall:NativeCapabilities.promptInstall,inspectInstallation:NativeCapabilities.inspectInstallation,revealInstallHelp:NativeCapabilities.revealInstallHelp
+  installation:Object.freeze<PublicApiInput['installation']>({
+    status:()=>requireNativeCapabilities().status(),promptInstall:options=>requireNativeCapabilities().promptInstall(options),inspectInstallation:()=>requireNativeCapabilities().inspectInstallation(),revealInstallHelp:()=>requireNativeCapabilities().revealInstallHelp()
   }),
-  appearance:Object.freeze({
-    theme:Object.freeze({defaultId:DEFAULT_THEME_ID,supported:PUBLIC_THEME_METADATA,get:PRESENTATION_KERNEL.activeThemeId,set:setTheme}),
-    presentation:Object.freeze({
+  appearance:Object.freeze<PublicApiInput['appearance']>({
+    theme:Object.freeze<PublicApiInput['appearance']['theme']>({defaultId:DEFAULT_THEME_ID,supported:PUBLIC_THEME_METADATA.filter((item):item is NonNullable<(typeof PUBLIC_THEME_METADATA)[number]>=>item!==undefined),get:PRESENTATION_KERNEL.activeThemeId,set:setTheme}),
+    presentation:Object.freeze<PublicApiInput['appearance']['presentation']>({
       defaultId:DEFAULT_PRESENTATION_ID,invariants:PRESENTATION_INVARIANTS,breakpoints:PRESENTATION_BREAKPOINTS,tokens:PRESENTATION_TOKEN_CONTRACT,manifest:PRESENTATION_MANIFEST,
       list:PRESENTATION_KERNEL.listPresentations,register:registerPresentationPack,get:PRESENTATION_KERNEL.activePresentationId,set:setPresentation
     })
   }),
-  ui:Object.freeze({registerTab:UiTabRegistry.registerTab,goTab,navigationStatus:()=>NavigationController.status(),workspaceHistory:WorkspaceHistoryPublic})
+  ui:Object.freeze<PublicApiInput['ui']>({registerTab:UiTabRegistry.registerTab,goTab,navigationStatus:()=>requireNavigationController().status(),workspaceHistory:WorkspaceHistoryPublic})
 }));
 HOST_WINDOW.StudyDirector=StudyDirectorPublicAPI;
 window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT,{detail:Object.freeze({version:StudyDirectorPublicAPI.version,theme:PRESENTATION_KERNEL.activeThemeId(),presentation:PRESENTATION_KERNEL.activePresentationId()})}));
