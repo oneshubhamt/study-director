@@ -14,7 +14,7 @@ import {
 } from './typography';
 import {looksLikeMarkdown,markdownDocument,markdownToHtml} from './markdown';
 import type {MarkdownNode} from './markdown';
-import type {OverlayHandle,OverlayOptions} from '../types/workspace.ts';
+import type {OverlayHandle,OverlayOptions,OverlayHistoryOptions,WorkspaceDescriptor} from '../types/workspace.ts';
 import {normalizeTag,renameTagInInline,renameTagInText,tagMatches,tagsInText} from './tags';
 declare const __SD_WORDGARD_VERSION__:string;
 import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
@@ -37,11 +37,10 @@ export interface AttachmentUploadOptions{signal?:AbortSignal;onProgress?:(progre
 type AttachmentKind='pdf'|'audio';
 type AttachmentUploadDecorationState={pos:number;widget:Widget<HTMLElement>};
 export interface AttachmentPort{upload(file:File,options?:AttachmentUploadOptions):Promise<{id:string;name:string;type:string}>}
-export interface WorkspaceHistoryDescriptor{kind:'focus'|'audio';token:string;key?:string}
-export interface WorkspaceHistoryOptions{kind:'focus'|'audio';key?:string;token?:string|undefined;reopen?:(descriptor:WorkspaceHistoryDescriptor)=>boolean|Promise<boolean>;valid?:()=>boolean}
+export type WorkspaceHistoryDescriptor=WorkspaceDescriptor;
+export type WorkspaceHistoryOptions=OverlayHistoryOptions&Readonly<{kind:'focus'|'audio'}>;
 export type WorkspaceOverlayHandle=OverlayHandle;
-export type RichTextOverlayOptions=Omit<OverlayOptions,'history'>&{history?:WorkspaceHistoryOptions};
-export interface WorkspaceOverlayPort{open(options:RichTextOverlayOptions):WorkspaceOverlayHandle|null}
+export interface WorkspaceOverlayPort{open(options:OverlayOptions):WorkspaceOverlayHandle|null}
 // Notes, for links to them: the picker, a note's title (null once deleted) and
 // opening one. Tags: showing the notes with one (passive when the click only
 // placed the caret) and the # suggestions, which resolve to the name to write

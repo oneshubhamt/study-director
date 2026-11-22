@@ -18,7 +18,7 @@ export interface PlanRow{
   start:string;dur:number|string;name:string;kind:string;area:string;measure:string;target:number|string|null;id?:string;
 }
 export interface PlanParseResult{
-  ok:boolean;kind:string;message?:string;parsed:readonly import('./domain.ts').ScheduleRow[];errors?:readonly string[];warnings:readonly string[];
+  ok:boolean;kind:string;message?:string;parsed:readonly import('./domain.ts').ScheduleRow[];errors?:readonly string[];warnings?:readonly string[];
   rawOriginal?:string;raw?:string;
 }
 export interface ImmutablePlanDraft{
