@@ -5,6 +5,7 @@ import type {ActiveSession,SessionSnapshot,TimerPayload} from '../../types/recor
 import type {SessionHostController} from '../../types/session-host.ts';
 import type {SessionHandoffTransferOptions} from '../../types/session-handoff.ts';
 import type {SessionResult} from '../../types/repositories.ts';
+import type {ReviewStateInput} from '../../types/review.ts';
 import type {SessionActionState,SessionActionInput,SessionApplyOptions} from '../../types/session-actions.ts';
 const sdSessionActionsFactory=(()=>{
 'use strict';
@@ -665,7 +666,9 @@ function reconcileLifecycleEditors(context:SessionContext){
   }
   refreshAllSubjectNoteFieldsFromRepository();
   refreshPnote({force:true});
-  hydrateReviewState({date:targetDate,snapshotReview:options['snapshotReview'],source:context.kind});
+  const candidateReview=options['snapshotReview'];
+  const snapshotReview:ReviewStateInput|null=candidateReview&&typeof candidateReview==='object'&&!Array.isArray(candidateReview)?candidateReview as ReviewStateInput:null;
+  hydrateReviewState({date:targetDate,snapshotReview,source:context.kind});
   refreshLibraryNotes();
   ports.ReviewView.invalidate();
   if(document.getElementById('pane-review')?.classList.contains('on'))ports.ReviewView.refresh({force:true});
