@@ -1733,7 +1733,7 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<Parameters<ty
   document,
   profiles:Profiles,
   backupProtection:Object.freeze({enable:password=>BackupProtection.enable(password)}),
-  provider:Object.freeze({locationStatus:id=>BackupProviderRuntime.locationStatus(id)}),
+  provider:Object.freeze<SessionHandoffInput['provider']>({locationStatus:id=>BackupProviderRuntime.locationStatus(id)}),
   connectDriveForProfile:()=>connectDriveForProfile(),
   getStudentName:()=>getStudentNameFromDisplay(),
   isDefaultStudentName,
@@ -2724,11 +2724,11 @@ if(!Object.isFrozen(NoteExporter)||NoteExporter.format!=='study-director.note-ex
 const PdfDocuments=DocumentHostModule.createPdfController(Object.freeze<Parameters<typeof DocumentHostModule.createPdfController>[0]>({
   document,window,urls:URL,store:AttachmentStorage,overlay:WorkspaceOverlay,
   notifications:Object.freeze({notify:input=>Interactions.notify(input),resolve:(source,key)=>NoticeCoordinator.resolveEvent(source,key)}),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  diagnostics:Object.freeze<BackgroundMaintenanceInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<Parameters<typeof DocumentHostModule.createPrinter>[0]>({
   document,window,richText:RichTextApi,assets:RichTextAssets,plain:value=>plainTextContent(value),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
+  diagnostics:Object.freeze<StorageResetInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
 }));
 let AttachmentLibrary:ReturnType<typeof AttachmentsModule.create>|null=null;
 function journalHasState(value:unknown){return !!(value&&typeof value==='object'&&Reflect.get(value,'state'));}
@@ -3007,7 +3007,7 @@ function verifyRestoredSessionRuntime(...args:Parameters<typeof SessionActions.v
 // replaces the catalogue; physical reclamation still waits for all readers.
 type NoteReconciliationInput=Parameters<typeof ReconciliationUIModule.createController>[0];
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze<NoteReconciliationInput>({ports:Object.freeze<NoteReconciliationInput['ports']>({
-  configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
+  configuration:Object.freeze<SessionHandoffInput['configuration']>({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
   richText:Object.freeze<NoteReconciliationInput['ports']['richText']>({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
   assets:Object.freeze<NoteReconciliationInput['ports']['assets']>({get:assetId=>RichTextAssets.get(assetId)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
@@ -3077,7 +3077,7 @@ KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze<Parameter
   }),
   reviews:Object.freeze({list:()=>AppData.pendingReviews.list()}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  environment:Object.freeze({
+  environment:Object.freeze<BackgroundMaintenanceInput['environment']>({
     canMutate:()=>appCanMutate(),now:()=>Date.now(),
     connectCardOpen:()=>SyncStatusHost?.connectCardOpen()===true,sessionYieldedAt:()=>sessionYieldedAt
   }),
@@ -3085,7 +3085,7 @@ KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze<Parameter
     notify:options=>Interactions.notify(options),
     resolveEvent:(source,id)=>NoticeCoordinator.resolveEvent(source,id)
   }),
-  view:Object.freeze({
+  view:Object.freeze<StorageResetInput['view']>({
     render:()=>KeptVersionsView.render(),renderLocation:()=>renderDriveBackup(),scheduleStatus:()=>scheduleSyncStatus(),
     refreshNotes:()=>LibraryView.refreshNotes()
   })
@@ -3093,17 +3093,18 @@ KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze<Parameter
 if(!Object.isFrozen(KeptVersions)||KeptVersions.format!=='study-director.kept-versions'||KeptVersions.contractVersion!==1){
   throw new Error('Study Director kept-version recovery controller is unavailable or incompatible.');
 }
-SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Parameters<typeof SessionHandoffModule.createController>[0]>({
-  configuration:Object.freeze({
+type SessionHandoffInput=Parameters<typeof SessionHandoffModule.createController>[0];
+SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<SessionHandoffInput>({
+  configuration:Object.freeze<DeviceBackupCompositionInput['configuration']>({
     providerId:'google-drive',claimWatchMs:SESSION_CLAIM_WATCH_MS,claimSyncRetryMs:SESSION_CLAIM_SYNC_RETRY_MS,
     claimSaveWarning:'The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.'
   }),
-  authority:Object.freeze({
+  authority:Object.freeze<SessionHandoffInput['authority']>({
     canMutate:()=>appCanMutate(),startupReady:()=>StartupLifecycle.status().fullyInitialized,
     visible:()=>document.visibilityState==='visible',online:()=>navigator.onLine!==false,
     hasTasks:()=>TASKS.length>0,panelElsewhere:()=>sessionPanelMode==='elsewhere'
   }),
-  provider:Object.freeze({
+  provider:Object.freeze<StorageResetInput['provider']>({
     connected:id=>BackupProviderRuntime.connected(id),
     readHandoffSource:id=>BackupProviderRuntime.readSessionHandoffSource(id),
     claimOwnership:(id,request)=>BackupProviderRuntime.claimSessionOwnership(id,request),
@@ -3113,23 +3114,23 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Parame
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),
     wakeBackground:reason=>BackupProviderRuntime.wakeBackground(reason)
   }),
-  session:Object.freeze({
+  session:Object.freeze<SessionHandoffInput['session']>({
     host:ActiveSessionRuntime,sanitize:value=>ActiveSessionCodec.sanitizeCurrent(value),
     same:(left,right)=>CanonicalModule.same(left,right),nextRevision:seed=>nextSessionRevision(seed),
     contentFingerprint:value=>activeSessionContentFingerprint(value),assetIds:value=>BackupCodec.assetIds(value)
   }),
-  plan:Object.freeze({
+  plan:Object.freeze<SessionHandoffInput['plan']>({
     flushDraft:()=>PlanDraftEditor.flush(),settled:()=>PlanData.settled(),readDraft:()=>PlanData.readDraft(),
     readCanonicalDraft:async()=>{const value=await AppData.planData.read();return value.draft;},
-    displayedDraft:()=>String(document.getElementById('plan-input')?.value||''),
+    displayedDraft:()=>{const field=document.getElementById('plan-input');return field instanceof HTMLTextAreaElement||field instanceof HTMLInputElement?field.value:'';},
     defaultScheduleText:()=>getActiveDefaults().scheduleText
   }),
-  runtime:Object.freeze({
+  runtime:Object.freeze<SessionHandoffInput['runtime']>({
     markContentChanged:()=>markDayContentChanged(),
     captureEvidence:()=>captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true}),
     stopExecution:()=>TimerEngine.stopExecution(),resumeExecution:options=>TimerEngine.resumeAfterPrimaryRestore(options),
   }),
-  presentation:Object.freeze({
+  presentation:Object.freeze<SessionHandoffInput['presentation']>({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     setStatus:(message,ok)=>setPlanStatus(message,ok),
     warnStorage:SessionActions.warnStorage,
@@ -3137,16 +3138,17 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Parame
     notifyNewerClaim:SessionActions.notifyNewerClaim,
     noteBackupChange:reason=>notifyBackupChange({urgent:true,reason})
   }),
-  installation:Object.freeze({id:()=>InstallationIdentity.getId()}),
-  clock:Object.freeze({nowMs:DecisionClock.nowMs,nowIso:()=>new Date().toISOString()}),
-  identity:Object.freeze({uuid:()=>crypto.randomUUID()})
+  installation:Object.freeze<SessionHandoffInput['installation']>({id:()=>InstallationIdentity.getId()}),
+  clock:Object.freeze<SessionHandoffInput['clock']>({nowMs:DecisionClock.nowMs,nowIso:()=>new Date().toISOString()}),
+  identity:Object.freeze<SessionHandoffInput['identity']>({uuid:()=>crypto.randomUUID()})
 }));
 if(!Object.isFrozen(SessionHandoffRuntime)||SessionHandoffRuntime.format!=='study-director.session-handoff'||SessionHandoffRuntime.contractVersion!==1){
   throw new Error('Study Director session handoff runtime is unavailable or incompatible.');
 }
 // File/location controls, user entry points and foreground/background exclusion
 // are owned by the checked P5.7A host boundary.
-BackupActions=BackupActionsHostModule.createControls(Object.freeze<Parameters<typeof BackupActionsHostModule.createControls>[0]>({
+type BackupControlsInput=Parameters<typeof BackupActionsHostModule.createControls>[0];
+BackupActions=BackupActionsHostModule.createControls(Object.freeze<BackupControlsInput>({
   document,controller:BackupController,processing:Exports,protection:BackupProtectionHost,
   device:()=>DeviceBackup,providers:BackupProviderRuntime,presentation:BackupPresentation,
   verifiedAt:source=>VerifiedRecovery.verified(source)?.at||'',timeLabel:storageHealthTime,
@@ -3161,21 +3163,22 @@ BackupActions=BackupActionsHostModule.createControls(Object.freeze<Parameters<ty
 if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backup-controls'||BackupActions.contractVersion!==1){
   throw new Error('Study Director backup controls are unavailable or incompatible.');
 }
-function renderDriveBackup(){return BackupActions.renderDrive();}
-function renderDeviceBackup(state:Parameters<NonNullable<typeof BackupActions>['renderDevice']>[0]){return BackupActions.renderDevice(state);}
-BackupActions.install();
-BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createBackground>[0]>({
+function renderDriveBackup(){return requireBackupActions().renderDrive();}
+function renderDeviceBackup(state:Parameters<NonNullable<typeof BackupActions>['renderDevice']>[0]){return requireBackupActions().renderDevice(state);}
+requireBackupActions().install();
+type BackgroundMaintenanceInput=Parameters<typeof BackupMaintenanceHostModule.createBackground>[0];
+BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze<BackgroundMaintenanceInput>({
   lifecycle:OperationLifecycle,
-  environment:Object.freeze({now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
-  authority:Object.freeze({
+  environment:Object.freeze<DeviceBackupCompositionInput['environment']>({now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
+  authority:Object.freeze<BackgroundMaintenanceInput['authority']>({
     canMutate:()=>appCanMutate(),fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,
     storageResetUnresolved:()=>storageResetUnresolved(),unsupportedDataHeld:()=>UnsupportedData.held()
   }),
-  foreground:Object.freeze({
+  foreground:Object.freeze<BackgroundMaintenanceInput['foreground']>({
     pwaReserved:()=>PwaRuntime.reservationActive(),mutation:AppMutationCoordinator,attachmentIngest:AttachmentIngest,
     exports:Exports,backupController:BackupController,providers:BackupProviderRuntime
   }),
-  data:Object.freeze({maintenance:AppData.maintenance,notes:AppData.notes}),
+  data:Object.freeze<BackgroundMaintenanceInput['data']>({maintenance:AppData.maintenance,notes:AppData.notes}),
   diagnostics:Object.freeze({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     start:(kind,label,details)=>BackupOperationDiagnostics.start(kind,label,details),
@@ -3184,14 +3187,14 @@ BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze
     fail:(error,details,traceId)=>BackupOperationDiagnostics.fail(error,details,traceId)
   }),
   backgroundOwners:()=>Object.freeze([
-    Object.freeze(['attachments',Object.freeze({wake:trigger=>RichTextAssetMaintenance.wake(trigger)})]),
-    Object.freeze(['attachment-integrity',Object.freeze({wake:trigger=>AttachmentIntegrityJob.wake(trigger,true)})]),
-    Object.freeze(['temporary-files',BackupFiles]),
-    Object.freeze(['device-folder',Object.freeze({wake:()=>DeviceBackup.wake()})]),
-    Object.freeze(['backup-locations',Object.freeze({wake:trigger=>BackupProviderRuntime.wakeBackground(trigger)})])
+    Object.freeze(['attachments',Object.freeze({wake:(trigger:string)=>RichTextAssetMaintenance.wake(trigger)})] as const),
+    Object.freeze(['attachment-integrity',Object.freeze({wake:(trigger:string)=>{if(!AttachmentIntegrityJob)return false;return AttachmentIntegrityJob.wake(trigger,true);}})] as const),
+    Object.freeze(['temporary-files',BackupFiles] as const),
+    Object.freeze(['device-folder',Object.freeze({wake:()=>DeviceBackup?.wake()||false})] as const),
+    Object.freeze(['backup-locations',Object.freeze({wake:(trigger:string)=>BackupProviderRuntime.wakeBackground(trigger)})] as const)
   ]),
   scheduleAssetMaintenance:delay=>scheduleRichTextAssetMaintenance(delay),
-  intervals:Object.freeze({
+  intervals:Object.freeze<BackgroundMaintenanceInput['intervals']>({
     maintenanceMs:DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS,failureRetryMs:DATA_MAINTENANCE_FAILURE_RETRY_MS,
     assetCleanupDelayMs:ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS,foregroundRecheckMs:15000
   })
@@ -3203,7 +3206,7 @@ DataMaintenanceJob=BackgroundMaintenance.job;
 const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMaintenance(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createRepositoryMaintenance>[0]>({
   meta:BackupAppMeta,metadataName:'repositoryMaintenancePending',
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  environment:Object.freeze({nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID()})
+  environment:Object.freeze<StorageResetInput['environment']>({nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID()})
 }));
 BackupProviderRuntime.configureRepositoryMaintenance(RepositoryMaintenanceHost.hooks);
 
@@ -3222,48 +3225,51 @@ function resumeUnresolvedStorageReset(){return StorageResetRecovery?.resume()||f
 function settleStorageReset(){return StorageResetRecovery?.settle()||false;}
 function restoreAfterStorageReset(){return requireStorageResetRecovery().restore();}
 
-const DeviceBackupHooks=BackupActionsHostModule.createDeviceHooks(Object.freeze<Parameters<typeof BackupActionsHostModule.createDeviceHooks>[0]>({
-  interactions:Object.freeze({choose:options=>Interactions.choose(options)}),capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
+type DeviceBackupHooksInput=Parameters<typeof BackupActionsHostModule.createDeviceHooks>[0];
+const DeviceBackupHooks=BackupActionsHostModule.createDeviceHooks(Object.freeze<DeviceBackupHooksInput>({
+  interactions:Object.freeze<DeviceBackupHooksInput['interactions']>({choose:async options=>await Interactions.choose(options)}),capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   profileId:()=>Profiles.current()?.id||'',profileScope:()=>ProfileScope.scope,installationId:()=>InstallationIdentity.getId(),backupFolderName:()=>backupFolderName({device:true}),
   render:state=>renderDeviceBackup(state),sourceRevision:()=>BackupRuntimeHost.sourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
 }));
 // The Device Folder is one backup location of the engine. P5.7A owns the
 // browser picker, provider callbacks and typed Device Folder storage composition.
-DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze<Parameters<typeof BackupActionsHostModule.createDeviceBackup>[0]>({
+type DeviceBackupCompositionInput=Parameters<typeof BackupActionsHostModule.createDeviceBackup>[0];
+DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze<DeviceBackupCompositionInput>({
   module:DeviceBackupModule,storageModule:DeviceFolderStorageModule,
   configuration:Object.freeze({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
   engine:BackupProviderRuntime,
   environment:Object.freeze({
     backgroundBlocker:()=>backgroundBlocker(),canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
-    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):undefined,
+    showDirectoryPicker:typeof Reflect.get(window,'showDirectoryPicker')==='function'?async options=>await Reflect.apply(Reflect.get(window,'showDirectoryPicker') as (...args:unknown[])=>Promise<unknown>,window,[options]) as Awaited<ReturnType<NonNullable<DeviceBackupCompositionInput['environment']['showDirectoryPicker']>>>:undefined,
     withLock:work=>navigator.locks?.request?navigator.locks.request(ProfileScope.scoped('study-director-device-folder-prepare'),{mode:'exclusive'},()=>work()):Promise.resolve().then(work)
   }),
   hooks:DeviceBackupHooks,
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
-  storage:Object.freeze({
-    identities:Object.freeze({prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+  storage:Object.freeze<DeviceBackupCompositionInput['storage']>({
+    identities:Object.freeze<DeviceBackupCompositionInput['storage']['identities']>({prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
     owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
-    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:Object.freeze<DeviceBackupCompositionInput['storage']['limits']>({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   })
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
   throw new Error('Study Director automatic device backup is unavailable or incompatible.');
 }
-StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createStorageReset>[0]>({
-  authority:Object.freeze({canMutate:()=>appCanMutate()}),
-  canonical:Object.freeze({
+type StorageResetInput=Parameters<typeof BackupRecoveryHostModule.createStorageReset>[0];
+StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<StorageResetInput>({
+  authority:Object.freeze<StorageResetInput['authority']>({canMutate:()=>appCanMutate()}),
+  canonical:Object.freeze<StorageResetInput['canonical']>({
     dailyRecordsList:()=>AppData.dailyRecords.list({strict:true}),notesReadFreshPayload:()=>AppData.notes.readFreshPayload(),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),
     planDataRead:()=>AppData.planData.read(),attachmentsList:()=>AttachmentStorage.list(),pendingReviewsList:()=>AppData.pendingReviews.list(),
     savedDayDeletions:()=>AppData.deletionRecovery.savedDays(),noteDeletions:()=>AppData.deletionRecovery.notes()
   }),
-  writeback:Object.freeze({
+  writeback:Object.freeze<StorageResetInput['writeback']>({
     installationKeep:()=>InstallationIdentity.keep(),notesRecover:()=>AppData.notes.recoverAfterStorageLoss(),planRewrite:()=>PlanData.rewriteAfterStorageReset(),
     settingsFlush:()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();},hasTasks:()=>TASKS.length>0,
-    writeLiveDraft:()=>writeLiveDraftNow({markChanged:false})
+    writeLiveDraft:async()=>{const result=await writeLiveDraftNow({markChanged:false});if(!result)throw new Error('Active Session write did not return a canonical result.');return result;}
   }),
   provider:Object.freeze({
     history:(id,options)=>BackupProviderRuntime.history(id,options),
@@ -3273,22 +3279,22 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<P
     list:()=>BackupProviderRuntime.list(),locationStatus:id=>BackupProviderRuntime.locationStatus(id),
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),connected:id=>BackupProviderRuntime.connected(id)
   }),
-  device:Object.freeze({
-    status:()=>DeviceBackup.status(),connect:()=>DeviceBackup.connect(),install:()=>DeviceBackup.install(),refreshPermission:()=>DeviceBackup.refreshPermission(),
-    rememberAfterStorageReset:()=>DeviceBackup.rememberAfterStorageReset()
+  device:Object.freeze<StorageResetInput['device']>({
+    status:()=>requireDeviceBackup().status(),connect:()=>requireDeviceBackup().connect(),install:()=>requireDeviceBackup().install(),refreshPermission:()=>requireDeviceBackup().refreshPermission(),
+    rememberAfterStorageReset:()=>requireDeviceBackup().rememberAfterStorageReset()
   }),
-  storage:Object.freeze({
+  storage:Object.freeze<StorageResetInput['storage']>({
     health:()=>readStorageHealth(),updateHealth:patch=>writeStorageHealth(patch),
     storedHealth:()=>AppData.local.getJson(STORAGE_KEYS.storageHealth,null),indexedDbLifecycle:()=>IndexedDb.lifecycle()
   }),
-  presentation:Object.freeze({
+  presentation:Object.freeze<StorageResetInput['presentation']>({
     restoreChoices:()=>backupRestoreChoices(),openRestore:()=>openBackupRestore(),confirm:options=>Interactions.confirm(options),notify:options=>Interactions.notify(options),
     emit:event=>NoticeCoordinator.emit(event),resolve:(source,id)=>NoticeCoordinator.resolveEvent(source,id),subscribe:listener=>NoticeCoordinator.subscribe(listener)
   }),
-  ownership:Object.freeze({announceStorageReset:detectedAt=>AppOwnership.announceStorageReset(detectedAt)}),
-  mutation:Object.freeze({settled:()=>AppMutationCoordinator.settled()}),background:Object.freeze({wake:reason=>wakeBackgroundOperations(reason)}),
-  session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession(),suspend:()=>suspendTodaySession()}),
-  view:Object.freeze({refreshAfterWriteback:()=>{refreshNoteConsumers();renderSched();}}),readiness:Object.freeze({reconcileStartupChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock()}),
+  ownership:Object.freeze<StorageResetInput['ownership']>({announceStorageReset:detectedAt=>AppOwnership.announceStorageReset(detectedAt)}),
+  mutation:Object.freeze<StorageResetInput['mutation']>({settled:()=>AppMutationCoordinator.settled()}),background:Object.freeze<StorageResetInput['background']>({wake:reason=>wakeBackgroundOperations(reason)}),
+  session:Object.freeze<StorageResetInput['session']>({hasBlocking:()=>hasBlockingActiveSession(),suspend:()=>suspendTodaySession()}),
+  view:Object.freeze({refreshAfterWriteback:()=>{refreshNoteConsumers();renderSched();}}),readiness:Object.freeze<StorageResetInput['readiness']>({reconcileStartupChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock()}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   environment:Object.freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)})
 }));
