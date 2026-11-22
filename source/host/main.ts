@@ -3367,7 +3367,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze<RecoveryHos
     planDraft:()=>PlanData.readDraft(),planInputValue:()=>PlanDraftEditor.authoredText(),quiesce:operation=>ManagedRecoveryQuiescence.run(operation),
     savePlanDraft:async options=>await PlanDraftEditor.save(options?.force?{strictDurability:true}:undefined),settleAttachmentWriters:options=>settleAttachmentWriters(options),settlePlan:()=>PlanData.settled(),writeLiveDraft:async()=>{const result=await writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true});if(!result)throw new Error('Recovery session write did not return a canonical result.');return result;}
   }),
-  managedRecovery:ManagedRecoveryModule,
+  managedRecovery:Object.freeze<RecoveryHostInput['managedRecovery']>({createCoordinator:ManagedRecoveryModule.createCoordinator}),
   mutation:Object.freeze<RecoveryHostInput['mutation']>({run:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
   providers:Object.freeze<RecoveryHostInput['providers']>({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
