@@ -1476,7 +1476,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
             <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="profile-act ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
             <ul class="profile-status-items" id="profile-status-items"></ul>
           </div>
-          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><span class="profile-row-actions"><button class="profile-act ui-btn" id="profile-drive-sync" type="button" data-action="sync-status-action" data-sync-action="sync-now" hidden>Sync now</button><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
           <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span></span><button class="profile-act ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></div>
           <button class="profile-row profile-link-row" type="button" data-action="sync-status-action" data-sync-action="open-data"><span class="profile-row-text"><span class="profile-row-label">Backup details</span><span class="profile-row-value">Versions and backup files in Library → Data</span></span><span class="profile-chevron" aria-hidden="true"></span></button>
         </div>
@@ -2922,7 +2922,7 @@ function togglePause(){const result=togglePauseTimer();sendSessionChangeSoon(Tim
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
 function notifyBackupChange(change){
-  try{BackupProviderRuntime?.noteChange(Object.freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')}));return true;}
+  try{BackupProviderRuntime?.noteChange(Object.freeze({urgent:change?.urgent===true,typed:change?.typed===true,reason:String(change?.reason||'change')}));return true;}
   catch(error){AppDiagnostics.capture('backup.change-provider',error,'warn');return false;}
 }
 // Changes still waiting for an automatic backup go out at once when the app
@@ -4530,7 +4530,7 @@ function writeActiveSessionNow(snapshot,options={}){
   return saveActiveSession(session,options);
 }
 function saveActiveSession(session,options){
-  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
+  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true,typed:options.typed===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
@@ -5433,8 +5433,11 @@ function handleCanonicalCommit(event){
     const badgeActive=event.operation==='delete'?false:persistedActiveSessionUnfinished(event.value);
     if(NativeCapabilities.status().badgeActive!==badgeActive)void NativeCapabilities.updateBadge(badgeActive);
   }
+  // A Saved Day change is a key moment (Save Today, a restore); typing in a
+  // note or a reflection goes up once the typing pauses.
   if(event?.backupCapture!==true)notifyBackupChange({
-    urgent:event&&event.entityType==='dailyRecord',
+    urgent:!!event&&event.entityType==='dailyRecord'&&event.typed!==true,
+    typed:!!event&&(event.entityType==='note'||event.typed===true),
     reason:String(event&&event.entityType||'canonical-commit')
   });
   if(referencesChanged&&event?.backupCapture!==true){
@@ -6757,9 +6760,18 @@ function renderSyncStatusPanel(model){
   const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
   const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
   const primary=document.getElementById('profile-status-primary');
-  // Sync now (shown only while waiting) is a quiet link beside the sentence;
-  // Try again keeps the full button.
-  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}}
+  // Sync now is in the Google Drive row while signed in (owner, 2026-11-22),
+  // so the sentence keeps only Try again.
+  const shown=!!model.action&&model.action.action!=='sync-now';
+  if(primary){primary.hidden=!shown;if(shown){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;}}
+  // Greyed while a sync runs, except one waiting for another device's turn,
+  // which Sync now goes ahead of.
+  const syncNow=document.getElementById('profile-drive-sync');
+  if(syncNow){
+    const working=model.ring==='syncing'&&!model.slow;
+    syncNow.hidden=!BackupProviderRuntime.locationStatus('google-drive')?.connected;
+    syncNow.disabled=working||model.ring==='blocked'||model.ring==='offline';syncNow.textContent=working?'Syncing…':'Sync now';
+  }
   // Rebuilt only when the items change, so a focused button keeps focus.
   const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
   if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
@@ -6803,7 +6815,8 @@ function renderProfilePanel(){
   const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
   if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
-  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
+  // Signed in, Disconnect is the quieter button beside Sync now.
+  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.classList.toggle('profile-act-muted',!!drive?.connected);driveAction.disabled=!!drive?.engineBusy;}
   const passwordValue=document.getElementById('profile-password-value'),passwordAction=document.getElementById('profile-password-action');
   if(passwordValue)passwordValue.textContent=protection.enabled?(protection.unlocked?'On':'On · Not entered on this device yet'):'Off';
   if(passwordAction)passwordAction.textContent=protection.enabled?(protection.unlocked?'Change…':'Enter…'):'Set…';
@@ -6830,7 +6843,7 @@ function renderProfile(){renderProfileBadge();renderProfilePanel();}
 function openProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
   const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
-  dialog.showModal();renderProfilePanel();NotificationRecent.opened();return true;
+  dialog.showModal();renderProfilePanel();scheduleSyncStatus();NotificationRecent.opened();return true;
 }
 function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
 function installProfileDialogs(){
@@ -7190,7 +7203,9 @@ function updateHeaderInfo(){
   const sbDate=document.getElementById('sb-date');if(sbDate)sbDate.textContent=`${dowShort} · ${monShort} ${dd} · ${yyyy}`;
   const statusDate=document.getElementById('status-date');if(statusDate)statusDate.textContent=`${dowShort} ${monShort} ${dd}`;
   const schedTitle=document.getElementById('sched-title');if(schedTitle)schedTitle.textContent=`${dowFull} · ${monFull} ${dd}`;
-  const rptDate=document.getElementById('review-date');if(rptDate)rptDate.textContent=`${dowFull} · ${monFull} ${dd}`;
+  // The Review heading names the day under review (setReviewDateTitle), not
+  // the clock's: writing today's date here showed "Sunday · Nov 22" over
+  // Saturday's reflection.
   document.title=`STUDY DIRECTOR · ${monShort} ${dd}`;
   const workBlocks=TASKS.filter(isWorkBlock);
   const totalMin=workBlocks.reduce((a,t)=>a+positiveMinutes(t.dur),0);
@@ -8379,13 +8394,14 @@ const DailyReflectionPersistence=(()=>{
     const current=await AppData.dailyRecords.get(date),currentCanonical=String(current?.reflection||'');
     if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     if(currentCanonical===candidate)return snapshot(current);
-    const backupCapture=options.backupCapture===true,hasContent=!!String(candidate||'').trim();
-    if(current?.recordKind==='study')await AppData.dailyRecords.save({...current,reflection:candidate,updatedAt:new Date().toISOString()},{backupCapture});
+    // typed: the reflection's editor saving as it is typed (not a deletion).
+    const backupCapture=options.backupCapture===true,typed=options.typed===true,hasContent=!!String(candidate||'').trim();
+    if(current?.recordKind==='study')await AppData.dailyRecords.save({...current,reflection:candidate,updatedAt:new Date().toISOString()},{backupCapture,typed});
     else if(hasContent){
       const diary=createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
       if(!diary)throw new Error('Daily Reflection failed canonical validation.');
-      await AppData.dailyRecords.save(diary,{backupCapture});
-    }else if(current?.recordKind==='diary')await AppData.dailyRecords.remove(date,{backupCapture});
+      await AppData.dailyRecords.save(diary,{backupCapture,typed});
+    }else if(current?.recordKind==='diary')await AppData.dailyRecords.remove(date,{backupCapture,typed});
     const fresh=await AppData.dailyRecords.get(date);
     if(hasContent&&String(fresh?.reflection||'')!==candidate)throw new Error('Daily Reflection did not pass its save read-back check.');
     if(!hasContent&&current?.recordKind==='study'&&(!fresh||fresh.recordKind!=='study'||String(fresh.reflection||'').trim()))throw new Error('Daily Reflection clear did not pass its save read-back check.');
@@ -8413,7 +8429,7 @@ const LibraryDiaryEditor=(()=>{
   async function write(field,state,value,options={}){
     const candidate=clampEditorContent(value,APP_LIMITS.maxReflectionChars);
     if(!editorContentWithinLimits(candidate))throw new Error('Diary reflection exceeds the rich-text limit.');
-    const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true}),fresh=saved.record;
+    const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true,typed:true}),fresh=saved.record;
     state.canonical=saved.canonical;state.revision=saved.revision;state.recordKind=saved.recordKind||'diary';
     field.dataset.diaryRevision=String(state.revision);richTextSyncField(field);state.onSaved?.(fresh);return fresh;
   }

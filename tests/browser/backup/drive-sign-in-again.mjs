@@ -70,6 +70,21 @@ try{
   await tap(a);await waitFor(()=>connected(a),{label:'signed in with the right account',timeout:20000});await settled(a,'A');
   result.checks.otherAccountRefused=true;
 
+  // Signed in, the profile panel's Google Drive row offers Sync now beside a
+  // quieter Disconnect (owner, 2026-11-22). Sync now sends waiting changes at
+  // once, before typing's 10 s pause would, and the panel stays open.
+  await a.evaluate(`document.getElementById('profile-tag').click()`);
+  await waitFor(()=>a.evaluate(`document.getElementById('profile-dialog').open`),{label:'profile panel open'});
+  await waitFor(()=>a.evaluate(`(()=>{const button=document.getElementById('profile-drive-sync');return !!button&&!button.hidden&&!button.disabled&&button.textContent==='Sync now';})()`),{label:'Sync now offered',timeout:15000});
+  assert.equal(await a.evaluate(`document.getElementById('profile-drive-action').classList.contains('profile-act-muted')`),true,'Disconnect is the quieter button');
+  const beforeSyncNow=uploadsBy('A');await writeNote(a,'sync-now','sent with Sync now');const pressed=Date.now();
+  await a.evaluate(`document.getElementById('profile-drive-sync').click()`);
+  await waitFor(()=>uploadsBy('A')>beforeSyncNow,{label:'Sync now uploads',timeout:15000,interval:200});
+  assert.ok(Date.now()-pressed<8000,'Sync now sends the change at once');
+  assert.equal(await a.evaluate(`document.getElementById('profile-dialog').open`),true,'the panel stays open to show the sync');
+  await a.evaluate(`document.getElementById('profile-dialog').close()`);await settled(a,'A');
+  result.checks.profileSyncNow=true;
+
   // Disconnect signs this device out only: Google's permission is kept, and
   // connecting again goes straight back to the profile's account. Pressed
   // while a sync runs here, it stops that sync safely first (it used to do

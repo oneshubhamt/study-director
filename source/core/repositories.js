@@ -151,12 +151,13 @@ registry.define('repositories',1,()=>{
     function seedChangeClock(value){const ms=Date.parse(String(value||''));if(Number.isFinite(ms))changeClockMs=Math.max(changeClockMs,ms);return changeClockMs?new Date(changeClockMs).toISOString():'';}
     // startup: written while the app starts, not by the person or a sync.
     // settingsOnly: personal settings alone, no plans.
-    function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false,startup=false,settingsOnly=false}={}){
+    // typed: a reflection being typed (its editor's save), not a key moment.
+    function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false,startup=false,settingsOnly=false,typed=false}={}){
       try{
         onCanonicalCommit(freeze({
           format:'study-director.canonical-commit',contractVersion:1,
           entityType:String(entityType||''),operation:operation==='delete'?'delete':'upsert',
-          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true,startup:startup===true,settingsOnly:settingsOnly===true
+          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true,startup:startup===true,settingsOnly:settingsOnly===true,typed:typed===true
         }));
       }catch(error){capture('repository.canonical-commit-hook',error,'error');}
     }
@@ -838,7 +839,7 @@ async function idbDeleteActiveSession(ownershipToken=null){
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical=null}={}){
+async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical=null,typed=false}={}){
   let ownershipToken;
   try{ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
@@ -873,7 +874,7 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
       // strict disk-commit semantics. Periodic timer snapshots stay default.
       await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected);idbSaved=true;
       clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
-      reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
+      reportCanonicalCommit('activeSession','upsert',clean,{backupCapture,typed});
     }catch(e){
       if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:false}};
       idbError=e;
@@ -1100,7 +1101,7 @@ async function storeDailyRecord(rec,options={}){
     await idbPut(clean,{markDirty:true,ownershipToken});
     assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
     cleanupCommittedDailyRecords([clean]);
-    reportCanonicalCommit('dailyRecord','upsert',null,{backupCapture:options.backupCapture===true});
+    reportCanonicalCommit('dailyRecord','upsert',null,{backupCapture:options.backupCapture===true,typed:options.typed===true});
     stored=true;return freeze({ok:true,storage:'indexeddb'});
   }
   catch(e){
@@ -1281,7 +1282,7 @@ async function removeDailyRecord(date,options={}){
       if(!fallbackCleared&&!staged)throw LocalStorageContract.lastError||new Error('DailyRecord fallback cleanup failed.');
       if(!rollback&&fallbackCleared)clearDeletionRecoveryKeys([recoveryKey]);
       confirmDailyRecordStorage();
-      if(!rollback)reportCanonicalCommit('dailyRecord','delete');
+      if(!rollback)reportCanonicalCommit('dailyRecord','delete',null,{typed:options.typed===true});
       if(fallbackHadRecord&&!(result&&result.changed))InsightsDatasetRevision.invalidateVolatile('fallback-daily-record-delete');
       removed=true;
     }catch(e){

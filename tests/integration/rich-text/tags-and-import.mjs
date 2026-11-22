@@ -38,6 +38,12 @@ assert.equal(rich.renameTag(value,'absent','other'),value,'a note without the ta
 assert.equal(rich.renameTag('Plain #Revise.','revise','review'),'Plain #review.');
 assert.throws(()=>rich.renameTag(value,'revise','not a tag'),/start with a letter/);
 
+// A note has two heading levels, so ### and deeper become level 2; a list
+// whose every item is a task is a checklist (a list mixing tasks and other
+// items keeps "[ ]" as text); • bullets are a list (owner, 2026-11-22).
+assert.equal(text.markdownToHtml('#### Four\n\n- [ ] todo\n- [x] done\n\n• one\n• two'),
+  '<h2>Four</h2><ul data-sd-checklist="true"><li role="checkbox" aria-checked="false"><p>todo</p></li><li role="checkbox" aria-checked="true"><p>done</p></li></ul><ul><li><p>one</p></li><li><p>two</p></li></ul>');
+assert.equal(text.looksLikeMarkdown('• one\n• two'),true,'• bullets on two lines read as Markdown');
 // Markdown for import: structure and styles become HTML for the paste cleaner;
 // what a note cannot hold stays as written.
 const html=text.markdownToHtml([
@@ -48,7 +54,7 @@ const html=text.markdownToHtml([
 assert.equal(html,[
   '<h1>Title</h1>',
   '<p>Some <em>em</em>, <strong>bold</strong>, <s>gone</s>, <mark>marked</mark> and snake_case_word code *x*<br>next <a href="https://a.com">web</a> [rel](other.md) ![img](a.png) <a href="https://b.com">https://b.com</a></p>',
-  '<h2>Sub</h2><p><strong>Deep</strong></p>',
+  '<h2>Sub</h2><h2>Deep</h2>',
   '<ul><li><p>one</p></li><li><p>two</p><ul><li><p>nested</p></li></ul></li><li><p>[ ] task</p></li></ul>',
   '<ol><li><p>first</p></li><li><p>second</p></li></ol>',
   '<blockquote><p>quote<br>more</p></blockquote><hr>',

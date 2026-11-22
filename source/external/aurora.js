@@ -605,7 +605,9 @@ html[data-presentation="aurora"][data-theme="dark"] #pane-execute .cd-card.pause
 html[data-presentation="aurora"][data-theme="dark"] #pane-execute .cd-card #cd{filter:drop-shadow(0 0 36px rgba(165,180,252,.32))}
 html[data-presentation="aurora"] #pane-execute .cd-card::before{opacity:0}
 
-html[data-presentation="aurora"][data-theme="light"] :is(#pane-execute .cd-card,#pane-review .review-hero){
+/* A plain selector list, not :is() (see core.css DIRECTOR LIGHT · LAYERS). */
+html[data-presentation="aurora"][data-theme="light"] #pane-execute .cd-card,
+html[data-presentation="aurora"][data-theme="light"] #pane-review .review-hero{
   color-scheme:dark;
   --sd-color-text-primary:#ffffff;--sd-color-text-secondary:#e6e3ff;--sd-color-text-tertiary:#ffffff;--sd-color-text-muted:#cfc9fb;
   --sd-color-text-secondary-strong:#f3f1ff;--sd-color-text-accessible-muted:#f0eeff;

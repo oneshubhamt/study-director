@@ -44,7 +44,7 @@ registry.define('backup-provider',1,input=>{
   const VERIFIED_HISTORY_READ_CONCURRENCY=8;
   const RECENT_HISTORY_TTL_MS=30*1000;
   const VERIFIED_HISTORY_INTERPRETATION_VERSION='managed-history-v1:'+APP_VERSION;
-  const {publicationRenewMs:PUBLICATION_RENEW_MS,publicationStaleMs:PUBLICATION_STALE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
+  const {publicationRenewMs:PUBLICATION_RENEW_MS,publicationStaleMs:PUBLICATION_STALE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticTypedMs:AUTOMATIC_TYPED_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
   const PROVIDER_RECOVERY_MAINTENANCE_POLL_MS=500,PROVIDER_RECOVERY_MAINTENANCE_YIELD_MS=MAINTENANCE_MAX_AGE_MS+PROVIDER_RECOVERY_MAINTENANCE_POLL_MS;
   const SESSION_CLAIM_FORMAT='study-director.active-session-claim',SESSION_CLAIM_VERSION=4,SESSION_CLAIM_MAX_BYTES=4096,SESSION_OWNER_PATTERN=/^inst_[a-z0-9_]{8,128}$/iu,SESSION_CLAIM_TOKEN_PATTERN=/^[a-f0-9]{64}$/u,SESSION_HANDOFF_TOKEN_PATTERN=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
   const MAINTENANCE_MIN_CHECKPOINT_DELETES=16,MAINTENANCE_MAX_CHECKPOINT_DELETES=128,MAINTENANCE_MAX_OBJECT_DELETES=48,PROVIDER_CONVERGENCE_BUSY_RETRY_MS=15*1000,PROVIDER_CONVERGENCE_RETRY_DELAYS=freeze([30*1000,2*60*1000,10*60*1000,30*60*1000]);
@@ -1028,7 +1028,7 @@ registry.define('backup-provider',1,input=>{
   const automaticByProvider=new Map();
   function automaticState(selected){
     const id=safeId(selected&&selected.id);let state=automaticByProvider.get(id);
-    if(!state){state={connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN};automaticByProvider.set(id,state);}
+    if(!state){state={connected:false,noticeShown:false,waitingSince:NaN,urgentSince:NaN,typedAt:NaN};automaticByProvider.set(id,state);}
     return state;
   }
   // A change noted while the app runs is a real edit. Before the first one,
@@ -1055,20 +1055,24 @@ registry.define('backup-provider',1,input=>{
     const covered=automaticCovered(selected);return Number.isFinite(current)&&(!Number.isFinite(covered)||current>covered);
   }
   // A backup restarts the countdown: changes made while it ran wait a full
-  // cadence from its end, except a key moment made after the capture.
+  // cadence from its end, except a key moment or typing made after the
+  // capture, which keep their own, shorter deadline.
   function restartAutomaticCountdown(selected,sourceRevision){
     const at=Date.parse(String(sourceRevision||'')),state=automaticState(selected);
     const waiting=automaticNeeded(selected);state.waitingSince=waiting?Date.now():NaN;
     if(!waiting||!(state.urgentSince>at))state.urgentSince=NaN;
+    if(!waiting||!(state.typedAt>at))state.typedAt=NaN;
   }
   // When a location's waiting changes are due: AUTOMATIC_QUIET_MS after the
-  // first one, sooner after a key moment or before a sign-in runs out. NaN
-  // when the waiting changes were found rather than seen (on start or on
-  // reconnect): those go at once.
+  // first one, sooner after a key moment, once typing (a note or a
+  // reflection) has paused for AUTOMATIC_TYPED_MS, or before a sign-in runs
+  // out. NaN when the waiting changes were found rather than seen (on start
+  // or on reconnect): those go at once.
   function automaticDueAt(selected){
     const state=automaticState(selected);if(!Number.isFinite(state.waitingSince))return NaN;
     let due=state.waitingSince+AUTOMATIC_QUIET_MS,expiresAt=NaN;
     if(Number.isFinite(state.urgentSince))due=Math.min(due,state.urgentSince+AUTOMATIC_URGENT_MS);
+    if(Number.isFinite(state.typedAt))due=Math.min(due,state.typedAt+AUTOMATIC_TYPED_MS);
     try{expiresAt=Number(selected.connectionExpiresAt?.());}catch(error){AppDiagnostics.capture('backup-provider.connection-expiry',error,'warn');}
     if(Number.isFinite(expiresAt)&&expiresAt>0)due=Math.min(due,expiresAt-AUTOMATIC_EXPIRY_LEAD_MS);
     return due;
@@ -1077,17 +1081,20 @@ registry.define('backup-provider',1,input=>{
     const deadline=automaticDueAt(selected),at=Number(eligibleAt);
     return automaticNeeded(selected)&&Number.isFinite(deadline)&&Number.isFinite(at)&&deadline>at+50;
   }
-  function scheduleAutomaticBackup(selected,{urgent=false}={}){
+  // Typing moves its deadline with every edit (it waits for a pause); the
+  // first change's 20-minute deadline and a key moment's never move.
+  function scheduleAutomaticBackup(selected,{urgent=false,typed=false}={}){
     if(!automaticNeeded(selected)||!providerConnected(selected))return false;
     const job=providerConvergenceJob(selected);if(!job)return false;
     const state=automaticState(selected),now=Date.now();
     if(!Number.isFinite(state.waitingSince))state.waitingSince=now;
     if(urgent&&!Number.isFinite(state.urgentSince))state.urgentSince=now;
+    if(typed)state.typedAt=now;
     return job.schedule(Math.max(0,automaticDueAt(selected)-now),urgent?'important-change':'automatic','earliest');
   }
   function noteChange(change={}){
-    const urgent=change&&change.urgent===true;changeNoted=true;
-    for(const selected of providers.values())scheduleAutomaticBackup(selected,{urgent});
+    const urgent=change&&change.urgent===true,typed=!urgent&&change&&change.typed===true;changeNoted=true;
+    for(const selected of providers.values())scheduleAutomaticBackup(selected,{urgent,typed});
     notifyStatus();return true;
   }
   // Back up waiting changes now (the app going to the background, an update
@@ -2337,7 +2344,7 @@ registry.define('backup-provider',1,input=>{
   // backups stay where they are.
   async function forgetProvider(selected){
     sessionWatchByProvider.delete(selected.id);
-    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);overtakenByProvider.delete(selected.id);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
+    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN,typedAt:NaN});await discardProviderPublication(selected);overtakenByProvider.delete(selected.id);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
   // Resolves true once no backup operation runs, false after timeoutMs.
   function whenIdle(timeoutMs){

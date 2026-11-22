@@ -55,8 +55,9 @@ assert.doesNotMatch(coreCss,/text-transform:uppercase/u,'capitalisation is a typ
 assert.match(coreCss,/--sd-type-caps-tracking-scale:1;/u,'Director keeps its capitals tracking through the shared scale.');
 assert.match(glassCss,/--sd-type-caps-tracking-scale:0;/u,'Glass drops capitals tracking through the shared scale rather than per-selector patches.');
 
-assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] :is\(#pane-execute \.cd-card,#pane-review \.review-hero,#pane-plan \.si\.active \.si-card\)\{\s*color-scheme:dark;[\s\S]*?--sd-color-accent-primary:#e8ff00;/u,'Director Light heroes are dark instrument islands that re-declare the semantic roles their children read.');
-assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="light"\] :is\(#pane-execute \.cd-card,#pane-review \.review-hero\)\{\s*color-scheme:dark;/u,'Glass Light heroes are colour islands rather than recoloured light surfaces.');
+// A plain selector list, not :is() (owner's Chrome, 2026-11-22).
+assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #pane-execute \.cd-card,\nhtml\[data-theme="light"\]\[data-presentation="director-current"\] #pane-review \.review-hero,\nhtml\[data-theme="light"\]\[data-presentation="director-current"\] #pane-plan \.si\.active \.si-card\{\s*color-scheme:dark;[\s\S]*?--sd-color-accent-primary:#e8ff00;/u,'Director Light heroes are dark instrument islands that re-declare the semantic roles their children read.');
+assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="light"\] #pane-execute \.cd-card,\nhtml\[data-presentation="glass"\]\[data-theme="light"\] #pane-review \.review-hero\{\s*color-scheme:dark;/u,'Glass Light heroes are colour islands rather than recoloured light surfaces.');
 assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #pane-plan \.si\.active \.si-card:hover:not\(\.no-hover\)\{background:var\(--card-bg\)\}/u,'the dark active Plan row keeps its island background on hover so its light text stays readable.');
 assert.match(glassCss,/@property --sd-aurora-a\{syntax:"<color>"/u,'Glass aurora colours are registered so area moods interpolate.');
 assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::before\{--sd-aurora-a:/u,'each area sets its own Glass atmosphere.');

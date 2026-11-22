@@ -280,12 +280,12 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
 // right day.
 async function writeReflection(pending,options={}){
   if(pending.mode==='session'){
-    const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true});
+    const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true,typed:true});
     if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
     return result;
   }
   const expected=reflectionOnlyState.date===pending.date?reflectionOnlyState.canonical:'';
-  const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
+  const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true,typed:true});
   reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
   if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();}
   markStorageHealthTimestamp('lastStudyDataSaveAt');await refreshLibraryAfterSave(pending.date);return saved;

@@ -48,6 +48,8 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   return {
     clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
+    // A save while typing in a note or a reflection.
+    type:()=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({typed:true});},
     expire:()=>{expiresAt=clock.now();listener?.();},
     signIn:(lifetime=59*MINUTE)=>{authorized=true;expiresAt=clock.now()+lifetime;listener?.();},
     notices:(id='permission')=>emitted.filter(raw=>raw.source==='google-drive'&&raw.id===id),
@@ -331,5 +333,47 @@ const cases=[];
   assert.equal(attempts,7,'six refusals, each retried within about 15 s, then the upload goes through');
   assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').retryBackoffCapped??false,false);
   cases.push('cleanup busy retries soon, never on the failure backoff');
+}
+{
+  // Typing in a note or a reflection: each save moves its deadline, so
+  // nothing goes up while the person types, and it goes up 10 s after the
+  // last save (owner, 2026-11-22). Background wakes meanwhile do not upload.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,10*1000);
+  assert.equal(t.policy.automaticTypedMs,10*1000,'typing goes up 10 s after it pauses');
+  let last=0;
+  for(let i=0;i<20;i++){t.type();last=t.clock.now();await tick(t,3000);if(i%4===0)t.runtime.wakeBackground('foreground-released');}
+  assert.equal(t.publishedAt.length,0,'a minute of typing with short pauses uploads nothing');
+  // One-second steps: work a timer starts is stamped at the end of its step.
+  await tick(t,5000);assert.equal(t.publishedAt.length,0,'nor 8 s after the last save');
+  for(let i=0;i<10&&!t.publishedAt.length;i++)await tick(t,1000);
+  assert.equal(t.publishedAt.length,1,'it goes up once the typing has paused for 10 s');
+  assert.ok(t.publishedAt[0]-last>=10*1000&&t.publishedAt[0]-last<=11*1000,'10 s after the last save: '+(t.publishedAt[0]-last));
+  await tick(t,30*MINUTE);assert.equal(t.publishedAt.length,1,'and once');
+  cases.push('typing goes up once, 10 s after it pauses');
+}
+{
+  // Typing that never pauses for 10 s still goes up within 20 minutes of the
+  // first save, as any change does.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,10*1000);
+  const start=t.clock.now();
+  while(t.clock.now()-start<21*MINUTE){t.type();await tick(t,5000);}
+  assert.ok(t.publishedAt.length>=1,'non-stop typing still goes up');
+  assert.ok(t.publishedAt[0]-start>=20*MINUTE&&t.publishedAt[0]-start<=20*MINUTE+6000,'within 20 minutes of the first save');
+  cases.push('non-stop typing goes up within 20 minutes');
+}
+{
+  // A save made while an upload runs goes up 10 s after it, not 20 minutes
+  // later; a key moment still goes up within 3 s.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);let release=null;
+  t.onPublication(()=>new Promise(resolve=>{release=resolve;}));t.type();await tick(t,11*1000);
+  assert.equal(t.publishedAt.length,1,'the first upload is running');assert.ok(release);
+  t.type();const typedAt=t.clock.now();t.onPublication(noop);release();await tick(t,5000);
+  assert.equal(t.publishedAt.length,1,'the save made during it waits for its pause');
+  for(let i=0;i<10&&t.publishedAt.length<2;i++)await tick(t,1000);
+  assert.equal(t.publishedAt.length,2,'and goes up 10 s after it');
+  assert.ok(t.publishedAt[1]-typedAt>=10*1000&&t.publishedAt[1]-typedAt<=11*1000,'10 s after: '+(t.publishedAt[1]-typedAt));
+  t.type();await tick(t,1000);t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);
+  assert.equal(t.publishedAt.length,3,'a key moment during typing still goes up within 3 s');
+  cases.push('a save during an upload goes up 10 s after it; key moments stay at 3 s');
 }
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

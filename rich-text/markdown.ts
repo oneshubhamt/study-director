@@ -25,10 +25,10 @@ function markdownBlock(node:any,options:{assetPath?:(assetId:string)=>string}={}
 export function markdownDocument(doc:any,text='',options:{assetPath?:(assetId:string)=>string}={}){if(!doc){const plain=normalizePlainText(text).trimEnd();return plain?escapeMarkdownText(plain)+'\n':''}const markdown=(doc.content||[]).map((node:any)=>markdownBlock(node,options)).join('\n').replace(/\n{3,}/g,'\n\n').trimEnd();return markdown?markdown+'\n':''}
 
 // Plain pasted text that is clearly Markdown, as chat tools and many web
-// editors copy it: a `# ` heading, list markers on two or more lines,
+// editors copy it: a `# ` heading, list markers (or • bullets) on two or more lines,
 // **bold**, a code fence pair, a table, or a [link](https://…). A #tag, a
 // single dash line, `__init__`, an emoticon or ordinary text is not.
-const MD_PASTE_HEADING=/^ {0,3}#{1,6}[ \t]+\S/,MD_PASTE_ITEM=/^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/,MD_PASTE_FENCE=/^ {0,3}(?:`{3,}|~{3,})/;
+const MD_PASTE_HEADING=/^ {0,3}#{1,6}[ \t]+\S/,MD_PASTE_ITEM=/^ {0,3}(?:[-*+•◦▪‣]|\d{1,9}[.)])[ \t]+\S/,MD_PASTE_FENCE=/^ {0,3}(?:`{3,}|~{3,})/;
 const MD_PASTE_TABLE_RULE=/^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/,MD_PASTE_BOLD=/\*\*(?=\S)[^*\n]*\S\*\*/,MD_PASTE_LINK=/\[[^\]\n]+\]\((?:https?:\/\/|mailto:)[^)\s]+\)/i;
 export function looksLikeMarkdown(text:unknown){
   const source=String(text??''),lines=source.split(/\r\n?|\n/);
@@ -40,12 +40,14 @@ export function looksLikeMarkdown(text:unknown){
 }
 
 // Markdown read for import. Headings, paragraphs (their line breaks kept),
-// lists, quotes, rules, tables and inline styles become HTML for the editor's
-// paste cleaner. What a note cannot hold stays as the text it was written as:
-// images, links that are not web, mail or phone addresses, and the markers of
-// task lists. Code keeps its lines and indentation as plain text.
-const MD_FENCE=/^ {0,3}(`{3,}|~{3,})/,MD_HEADING=/^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/,MD_SETEXT=/^ {0,3}(=+|-+)[ \t]*$/,MD_RULE=/^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,MD_QUOTE=/^ {0,3}> ?/,MD_ITEM=/^( *)([-*+]|\d{1,9}[.)])(?:[ \t]+(.*))?$/,MD_TABLE_RULE=/^ *\|? *:?-+:? *(?:\| *:?-+:? *)*\|? *$/;
-const MAX_IMPORTED_TABLE=15,WEB_ADDRESS=/^(?:https?:\/\/|mailto:|tel:)/i,WORD_CHAR=/[\p{L}\p{N}]/u;
+// lists (also with • bullets, as text copied from a page has them), task
+// lists (as checklists), quotes, rules, tables and inline styles become HTML
+// for the editor's paste cleaner. A note has two heading levels: ### and
+// deeper become level 2. What a note cannot hold stays as the text it was
+// written as: images, and links that are not web, mail or phone addresses.
+// Code keeps its lines and indentation as plain text.
+const MD_FENCE=/^ {0,3}(`{3,}|~{3,})/,MD_HEADING=/^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/,MD_SETEXT=/^ {0,3}(=+|-+)[ \t]*$/,MD_RULE=/^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/,MD_QUOTE=/^ {0,3}> ?/,MD_ITEM=/^( *)([-*+•◦▪‣]|\d{1,9}[.)])(?:[ \t]+(.*))?$/,MD_TABLE_RULE=/^ *\|? *:?-+:? *(?:\| *:?-+:? *)*\|? *$/;
+const MD_TASK=/^\[([ xX])\](?:[ \t]+|$)/,MAX_IMPORTED_TABLE=15,WEB_ADDRESS=/^(?:https?:\/\/|mailto:|tel:)/i,WORD_CHAR=/[\p{L}\p{N}]/u;
 function leadingSpaces(line:string){return line.length-line.trimStart().length}
 function tableCells(line:string){return line.trim().replace(/^\|/,'').replace(/(?<!\\)\|$/,'').split(/(?<!\\)\|/).map(cell=>cell.trim().replace(/\\\|/g,'|'))}
 function startsBlock(line:string){return MD_FENCE.test(line)||MD_HEADING.test(line)||MD_RULE.test(line)||MD_QUOTE.test(line)||MD_ITEM.test(line)}
@@ -73,22 +75,27 @@ function markdownInlineHtml(text:string):string{
   return out;
 }
 function markdownListHtml(lines:string[],start:number):[string,number]{
+  // A list goes on while its items use the same bullet (or the same "." or
+  // ")" after a number), as Markdown reads it: "- a" then "• b" are two lists.
   const first=MD_ITEM.exec(lines[start]!)!,indent=first[1]!.length,ordered=/\d/.test(first[2]!),items:string[][]=[];let index=start,width=0;
+  const marker=(value:string)=>/\d/.test(value)?value.slice(-1):value,same=(value:string)=>marker(value)===marker(first[2]!);
   while(index<lines.length){
     const line=lines[index]!,item=MD_ITEM.exec(line);
-    if(item&&item[1]!.length===indent&&!MD_RULE.test(line)){if(/\d/.test(item[2]!)!==ordered)break;items.push([item[3]||'']);width=item[2]!.length+1;index++;continue}
+    if(item&&item[1]!.length===indent&&!MD_RULE.test(line)){if(!same(item[2]!))break;items.push([item[3]||'']);width=item[2]!.length+1;index++;continue}
     if(!line.trim()){
       let next=index+1;while(next<lines.length&&!lines[next]!.trim())next++;
       const after=next<lines.length?lines[next]!:'',sibling=MD_ITEM.exec(after);
-      if(next<lines.length&&(leadingSpaces(after)>indent||(sibling&&sibling[1]!.length===indent&&/\d/.test(sibling[2]!)===ordered))){items.at(-1)!.push('');index++;continue}
+      if(next<lines.length&&(leadingSpaces(after)>indent||(sibling&&sibling[1]!.length===indent&&same(sibling[2]!)))){items.at(-1)!.push('');index++;continue}
       break;
     }
     if(leadingSpaces(line)>indent){items.at(-1)!.push(line.slice(Math.min(leadingSpaces(line),indent+width)));index++;continue}
     if(items.at(-1)!.at(-1)?.trim()&&!startsBlock(line)){items.at(-1)!.push(line.trim());index++;continue}
     break;
   }
-  const tag=ordered?'ol':'ul';
-  return [`<${tag}>${items.map(item=>`<li>${markdownBlocksHtml(item)}</li>`).join('')}</${tag}>`,index];
+  // A list whose every item starts "[ ]" or "[x]" is a checklist.
+  const tag=ordered?'ol':'ul',tasks=!ordered&&items.every(item=>MD_TASK.test(item[0]!));
+  if(!tasks)return [`<${tag}>${items.map(item=>`<li>${markdownBlocksHtml(item)}</li>`).join('')}</${tag}>`,index];
+  return [`<ul data-sd-checklist="true">${items.map(item=>`<li role="checkbox" aria-checked="${/[xX]/.test(MD_TASK.exec(item[0]!)![1]!)}">${markdownBlocksHtml([item[0]!.replace(MD_TASK,''),...item.slice(1)])}</li>`).join('')}</ul>`,index];
 }
 function markdownBlocksHtml(lines:string[]):string{
   let html='',index=0,paragraph:string[]=[];
@@ -101,7 +108,7 @@ function markdownBlocksHtml(lines:string[]):string{
       while(index<lines.length&&!close.test(lines[index]!))body.push(lines[index++]!);index++;
       html+=`<p>${body.map(row=>escapeHtml(row).replace(/^ +/,spaces=>'\u00a0'.repeat(spaces.length))).join('<br>')}</p>`;continue;
     }
-    if((match=MD_HEADING.exec(line))){flush();const level=match[1]!.length,text=markdownInlineHtml(match[2]||'');html+=level<=2?`<h${level}>${text}</h${level}>`:`<p><strong>${text}</strong></p>`;index++;continue}
+    if((match=MD_HEADING.exec(line))){flush();const level=match[1]!.length,text=markdownInlineHtml(match[2]||'');html+=`<h${Math.min(level,2)}>${text}</h${Math.min(level,2)}>`;index++;continue}
     if(paragraph.length&&(match=MD_SETEXT.exec(line))){const level=match[1]![0]==='='?1:2;html+=`<h${level}>${paragraph.map(row=>markdownInlineHtml(row.trim())).join(' ')}</h${level}>`;paragraph=[];index++;continue}
     if(MD_RULE.test(line)){flush();html+='<hr>';index++;continue}
     if(MD_QUOTE.test(line)){flush();const body:string[]=[];while(index<lines.length&&MD_QUOTE.test(lines[index]!))body.push(lines[index++]!.replace(MD_QUOTE,''));html+=`<blockquote>${markdownBlocksHtml(body)}</blockquote>`;continue}

@@ -82,7 +82,7 @@ session running on another device, app update ready, no backup in over a week.
 - **Headline:** one sentence, for example "Synced at 12:04. This device is up to date."
 - **When next:** "Uploads by 12:24, or when you leave the app" (from the
   automatic-backup schedule), "Next try at 12:10", or "Checks Google Drive again
-  when you return to the app". A button only when something waits (owner, 2026-11-08): **Sync now** while this device waits for another device's upload (it uploads without waiting for that turn) or retries after a failure, and **Try again** once retries ran out. None while syncing works normally. The first-sync card shows the same Sync now on its upload step while waiting.
+  when you return to the app". A button only when something waits (owner, 2026-11-08): **Sync now** while this device waits for another device's upload (it uploads without waiting for that turn) or retries after a failure, and **Try again** once retries ran out. None while syncing works normally. The first-sync card shows the same Sync now on its upload step while waiting. Since 2026-11-22 (owner) the panel's Google Drive row has **Sync now** whenever the device is signed in, beside a quieter Disconnect: it catches up with Drive and uploads at once (going ahead of another device's turn), greyed and reading "Syncing…" while a sync runs (not while it waits for another device), and greyed offline or while a password or update is needed. The sentence then shows only Try again, so there is one Sync now.
 - **Needs you:** one row per item with its own button — Sign in, Enter password,
   Update app, Review (sync), Review (kept versions), Allow access (Device Folder),
   Details (storage, backup check, Device Folder failing), Go to Execute (session
