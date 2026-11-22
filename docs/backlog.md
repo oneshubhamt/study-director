@@ -48,7 +48,7 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 4. Faster backups limit the damage whatever the cause: a loss costs only what has not reached Drive or the Device Folder yet (items 18 and 22 once stopped Drive backups for up to 30 minutes).
 5. Still to explain: why the phone on 11-05 showed no automatic recovery (perhaps nothing survived that said data had been there).
 
-**From the 2026-11-17 diagnostics, to check next.** Why no "Database before last loss" record was kept, although localStorage survived (`Local storage health` and the profile list are there): the record may be written only after the start's first count, or skipped for a database it did not see open before. Whether the owner saw "Browser data was cleared" this time. Why the Drive formats row reads `unknown` with a connected, verified Drive (F30 needs it to read `ready`).
+**From the 2026-11-17 diagnostics, to check next.** Why no "Database before last loss" record was kept, although localStorage survived (`Local storage health` and the profile list are there). Simulated in Chromium on 2026-11-22: a database deleted while the app is closed keeps the record, also for a second loss with no cold start in between (each start writes its record once the tab controls the data, and its first write counts as data held). So the gap is in the device, not in the record's rules: Copy diagnostics on that device after the next loss. Whether the owner saw "Browser data was cleared" this time. The Drive formats row and Format cleanup belong to F29 (F30 has neither): read them on each device while it still runs F29.
 
 **Related.**
 
