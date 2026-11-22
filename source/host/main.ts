@@ -3615,7 +3615,8 @@ async function copyBackupDiagnostics(){
   }
 }
 // App-specific DOM handlers are installed only through the private startup/lifecycle coordinator.
-const CLICK_ACTIONS=Object.freeze({
+type DelegatedHostInput=Parameters<typeof FoundationHostModule.createDelegated>[0];
+const CLICK_ACTIONS:DelegatedHostInput['CLICK_ACTIONS']=Object.freeze({
   'recheck-device-integrity':()=>requestRepositoryIntegrityRecheck('device-folder'),
   'recheck-drive-integrity':()=>requestRepositoryIntegrityRecheck('google-drive'),
   'apply-pwa-update': applyPwaUpdateFromUi,
@@ -3627,7 +3628,7 @@ const CLICK_ACTIONS=Object.freeze({
   'connect-device-backup': ()=>BackupActions.connectDevice(),
   'backup-now': ()=>BackupActions.backUpEverywhere(),
   'cancel-device-backup': ()=>BackupActions.cancelDevice(),
-  'toggle-backup-settings': ev=>BackupActions.toggleSettings(ev.target.closest('[data-backup-settings]')?.dataset.backupSettings),
+  'toggle-backup-settings': ev=>BackupActions.toggleSettings(ev.target instanceof Element?ev.target.closest<HTMLElement>('[data-backup-settings]')?.dataset['backupSettings']:undefined),
   'disconnect-device-backup': ()=>BackupActions.disconnectDevice(),
   'open-version-history': ()=>BackupActions.openHistory(),
   'connect-drive-backup': ()=>BackupActions.connectDrive(),
@@ -3640,7 +3641,7 @@ const CLICK_ACTIONS=Object.freeze({
   'compare-managed-note': ev=>BackupRecoveryHost.history.recover(ev),
   'remove-managed-version': ev=>BackupRecoveryHost.history.removeVersion(ev),
   'toggle-pause': togglePause,
-  'practice-mode': ev=>PracticePacer.setSetupMode(ev.target.closest('[data-practice-mode]')?.dataset.practiceMode),
+  'practice-mode': ev=>PracticePacer.setSetupMode(ev.target instanceof Element?ev.target.closest<HTMLElement>('[data-practice-mode]')?.dataset['practiceMode']:undefined),
   'practice-total-toggle': ()=>PracticePacer.toggleTotal(),
   'practice-cue-toggle': ()=>PracticePacer.toggleCueMode(),
   'practice-start': ()=>PracticePacer.start(),
@@ -3666,7 +3667,7 @@ const CLICK_ACTIONS=Object.freeze({
   'toggle-copy-report-menu': toggleCopyReportMenu,
   'reset-copy-report': resetCopyReportSelection,
   'render-library': LibraryView.render,
-  'open-library-day': ev=>LibraryView.openDay(ev.target.closest('[data-library-date]')?.dataset.libraryDate),
+  'open-library-day': ev=>LibraryView.openDay(ev.target instanceof Element?ev.target.closest<HTMLElement>('[data-library-date]')?.dataset['libraryDate']:undefined),
   'export-backup': ()=>BackupActions.exportLocal(),
   'clear-library': LibraryView.clearAll,
   'backup-protection': ()=>BackupActions.manageProtection(),
@@ -3726,14 +3727,14 @@ const CLICK_ACTIONS=Object.freeze({
   'toggle-display-tools': toggleDisplayTools,
   'toggle-fullscreen': toggleFS
 });
-const CHANGE_ACTIONS=Object.freeze({
+const CHANGE_ACTIONS:DelegatedHostInput['CHANGE_ACTIONS']=Object.freeze({
   'render-library': ()=>LibraryView.render(),
   'import-backup': ev=>BackupActions.importLocal(ev),
   'change-reflection-date': ()=>requireReviewSavedDayRuntime().selectReviewDate(),
   'sound-mode': handleSoundModeChange,
-  'keep-screen-awake': ev=>CapabilityInstallation.setKeepAwake(ev.target.checked)
+  'keep-screen-awake': ev=>CapabilityInstallation.setKeepAwake(ev.target instanceof HTMLInputElement&&ev.target.checked)
 });
-const INPUT_ACTIONS=Object.freeze({
+const INPUT_ACTIONS:DelegatedHostInput['INPUT_ACTIONS']=Object.freeze({
   'first-start-password': ()=>FirstStart.confirmField(),
   'pnote-progress': onPnoteChange,
   'save-reflection': event=>queueReviewSave({event}),
@@ -3743,11 +3744,11 @@ const INPUT_ACTIONS=Object.freeze({
   'unfinished-note': ()=>{syncUnfinishedNoteDraft();ReviewView.sync();},
   'practice-setup': ()=>PracticePacer.previewSetup()
 });
-const BLUR_ACTIONS=Object.freeze({
+const BLUR_ACTIONS:DelegatedHostInput['BLUR_ACTIONS']=Object.freeze({
   'profile-name': finishProfileRename,
   'save-reflection': ()=>{void flushPendingReviewSave().catch(error=>AppDiagnostics.capture('review.blur-flush',error,'warn'));}
 });
-const KEYDOWN_ACTIONS=Object.freeze({
+const KEYDOWN_ACTIONS:DelegatedHostInput['KEYDOWN_ACTIONS']=Object.freeze({
   'profile-name': handleProfileNameKey,
   'first-start': e=>FirstStart.key(e),
   'gap-split': handleInactiveGapSplitKey,
@@ -3772,16 +3773,16 @@ const ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS=new Set(['import-backup']);
 const ACTIVE_SESSION_BLOCKED_IDS=new Set([]);
 const ACTIVE_SESSION_DISABLED_REASON='Suspend or reset today’s active session to restore a backup or clear Library data.';
 const BlockedActionHint=(()=>{
-  let popover=null,target=null,controller=null,installed=false;
-  const blockedTarget=eventTarget=>eventTarget instanceof Element?eventTarget.closest('[data-ownership-ui-reason="active-session"]'):null;
+  let popover:HTMLDivElement|null=null,target:HTMLElement|null=null,controller:ReturnType<typeof RichTextApi.createAnchoredPopover>|null=null,installed=false;
+  const blockedTarget=(eventTarget:EventTarget|null)=>eventTarget instanceof Element?eventTarget.closest<HTMLElement>('[data-ownership-ui-reason="active-session"]'):null;
   const clearTarget=()=>{if(target?.getAttribute('aria-describedby')==='ownership-blocked-popover')target.removeAttribute('aria-describedby');target=null;};
-  const hide=(element=null)=>{if(element&&target!==element)return;controller?.hide();clearTarget();};
+  const hide=(element:HTMLElement|null=null)=>{if(element&&target!==element)return;controller?.hide();clearTarget();};
   const ensure=()=>{
     if(popover)return;
     popover=document.createElement('div');popover.id='ownership-blocked-popover';popover.className='ownership-blocked-popover';popover.setAttribute('role','tooltip');document.body.append(popover);
-    controller=RichTextApi.createAnchoredPopover(popover,{align:'center',manual:true,onClose:clearTarget});
+    controller=RichTextApi.createAnchoredPopover(popover,{align:'start',manual:true,onClose:clearTarget});
   };
-  const showFor=element=>{if(!element||element.dataset.ownershipUiReason!=='active-session')return false;ensure();if(target!==element)hide();target=element;popover.textContent=ACTIVE_SESSION_DISABLED_REASON;element.setAttribute('aria-describedby','ownership-blocked-popover');controller.show(element);return true;};
+  const showFor=(element:HTMLElement|null)=>{if(!element||element.dataset['ownershipUiReason']!=='active-session')return false;ensure();if(target!==element)hide();target=element;popover!.textContent=ACTIVE_SESSION_DISABLED_REASON;element.setAttribute('aria-describedby','ownership-blocked-popover');controller!.show(element);return true;};
   const install=()=>{
     if(installed)return false;installed=true;
     document.addEventListener('pointerover',event=>{const element=blockedTarget(event.target);if(!element)return;const previous=event.relatedTarget;if(previous instanceof Node&&element.contains(previous))return;showFor(element);},true);
@@ -3793,9 +3794,12 @@ const BlockedActionHint=(()=>{
   return Object.freeze({install,showFor,hide});
 })();
 const OwnershipUiProjection=(()=>{
-  const TRANSITIONAL_STATES=new Set([
-    OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,
-    OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
+  type OwnershipStateValue=ReturnType<typeof AppOwnership.status>['state'];
+  type OwnershipUiElement=HTMLElement&Partial<Pick<HTMLInputElement,'disabled'|'readOnly'>>;
+  type OwnershipBaseline=Readonly<{disabled:boolean|null;readOnly:boolean|null;draggable:string|null;ariaDisabled:string|null;ariaReadonly:string|null}>;
+  type OwnershipUiSnapshot=Readonly<{format:'study-director.ownership-ui-snapshot';contractVersion:1;state:OwnershipStateValue;canMutate:boolean;activeSessionBlocked:boolean;transitional:boolean;revision:number;reason:string}>;
+  const TRANSITIONAL_STATES=new Set<OwnershipStateValue>([
+    OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
   ]);
   const ACTION_BINDINGS=Object.freeze([
     Object.freeze({attribute:'data-action',actions:OWNER_REQUIRED_CLICK_ACTIONS}),
@@ -3808,17 +3812,14 @@ const OwnershipUiProjection=(()=>{
     '.task-note-field','[data-quality]','[data-draft-field]','[data-draft-action]','[data-owner-mutation]',
     '#review-list input','#review-list textarea','#ns-nudge-after','#ns-break'
   ]);
-  const BLOCKED_EVENT_TYPES=Object.freeze(['beforeinput','input','change','paste','cut','drop','dragstart']);
-  const baselines=new WeakMap();
-  let current=Object.freeze({
-    format:'study-director.ownership-ui-snapshot',contractVersion:1,
-    state:OWNERSHIP_STATES.SECONDARY,canMutate:false,activeSessionBlocked:false,transitional:false,revision:0,
-    reason:'Ownership has not been established yet.'
+  const BLOCKED_EVENT_TYPES:readonly string[]=Object.freeze(['beforeinput','input','change','paste','cut','drop','dragstart']);
+  const baselines=new WeakMap<OwnershipUiElement,OwnershipBaseline>();
+  let current:OwnershipUiSnapshot=Object.freeze({
+    format:'study-director.ownership-ui-snapshot',contractVersion:1,state:OWNERSHIP_STATES.SECONDARY,canMutate:false,activeSessionBlocked:false,transitional:false,revision:0,reason:'Ownership has not been established yet.'
   });
-  let observer=null;
-  let applyQueued=false;
+  let observer:MutationObserver|null=null,applyQueued=false;
 
-  function reasonFor(state){
+  function reasonFor(state:OwnershipStateValue){
     if(state===OWNERSHIP_STATES.PRIMARY)return 'This tab has control.';
     if(state===OWNERSHIP_STATES.HYDRATING)return 'Reloading canonical data before this tab becomes writable.';
     if(state===OWNERSHIP_STATES.ACQUIRING)return 'Acquiring exclusive control.';
@@ -3827,144 +3828,67 @@ const OwnershipUiProjection=(()=>{
     if(state===OWNERSHIP_STATES.FAULTED)return 'Ownership could not be established safely.';
     return 'Another tab has control.';
   }
-  function createSnapshot(){
-    const status=AppOwnership.status();
-    const transitional=TRANSITIONAL_STATES.has(status.state);
-    const mutationBlocked=PwaRuntime.reservationActive()||!!(AppMutationCoordinator&&AppMutationCoordinator.blocksUi());
-    return Object.freeze({
-      format:'study-director.ownership-ui-snapshot',contractVersion:1,
-      state:status.state,
-      canMutate:!mutationBlocked&&!transitional&&status.state===OWNERSHIP_STATES.PRIMARY&&appCanMutate(),
-      activeSessionBlocked:hasBlockingActiveSession(),
-      transitional:transitional||mutationBlocked,
-      revision:Math.max(0,Number(status.revision)||0),
-      reason:mutationBlocked?'A protected data operation is in progress.':reasonFor(status.state)
-    });
+  function createSnapshot():OwnershipUiSnapshot{
+    const status=AppOwnership.status(),transitional=TRANSITIONAL_STATES.has(status.state),mutationBlocked=PwaRuntime.reservationActive()||requireMutationCoordinator().blocksUi();
+    return Object.freeze({format:'study-director.ownership-ui-snapshot',contractVersion:1,state:status.state,canMutate:!mutationBlocked&&!transitional&&status.state===OWNERSHIP_STATES.PRIMARY&&appCanMutate(),activeSessionBlocked:hasBlockingActiveSession(),transitional:transitional||mutationBlocked,revision:Math.max(0,Number(status.revision)||0),reason:mutationBlocked?'A protected data operation is in progress.':reasonFor(status.state)});
   }
-  function candidateElements(root:ParentNode=document){
-    const found=new Set();
-    const elementRoot=root&&root.nodeType===1?root:null;
-    const queryRoot=root&&typeof root.querySelectorAll==='function'?root:document;
-    const addBoundElement=element=>{
-      ACTION_BINDINGS.forEach(binding=>{
-        if(binding.actions.has(element.getAttribute(binding.attribute)||''))found.add(element);
-      });
-    };
+  function candidateElements(root:ParentNode=document):OwnershipUiElement[]{
+    const found=new Set<OwnershipUiElement>(),elementRoot=root instanceof HTMLElement?root as OwnershipUiElement:null,queryRoot=root&&typeof root.querySelectorAll==='function'?root:document;
+    const addBoundElement=(element:OwnershipUiElement)=>{ACTION_BINDINGS.forEach(binding=>{if(binding.actions.has(element.getAttribute(binding.attribute)||''))found.add(element);});};
     if(elementRoot)addBoundElement(elementRoot);
-    queryRoot.querySelectorAll('[data-action],[data-change],[data-input],[data-blur],[data-keydown]').forEach(addBoundElement);
-    DIRECT_SELECTORS.forEach(selector=>{
-      if(elementRoot&&elementRoot.matches(selector))found.add(elementRoot);
-      queryRoot.querySelectorAll(selector).forEach(element=>found.add(element));
-    });
-    queryRoot.querySelectorAll('.si.draft[draggable]').forEach(element=>found.add(element));
+    queryRoot.querySelectorAll<OwnershipUiElement>('[data-action],[data-change],[data-input],[data-blur],[data-keydown]').forEach(addBoundElement);
+    DIRECT_SELECTORS.forEach(selector=>{if(elementRoot&&elementRoot.matches(selector))found.add(elementRoot);queryRoot.querySelectorAll<OwnershipUiElement>(selector).forEach(element=>found.add(element));});
+    queryRoot.querySelectorAll<OwnershipUiElement>('.si.draft[draggable]').forEach(element=>found.add(element));
     return [...found];
   }
-  function captureBaseline(element){
-    if(baselines.has(element))return baselines.get(element);
-    const baseline=Object.freeze({
-      disabled:'disabled' in element?!!element.disabled:null,
-      readOnly:'readOnly' in element?!!element.readOnly:null,
-      draggable:element.getAttribute('draggable'),
-      ariaDisabled:element.getAttribute('aria-disabled'),
-      ariaReadonly:element.getAttribute('aria-readonly')
-    });
-    baselines.set(element,baseline);
-    return baseline;
+  function captureBaseline(element:OwnershipUiElement):OwnershipBaseline{
+    const prior=baselines.get(element);if(prior)return prior;
+    const baseline=Object.freeze({disabled:typeof element.disabled==='boolean'?element.disabled:null,readOnly:typeof element.readOnly==='boolean'?element.readOnly:null,draggable:element.getAttribute('draggable'),ariaDisabled:element.getAttribute('aria-disabled'),ariaReadonly:element.getAttribute('aria-readonly')});
+    baselines.set(element,baseline);return baseline;
   }
-  function restoreAttribute(element,name,value){
-    if(value===null){if(element.hasAttribute(name))element.removeAttribute(name);}
-    else if(element.getAttribute(name)!==value)element.setAttribute(name,value);
-  }
-  function releaseElement(element){
+  function restoreAttribute(element:OwnershipUiElement,name:string,value:string|null){if(value===null){if(element.hasAttribute(name))element.removeAttribute(name);}else if(element.getAttribute(name)!==value)element.setAttribute(name,value);}
+  function releaseElement(element:OwnershipUiElement){
     const baseline=baselines.get(element);
     if(baseline){
       if(baseline.disabled!==null&&element.disabled!==baseline.disabled)element.disabled=baseline.disabled;
       if(baseline.readOnly!==null&&element.readOnly!==baseline.readOnly)element.readOnly=baseline.readOnly;
-      restoreAttribute(element,'draggable',baseline.draggable);
-      restoreAttribute(element,'aria-disabled',baseline.ariaDisabled);
-      restoreAttribute(element,'aria-readonly',baseline.ariaReadonly);
-      baselines.delete(element);
+      restoreAttribute(element,'draggable',baseline.draggable);restoreAttribute(element,'aria-disabled',baseline.ariaDisabled);restoreAttribute(element,'aria-readonly',baseline.ariaReadonly);baselines.delete(element);
     }
     BlockedActionHint.hide(element);
-    if(element.dataset.ownershipUi!==undefined)delete element.dataset.ownershipUi;
-    if(element.dataset.ownershipUiReason!==undefined)delete element.dataset.ownershipUiReason;
+    if(element.dataset['ownershipUi']!==undefined)delete element.dataset['ownershipUi'];
+    if(element.dataset['ownershipUiReason']!==undefined)delete element.dataset['ownershipUiReason'];
   }
-  function projectionMode(element){
+  function projectionMode(element:OwnershipUiElement){
     if(element.matches('.si.draft[draggable]'))return 'drag';
     if(element.matches('textarea,input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"])'))return 'readonly';
     if(element.matches('button,select,input,[aria-pressed]'))return 'disabled';
     return 'action';
   }
-  function blockElement(element,reason='ownership'){
-    captureBaseline(element);
-    const mode=projectionMode(element);
-    element.dataset.ownershipUiReason=reason;
-    if(element.dataset.ownershipUi!==mode)element.dataset.ownershipUi=mode;
-    if(mode==='readonly'){
-      if(!element.readOnly)element.readOnly=true;
-      if(element.getAttribute('aria-readonly')!=='true')element.setAttribute('aria-readonly','true');
-      return;
-    }
-    if(mode==='disabled'){
-      if(!element.disabled)element.disabled=true;
-      if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');
-      return;
-    }
-    if(mode==='drag'&&element.draggable)element.draggable=false;
-    if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');
+  function blockElement(element:OwnershipUiElement,reason='ownership'){
+    captureBaseline(element);const mode=projectionMode(element);element.dataset['ownershipUiReason']=reason;if(element.dataset['ownershipUi']!==mode)element.dataset['ownershipUi']=mode;
+    if(mode==='readonly'){if(!element.readOnly)element.readOnly=true;if(element.getAttribute('aria-readonly')!=='true')element.setAttribute('aria-readonly','true');return;}
+    if(mode==='disabled'){if(!element.disabled)element.disabled=true;if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');return;}
+    if(mode==='drag'&&element.draggable)element.draggable=false;if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');
   }
-  function blockedByActiveSession(element){
-    if(!current.activeSessionBlocked)return false;
-    if(ACTIVE_SESSION_BLOCKED_IDS.has(element.id))return true;
-    if(ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS.has(element.getAttribute('data-action')||''))return true;
-    return ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS.has(element.getAttribute('data-change')||'');
-  }
+  function blockedByActiveSession(element:OwnershipUiElement){if(!current.activeSessionBlocked)return false;if(ACTIVE_SESSION_BLOCKED_IDS.has(element.id))return true;if(ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS.has(element.getAttribute('data-action')||''))return true;return ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS.has(element.getAttribute('data-change')||'');}
   function apply(root:ParentNode=document){
-    const previousCanMutate=current.canMutate;
-    current=createSnapshot();
-    const page=document.documentElement;
-    const mutable=current.canMutate?'1':'0',revision=String(current.revision);
-    if(page.dataset.studyDirectorUiMutable!==mutable)page.dataset.studyDirectorUiMutable=mutable;
-    if(page.dataset.studyDirectorUiState!==current.state)page.dataset.studyDirectorUiState=current.state;
-    if(page.dataset.studyDirectorUiRevision!==revision)page.dataset.studyDirectorUiRevision=revision;
-    candidateElements(root).forEach(element=>{
-      if(!current.canMutate){blockElement(element,'ownership');return;}
-      if(blockedByActiveSession(element)){blockElement(element,'active-session');return;}
-      releaseElement(element);
-    });
+    const previousCanMutate=current.canMutate;current=createSnapshot();const page=document.documentElement,mutable=current.canMutate?'1':'0',revision=String(current.revision);
+    if(page.dataset['studyDirectorUiMutable']!==mutable)page.dataset['studyDirectorUiMutable']=mutable;
+    if(page.dataset['studyDirectorUiState']!==current.state)page.dataset['studyDirectorUiState']=current.state;
+    if(page.dataset['studyDirectorUiRevision']!==revision)page.dataset['studyDirectorUiRevision']=revision;
+    candidateElements(root).forEach(element=>{if(!current.canMutate){blockElement(element,'ownership');return;}if(blockedByActiveSession(element)){blockElement(element,'active-session');return;}releaseElement(element);});
     if(previousCanMutate!==current.canMutate){queueMicrotask(()=>richTextSyncAll());if(current.canMutate){schedulePwaUpdateCheck(250);schedulePwaUpdateEvaluation(250);}else clearPwaUpdateCheckTimer();}
     return current;
   }
-  function queueApply(){
-    if(applyQueued)return;
-    applyQueued=true;
-    Promise.resolve().then(()=>{applyQueued=false;apply();});
+  function queueApply(){if(applyQueued)return;applyQueued=true;Promise.resolve().then(()=>{applyQueued=false;apply();});}
+  function mutationNeedsProjection(mutation:MutationRecord){if(mutation.type==='attributes')return mutation.target instanceof HTMLElement&&!!mutation.target.dataset['ownershipUi'];return [...mutation.addedNodes].some(node=>node?.nodeType===1);}
+  function guardEvent(event:Event){
+    const target=event.target instanceof Element?event.target.closest<HTMLElement>('[data-ownership-ui]'):null;if(!target)return;
+    const activeSessionReason=target.dataset['ownershipUiReason']==='active-session';if(current.canMutate&&!activeSessionReason)return;const mode=target.dataset['ownershipUi'];
+    if(event.type==='click'&&mode!=='action')return;if(event.type!=='click'&&!BLOCKED_EVENT_TYPES.includes(event.type))return;
+    event.preventDefault();event.stopImmediatePropagation();if(event.type==='click'&&!activeSessionReason)AppOwnership.requirePrimary('use this control');
   }
-  function mutationNeedsProjection(mutation){
-    if(mutation.type==='attributes')return !!mutation.target?.dataset?.ownershipUi;
-    return [...mutation.addedNodes].some(node=>node&&node.nodeType===1);
-  }
-  function guardEvent(event){
-    const target=event.target&&event.target.closest&&event.target.closest('[data-ownership-ui]');
-    if(!target)return;
-    const activeSessionReason=target.dataset.ownershipUiReason==='active-session';
-    if(current.canMutate&&!activeSessionReason)return;
-    const mode=target.dataset.ownershipUi;
-    if(event.type==='click'&&mode!=='action')return;
-    if(event.type!=='click'&&!BLOCKED_EVENT_TYPES.includes(event.type))return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if(event.type==='click'&&!activeSessionReason)AppOwnership.requirePrimary('use this control');
-  }
-  function install(){
-    if(observer)return false;
-    BLOCKED_EVENT_TYPES.forEach(type=>document.addEventListener(type,guardEvent,true));
-    document.addEventListener('click',guardEvent,true);
-    observer=new MutationObserver(mutations=>{if(mutations.some(mutationNeedsProjection))queueApply();});
-    observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','readonly','aria-disabled','aria-readonly','draggable']});
-    apply();
-    return true;
-  }
+  function install(){if(observer)return false;BLOCKED_EVENT_TYPES.forEach(type=>document.addEventListener(type,guardEvent,true));document.addEventListener('click',guardEvent,true);observer=new MutationObserver(mutations=>{if(mutations.some(mutationNeedsProjection))queueApply();});observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','readonly','aria-disabled','aria-readonly','draggable']});apply();return true;}
   function snapshot(){return current;}
   return Object.freeze({format:'study-director.ownership-ui-projection',contractVersion:1,apply,install,snapshot});
 })();
