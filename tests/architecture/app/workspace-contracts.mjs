@@ -21,10 +21,11 @@ console.log(JSON.stringify({status:'PASS',boundary:'attachment-references',hostC
 const app=readHostHtml();
 const backup=readScript('source/core/backup.ts');
 const provider=readScript('source/core/backup-provider.ts');
+const actionsHost=readScript('source/core/backup-actions-host.ts');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
 const notesHost=readScript('source/core/notes-host.ts');
 
-assert.match(app,/function applicableNotesForTask\(task\)\{return notesRuntime\(\)\.applicableForTask\(task\);\}/u,'host note presentation must remain a thin bridge to the checked notes owner');
+assert.match(app,/function applicableNotesForTask\(task\s*(?::\s*[^)]*)?\)\{return notesRuntime\(\)\.applicableForTask\(task\);\}/u,'host note presentation must remain a thin bridge to the checked notes owner');
 assert.match(notesHost,/function applicableForTask\(task/u,'checked notes owner must retain read-only task-note projection');
 assert.match(notesHost,/const exact=repository\.get\(exactKey\)/u,'viewing a note may read the current canonical note');
 assert.doesNotMatch(notesHost,/create\s*:\s*true/u,'read-only Note rendering must not create a noncanonical placeholder in the repository cache');
@@ -37,7 +38,8 @@ assert.match(exportFn,/message=cancelled\?'Backup export cancelled\.'[\s\S]*setL
 assert.doesNotMatch(exportFn,/setStatus\('library-status'/u,'standalone export must not leak its routine status to the bottom-of-Library global status surface');
 assert.doesNotMatch(backup,/Exports\s*\.status\s*\(\s*\)/u,'Backup runtime must not depend on the restricted Exports port exposing internal coordinator status');
 assert.doesNotMatch(backup,/document\s*\.|getElementById/u,'the backup runtime draws nothing: the app draws the file row from its status');
-assert.match(app,/if\(cancel\)cancel\.hidden=!\(exporting\|\|Exports\.status\(\)\.fileBusy\);/u,'one renderer decides the file row Cancel from export and file-processor state');
+assert.match(app,/function renderFileBackup\(\)\{return BackupActions\?\.renderFile\(\);\}/u,'host delegates file-row rendering to the checked backup-actions owner');
+assert.match(actionsHost,/if\(cancel\)cancel\.hidden=!\(exporting\|\|processing\.status\(\)\.fileBusy\);/u,'one checked renderer decides file-row Cancel from export and file-processor state');
 
 
 assert.match(app,/id="library-status"[^>]*role="status"[^>]*aria-live="polite"/u,'Library must retain a quiet generic status fallback surface');
