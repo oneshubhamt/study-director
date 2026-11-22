@@ -9192,7 +9192,9 @@ const PlanRuntime=PlanModule.createController(Object.freeze({ports:Object.freeze
     clearTimeout:id=>clearTimeout(id),
     setTimeout:(callback,delay)=>setTimeout(callback,delay)
   }),
-  previousDay:Object.freeze({holdsApply:()=>previousDayHoldsApply()})
+  // A previous day stored here always shows its panel ('previous'), so every
+  // other Apply goes ahead at once, as before.
+  previousDay:Object.freeze({holdsApply:()=>sessionPanelMode==='previous'&&!TASKS.length?previousDayHoldsApply():false})
 })}));
 if(!Object.isFrozen(PlanRuntime)||PlanRuntime.format!=='study-director.plan-controller'||PlanRuntime.contractVersion!==1){
   throw new Error('Study Director Plan controller is unavailable or incompatible.');

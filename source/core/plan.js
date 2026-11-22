@@ -596,7 +596,8 @@ function applySchedule(options={}){
     // A plan applied with no day loaded may replace a stored previous day;
     // one with work no Saved Day covers is asked about first.
     if(explicitSchedule!==null||TASKS.length)return proceed();
-    return Promise.resolve(ports.previousDay.holdsApply()).then(held=>held?false:proceed());
+    const held=ports.previousDay.holdsApply();
+    return held===false?proceed():Promise.resolve(held).then(value=>value?false:proceed());
   };
   if(opts.persistDraft===false)return apply();
   // A user-authored Plan may apply only after its exact working text was
