@@ -20,7 +20,8 @@ registry.define('plan',1,()=>{
     interactions:freeze(['confirm','input']),
     notifications:freeze(['begin','feedback']),
     overlays:freeze(['createAnchoredPopover']),
-    environment:freeze(['clearTimeout','setTimeout'])
+    environment:freeze(['clearTimeout','setTimeout']),
+    previousDay:freeze(['holdsApply'])
   });
   function createController(input){
     exactObject(input,['ports'],'Plan input');
@@ -37,6 +38,7 @@ registry.define('plan',1,()=>{
     requireFunctions(ports.interactions,PORT_FIELDS.interactions,'Plan interactions port');
     requireFunctions(ports.overlays,PORT_FIELDS.overlays,'Plan overlays port');
     requireFunctions(ports.environment,PORT_FIELDS.environment,'Plan environment port');
+    requireFunctions(ports.previousDay,PORT_FIELDS.previousDay,'Plan previous-day port');
     if(!Object.isFrozen(ports.configuration.limits)||!Object.isFrozen(ports.defaults.factory))throw new TypeError('Plan configuration and factory defaults must be frozen.');
 
     const APP_LIMITS=ports.configuration.limits;
@@ -579,11 +581,22 @@ function applySchedule(options={}){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
       return false;
     }
-    const draft=projection.draft,parsed=draft.parsed;
-    const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
-    return preparation&&typeof preparation.then==='function'
-      ?preparation.then(result=>finish(result,draft,parsed))
-      :finish(preparation,draft,parsed);
+    const proceed=()=>{
+      if(!canApply())return false;
+      if(!currentDraft()){
+        setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
+        return false;
+      }
+      const draft=projection.draft,parsed=draft.parsed;
+      const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
+      return preparation&&typeof preparation.then==='function'
+        ?preparation.then(result=>finish(result,draft,parsed))
+        :finish(preparation,draft,parsed);
+    };
+    // A plan applied with no day loaded may replace a stored previous day;
+    // one with work no Saved Day covers is asked about first.
+    if(explicitSchedule!==null||TASKS.length)return proceed();
+    return Promise.resolve(ports.previousDay.holdsApply()).then(held=>held?false:proceed());
   };
   if(opts.persistDraft===false)return apply();
   // A user-authored Plan may apply only after its exact working text was

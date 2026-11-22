@@ -4858,6 +4858,98 @@ function recheckStoredPreviousSession(){
   })();
   return previousSessionRecheck;
 }
+// A previous day this device ran, with work no Saved Day here covers. The
+// question waits until the app has started, and with Google Drive connected a
+// sync comes first: the day may have been continued and saved on another
+// device (owner, 2026-11-22: a day begun on the phone and worked on the
+// laptop was asked about on the phone, which had not yet seen the laptop's
+// save). Asked only if the day is still not covered. Before, the question held
+// startup, so no sync could come first.
+const PREVIOUS_DAY_SYNC_WAIT_MS=20000;
+let previousDayQuestion=null,previousDayAsked=0;
+function askAboutPreviousDay(session){
+  setSessionPanelMode('previous',session);
+  previousDayQuestion??=(async()=>{
+    const asked=previousDayAsked;
+    try{
+      await startupFinished();
+      const synced=await syncBeforePreviousDayQuestion();
+      // Asked meanwhile: Review Previous Day, or Apply.
+      if(previousDayAsked!==asked)return false;
+      return await askIfStillUncovered({checkDrive:!synced&&driveSignedOut()});
+    }catch(error){AppDiagnostics.capture('session.previous-day-question',error,'warn');return false;}
+    finally{previousDayQuestion=null;}
+  })();
+  return false;
+}
+async function askIfStillUncovered(options={}){
+  await AppMutationCoordinator.settled();
+  if(!appCanMutate()||TASKS.length)return false;
+  const loaded=await AppData.activeSession.load(0,{strict:true}),current=loaded?.ok&&!loaded.error?loaded.value:null;
+  if(!isPreviousActiveSessionRecord(current))return attemptAutoRestoreActiveSession();
+  if(await retireCoveredPreviousActiveSession(current))return false;
+  setSessionPanelMode('previous',current);
+  if(sessionFromElsewhere(current)||sessionHoldsNoWork(current))return false;
+  return handlePreviousActiveSession(current,options);
+}
+// Google ends a Drive sign-in after about an hour and only a tap renews it
+// (backup-and-sync.md), so a device waking in the morning is signed out. Its
+// question then offers that tap: Check Google Drive first signs in and syncs,
+// and a copy another device's save covers clears without another question.
+function driveSignedOut(){
+  const drive=BackupProviderRuntime.locationStatus('google-drive');
+  return !!drive&&!drive.connected&&navigator.onLine!==false&&(drive.wasConnected||!!Profiles.current()?.email);
+}
+async function checkDriveThenAsk(){
+  try{await connectDriveForProfile();}catch(error){AppDiagnostics.capture('session.previous-day-sign-in',error,'warn');}
+  await syncBeforePreviousDayQuestion();
+  return askIfStillUncovered();
+}
+async function startupFinished(){
+  const done=()=>{const status=StartupLifecycle.status();return status.failed||status.completedStages.includes('startup-ready');};
+  while(!done())await new Promise(resolve=>setTimeout(resolve,100));
+}
+// A sync, waited on until it finishes, stops (signed out, failed, or waiting
+// on a decision) or 20 s pass. False when Drive is not connected.
+async function syncBeforePreviousDayQuestion(){
+  const status=()=>BackupProviderRuntime.locationStatus('google-drive'),before=status();
+  if(!before?.connected||navigator.onLine===false)return false;
+  const syncedAt=before.sync?.syncedAt||'',failed=!!before.sync?.failed;
+  if(!BackupProviderRuntime.scheduleSharedSync('google-drive','previous-day'))return false;
+  for(const until=Date.now()+PREVIOUS_DAY_SYNC_WAIT_MS;Date.now()<until;){
+    await new Promise(resolve=>setTimeout(resolve,250));
+    const now=status(),sync=now?.sync;
+    if(!now?.connected||!sync)return false;
+    if(sync.syncedAt&&sync.syncedAt!==syncedAt)return true;
+    if(sync.review||sync.password||sync.newer||sync.failed&&!failed)return false;
+  }
+  return false;
+}
+// Today's plan never replaces, unasked, a previous day this device ran with
+// work no Saved Day covers (2026-11-22: after Keep stored, Apply replaced it
+// with no save). Apply asks first and goes ahead once the day is saved or
+// discarded. A plan-only copy, or a copy from another device, is replaced as
+// before.
+async function previousDayHoldsApply(){
+  if(TASKS.length)return false;
+  let session=null;
+  try{
+    const loaded=await AppData.activeSession.load(0,{strict:true});
+    if(!loaded?.ok||loaded.error)throw loaded?.error||new Error('The stored session could not be read.');
+    session=loaded.value||null;
+  }catch(error){
+    setPlanStatus('Today’s plan was not applied: the stored session could not be checked. '+(error?.message||String(error)),false);
+    return true;
+  }
+  if(!isPreviousActiveSessionRecord(session)||sessionFromElsewhere(session)||sessionHoldsNoWork(session))return false;
+  if(await retireCoveredPreviousActiveSession(session))return false;
+  await handlePreviousActiveSession(session,{applying:true});
+  if(TASKS.length)return true;
+  const after=await AppData.activeSession.load(0,{strict:true}).catch(()=>null);
+  if(after?.ok&&!after.error&&!isPreviousActiveSessionRecord(after.value))return false;
+  setPlanStatus(`Today’s plan was not applied: ${prettyDate(session.date)} is still stored here. Recover it in Review and save it, or discard it.`,false);
+  return true;
+}
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
   sessionPanelSession=['suspended','elsewhere','previous','finished'].includes(sessionPanelMode)?session:null;
@@ -4899,23 +4991,33 @@ async function recoverPreviousSessionForReview(session){
   await goTab('review',{source:'session-recovery',history:'none'});
   return true;
 }
-async function handlePreviousActiveSession(session){
+async function handlePreviousActiveSession(session,options={}){
+  const applying=options.applying===true;
   if(!isPreviousActiveSessionRecord(session))return false;
-  const remote=sessionFromElsewhere(session);
+  previousDayAsked+=1;
+  const remote=sessionFromElsewhere(session),checkDrive=options.checkDrive===true&&!applying;
   const choice=await Interactions.choose({
     title:'Previous study day needs review',
-    message:`Study Director found study evidence from ${prettyDate(session.date)}. It will not restart yesterday’s timer or transfer ownership.`,
-    details:[
+    message:applying
+      ?`${prettyDate(session.date)} has study work that no Saved Day holds. Today’s plan would replace it on this device.`
+      :`Study Director found study evidence from ${prettyDate(session.date)}. It will not restart yesterday’s timer or transfer ownership.`,
+    details:applying?[
+      'Recover opens it in Review without restarting its timer. Save it there, then apply today’s plan.',
+      'Discard removes it and applies today’s plan.'
+    ]:[
+      ...(checkDrive?['Google Drive is signed out here, so a save from another device may not show yet. Check Google Drive first signs in and looks.']:[]),
       'Recover opens the previous day in Review without restarting its timer.',
       remote?'This copy was last owned on another device. Review it here without using Continue Here.':'Keep stored preserves the recovery copy for later.',
       'A different or unproven Saved Day will never silently replace this evidence.'
     ],
-    cancelLabel:'Keep stored',
+    cancelLabel:applying?'Cancel':'Keep stored',
     choices:[
-      {value:'recover',label:'Recover in Review',kind:'primary',description:'Review and save the previous study day.'},
+      ...(checkDrive?[{value:'check',label:'Check Google Drive first',kind:'primary',description:'Sign in to Google Drive. If another device saved this day, this copy clears.'}]:[]),
+      {value:'recover',label:'Recover in Review',kind:checkDrive?'':'primary',description:'Review and save the previous study day.'},
       ...(!remote?[{value:'discard',label:'Discard session',kind:'danger',description:'Remove this unsaved local recovery copy after an explicit decision.'}]:[])
     ]
   });
+  if(choice==='check')return checkDriveThenAsk();
   // A dialog is not a storage lock. Reject choices against a session that
   // changed while the person was deciding, and verify durable retirement.
   let loaded=null;
@@ -5002,7 +5104,7 @@ async function attemptAutoRestoreActiveSession(){
     // the phone and worked on the laptop asked about the phone's empty copy):
     // kept quietly, cleared by a sync, replaced by today's plan.
     if(isPreviousActiveSessionRecord(session)&&sessionHoldsNoWork(session)){setSessionPanelMode('previous',session);return false;}
-    if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
+    if(isPreviousActiveSessionRecord(session))return askAboutPreviousDay(session);
     if(isFinishedActiveSession(session))return openFinishedSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
@@ -9089,7 +9191,8 @@ const PlanRuntime=PlanModule.createController(Object.freeze({ports:Object.freeze
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),
     setTimeout:(callback,delay)=>setTimeout(callback,delay)
-  })
+  }),
+  previousDay:Object.freeze({holdsApply:()=>previousDayHoldsApply()})
 })}));
 if(!Object.isFrozen(PlanRuntime)||PlanRuntime.format!=='study-director.plan-controller'||PlanRuntime.contractVersion!==1){
   throw new Error('Study Director Plan controller is unavailable or incompatible.');
@@ -9510,7 +9613,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       refreshPlanAfterSessionReset,renderInheritedNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
     }),
     notifications:NoticeCoordinator.presentation('review',Object.freeze({label:'Open Review',run:()=>goTab('review')})),
-    view:Object.freeze({markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave:async()=>{LibraryView.invalidate();return LibraryView.render();},refreshStorageFallbackWarning,setStatus,updateBadges}),
+    view:Object.freeze({markStorageHealthTimestamp,on,refreshLibraryAfterSave:async()=>{LibraryView.invalidate();return LibraryView.render();},refreshStorageFallbackWarning,setStatus,updateBadges}),
     interactions:Object.freeze({confirm:options=>Interactions.confirm(options),notify:options=>Interactions.notify({...options,source:'review'})}),
     environment:Object.freeze({cancelAnimationFrame,clearTimeout,requestAnimationFrame,setTimeout,todayISO})
   })

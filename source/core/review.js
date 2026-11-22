@@ -43,7 +43,7 @@ registry.define('review',1,()=>{
       'refreshPlanAfterSessionReset',
       'renderInheritedNotes','setPlanStatus','syncUnfinishedNoteDraft','unfinishedNoteDraftText'
     ]),
-    view:freeze(['markStorageHealthTimestamp','notifyUser','on','refreshLibraryAfterSave','refreshStorageFallbackWarning','setStatus','updateBadges']),
+    view:freeze(['markStorageHealthTimestamp','on','refreshLibraryAfterSave','refreshStorageFallbackWarning','setStatus','updateBadges']),
     interactions:freeze(['confirm','notify']),
     environment:freeze(['cancelAnimationFrame','clearTimeout','requestAnimationFrame','setTimeout','todayISO'])
   });
@@ -115,7 +115,7 @@ registry.define('review',1,()=>{
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
       refreshPlanAfterSessionReset,renderInheritedNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
     }=ports.notesDefaults;
-    const {markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave,refreshStorageFallbackWarning,setStatus,updateBadges}=ports.view;
+    const {markStorageHealthTimestamp,on,refreshLibraryAfterSave,refreshStorageFallbackWarning,setStatus,updateBadges}=ports.view;
     const {confirm,notify}=ports.interactions;
     const {cancelAnimationFrame,clearTimeout,requestAnimationFrame,setTimeout,todayISO}=ports.environment;
     let rolloverSaveInProgress=false;
@@ -529,7 +529,6 @@ async function saveDayRecord(options={}){
       reflectionLane.cancel();setReflectionRichSync('saved','Saved');
     }
     if(closesPriorDay){
-      Runtime.setSafetyMessage(`Recovered ${prettyDate(rec.date)} was saved to Library. Apply the current study-day schedule when ready.`);
       resetRuntimeSessionState({source:'recovered-day-close',date:todayISO()});
       clearReviewForNewDay();
       setSessionPanelMode('none');
@@ -631,8 +630,6 @@ async function handleStudyDayRollover(options={}){
         savedDay={date:rec.date,revision:doc.sourceRevision};
         markStorageHealthTimestamp('lastStudyDataSaveAt');
       }
-    }else{
-      Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
     }
     await runLifecycle('study-day-rollover',{
       scheduleIdentity:true,date:todayISO(),autoDate:true,review:true
@@ -648,10 +645,11 @@ async function handleStudyDayRollover(options={}){
       return true;
     });
     if(savedDay)markDayContentSaved(savedDay.date,savedDay.revision);
-    if(savedDay&&!quietSave){
-      notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
-      Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);
-    }
+    // News, shown at once, and on the device when the app is in the
+    // background. It was the "Unsaved work needs attention" banner, set after
+    // that banner's refresh, so it came late and read as a day not saved
+    // (owner, 2026-11-22). A day with no plan loaded says nothing.
+    if(savedDay&&!quietSave)notify({key:`study-day-auto-saved-${endedDate}`,kind:'success',tier:'news',system:true,title:'Study day auto-saved',message:`${prettyDate(endedDate)} was saved to Library. Apply today’s plan when ready.`});
     return true;
   }catch(e){
     AppDiagnostics.capture('session.rollover-save',e,'error');

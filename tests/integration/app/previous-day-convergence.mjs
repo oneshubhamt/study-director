@@ -12,7 +12,7 @@ const previous=production('function isPreviousActiveSessionRecord(session){');
 const continueHere=production('async function continueSessionHere(){');
 const restoreSuspended=production('async function restoreSuspendedTodaySession(){');
 const restore=production('async function attemptAutoRestoreActiveSession(){');
-const choose=production('async function handlePreviousActiveSession(session){');
+const choose=production('async function handlePreviousActiveSession(session,options={}){');
 const reminderLive=production('function liveSaveReminderEvidence(date){');
 const reminderCovers=production('function savedDayCoversReminderEvidence(record,subjects){');
 const reminderPending=production('async function savedDayHasUncoveredKeptSession(record,date){');
@@ -31,7 +31,8 @@ const canonical=x=>x||null;
 
 // The actual startup router must reach previous-day handling BEFORE foreign
 // ownership or today's suspended-state handlers, and retire covered rows first.
-// Only the device that ran the day asks ('dialog'); a copy from another
+// Only the device that ran the day asks ('dialog', after a sync when Drive is
+// connected: previous-day-question.mjs); a copy from another
 // device is kept quietly in the panel ('previous') until a sync shows the day
 // saved (owner's choice, 2026-11-12), and so is one holding only the plan,
 // with nothing recorded here (2026-11-22: begun on the phone, worked on the
@@ -54,7 +55,7 @@ for(const [label,state,covered,expected] of [
     DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
     retireCoveredPreviousActiveSession:async()=>{if(covered)events.push('retired');return covered;},
     sessionRunsElsewhere:x=>x.status!=='suspended'&&x.runningOn!=='inst_here',sessionFromElsewhere:x=>x.runningOn!=='inst_here',
-    handlePreviousActiveSession:async()=>{events.push('dialog');return false;},
+    askAboutPreviousDay:()=>{events.push('dialog');return false;},
     sessionHoldsNoWork:x=>x.planOnly===true,
     setSessionPanelMode:mode=>events.push(mode),
     isSuspendedActiveSession:()=>false,isFinishedActiveSession:()=>false,isRestorableActiveSession:()=>false,
@@ -184,7 +185,7 @@ for(const [label,owner,selection,mutated,expected] of [
     prettyDate:x=>x,refreshStorageFallbackWarning:()=>{},
     sessionSafetyMessage:''
   });
-  vm.runInContext(choose+'\nglobalThis.choosePrevious=handlePreviousActiveSession;',context);
+  vm.runInContext('let previousDayAsked=0;\n'+choose+'\nglobalThis.choosePrevious=handlePreviousActiveSession;',context);
   await context.choosePrevious(original);
   assert.ok(events.includes(expected),label+' must preserve its decision semantics');
   assert.equal(clears,selection==='discard'&&!mutated?1:0,label+' cannot delete implicitly');
