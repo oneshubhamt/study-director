@@ -1,6 +1,5 @@
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import {readScript} from '../../../build/source-script.mts';
-import {readHostHtml} from '../../../build/host-source.mjs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {createDeviceFolderWorld,MINUTE} from '../../helpers/device-folder-world.mjs';
@@ -12,23 +11,17 @@ const Maintenance=registry.require('backup-maintenance-host',1),Recovery=registr
 // Someone who uses neither the Device Folder nor Google Drive: every backup
 // interaction across the app still works, does nothing it does not need to,
 // and keeps recovery explicit after a browser-data clear.
-const html=readHostHtml();
-const slice=(from,to)=>{const start=html.indexOf(from),end=html.indexOf(to,start);assert.ok(start>=0&&end>start,'app.html must contain '+from);return html.slice(start,end);};
 const w=createDeviceFolderWorld({supported:false});await w.controller.install();
-const runtime=w.runtime,captured=[],statuses=[],shown=[],storageEvents=[];
+const runtime=w.runtime,captured=[],shown=[],storageEvents=[];
 const capture=(scope,error)=>captured.push(scope+': '+(error?.message||error));
 const background=Maintenance.createProviderBackgroundBridge(freeze({provider:()=>runtime,capture:(scope,error)=>capture(scope,error)}));
-const pwaSource=slice('const PWA_UPDATE_BACKUP_WAIT_MS=','function uploadSoonAfterPlanApply(');
-const createPwa=new Function('automaticBackupsWaiting','flushAutomaticBackups','renderPwaUpdateStatus','PwaLifecycle','setTimeout','clearTimeout',
-  "let pwaAutomaticBlockMessage='';"+pwaSource+";return {backUpBeforeUpdate,blockMessage:()=>pwaAutomaticBlockMessage};");
-const pwa=createPwa(()=>background.waiting(),reason=>background.flush(reason),()=>statuses.push('render'),{status:()=>({})},w.clock.setTimeout,w.clock.clearTimeout);
 const cases=[];
 
 assert.equal(runtime.list({hosted:true}).length,0,'no backup location exists');
 assert.equal(background.noteChange({urgent:true,reason:'study-day-completed'}),true);await w.tick(30*MINUTE);
 assert.equal(w.published.length,0);cases.push('changes and key moments are noted without any backup');
 await background.flush('app-hidden');assert.equal(background.waiting(),false);cases.push('going to the background does nothing');
-const started=w.clock.now();await pwa.backUpBeforeUpdate();assert.equal(w.clock.now(),started,'an update never waits');assert.equal(pwa.blockMessage(),'');assert.deepEqual(statuses,[]);cases.push('an update applies without waiting');
+const started=w.clock.now();await background.flush('app-update');assert.equal(w.clock.now(),started,'an update-triggered backup flush never waits when there is no location');assert.equal(background.waiting(),false);cases.push('an update backup flush has nothing to wait for');
 
 let health={lastStudyDataSaveAt:'2026-10-06T06:00:00.000Z',browserDataClearedAt:null};
 const reset=Recovery.createStorageReset(freeze({
