@@ -9,7 +9,7 @@ import fs from 'node:fs';
 const diagnostics=readScript('source/core/backup-operation-diagnostics.ts');
 const allowed=name=>new Set(JSON.parse(diagnostics.match(new RegExp(`const ${name}=new Set\\((\\[[^\\]]*\\])\\)`,'u'))[1]));
 const lists={reasons:allowed('SAFE_REASONS'),phases:allowed('SAFE_PHASES'),codes:allowed('SAFE_CODES')};
-const files=['source/app.html','source/external/drive.ts',...fs.readdirSync('source/core').map(file=>'source/core/'+file),...fs.readdirSync('portable').filter(file=>file.endsWith('.js')).map(file=>'portable/'+file)];
+const files=['source/app.html','source/external/drive.ts',...fs.readdirSync('source/core').map(file=>'source/core/'+file),...fs.readdirSync('portable').filter(file=>file.endsWith('.ts')).map(file=>'portable/'+file)];
 const patterns={
   phases:[/\b(?:OperationDiagnostics\.mark|diagnostics\.mark|diagMark)\(\s*'([a-z0-9-]+)'/gu],
   codes:[/\bcode\s*[:=]\s*'([A-Z][A-Z0-9_]{2,})'/gu],

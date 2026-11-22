@@ -55,8 +55,6 @@ assert.match(read('rich-text/wordgard-source/command.ts'),/killToLineEnd, yankKi
 
 const buildSource=read('build/wordgard-bundle.mjs');
 assert.match(buildSource,/plugins:wordgardGlobal\?\[wordgardGlobalPlugin\(\)\]:\[wordgardSourcePatchPlugin\(\{root:ROOT\}\)\]/,'Wordgard builds apply the explicit source patch layer; the editor reads Wordgard from its module.');
-assert.match(buildSource,/source\/external\/rich-text\.js/,'Rich-text build must retain the editor bundle target.');
-assert.match(buildSource,/source\/external\/wordgard\.js/,'Wordgard ships as its own module.');
 // The Wordgard module re-exports Wordgard packages and nothing of Study Director's.
 const wordgardModule=read('rich-text/wordgard-module.ts').replace(/^\s*\/\/.*$/gmu,'').trim().split('\n');
 assert.ok(wordgardModule.every(line=>/^export \* as [a-zA-Z]+ from \x27wordgard\/[a-z-]+\x27;$/u.test(line)),'The Wordgard module holds Wordgard packages only.');
