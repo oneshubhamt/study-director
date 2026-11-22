@@ -303,9 +303,15 @@ function queueReflectionOnlySave(binding,options={}){
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
   return true;
 }
+// Before a sync or an export, the field's text is saved only when it is an
+// edit made here. The field opens for typing once the day's stored reflection
+// has loaded, so a field never loaded (Review not opened today) or one showing
+// what is stored holds nothing to save. Saving it anyway sent an empty or old
+// text as an edit; after another device changed the reflection, that save was
+// refused and every sync on this device stopped (2026-11-22).
 function flushReflectionOnlySave(options={}){
   const bound=resolveReviewEditorBinding(getReviewDate(),options.event||null);
-  if(bound)reflectionLane.schedule(freeze({mode:'saved-day',date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true}));
+  if(bound&&reflectionOnlyReady(bound.date)&&!reflectionOnlyLoading&&bound.reflection!==reflectionOnlyState.canonical)reflectionLane.schedule(freeze({mode:'saved-day',date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true}));
   return reflectionLane.flush(options);
 }
 function persistReviewBinding(binding,options={}){

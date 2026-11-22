@@ -31,6 +31,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('sync-and-profiles','tests/browser/backup/sync-and-profiles.mjs',['sync','google-drive','two-devices','reload','activation','profiles'],300000),
     test('drive-sign-in-again','tests/browser/backup/drive-sign-in-again.mjs',['sync','google-drive','sign-in','connect-card','profiles','reload'],240000),
     test('typing-upload-pause','tests/browser/backup/typing-upload-pause.mjs',['sync','google-drive','notes','reflection','cadence'],180000),
+    test('reflection-through-sync','tests/browser/backup/reflection-through-sync.mjs',['sync','google-drive','two-devices','reflection','review'],240000),
     test('sync-kept-reviews','tests/browser/backup/sync-kept-reviews.mjs',['sync','google-drive','two-devices','pending-reviews','restore'],300000),
     test('cold-start-drive-recovery','tests/browser/backup/cold-start-drive-recovery.mjs',['sync','google-drive','site-data-clear','recovery','indexeddb'],300000,{alone:'Like site-data-clear: the app gives up opening IndexedDB after two 2.5 s attempts, and right after a storage clear that reopen can take longer on a busy CPU.'}),
     test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000,{alone:'Two-device ownership handoff has deliberate network gates and short post-claim timing assertions; unrelated Chromium CPU load can delay the local continuation path without testing a synchronization invariant.'}),
