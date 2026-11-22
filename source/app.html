@@ -4780,6 +4780,19 @@ function isFinishedActiveSession(session){
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
 }
+// Only the plan: no block has time, progress, completion, an outcome or a
+// started clock, no timer was started, the plan was not shifted, and there is
+// no Pacer run, reflection, rating or carry-forward note.
+function sessionHoldsNoWork(session){
+  const snapshot=activeSessionSnapshot(session);if(!snapshot)return false;
+  if(snapshot.timerRuntime||Object.keys(snapshot.scheduleAdjustments||{}).length)return false;
+  const worked=row=>!!row&&(row.resolvedState==='done'||row.resolvedState==='skipped'||Number(row.completion)>0||
+    (!!row.completionSource&&row.completionSource!==COMPLETION_SOURCES.NONE)||Number(row.progress?.done)>0||
+    Number(row.actual?.seconds)>0||!!row.actual?.clock?.startedAt||Number(row.actual?.record?.sessionCount)>0);
+  const practice=snapshot.practice,review=snapshot.review||{};
+  return !Object.values(snapshot.taskState||{}).some(worked)&&!(practice&&(practice.active||(practice.runs||[]).length))&&
+    !plainTextContent(review.reflection||'').trim()&&!(Number(review.studyQuality)>=1)&&!String(snapshot.latestCarryForward||'').trim();
+}
 function isPreviousActiveSessionRecord(session){
   if(!session||typeof session!=='object'||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
   if(session.status&&!['active','suspended','finished'].includes(session.status))return false;
@@ -4985,6 +4998,10 @@ async function attemptAutoRestoreActiveSession(){
     // asked every morning: its Drive sign-in had expired overnight, so it
     // could not see the other device's save.
     if(isPreviousActiveSessionRecord(session)&&sessionFromElsewhere(session)){setSessionPanelMode('previous',session);return false;}
+    // Only its plan, nothing recorded here (owner, 2026-11-22: a day begun on
+    // the phone and worked on the laptop asked about the phone's empty copy):
+    // kept quietly, cleared by a sync, replaced by today's plan.
+    if(isPreviousActiveSessionRecord(session)&&sessionHoldsNoWork(session)){setSessionPanelMode('previous',session);return false;}
     if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
     if(isFinishedActiveSession(session))return openFinishedSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
@@ -9245,6 +9262,8 @@ function executeIdlePresentation(d=new Date(),options={}){
     'Today’s session is finished. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over.','NEXT: REVIEW'));
   if(sessionPanelMode==='previous'&&sessionFromElsewhere(sessionPanelSession))return applyOverrides(executeIdleView('Previous Day from Another Device','PREVIOUS DAY','Previous Day from Another Device',
     `${prettyDate(sessionPanelSession.date)} ran ${sessionDevice(sessionPanelSession)}, which saves it. This copy clears once a sync shows it saved; Review Previous Day opens it here.`,'NEXT: SYNC'));
+  if(sessionPanelMode==='previous'&&sessionHoldsNoWork(sessionPanelSession))return applyOverrides(executeIdleView('Previous Day: Plan Only','PREVIOUS DAY','Previous Day: Plan Only',
+    `Only the plan of ${prettyDate(sessionPanelSession.date)} is on this device; no work was recorded here. It clears once a sync shows the day saved, and today’s plan replaces it.`,'NEXT: PLAN'));
   if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
     'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
   if(sessionParkedHere()){
@@ -9390,10 +9409,12 @@ function updateSessionControls(){
     panel.classList.toggle('suspended',suspended||elsewhere||previous||finished);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    const previousElsewhere=previous&&sessionFromElsewhere(sessionPanelSession);
-    if(title)title.textContent=previousElsewhere?'Previous Day from Another Device':previous?'Previous Day Needs Review':finished?'Today Finished':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':complete?'Plan Complete':running?'Live Timer Active':'Applied Plan Available';
+    const previousElsewhere=previous&&sessionFromElsewhere(sessionPanelSession),previousPlanOnly=previous&&!previousElsewhere&&sessionHoldsNoWork(sessionPanelSession);
+    if(title)title.textContent=previousElsewhere?'Previous Day from Another Device':previousPlanOnly?'Previous Day: Plan Only':previous?'Previous Day Needs Review':finished?'Today Finished':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':complete?'Plan Complete':running?'Live Timer Active':'Applied Plan Available';
     if(note)note.textContent=previousElsewhere
       ? `${prettyDate(sessionPanelSession.date)} ran ${sessionDevice(sessionPanelSession)}, which saves it. This copy clears here once a sync shows it saved. Review Previous Day opens it here.`
+      : previousPlanOnly
+      ? `Only the plan of ${prettyDate(sessionPanelSession.date)} is on this device; no work was recorded here. It clears once a sync shows the day saved, and today’s plan replaces it.`
       : previous
       ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
       : finished
