@@ -1197,7 +1197,7 @@ const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<RichT
   budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options),
   invalidate:()=>invalidateAttachmentLibrary(),
   captureError:error=>AppDiagnostics.capture('rich-text.assets.maintenance',error,'warn'),
-  diagnostics:Object.freeze<NoteReconciliationInput['ports']['diagnostics']>({start:(kind,source,details)=>BackupOperationDiagnostics.start(kind,source,details),mark:(name,details,id)=>BackupOperationDiagnostics.mark(name,details,id),finish:(details,id)=>BackupOperationDiagnostics.finish(details,id),fail:(error,details,id)=>BackupOperationDiagnostics.fail(error,details,id)})
+  diagnostics:Object.freeze<RichTextAssetMaintenancePorts['diagnostics']>({start:(kind,source,details)=>BackupOperationDiagnostics.start(kind,source,details),mark:(name,details,id)=>BackupOperationDiagnostics.mark(name,details,id),finish:(details,id)=>BackupOperationDiagnostics.finish(details,id),fail:(error,details,id)=>BackupOperationDiagnostics.fail(error,details,id)})
 }),Object.freeze({lease:RichTextAssetWriteLease}));
 // Cleanup runs after each day's upkeep, and soon after anything leaves a file
 // unused. A request lost to a reload is caught by the next day's sweep.
@@ -1230,13 +1230,14 @@ async function readReconciliationBase(){return ReconciliationBaselineStore.readH
 async function readReconciliationBaseNotes(keys:Parameters<typeof ReconciliationBaselineStore['readNotes']>[0]){return ReconciliationBaselineStore.readNotes(keys);}
 async function readReconciliationBaseDayAncestry(dates:Parameters<typeof ReconciliationBaselineStore['readDayAncestry']>[0],checkpointId:Parameters<typeof ReconciliationBaselineStore['readDayAncestry']>[1]){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
 async function writeReconciliationBase(checkpointId:Parameters<typeof ReconciliationBaselineStore['write']>[0],spec:Parameters<typeof ReconciliationBaselineStore['write']>[1]){return ReconciliationBaselineStore.write(checkpointId,spec);}
-const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze<Parameters<typeof BackupReadinessHostModule.createVerifiedRecovery>[0]>({
-  metadata:Object.freeze({
+type VerifiedRecoveryInput=Parameters<typeof BackupReadinessHostModule.createVerifiedRecovery>[0];
+const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze<VerifiedRecoveryInput>({
+  metadata:Object.freeze<VerifiedRecoveryInput['metadata']>({
     read:()=>readHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups),
     write:value=>writeHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups,value)
   }),
-  storageHealth:Object.freeze<BackupRuntimeHostInput['storageHealth']>({snapshot:()=>requireStorageHealthController().snapshot(),updateHistory:patch=>requireStorageHealthController().updateHistory(patch)}),
-  mutationEpoch:Object.freeze({latestChangeAt:recorded=>AppData.mutationEpoch.latestChangeAt(recorded)}),
+  storageHealth:Object.freeze<VerifiedRecoveryInput['storageHealth']>({snapshot:()=>requireStorageHealthController().snapshot(),updateHistory:patch=>requireStorageHealthController().updateHistory(patch)}),
+  mutationEpoch:Object.freeze<VerifiedRecoveryInput['mutationEpoch']>({latestChangeAt:recorded=>AppData.mutationEpoch.latestChangeAt(recorded)}),
   backupVersion:DATA_CONTRACT.schemas.Backup.version,
   sourceRevision:()=>BackupRuntimeHost.sourceRevision(),
   refreshProviders:()=>BackupProviderRuntime.refresh(),
@@ -1336,7 +1337,7 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
     }),
     activeSessionId:ACTIVE_SESSION_ID,
     clock:Object.freeze<RepositoryCompositionInput['appData']['clock']>({nowMs:DecisionClock.nowMs}),
-    helpers:Object.freeze({
+    helpers:Object.freeze<BackupCodecInput['helpers']>({
       boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
       activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay:value=>{const day=isoDateDay(value);if(day===null)throw new TypeError('Canonical ISO date is invalid.');return day;},normalizeTimestamp,jsonByteLength
     }),
@@ -1673,9 +1674,10 @@ const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<ProfileDel
 const deleteThisProfile=ProfileDeletion.deleteThisProfile;
 const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
 
-const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<Parameters<typeof ProfilesHostModule.createDriveBinding>[0]>({
+type ProfileDriveBindingInput=Parameters<typeof ProfilesHostModule.createDriveBinding>[0];
+const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<ProfileDriveBindingInput>({
   profiles:Profiles,
-  interactions:Object.freeze<BackupRuntimeHostInput['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify(options)}),
+  interactions:Object.freeze<ProfileDriveBindingInput['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify(options)}),
   clearBaseline:()=>ReconciliationBaselineStore.clear(),
   renderProfile:()=>renderProfile(),
   endConnectCard:()=>endDriveConnectCard(),
@@ -2033,7 +2035,7 @@ function commitTaskNoteEditor(field:HTMLTextAreaElement,value:unknown,event:Even
 /* DAILY REFLECTION + DIARY PERSISTENCE · P5.5B CHECKED OWNER */
 type ReviewPersistenceInput=Parameters<typeof ReviewPersistenceModule.createPersistence>[0];
 const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze<ReviewPersistenceInput>({
-  configuration:Object.freeze<NoteReconciliationInput['ports']['configuration']>({limits:APP_LIMITS,dataContract:DATA_CONTRACT}),
+  configuration:Object.freeze<ReviewPersistenceInput['configuration']>({limits:APP_LIMITS,dataContract:DATA_CONTRACT}),
   records:Object.freeze<ReviewPersistenceInput['records']>({
     get:(...args)=>AppData.dailyRecords.get(...args),
     save:(...args)=>AppData.dailyRecords.save(...args),
@@ -2129,7 +2131,7 @@ const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze<RichTextRun
     applyOwnership:root=>OwnershipUiProjection.apply(root)
   }),
   activation:Object.freeze<RichTextRuntimeInput['activation']>({kinds:APP_ACTIVATION_KINDS,subscribe:callback=>AppActivation.subscribe(callback)}),
-  diagnostics:Object.freeze<RecoveryQuiescenceInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  diagnostics:Object.freeze<RichTextRuntimeInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 if(!Object.isFrozen(RichTextRuntime)||RichTextRuntime.format!=='study-director.rich-text-runtime'||RichTextRuntime.contractVersion!==1){
   throw new Error('Study Director rich-text host runtime is unavailable or incompatible.');
@@ -2143,7 +2145,7 @@ ManagedRecoveryQuiescence=BackupRecoveryHostModule.createQuiescence(Object.freez
   richText:Object.freeze<RecoveryQuiescenceInput['richText']>({quiesce:operation=>RichTextRuntime.quiesce(operation)}),
   mutation:Object.freeze<RecoveryQuiescenceInput['mutation']>({settled:()=>requireMutationCoordinator().settled(),active:()=>!!requireMutationCoordinator().status().active}),
   handoff:Object.freeze<RecoveryQuiescenceInput['handoff']>({frozen:()=>!!SessionHandoffRuntime?.frozen()}),
-  diagnostics:Object.freeze<BackupRuntimeHostInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  diagnostics:Object.freeze<RecoveryQuiescenceInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 if(!Object.isFrozen(ManagedRecoveryQuiescence)||ManagedRecoveryQuiescence.format!=='study-director.recovery-quiescence'||ManagedRecoveryQuiescence.contractVersion!==1){
   throw new Error('Study Director recovery quiescence is unavailable or incompatible.');
@@ -2155,7 +2157,7 @@ richTextSyncAll=()=>RichTextRuntime.syncAll(document);
 richTextReconcileExternal=(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision);
 type NotesControllerInput=Parameters<typeof NotesHostModule.createController>[0];
 NotesRuntime=NotesHostModule.createController(Object.freeze<NotesControllerInput>({
-  configuration:Object.freeze<BackupRuntimeHostInput['configuration']>({
+  configuration:Object.freeze<NotesControllerInput['configuration']>({
     maxAreaNameChars:APP_LIMITS.maxAreaNameChars,maxNoteChars:APP_LIMITS.maxNoteChars,maxNotes:APP_LIMITS.maxNotes,
     maxRichTextWords:APP_LIMITS.maxRichTextWords,maxRichTextBytes:APP_LIMITS.maxRichTextBytes,supportNote:SUPPORT_NOTE
   }),
@@ -2544,7 +2546,7 @@ const SessionLifecycleHooks=ReviewHostModule.createLifecycleHooks(Object.freeze<
   canMutate:()=>appCanMutate(),
   reviewEditor:ReviewEditor,
   lifecycleViews:SessionLifecycleViews,
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  diagnostics:Object.freeze<NoteReconciliationInput['ports']['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze<Parameters<typeof SessionLifecycleModule.createCoordinator>[0]>({hooks:SessionLifecycleHooks}));
 if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director.session-lifecycle-coordinator'||SessionLifecycle.contractVersion!==1){
@@ -2553,7 +2555,7 @@ if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director
 
 type SessionHostInput=Parameters<typeof SessionHostModule.createController>[0];
 ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHostInput>({
-  configuration:Object.freeze({
+  configuration:Object.freeze<NoteReconciliationInput['ports']['configuration']>({
     activeSessionId:ACTIVE_SESSION_ID,activeSessionVersion:DATA_CONTRACT.schemas.ActiveSession.version,
     sessionSnapshotVersion:DATA_CONTRACT.schemas.SessionSnapshot.version,maxCarryForwardChars:APP_LIMITS.maxCarryForwardChars,
     maxScheduleChars:APP_LIMITS.maxScheduleChars,maxTasksPerDay:APP_LIMITS.maxTasksPerDay,
@@ -2708,7 +2710,7 @@ BackupProtectionHost.install();
 type NoteExporterInput=Parameters<typeof NoteExportModule.createExporter>[0];
 const NoteExporter=NoteExportModule.createExporter(Object.freeze<NoteExporterInput>({ports:Object.freeze<NoteExporterInput['ports']>({
   assets:Object.freeze<NoteExporterInput['ports']['assets']>({get:id=>RichTextAssets.get(id)}),
-  notes:Object.freeze<NoteExporterInput['ports']['notes']>({get:key=>AppData.notes.get(key)}),
+  notes:Object.freeze<LibraryViewInput['ports']['notes']>({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze<NoteExporterInput['ports']['processing']>({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze<NoteExporterInput['ports']['scheduling']>({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze<NoteExporterInput['ports']['output']>({chooseSave:Exports.chooseSave,save:Exports.save}),
@@ -2872,13 +2874,11 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
     createSavedDayTaskReviewCard,createPomodoroSummaryLine,emptyMsg,
     optionalDurationLabel,optionalHoursLabel,optionalPercentLabel,populatePracticeRunTable,prettyDate,renderRichTextContent,textEl,plainTextContent,
   }),
-  view:Object.freeze<NoteReconciliationInput['ports']['view']>({document,goTab,setStatus,setTextSafe,window}),
-  interactions:Object.freeze({
-    choose:options=>Interactions.choose(options),
-    confirm:options=>Interactions.confirm(options),
-    input:options=>Interactions.input(options)
+  view:Object.freeze<LibraryViewInput['ports']['view']>({document,goTab:(tab,options)=>goTab(tab,options),setStatus,setTextSafe,window}),
+  interactions:Object.freeze<LibraryViewInput['ports']['interactions']>({
+    choose:options=>Interactions.choose(options),confirm:options=>Interactions.confirm(options),input:options=>Interactions.input(options)
   }),
-  environment:Object.freeze<BackupRuntimeHostInput['environment']>({
+  environment:Object.freeze<LibraryViewInput['ports']['environment']>({
     cancelAnimationFrame:frame=>cancelAnimationFrame(frame),
     createOption:(text,value)=>new Option(text,value),
     createSearchWorker:()=>new Worker(trustedAssetURL(NOTES_SEARCH_WORKER_URL),{name:'study-director-note-search'}),
@@ -2946,9 +2946,9 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
     preflight:selection=>LibraryClearCoordinator.preflight(selection),
     execute:options=>RichTextRuntime.quiesce(()=>LibraryClearCoordinator.execute(options))
   }),
-  ownership:Object.freeze({canMutate:()=>appCanMutate()}),
+  ownership:Object.freeze<LibraryViewInput['ports']['ownership']>({canMutate:()=>appCanMutate()}),
   overlays:Object.freeze<LibraryViewInput['ports']['overlays']>({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
-  session:Object.freeze<BackupRuntimeHostInput['session']>({hasActiveSession:hasBlockingActiveSession})
+  session:Object.freeze<LibraryViewInput['ports']['session']>({hasActiveSession:hasBlockingActiveSession})
 })}));
 if(!Object.isFrozen(LibraryView)||LibraryView.format!=='study-director.library-view'||LibraryView.contractVersion!==1){
   throw new Error('Study Director Library view is unavailable or incompatible.');
@@ -2977,7 +2977,7 @@ updateNoteSearchDocument=LibraryView.updateSearchDocument;
 type BackupCodecInput=Parameters<typeof BackupCodecModule.createBackupCodec>[0];
 const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze<BackupCodecInput>({
   processing:Object.freeze<BackupCodecInput['processing']>({run:(type,data,options)=>Exports.run(type,data,options),scope:operation=>Exports.scope(operation)}),
-  appConfig:Object.freeze({
+  appConfig:Object.freeze<BackupCodecInput['appConfig']>({
     appName:APP_CONFIG.appName,
     attribution:APP_CONFIG.attribution
   }),
@@ -2985,9 +2985,9 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze<BackupCodecI
   dataContract:DATA_CONTRACT,
   entityTypes:BACKUP_ENTITY_TYPES,
   keyedRecord:KeyedRecord,
-  entities:Object.freeze({entityDefinition,entityIdentity}),
+  entities:Object.freeze<BackupCodecInput['entities']>({entityDefinition,entityIdentity}),
   helpers:Object.freeze({boundedInt,jsonByteLength}),
-  richText:Object.freeze<NoteReconciliationInput['ports']['richText']>({assetIds:value=>RichTextApi.scanAttachmentReferences(value).assetIds,assetIdValid:AttachmentsModule.validId,imageMimeTypeValid:AttachmentsModule.validType}),
+  richText:Object.freeze<BackupCodecInput['richText']>({assetIds:value=>RichTextApi.scanAttachmentReferences(value).assetIds,assetIdValid:AttachmentsModule.validId,imageMimeTypeValid:AttachmentsModule.validType}),
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
   personalDataCodec:PersonalDataCodec,
@@ -3005,19 +3005,19 @@ function verifyRestoredSessionRuntime(...args:Parameters<typeof SessionActions.v
 type NoteReconciliationInput=Parameters<typeof ReconciliationUIModule.createController>[0];
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze<NoteReconciliationInput>({ports:Object.freeze<NoteReconciliationInput['ports']>({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
-  richText:Object.freeze({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
+  richText:Object.freeze<BackupCodecInput['richText']>({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
   assets:Object.freeze<NoteReconciliationInput['ports']['assets']>({get:assetId=>RichTextAssets.get(assetId)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  view:Object.freeze<BackupRuntimeHostInput['view']>({document,requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id)})
+  view:Object.freeze<NoteReconciliationInput['ports']['view']>({document,requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id)})
 })}));
 type BackupRuntimeHostInput=Parameters<typeof BackupRecoveryHostModule.createRuntime>[0];
 const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<BackupRuntimeHostInput>({
   module:BackupModule,
-  configuration:Object.freeze({
+  configuration:Object.freeze<BackupRuntimeHostInput['configuration']>({
     appVersion:APP_VERSION,backupVersion:DATA_CONTRACT.schemas.Backup.version,starterSchedule:FACTORY_DEFAULTS.scheduleText,
     limits:APP_LIMITS
   }),
-  appData:AppData,storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze({snapshot:()=>requireStorageHealthController().snapshot(),markOk:(source,key)=>requireStorageHealthController().markOk(source,key)}),
+  appData:AppData,storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze<BackupRuntimeHostInput['storageHealth']>({snapshot:()=>requireStorageHealthController().snapshot(),markOk:(source,key)=>requireStorageHealthController().markOk(source,key)}),
   storageGeneration:()=>IndexedDb.lifecycle().resets,
   personal:Object.freeze<BackupRuntimeHostInput['personal']>({draft:PlanDraftEditor,data:PlanData,inputValue:()=>{const field=document.getElementById('plan-input');return field instanceof HTMLTextAreaElement||field instanceof HTMLInputElement?field.value:null;},canMutate:()=>appCanMutate()}),
   files:BackupFiles,processing:Exports,protection:BackupProtection,backgroundAvailable:backupBackgroundAvailability,
@@ -3040,7 +3040,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
     withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)
   }),
   domain:Object.freeze<BackupRuntimeHostInput['domain']>({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
-  view:Object.freeze({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
+  view:Object.freeze<NoteReconciliationInput['ports']['view']>({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
   events:Object.freeze<BackupRuntimeHostInput['events']>({
     libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
     restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
