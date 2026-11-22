@@ -36,12 +36,29 @@ try{
   const initial=await editReflection('CoreFlowQA durable reflection',4);assert.equal(initial.accepted,true);assert.equal(initial.review?.reflection,'CoreFlowQA durable reflection');assert.equal(initial.review?.studyQuality,4);
   const storage=await page.evaluate(`(async()=>({session:(await __PWA6.AppData.activeSession.load()).value,reflection:StudyDirectorRichText.toPlainText((await __PWA6.AppData.activeSession.load()).value.snapshot.review.reflection),records:(await __PWA6.AppData.dailyRecords.list()).length}))()`);
   assert.equal(storage.reflection,'CoreFlowQA durable reflection');assert.equal(storage.records,0);result.checks.planTimerReviewIndexedDb=true;
+  await page.evaluate(`(()=>{
+    const capture=label=>{
+      const d=__PWA6,field=document.getElementById('daily-reflection');
+      sessionStorage.setItem('coreFlowExit:'+label,JSON.stringify({
+        review:d.ReviewEditor.activeSessionReview(),
+        field:field?.value||'',
+        fieldPlain:StudyDirectorRichText.toPlainText(field?.value||''),
+        local:d.AppData.activeSession.readLocal()?.snapshot?.review||null,
+        owner:d.AppOwnership.status(),
+        lifecycle:d.SessionLifecycle.status()
+      }));
+    };
+    capture('before');
+    document.addEventListener('visibilitychange',()=>capture('visibility-'+String(document.hidden)));
+    window.addEventListener('beforeunload',()=>capture('beforeunload'));
+    window.addEventListener('pagehide',()=>capture('pagehide'));
+  })()`);
 
   await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after reload'});
   await page.evaluate(`__PWA6.goTab('review')`);
   try{await waitFor(()=>page.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection').value)==='CoreFlowQA durable reflection'`),{label:'reflection reload'});}
   catch(error){
-    const diagnostics=await page.evaluate(`(async()=>({owner:__PWA6.AppOwnership.status(),lifecycle:__PWA6.SessionLifecycle.status(),startup:__PWA6.StartupLifecycle.status(),session:(await __PWA6.AppData.activeSession.load()).value,review:__PWA6.ReviewEditor.state(),field:document.getElementById('daily-reflection')?.value||'',fieldPlain:StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection')?.value||''),editor:document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor')?.textContent||'',activePane:document.querySelector('.pane.on')?.id||''}))()`);
+    const diagnostics=await page.evaluate(`(async()=>({owner:__PWA6.AppOwnership.status(),lifecycle:__PWA6.SessionLifecycle.status(),startup:__PWA6.StartupLifecycle.status(),session:(await __PWA6.AppData.activeSession.load()).value,review:__PWA6.ReviewEditor.state(),field:document.getElementById('daily-reflection')?.value||'',fieldPlain:StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection')?.value||''),editor:document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor')?.textContent||'',activePane:document.querySelector('.pane.on')?.id||'',exit:{before:sessionStorage.getItem('coreFlowExit:before'),visibility:sessionStorage.getItem('coreFlowExit:visibility-true'),beforeunload:sessionStorage.getItem('coreFlowExit:beforeunload'),pagehide:sessionStorage.getItem('coreFlowExit:pagehide')}}))()`);
     throw new Error(error.message+'; diagnostics='+JSON.stringify(diagnostics),{cause:error});
   }
   const newer=await editReflection('Newer active-session review',5);
