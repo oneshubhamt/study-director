@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import {compileScript,readScript,eraseTypes} from '../../../build/source-script.mts';
-import {renderBuild,validateBuild} from '../../../build/build.mjs';
+import {buildManifest,renderBuild,validateBuild} from '../../../build/build.mjs';
 
 // The exact erased program is consumed by both the build and VM harnesses.
 const build=renderBuild();
@@ -30,6 +30,9 @@ assert.ok(generatedRuntimeEntries.every(entry=>entry.isFile()&&entry.name.endsWi
 const generatedRuntimeJavaScript=generatedRuntimeEntries.map(entry=>entry.name).sort();
 const expectedGeneratedRuntimeJavaScript=['attachment-worker.js','export-worker.js','image-worker.js','rich-text.js','search-worker.js','wordgard.js'].sort();
 assert.deepEqual(generatedRuntimeJavaScript,expectedGeneratedRuntimeJavaScript,'generated runtime inventory must stay exact at TypeScript closure');
+const manifest=buildManifest(build);
+assert.deepEqual(Object.keys(manifest.generatedRuntimeSha256).sort(),expectedGeneratedRuntimeJavaScript,'build manifest must record generated runtime provenance separately from authored source');
+assert.ok(expectedGeneratedRuntimeJavaScript.every(name=>!Object.hasOwn(manifest.sourceSha256,`generated/runtime/${name}`)),'generated runtime must not re-enter authored source provenance');
 for(const id of ['canonical','save-lane','domain','operation-lifecycle','repository-policy']){
   const file=`source/core/${id}.ts`,source=fs.readFileSync(file,'utf8'),output=readScript(file);
   assert.equal(output.length,source.length);

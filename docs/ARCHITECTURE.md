@@ -31,7 +31,7 @@ flowchart TD
 | External authored features | checked TypeScript under `source/external/` (`drive`, Insights model/protocol/worker/compute/rendering/runtime, `guide`, `glass`, `aurora`) | Transport, analytics, help and presentation contracts |
 | Platform/build | `source/platform/sw.ts`, `pwa-lifecycle.ts`, `native-capabilities.ts`, `build/`, tracked `generated/runtime/` | Offline/update protocols, capability checks, deterministic output/CSP |
 
-Canonical authored runtime under `source/`, `portable/` and `rich-text/` is TypeScript. The six deterministic browser/worker bundles are tracked separately under `generated/runtime/{wordgard,rich-text,search-worker,image-worker,attachment-worker,export-worker}.js`; they are machine-owned build products reproduced byte-for-byte from reviewed authored/vendor inputs and must not be edited by hand. Disposable release output remains under untracked `dist/`.
+Canonical authored runtime under `source/`, `portable/` and `rich-text/` is TypeScript. The six deterministic browser/worker bundles are tracked separately under `generated/runtime/{wordgard,rich-text,search-worker,image-worker,attachment-worker,export-worker}.js`; they are machine-owned build products reproduced byte-for-byte from reviewed authored/vendor inputs and must not be edited by hand. `build-manifest.json` records authored-source and generated-runtime SHA-256 provenance separately. Disposable release output remains under untracked `dist/`.
 
 ## Startup and active lifecycle
 

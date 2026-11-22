@@ -333,6 +333,9 @@ function sourceHashes(){
     ...Object.values(platformFiles).map(row=>row.source),...staticAssets.map(row=>row.source)
   ].sort().map(name=>[name,sha256(sourceBytes(name))]));
 }
+function generatedRuntimeHashes(){
+  return Object.fromEntries(generatedRuntimeFiles().sort().map(name=>[name,sha256(fs.readFileSync(path.join(GENERATED_RUNTIME,name)))]));
+}
 function outputHashes(files){return Object.fromEntries([...files].sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)]));}
 function validateReleaseIdentities(files,identity,label){
   const allowed=new Set([identity.release,identity.id,`sd${identity.id}`]);
@@ -468,6 +471,7 @@ export function buildManifest(build){
       deployment:Object.freeze({releaseId:build.pwa.deployment.releaseId,assetId:build.pwa.deployment.assetId,precache:build.pwa.deployment.precache})
     }),
     sourceSha256:sourceHashes(),
+    generatedRuntimeSha256:generatedRuntimeHashes(),
     developmentSha256:outputHashes(build.development),
     deploymentSha256:outputHashes(build.deployment)
   });
