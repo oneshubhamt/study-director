@@ -20,14 +20,14 @@ The programme retains 14 top-level steps, P5.0–P5.13. Child IDs identify coher
 | P5.9a | CLOSED — AUDITED — TARGETED | Insights model foundations, records/windows and core analytics |
 | P5.9b | CLOSED — AUDITED — TARGETED | Practice, study state/dynamics, coach and complete model engine |
 | P5.10 | CLOSED — AUDITED — TARGETED | Insights compute boundary, presentation and retained UI/host integration |
-| P5.11a | NOT STARTED | Guide content/runtime, preview producer and owned navigation/accessibility behavior |
-| P5.11b | NOT STARTED | All three presentations from first paint through selection and reload, including both external packs |
-| P5.12 | NOT STARTED | Install and safe update from the page through the emitted worker, including offline and multi-tab behavior |
-| P5.13 | NOT STARTED | Public plugin contract, final host assembly and reconciliation of all shipped runtime sources |
+| P5.11a | CLOSED — AUDITED — TARGETED | Guide content/runtime, preview producer and owned navigation/accessibility behavior |
+| P5.11b | CLOSED — AUDITED — TARGETED | All three presentations from first paint through selection and reload, including both external packs |
+| P5.12 | CLOSED — AUDITED — TARGETED | Install and safe update from the page through the emitted worker, including offline and multi-tab behavior |
+| P5.13 | PARTIAL — SOURCE IMPLEMENTED; BROWSER EVIDENCE OPEN | Public plugin contract, final host assembly and reconciliation of all shipped runtime sources |
 
 ## Executor handoff
 
-Start at P5.11a. Work from the current `ts-exp` source and its last verified behavior. Use the five-step procedure in [AGENTS](../../AGENTS.md) and the [branch decision](DECISIONS.md#branch-lifecycle-and-f30-parity). F30 parity is a later assignment. Development data creates no migration obligation. Preserve the current codecs, write ownership, failure recovery and rejection of unsupported data.
+Resume the open P5.13 verification and handoff; P5.11a/b and P5.12 retain their prior targeted closure. Work from the current `ts-exp` source and its last verified behavior. Use the five-step procedure in [AGENTS](../../AGENTS.md) and the [branch decision](DECISIONS.md#branch-lifecycle-and-f30-parity). F30 parity is a later assignment. Development data creates no migration obligation. Preserve the current codecs, write ownership, failure recovery and rejection of unsupported data.
 
 For each outcome, trace a real user action from the shipped entry point through its implementation and back to its observable result. Record the starting commit, affected callers, expected behavior and relevant failure cases before editing. Move feature logic and its callers together. Check the actual object passed to the host, registry or browser API, keep optional globals behind capability checks, and use separate DOM, portable and worker projects. When a defect surfaces, reproduce it against the old owner, preserve the better behavior and verify the correction through the same entry point. Recheck whether a delayed success, failure or cleanup can affect a newer operation.
 
