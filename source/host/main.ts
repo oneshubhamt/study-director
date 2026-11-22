@@ -195,6 +195,9 @@ let DeviceBackup:ReturnType<typeof BackupActionsHostModule.createDeviceBackup>|n
 function requireDeviceBackup(){if(!DeviceBackup)throw new Error('Study Director Device Backup is unavailable.');return DeviceBackup;}
 function requireBackupActions(){if(!BackupActions)throw new Error('Study Director backup controls are unavailable.');return BackupActions;}
 function requireBackupProtectionHost(){if(!BackupProtectionHost)throw new Error('Study Director backup protection is unavailable.');return BackupProtectionHost;}
+function requireNativeCapabilities(){if(!NativeCapabilities)throw new Error('Study Director native capabilities are unavailable.');return NativeCapabilities;}
+function requireSyncStatusHost(){if(!SyncStatusHost)throw new Error('Study Director sync status host is unavailable.');return SyncStatusHost;}
+function requireNavigationController(){if(!NavigationController)throw new Error('Study Director navigation controller is unavailable.');return NavigationController;}
 function requireAttachmentLibrary(){if(!AttachmentLibrary)throw new Error('Study Director attachment library is unavailable.');return AttachmentLibrary;}
 function requireBackupRecoveryHost(){if(!BackupRecoveryHost)throw new Error('Study Director backup recovery host is unavailable.');return BackupRecoveryHost;}
 
@@ -3898,27 +3901,23 @@ const {actionNeedsAppControl,handleDelegatedClick,handleDelegatedChange,handleDe
   editedTextarea:()=>{richAssetReferenceRevision++;captureMutationGeneration++;},UiTabRegistry,Pomodoro});
 
 const NoteSyncPopover=(()=>{
-  let popover=null,target=null,controller=null,installed=false;
+  let popover:HTMLDivElement|null=null,target:HTMLElement|null=null,controller:ReturnType<typeof RichTextApi.createAnchoredPopover>|null=null,installed=false;
   const clearTarget=()=>{if(target?.getAttribute('aria-describedby')==='note-sync-popover')target.removeAttribute('aria-describedby');target=null;};
-  const hide=(element=null)=>{if(element&&target!==element)return;controller?.hide();clearTarget();};
-  const show=element=>{
-    if(!(element instanceof HTMLElement))return;
-    const message=String(element.getAttribute('aria-label')||'').trim();
-    if(!message){hide();return;}
-    if(!popover){
-      popover=document.createElement('div');popover.id='note-sync-popover';popover.className='note-sync-popover';popover.setAttribute('role','tooltip');
-      controller=RichTextApi.createAnchoredPopover(popover,{align:'end',manual:true,onClose:clearTarget});
-    }
-    if(target!==element){hide();const parent=element.closest('.workspace-overlay-rich-text')||document.body;parent.append(popover);popover.inert=false;}
-    target=element;popover.textContent=message;element.setAttribute('aria-describedby','note-sync-popover');controller.show(element);
+  const hide=(element:HTMLElement|null=null)=>{if(element&&target!==element)return;controller?.hide();clearTarget();};
+  const show=(element:HTMLElement|null)=>{
+    if(!element)return;
+    const message=String(element.getAttribute('aria-label')||'').trim();if(!message){hide();return;}
+    if(!popover){popover=document.createElement('div');popover.id='note-sync-popover';popover.className='note-sync-popover';popover.setAttribute('role','tooltip');controller=RichTextApi.createAnchoredPopover(popover,{align:'end',manual:true,onClose:clearTarget});}
+    if(target!==element){hide();const parent=element.closest<HTMLElement>('.workspace-overlay-rich-text')||document.body;parent.append(popover!);popover!.inert=false;}
+    target=element;popover!.textContent=message;element.setAttribute('aria-describedby','note-sync-popover');controller!.show(element);
   };
-  const refresh=element=>{if(target===element)show(element);};
+  const refresh=(element:HTMLElement)=>{if(target===element)show(element);};
   const install=()=>{
     if(installed)return;installed=true;
-    document.addEventListener('pointerover',event=>{const element=event.target instanceof Element?event.target.closest('.note-sync'):null;if(!element)return;const previous=event.relatedTarget;if(previous instanceof Node&&element.contains(previous))return;show(element);},true);
-    document.addEventListener('pointerout',event=>{const element=event.target instanceof Element?event.target.closest('.note-sync'):null;if(!element)return;const next=event.relatedTarget;if(!(next instanceof Node)||!element.contains(next))hide(element);},true);
-    document.addEventListener('focusin',event=>{const element=event.target instanceof Element?event.target.closest('.note-sync'):null;if(element)show(element);},true);
-    document.addEventListener('focusout',event=>{const element=event.target instanceof Element?event.target.closest('.note-sync'):null;if(!element)return;const next=event.relatedTarget;if(!(next instanceof Node)||!element.contains(next))hide(element);},true);
+    document.addEventListener('pointerover',event=>{const element=event.target instanceof Element?event.target.closest<HTMLElement>('.note-sync'):null;if(!element)return;const previous=event.relatedTarget;if(previous instanceof Node&&element.contains(previous))return;show(element);},true);
+    document.addEventListener('pointerout',event=>{const element=event.target instanceof Element?event.target.closest<HTMLElement>('.note-sync'):null;if(!element)return;const next=event.relatedTarget;if(!(next instanceof Node)||!element.contains(next))hide(element);},true);
+    document.addEventListener('focusin',event=>{const element=event.target instanceof Element?event.target.closest<HTMLElement>('.note-sync'):null;if(element)show(element);},true);
+    document.addEventListener('focusout',event=>{const element=event.target instanceof Element?event.target.closest<HTMLElement>('.note-sync'):null;if(!element)return;const next=event.relatedTarget;if(!(next instanceof Node)||!element.contains(next))hide(element);},true);
   };
   return Object.freeze({install,refresh,hide});
 })();
@@ -3933,51 +3932,51 @@ function installDelegatedEventBindings(){
   document.addEventListener('fullscreenchange',updateFullscreenButton);
 }
 function installApplicationDomBindings(){
-  document.documentElement.dataset.studyDirectorBound='1';
+  document.documentElement.dataset['studyDirectorBound']='1';
   installProfileDialogs();
-  const liveLimits={
+  const liveLimits:Readonly<Record<string,number>>={
     'profile-name-input':APP_LIMITS.maxStudentNameChars,'first-start-name':APP_LIMITS.maxStudentNameChars,
     'quote-input':APP_LIMITS.maxQuoteChars,'plan-input':APP_LIMITS.maxScheduleChars,
     'daily-reflection':APP_LIMITS.maxReflectionChars,'recovery-carry':APP_LIMITS.maxCarryForwardChars,
     'library-search':APP_LIMITS.maxSearchChars,'library-notes-search':APP_LIMITS.maxSearchChars,
     'pn-extra':APP_LIMITS.maxNoteChars
   };
-  Object.entries(liveLimits).forEach(([id,max])=>{const field=document.getElementById(id);if(field)field.maxLength=max;});
+  Object.entries(liveLimits).forEach(([id,max])=>{const field=document.getElementById(id);if(field instanceof HTMLInputElement||field instanceof HTMLTextAreaElement)field.maxLength=max;});
   installDelegatedEventBindings();
   NoteSyncPopover.install();
-  AttachmentLibrary.install();
+  requireAttachmentLibrary().install();
   void installAttachmentIntegrityAudit();
   void VerifiedRecovery.install().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
   OwnershipUiProjection.install();
   BlockedActionHint.install();
   RichTextRuntime.install();
   SystemNotifications.install();AppAudio.install();renderSoundSettings();
-  NativeCapabilities.install();
+  requireNativeCapabilities().install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
   // A check starting or stopping updates Verification as it happens.
   BackupProviderRuntime.subscribeStatus(renderIntegrityStatuses);
   BackupProviderRuntime.subscribeStatus(storageResetConnectionsChanged);
   // P5.8B owns status subscriptions, network/visibility refresh and Drive wake-up.
-  SyncStatusHost.install();
+  requireSyncStatusHost().install();
   NoticeCoordinator.subscribeRecent(NotificationRecent.changed);
   void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();
   UiTabRegistry.updateOrientation();
-  NavigationController.install();
+  requireNavigationController().install();
   if(window.matchMedia){
     const navMedia=window.matchMedia(NAV_HORIZONTAL_MEDIA_QUERY);
     if(typeof navMedia.addEventListener==='function')navMedia.addEventListener('change',UiTabRegistry.updateOrientation);
   }
 
-  const pn=document.getElementById('pn-extra');
+  const pnNode=document.getElementById('pn-extra'),pn=pnNode instanceof HTMLTextAreaElement?pnNode:null;
   if(pn)pn.addEventListener('input',event=>{
     if(!appCanMutate())return;
     commitTaskNoteEditor(pn,pn.value,event);
   });
-  const dd=document.getElementById('day-date');
-  if(dd){dd.value=todayISO();dd.dataset.autoDate='1';}
+  const ddNode=document.getElementById('day-date'),dd=ddNode instanceof HTMLInputElement?ddNode:null;
+  if(dd){dd.value=todayISO();dd.dataset['autoDate']='1';}
   PracticePacer.hydrateDefault();
   // Load nudge configuration and hydrate nudge/sound controls
   Pomodoro.configuration.load();
@@ -3993,7 +3992,7 @@ function installApplicationDomBindings(){
 }
 
 function applyPwaLaunchRoute(){
-  return NavigationController.hydrate({source:'launch-route',explicitOnly:true}).then(result=>result.ok===true);
+  return requireNavigationController().hydrate({source:'launch-route',explicitOnly:true}).then(result=>result.ok===true);
 }
 StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze<Parameters<typeof StartupHostModule.createCoordinator>[0]>({
   module:StartupLifecycleModule,
@@ -4019,7 +4018,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze<Parameters<ty
     hydratePlan:()=>PlanData.hydrate(),readRestoreJournal:()=>AppData.restoreJournal.read(),waitForClosedTabLease,recoverRestore:()=>BackupController.recoverInterruptedRestore(),tickClock,updateHeader:updateHeaderInfo,setInterval:(fn,ms)=>setInterval(fn,ms),setTimeout:(fn,ms)=>setTimeout(fn,ms),
     hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
     setFastFenceReady:value=>{BackupRuntimeHost.setFastFenceReady(value);},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock(),resumeStorageReset:resumeUnresolvedStorageReset,
-    installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>wakeBackgroundOperations(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
+    installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>wakeBackgroundOperations(reason),installSessionWatch,refreshKeptVersions:()=>requireKeptVersions().refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
     collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:InsightsPreload.schedule,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
     reportUnsupported:()=>UnsupportedData.reportBlocked(),setPlanStatus,noticeCanCompact,getReviewDate,reconcileLifecycle:(...args)=>SessionLifecycle.reconcile(...args)
   })
