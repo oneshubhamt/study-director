@@ -82,7 +82,7 @@ export interface SessionResetPorts{
   resetBreak(clear?:boolean):unknown;
   setEmptyTimerMode(source:string):unknown;
   clearTimerSession():unknown;
-  hydrateReview(date:string):unknown;
+  hydrateReview(date:string,review?:SessionSnapshot['review']|null):unknown;
   invalidateSchedule():unknown;
   resetPlanSession():unknown;
   clearProgress():unknown;

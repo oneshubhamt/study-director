@@ -2613,7 +2613,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
     stopTimerPresentation:()=>TimerPresentation.stop(),
     invalidatePresentation:()=>{executeIdleDisplayKey='';realTimeAwarenessRenderKey='';executePanelsRenderKey='';executeProgressPanelRenderKey='';scheduleEndPromptKey='';},
     resetCountdown:resetCountdownRuntime,setCurrentTask,resetBreak:resetBreakState,setEmptyTimerMode:()=>setTimerMode(TIMER_MODES.EMPTY,'session-reset'),
-    clearTimerSession:()=>TimerState.clearSession(),hydrateReview:date=>hydrateReviewState({date,snapshotReview:null}),
+    clearTimerSession:()=>TimerState.clearSession(),hydrateReview:(date,review=null)=>hydrateReviewState({date,snapshotReview:review}),
     invalidateSchedule:()=>invalidateScheduleDerived({identity:true,adjustments:true,render:true}),resetPlanSession:()=>PlanRuntime.resetSession(),
     clearProgress:clearProgressRuntime,clearCarryForward:()=>{latestCarryForward='';},resetPractice:()=>PracticePacer.reset(),
     pausePracticeForSessionEnd:()=>PracticePacer.pauseForSessionEnd({persist:false})

@@ -113,6 +113,10 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     const forcedPauseCause=!valid?configuration.practicePauseCauses.session:runtime?.pendingInactiveGap?configuration.practicePauseCauses.gap:runtime?.paused?configuration.practicePauseCauses.main:null;
     const savedAtMs=forcedPauseCause===configuration.practicePauseCauses.gap?(runtime?.pendingInactiveGap?.lastMs||Date.parse(String(value.updatedAt||''))||clock.nowMs()):(Date.parse(String(value.updatedAt||''))||clock.nowMs());
     snapshot.practiceRestore(value.practice,{forcePaused:!!forcedPauseCause,pauseCause:forcedPauseCause||configuration.practicePauseCauses.session,savedAtMs});
+    // Review is part of the stored session snapshot. Restore it before timer
+    // restoration can checkpoint adjusted runtime state, or that checkpoint
+    // could supersede the canonical session with an unhydrated empty Review.
+    reset.hydrateReview(value.date,value.review);
     return true;
   }
   function sessionSnapshot(session:ActiveSession|null):SessionSnapshot|null{
