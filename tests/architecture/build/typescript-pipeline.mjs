@@ -21,7 +21,7 @@ function collectSourceJavaScript(directory,prefix='source'){
     else if(entry.name.endsWith('.js'))sourceJavaScript.push(relative);
   }
 }
-collectSourceJavaScript(path.join(root,'source'));
+collectSourceJavaScript(path.join(process.cwd(),'source'));
 sourceJavaScript.sort();
 const generatedRuntimeJavaScript=[
   'source/external/attachment-worker.js',
@@ -32,7 +32,7 @@ const generatedRuntimeJavaScript=[
   'source/external/wordgard.js'
 ].sort();
 assert.deepEqual(sourceJavaScript,['source/external/insights.js',...generatedRuntimeJavaScript].sort(),'tracked JavaScript runtime inventory must stay explicit at TypeScript closure');
-const inertInsightsShell=fs.readFileSync(path.join(root,'source/external/insights.js'),'utf8');
+const inertInsightsShell=fs.readFileSync(path.join(process.cwd(),'source/external/insights.js'),'utf8');
 assert.equal(inertInsightsShell.replace(/\/\*[\s\S]*?\*\//gu,'').trim(),'','the retained Insights JavaScript shell must remain non-executable');
 for(const id of ['canonical','save-lane','domain','operation-lifecycle','repository-policy']){
   const file=`source/core/${id}.ts`,source=fs.readFileSync(file,'utf8'),output=readScript(file);
