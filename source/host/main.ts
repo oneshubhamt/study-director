@@ -3497,30 +3497,43 @@ const InsightsDeviceState=InsightsHostModule.createDeviceState(Object.freeze<Par
   writeWindow:value=>AppData.local.setText(STORAGE_KEYS.insightsWindow,value)
 }));
 /* DOM BINDINGS AND STARTUP */
+type DiagnosticRow=Readonly<{job:string;state:string;[key:string]:unknown}>;
 function currentBackupDiagnosticStates(){
-  const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
+  const states:DiagnosticRow[]=[];
+  const sample=<T>(job:string,read:()=>T,project:(value:T)=>DiagnosticRow|readonly DiagnosticRow[])=>{
+    try{
+      const projected=project(read()),rows=Array.isArray(projected)?projected:[projected];
+      states.push(...rows as readonly DiagnosticRow[]);
+    }catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}
+  };
   sample('Local storage health',()=>requireStorageHealthController().snapshot(),health=>{
-    const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:CapabilityStorage.snapshot().persisted,usageBytes:CapabilityStorage.snapshot().usageBytes,quotaBytes:CapabilityStorage.snapshot().quotaBytes}];
+    const rows:DiagnosticRow[]=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:CapabilityStorage.snapshot().persisted,usageBytes:CapabilityStorage.snapshot().usageBytes,quotaBytes:CapabilityStorage.snapshot().quotaBytes}];
     const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
-    for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}return rows;
+    for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}
+    return rows;
   });
-  sample('Note saving',()=>AppData.notes.failure(),value=>[{job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
-  sample('Write ownership',()=>({primary:appCanMutate(),...AppMutationCoordinator.status()}),value=>[{job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}]);
-  sample('Backup controller',()=>BackupController.status(),value=>[{job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}]);
-  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalePermissionResponses:value.stalePermissionResponses,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
-  sample('Provider operation',()=>BackupProviderRuntime.status(),value=>[{job:'Provider operation',...OperationLifecycle.snapshot(value)}]);
+  sample('Note saving',()=>AppData.notes.failure(),value=>({job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}));
+  sample('Write ownership',()=>({primary:appCanMutate(),...requireMutationCoordinator().status()}),value=>({job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}));
+  sample('Backup controller',()=>BackupController.status(),value=>({job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}));
+  sample('Device backup',()=>requireDeviceBackup().status(),value=>({job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalePermissionResponses:value.stalePermissionResponses,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}));
+  sample('Provider operation',()=>BackupProviderRuntime.status(),value=>({job:'Provider operation',...OperationLifecycle.snapshot(value)}));
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
-  sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
-  sample('Canonical maintenance',()=>({...DataMaintenanceJob.status(),busy:DataMaintenanceJob.status().busy||AppData.maintenance.status().busy}),value=>[{job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}]);
-  for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
-  sample('App update',()=>PwaLifecycle.status(),pwa=>{const update=PwaRuntime.diagnostics();return [{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:update.nextCheckAt>0,nextEligibleAt:update.nextCheckAt?new Date(update.nextCheckAt).toISOString():'',completedAt:update.lastSuccessfulCheckAt?new Date(update.lastSuccessfulCheckAt).toISOString():'',retryAttempt:update.failureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}];});
-  states.push(...(BackupIntegrity?.diagnosticRows()||[]));
-  // Sync with Drive and the profiles on this device: what to read first when
-  // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
-  sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
-  sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
-  sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
+  sample('Backup encryption',()=>BackupProtection.status(),value=>({job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}));
+  sample('Canonical maintenance',()=>{
+    if(!DataMaintenanceJob)throw new Error('Canonical maintenance job is unavailable.');
+    const status=DataMaintenanceJob.status();return {...status,busy:status.busy||AppData.maintenance.status().busy};
+  },value=>({job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}));
+  sample('Attachment cleanup',()=>RichTextAssetMaintenance.status(),value=>({job:'Attachment cleanup',state:String(value.state||value.status||'observed'),...value}));
+  sample('Backup scratch cleanup',()=>BackupFiles.status(),value=>({job:'Backup scratch cleanup',state:String(value.state||value.status||'observed'),...value}));
+  sample('Attachment processor',()=>AttachmentIngest.status(),value=>({job:'Attachment processor',state:String(OperationLifecycle.snapshot(value).state||'observed'),...OperationLifecycle.snapshot(value)}));
+  sample('File processor',()=>Exports.status(),value=>({job:'File processor',state:String(OperationLifecycle.snapshot(value).state||'observed'),...OperationLifecycle.snapshot(value)}));
+  sample('App update',()=>PwaLifecycle.status(),pwa=>{const update=PwaRuntime.diagnostics();return {job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:update.nextCheckAt>0,nextEligibleAt:update.nextCheckAt?new Date(update.nextCheckAt).toISOString():'',completedAt:update.lastSuccessfulCheckAt?new Date(update.lastSuccessfulCheckAt).toISOString():'',retryAttempt:update.failureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''};});
+  for(const row of BackupIntegrity?.diagnosticRows()||[])states.push(row as DiagnosticRow);
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:requireKeptVersions().count()})));
+  sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>({job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}));
+  sample('Unsupported data',()=>UnsupportedData.summary(),value=>({job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}));
+  sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values.map(value=>({job:String(value.job||value.providerId||'Provider background'),state:String(value.state||'observed'),...value})));
+  return states;
 }
 // Why a version was kept, for diagnostics: the kind of difference, not its content.
 function keptReviewCause(review){
