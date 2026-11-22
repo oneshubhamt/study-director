@@ -3536,42 +3536,73 @@ function currentBackupDiagnosticStates(){
   return states;
 }
 // Why a version was kept, for diagnostics: the kind of difference, not its content.
-function keptReviewCause(review){
+type DiagnosticPendingReview=Awaited<ReturnType<typeof AppData.pendingReviews.list>>[number];
+function keptReviewCause(review:DiagnosticPendingReview){
   const kept=review.kept;
   if(review.subject==='note')return !kept?'note-deletion':typeof kept.text==='string'&&typeof kept.label==='string'?'note-text-title':typeof kept.text==='string'?'note-text':'note-title';
   if(review.subject==='savedDay')return kept?'saved-day':'saved-day-deletion';
   if(review.subject==='session')return kept?'session':'session-absent';
   return 'settings';
 }
+type AsyncDiagnosticSpec=Readonly<{job:string;run():Promise<readonly DiagnosticRow[]>}>;
+function diagnosticSpec<T>(job:string,read:()=>T|PromiseLike<T>,project:(value:T)=>DiagnosticRow|readonly DiagnosticRow[]):AsyncDiagnosticSpec{
+  return Object.freeze({job,async run(){
+    const projected=project(await read()),rows=Array.isArray(projected)?projected:[projected];
+    return rows as readonly DiagnosticRow[];
+  }});
+}
 // Read current storage and recovery summaries for on-demand diagnostics.
 async function readDataDiagnosticStates(){
-  const samples=[
-    // Which storage this page opened. It tells a browser wipe (no profile
-    // list, one new database) from the app opening an empty profile while
-    // another database on this site still holds the data. Counts, not names.
-    {job:'Profile storage',read:async()=>{
-      const base=DATA_CONTRACT.storage.dbName,ours=name=>name===base||name.startsWith(base+ProfileScope.separator);
-      const names=typeof indexedDB?.databases==='function'?(await indexedDB.databases()).map(row=>String(row?.name||'')).filter(ours):null;
-      return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
-    },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),
-      ...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})})},
-    // Each version kept for review, newest first: what it is, why it was kept
-    // and which device's copy it came from (type and browser), never its
-    // content or which note or day it is.
-    {job:'Kept versions',read:()=>AppData.pendingReviews.list(),project:list=>{
-      const open=list.filter(review=>!review.resolvedAt).sort((a,b)=>b.keptAt.localeCompare(a.keptAt));
-      return [{job:'Kept versions',state:open.length?'pending':'none',count:open.length},...open.slice(0,12).map(review=>({job:'Kept version',state:'pending',subject:review.subject,cause:keptReviewCause(review),
-        device:!review.keptFrom?'not recorded':review.keptFrom===InstallationIdentity.getId()?'this device':PersistenceModule.deviceName(review.keptFrom)||'another device',keptAt:review.keptAt,...(review.keptChangedAt?{changedAt:review.keptChangedAt}:{})}))];
-    }},
-    {job:'Canonical maintenance record',read:()=>AppData.metadata.diagnostics(),project:value=>({job:'Canonical maintenance record',state:value.maintenanceStatus,pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery})},
-    ...[['Restore journal',AppData.restoreJournal],['Library clear journal',AppData.libraryClearJournal]].map(([job,owner])=>({job,read:()=>owner.diagnostics(),project:value=>({job,state:value?'pending':'absent',pending:!!value,phase:value?.phase||'',updatedAt:value?.updatedAt||'',coverage:'journal-header'})})),
-    {job:'Repository cleanup intent',read:()=>BackupAppMeta.read('repositoryMaintenancePending'),project:value=>[{job:'Repository cleanup intent',state:value?.entries?.length?'pending':'absent',pending:!!value?.entries?.length,count:value?.entries?.length||0},...(value?.entries||[]).filter(entry=>['device-folder','google-drive'].includes(entry.providerId)).map(entry=>({job:entry.providerId==='device-folder'?'Device cleanup intent':'Drive cleanup intent',state:'pending',pending:true,reason:entry.reason,nextEligibleAt:entry.nextEligibleAt,scopeBound:!!entry.repositoryScope}))]},
-    {job:'External backup pending',read:()=>BackupAppMeta.read('managedProviderBackupPending'),project:value=>({job:'External backup pending',state:value?.entries?.length?'pending':'absent',pending:!!value?.entries?.length,count:value?.entries?.length||0})},
-    {job:'Verified external copies',read:()=>BackupAppMeta.read('verifiedRecoveryBackups'),project:value=>{const entries=[value?.file,...Object.values(value?.providers||{})].filter(Boolean);return {job:'Verified external copies',state:entries.length?'recorded':'never',count:entries.length,completedAt:entries.map(entry=>entry.at||'').filter(value=>Number.isFinite(Date.parse(value))).sort().at(-1)||'',coverage:'recorded-verification'};}}
-  ],results=new Map();
-  const reads=samples.map(sample=>Promise.resolve().then(sample.read).then(value=>results.set(sample.job,sample.project(value))).catch(()=>results.set(sample.job,{job:sample.job,state:'unavailable',reason:'state-unavailable'})));
+  const profileStorage=diagnosticSpec('Profile storage',async()=>{
+    const base=DATA_CONTRACT.storage.dbName,ours=(name:string)=>name===base||name.startsWith(base+ProfileScope.separator);
+    const names=typeof indexedDB?.databases==='function'?(await indexedDB.databases()).map(row=>String(row?.name||'')).filter(ours):null;
+    return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
+  },value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})}));
+
+  const keptVersions=diagnosticSpec('Kept versions',()=>AppData.pendingReviews.list(),list=>{
+    const open=[...list].filter(review=>!review.resolvedAt).sort((a,b)=>b.keptAt.localeCompare(a.keptAt));
+    return [{job:'Kept versions',state:open.length?'pending':'none',count:open.length},...open.slice(0,12).map(review=>({job:'Kept version',state:'pending',subject:review.subject,cause:keptReviewCause(review),device:!review.keptFrom?'not recorded':review.keptFrom===InstallationIdentity.getId()?'this device':PersistenceModule.deviceName(review.keptFrom)||'another device',keptAt:review.keptAt,...(review.keptChangedAt?{changedAt:review.keptChangedAt}:{})}))];
+  });
+
+  const maintenanceRecord=diagnosticSpec('Canonical maintenance record',()=>AppData.metadata.diagnostics(),value=>({job:'Canonical maintenance record',state:String(value.maintenanceStatus||'unknown'),pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery}));
+
+  const journalSpec=(job:string,owner:Readonly<{diagnostics():Promise<unknown>}>):AsyncDiagnosticSpec=>diagnosticSpec(job,()=>owner.diagnostics(),value=>{
+    const phase=objectField(value,'phase'),updatedAt=objectField(value,'updatedAt');
+    return {job,state:value?'pending':'absent',pending:!!value,phase:typeof phase==='string'?phase:'',updatedAt:typeof updatedAt==='string'?updatedAt:'',coverage:'journal-header'};
+  });
+
+  const repositoryCleanup=diagnosticSpec('Repository cleanup intent',()=>BackupAppMeta.read('repositoryMaintenancePending'),value=>{
+    const raw=objectField(value,'entries'),entries=Array.isArray(raw)?raw:[];
+    const rows:DiagnosticRow[]=[{job:'Repository cleanup intent',state:entries.length?'pending':'absent',pending:entries.length>0,count:entries.length}];
+    for(const entry of entries){
+      const providerId=String(objectField(entry,'providerId')||'');if(!['device-folder','google-drive'].includes(providerId))continue;
+      rows.push({job:providerId==='device-folder'?'Device cleanup intent':'Drive cleanup intent',state:'pending',pending:true,reason:String(objectField(entry,'reason')||''),nextEligibleAt:String(objectField(entry,'nextEligibleAt')||''),scopeBound:!!objectField(entry,'repositoryScope')});
+    }
+    return rows;
+  });
+
+  const externalPending=diagnosticSpec('External backup pending',()=>BackupAppMeta.read('managedProviderBackupPending'),value=>{
+    const raw=objectField(value,'entries'),entries=Array.isArray(raw)?raw:[];
+    return {job:'External backup pending',state:entries.length?'pending':'absent',pending:entries.length>0,count:entries.length};
+  });
+
+  const verifiedCopies=diagnosticSpec('Verified external copies',()=>BackupAppMeta.read('verifiedRecoveryBackups'),value=>{
+    const providers=objectField(value,'providers'),providerValues=providers&&typeof providers==='object'?Object.values(providers):[];
+    const entries=[objectField(value,'file'),...providerValues].filter((entry):entry is object=>!!entry&&typeof entry==='object');
+    const completedAt=entries.map(entry=>String(objectField(entry,'at')||'')).filter(at=>Number.isFinite(Date.parse(at))).sort().at(-1)||'';
+    return {job:'Verified external copies',state:entries.length?'recorded':'never',count:entries.length,completedAt,coverage:'recorded-verification'};
+  });
+
+  const samples:readonly AsyncDiagnosticSpec[]=[
+    profileStorage,keptVersions,maintenanceRecord,
+    journalSpec('Restore journal',AppData.restoreJournal),
+    journalSpec('Library clear journal',AppData.libraryClearJournal),
+    repositoryCleanup,externalPending,verifiedCopies
+  ];
+  const results=new Map<string,readonly DiagnosticRow[]>();
+  const reads=samples.map(sample=>sample.run().then(rows=>results.set(sample.job,rows)).catch(()=>results.set(sample.job,[{job:sample.job,state:'unavailable',reason:'state-unavailable'}])));
   try{await OperationLifecycle.waitForSettlement(reads,{timeoutMs:3000,timeoutCode:'DIAGNOSTIC_SNAPSHOT_TIMEOUT',timeoutMessage:'Diagnostic snapshot could not finish.'});}catch{}
-  return samples.flatMap(sample=>results.get(sample.job)||{job:sample.job,state:'unavailable',reason:'diagnostic-deadline'});
+  return samples.flatMap(sample=>results.get(sample.job)||[{job:sample.job,state:'unavailable',reason:'diagnostic-deadline'}]);
 }
 async function copyBackupDiagnostics(){
   const notice=NoticeCoordinator.presentation('diagnostics').begin({id:'copy-backup',surfaceId:'backup-diagnostics-status',announce:false,title:'Copy data and backup diagnostics'});
