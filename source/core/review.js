@@ -361,9 +361,11 @@ function syncReviewSurfaceMode(){
   [
     document.querySelector('#pane-review .review-stats'),
     document.getElementById('review-summary'),
-    document.getElementById('practice-review'),
     document.querySelector('#pane-review .review-blocks-collapse')
   ].filter(Boolean).forEach(element=>{element.hidden=!hasStudyDay;});
+  // The Practice Pacer panel shows only with runs to show, which
+  // renderPracticeReview decides; here it only goes with the study day.
+  if(!hasStudyDay)hidePracticeReview();
   const quality=document.querySelector('#pane-review .quality-wrap');
   if(quality)quality.hidden=!hasStudyDay;
   document.querySelectorAll('.quality-btn').forEach(button=>{button.disabled=!hasStudyDay||!lifecycleCanWrite();});
@@ -1215,10 +1217,19 @@ function populatePracticeRunTable(root,runs,{tasks=TASKS,includeActiveNote=false
   }
   return summary;
 }
+// Hidden, the panel keeps nothing: a later day's Review must never show an
+// earlier day's runs (seen 2026-11-22 after a rollover and a new plan).
+function hidePracticeReview(){
+  const panel=document.getElementById('practice-review');if(!panel)return;
+  panel.hidden=true;
+  const table=panel.querySelector('.practice-run-table'),note=panel.querySelector('.practice-review-note');
+  if(table)table.replaceChildren();if(note)note.textContent='';
+}
 function renderPracticeReview(){
   const panel=document.getElementById('practice-review');if(!panel)return;
-  const runs=PracticePacer.completedRuns(),active=!!PracticePacer.status().active,show=!!runs.length||active;
-  panel.hidden=!show;if(!show)return;
+  const runs=PracticePacer.completedRuns(),active=!!PracticePacer.status().active,show=reviewHasStudyDay()&&(!!runs.length||active);
+  if(!show){hidePracticeReview();return;}
+  panel.hidden=false;
   const table=panel.querySelector('.practice-run-table'),note=panel.querySelector('.practice-review-note');
   if(runs.length){
     if(table)table.hidden=false;populatePracticeRunTable(panel,runs,{includeActiveNote:true,normalized:true,allowDelete:true});
