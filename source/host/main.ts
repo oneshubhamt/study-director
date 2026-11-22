@@ -142,8 +142,10 @@ function decodeBuildStringRecord(value:string,label:string):Readonly<Record<stri
 }
 function decodeBuildStringArray(value:string,label:string):readonly string[]{
   const parsed=decodeBuildJson(value,label);
-  if(!Array.isArray(parsed)||parsed.some(item=>typeof item!=='string'||!item))throw new TypeError('Invalid '+label+' build input.');
-  return Object.freeze([...parsed]);
+  if(!Array.isArray(parsed))throw new TypeError('Invalid '+label+' build input.');
+  const items:unknown[]=parsed;
+  if(items.some(item=>typeof item!=='string'||!item))throw new TypeError('Invalid '+label+' build input.');
+  return Object.freeze(items.map(item=>String(item)));
 }
 const RAW_LOCAL_STORAGE_KEYS=decodeBuildStringRecord('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys');
 const DEVICE_WIDE_STORAGE_KEY_NAMES=new Set<string>(decodeBuildStringArray('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys'));
@@ -466,7 +468,7 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
   practice:Object.freeze<ExecutionHostPorts['practice']>({
     configuration:Object.freeze<ExecutionHostPorts['practice']['configuration']>({APP_LIMITS}),
     schedule:Object.freeze<ExecutionHostPorts['practice']['schedule']>({isWorkBlock}),
-    persistence:Object.freeze<ExecutionHostPorts['practice']['persistence']>({persistPracticeCueMode,persistPracticeTarget,saveLiveDraft,writeLiveDraftNow}),
+    persistence:Object.freeze<ExecutionHostPorts['practice']['persistence']>({persistPracticeCueMode:mode=>{void persistPracticeCueMode(mode);},persistPracticeTarget:ms=>{void persistPracticeTarget(ms);},saveLiveDraft:options=>{void saveLiveDraft(options);},writeLiveDraftNow:()=>{void writeLiveDraftNow();}}),
     view:Object.freeze<ExecutionHostPorts['practice']['view']>({
       document,
       isExecutePaneVisible:()=>!document.hidden&&!!document.getElementById('pane-execute')?.classList.contains('on'),
@@ -490,8 +492,8 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
   timer:Object.freeze<ExecutionHostPorts['timer']>({
     configuration:Object.freeze<ExecutionHostPorts['timer']['configuration']>({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
     domain:Object.freeze<ExecutionHostPorts['timer']['domain']>({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
-    schedule:Object.freeze<ExecutionHostPorts['timer']['schedule']>({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
-    persistence:Object.freeze<ExecutionHostPorts['timer']['persistence']>({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
+    schedule:Object.freeze<ExecutionHostPorts['timer']['schedule']>({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>{void handleStudyDayRollover(...args);},isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
+    persistence:Object.freeze<ExecutionHostPorts['timer']['persistence']>({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft:()=>{void flushLiveDraft();},maybeSnapshotRunningTimer:()=>{void maybeSnapshotRunningTimer();},recoverySetStatus,saveLiveDraft:()=>{void saveLiveDraft();},saveNote:()=>{void saveNote();},writeLiveDraftNow:()=>{void writeLiveDraftNow();}}),
     view:Object.freeze<ExecutionHostPorts['timer']['view']>({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}),
     clock:Object.freeze<ExecutionHostPorts['timer']['clock']>({nowMs:DecisionClock.nowMs}),
     reviewEvidence:Object.freeze<ExecutionHostPorts['timer']['reviewEvidence']>({applicableNotesForTask,getReviewDate,updateRealTimeAwareness,updateTimerFocusMetrics}),
@@ -1803,14 +1805,14 @@ function tickClock(){
   const autoDate=todayISO(n);
   // Previous-day Review is an explicit recovery choice, not a live study
   // session eligible for automatic rollover or a surprise Day save.
-  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
+  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){void handleStudyDayRollover();return;}
   if(dd instanceof HTMLInputElement&&dd.dataset['autoDate']==='1'&&dd.value!==autoDate&&!SessionLifecycle.transitioning){
     void SessionLifecycle.run('date-rollover',{date:autoDate,autoDate:true},()=>{
       dd.value=autoDate;return true;
     }).catch(error=>AppDiagnostics.capture('review.auto-date-rollover',error,'warn'));
   }
   maybePromptScheduleEndSave(n);
-  maybePromptBackupNudge();
+  void maybePromptBackupNudge();
   if(!maybeAutoStartScheduledBlock(n)){
     if(document.getElementById('pane-plan')?.classList.contains('on'))updateRealTimeAwareness();
     if(document.getElementById('pane-execute')?.classList.contains('on'))refreshExecuteIdleDisplay(n);
@@ -1878,7 +1880,7 @@ if(location.protocol==='file:'){
   document.querySelector('main')?.prepend(notice);
 }
 // Local, bounded diagnostics: never record document samples, URLs or note text.
-const trustedTypeViolations=new Map();
+const trustedTypeViolations=new Map<string,number>();
 document.addEventListener('securitypolicyviolation',event=>{
   if(!['trusted-types','require-trusted-types-for'].includes(event.effectiveDirective))return;
   const key=event.effectiveDirective+':'+(['enforce','report'].includes(event.disposition)?event.disposition:'unknown');
@@ -1928,7 +1930,7 @@ function toggleDisplayTools(){return requirePresentationRuntime().toggleDisplayT
 function toggleFS(){
   if(!fullscreenAvailable())return;
   const action=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
-  if(action&&typeof action.catch==='function')action.catch(error=>AppDiagnostics.capture('ui.fullscreen',error));
+  void action.catch(error=>AppDiagnostics.capture('ui.fullscreen',error));
   updateFullscreenButton();
 }
 function shouldIgnoreFullscreenDblClick(target:Element|null){
@@ -2798,7 +2800,7 @@ AttachmentLibrary=AttachmentsModule.create(Object.freeze<AttachmentLibraryInput>
   onWorkStart:()=>{pwaWorkRevision++;},
   store:AttachmentStorage,processing:Exports,document,interactions:Interactions,
   canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),
-  isActive:()=>document.getElementById('pane-library')?.classList.contains('on')===true&&document.getElementById('library-data')?.hidden===false,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>BackupIntegrity?.attachmentIssue(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
+  isActive:()=>document.getElementById('pane-library')?.classList.contains('on')===true&&document.getElementById('library-data')?.hidden===false,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>BackupIntegrity?.attachmentIssue(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');void goTab('library',{source:'attachment-library'});},
   openSource:async source=>{if(!await goTab('library',{source:'attachment-reference'}))return false;if(source.kind==='note')return LibraryView.revealNoteReference(source.key);if(source.kind==='day')return LibraryView.openDay(source.key);return false;},
   preparePdfOpen:()=>PdfDocuments.prepareNativeWindow(),
   openPdf:(row,file,reservedWindow,releaseReader)=>PdfDocuments.open(row,file,reservedWindow,releaseReader),
@@ -2941,7 +2943,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
     tags:()=>NoteLinks.tags(),
     trash:key=>LibraryNoteWorkflows.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
-    versions:async target=>{const value=await withBackupPassword(()=>requireBackupRecoveryHost().history.openNote(target));if(!value||typeof value!=='object')return {};const reason=Reflect.get(value,'reason'),opened=Reflect.get(value,'opened');return Object.freeze({...((typeof reason==='string')?{reason}:{}),...((typeof opened==='boolean')?{opened}:{})});},
+    versions:async target=>{const value=await withBackupPassword(()=>requireBackupRecoveryHost().history.openNote(target));if(!value||typeof value!=='object')return {};const reason=objectField(value,'reason'),opened=objectField(value,'opened');return Object.freeze({...((typeof reason==='string')?{reason}:{}),...((typeof opened==='boolean')?{opened}:{})});},
     print:(key,title)=>LibraryDocuments.printNote(key,title)
   }),
   attachments:Object.freeze<LibraryViewInput['ports']['attachments']>({
@@ -3057,7 +3059,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
   domain:Object.freeze<BackupRuntimeHostInput['domain']>({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
   view:Object.freeze<BackupRuntimeHostInput['view']>({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
   events:Object.freeze<BackupRuntimeHostInput['events']>({
-    libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
+    libraryChanged:()=>{void LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
     restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
     notifyBackupChange:change=>notifyBackupChange(change),settleStorageReset:()=>settleStorageReset(),
     resetBackupNudge:()=>BackupNudge?.reset(),refreshStorageWarning:()=>refreshStorageFallbackWarning(),scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)
@@ -3378,7 +3380,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze<RecoveryHos
   }),
   view:Object.freeze<RecoveryHostInput['view']>({
     deviceName:(id,others)=>deviceName(id,others),invalidateAttachments:()=>invalidateAttachmentLibrary(),refreshCore:()=>{renderSched();refreshCoreUi({header:true});},refreshNotes:()=>refreshPnote(),refreshReview:()=>ReviewView.refresh(),
-    renderLibrary:()=>LibraryView.render(),setStatus:message=>{setTextSafe('backup-status',message);}
+    renderLibrary:()=>{void LibraryView.render();},setStatus:message=>{setTextSafe('backup-status',message);}
   })
 }));
 if(!Object.isFrozen(BackupRecoveryHost)||BackupRecoveryHost.format!=='study-director.backup-recovery-host'||BackupRecoveryHost.contractVersion!==1){
@@ -3589,7 +3591,7 @@ async function readDataDiagnosticStates(){
   });
 
   const verifiedCopies=diagnosticSpec('Verified external copies',()=>BackupAppMeta.read('verifiedRecoveryBackups'),value=>{
-    const providers=objectField(value,'providers'),providerValues=providers&&typeof providers==='object'?Object.values(providers):[];
+    const providers=objectField(value,'providers'),providerValues:unknown[]=providers&&typeof providers==='object'?Object.values(providers as Record<string,unknown>):[];
     const entries=[objectField(value,'file'),...providerValues].filter((entry):entry is object=>!!entry&&typeof entry==='object');
     const completedAt=entries.map(entry=>String(objectField(entry,'at')||'')).filter(at=>Number.isFinite(Date.parse(at))).sort().at(-1)||'';
     return {job:'Verified external copies',state:entries.length?'recorded':'never',count:entries.length,completedAt,coverage:'recorded-verification'};
@@ -3879,10 +3881,10 @@ const OwnershipUiProjection=(()=>{
     if(page.dataset['studyDirectorUiState']!==current.state)page.dataset['studyDirectorUiState']=current.state;
     if(page.dataset['studyDirectorUiRevision']!==revision)page.dataset['studyDirectorUiRevision']=revision;
     candidateElements(root).forEach(element=>{if(!current.canMutate){blockElement(element,'ownership');return;}if(blockedByActiveSession(element)){blockElement(element,'active-session');return;}releaseElement(element);});
-    if(previousCanMutate!==current.canMutate){queueMicrotask(()=>richTextSyncAll());if(current.canMutate){schedulePwaUpdateCheck(250);schedulePwaUpdateEvaluation(250);}else clearPwaUpdateCheckTimer();}
+    if(previousCanMutate!==current.canMutate){queueMicrotask(()=>{void richTextSyncAll();});if(current.canMutate){schedulePwaUpdateCheck(250);schedulePwaUpdateEvaluation(250);}else clearPwaUpdateCheckTimer();}
     return current;
   }
-  function queueApply(){if(applyQueued)return;applyQueued=true;Promise.resolve().then(()=>{applyQueued=false;apply();});}
+  function queueApply(){if(applyQueued)return;applyQueued=true;queueMicrotask(()=>{applyQueued=false;void apply();});}
   function mutationNeedsProjection(mutation:MutationRecord){if(mutation.type==='attributes')return mutation.target instanceof HTMLElement&&!!mutation.target.dataset['ownershipUi'];return [...mutation.addedNodes].some(node=>node?.nodeType===1);}
   function guardEvent(event:Event){
     const target=event.target instanceof Element?event.target.closest<HTMLElement>('[data-ownership-ui]'):null;if(!target)return;
