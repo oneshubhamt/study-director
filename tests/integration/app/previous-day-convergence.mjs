@@ -32,9 +32,12 @@ const canonical=x=>x||null;
 // ownership or today's suspended-state handlers, and retire covered rows first.
 // Only the device that ran the day asks ('dialog'); a copy from another
 // device is kept quietly in the panel ('previous') until a sync shows the day
-// saved (owner's choice, 2026-11-12).
+// saved (owner's choice, 2026-11-12), and so is one holding only the plan,
+// with nothing recorded here (2026-11-22: begun on the phone, worked on the
+// laptop).
 for(const [label,state,covered,expected] of [
   ['old local active',session('active'),false,'dialog'],
+  ['old local plan only',{...session('active'),planOnly:true},false,'previous'],
   ['old local suspended',session('suspended'),false,'dialog'],
   ['old remote active',session('active','inst_other'),false,'previous'],
   ['old remote suspended',session('suspended','inst_other'),false,'previous'],
@@ -51,6 +54,7 @@ for(const [label,state,covered,expected] of [
     retireCoveredPreviousActiveSession:async()=>{if(covered)events.push('retired');return covered;},
     sessionRunsElsewhere:x=>x.status!=='suspended'&&x.runningOn!=='inst_here',sessionFromElsewhere:x=>x.runningOn!=='inst_here',
     handlePreviousActiveSession:async()=>{events.push('dialog');return false;},
+    sessionHoldsNoWork:x=>x.planOnly===true,
     setSessionPanelMode:mode=>events.push(mode),
     isSuspendedActiveSession:()=>false,isFinishedActiveSession:()=>false,isRestorableActiveSession:()=>false,
     AppDiagnostics:{capture:()=>{}}

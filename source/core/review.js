@@ -581,11 +581,28 @@ function studyDayRolledOver(now=new Date()){
 // Coverage is read before the day-close capture, which itself records the
 // open block and Pacer run and so would look like new work.
 async function rolloverDecision(woke,endedDate){
+  // A device that slept may hold only the plan of a day worked on elsewhere
+  // (begun on the phone, continued on the laptop): saving it would set an
+  // empty day against the real one. It defers, and the fresh-start decision
+  // keeps a plan-only copy quietly until a sync clears it.
   if(woke)return {decision:'defer'};
-  const existing=await AppData.dailyRecords.get(endedDate);
-  if(!existing||existing.recordKind==='diary')return {decision:'save'};
+  const existing=await AppData.dailyRecords.get(endedDate),unsaved=!existing||existing.recordKind==='diary';
+  // Live, a plan applied with nothing recorded is kept as an empty day,
+  // without a notice (owner, 2026-11-22): Insights counts it as planned and
+  // missed.
+  if(unsaved&&dayHoldsNoWork(buildDailyRecord()))return {decision:'save',quiet:true};
+  if(unsaved)return {decision:'save'};
   if(await storedSessionCovered())return {decision:'quiet'};
   return {decision:cleanDayRevision(existing.sourceRevision)===cleanDayRevision(SessionState.savedRevision)?'save':'defer'};
+}
+// Only the plan: no time, progress, outcome, timing change or Pacer run, and
+// no reflection, rating or carry-forward note.
+function dayHoldsNoWork(doc){
+  const worked=entry=>!!entry&&(Number(entry.completion)>0||Number(entry.done)>0||Number(entry.actualSeconds)>0||Number(entry.sessionCount)>0||
+    entry.skipped===true||entry.doneFlag===true||!!entry.actualStart||!!entry.actualEnd||!!entry.adjustedStart||(entry.pauseEvents||[]).length>0||
+    (!!entry.completionSource&&entry.completionSource!==COMPLETION_SOURCES.NONE));
+  return !Object.values(doc.results||{}).some(worked)&&!(doc.practiceRuns||[]).length&&!(Number(doc.studyQuality)>=1)&&
+    !plainTextContent(doc.reflection||'').trim()&&!plainTextContent(doc.carryForwardDraft||'').trim();
 }
 async function handleStudyDayRollover(options={}){
   if(rolloverSaveInProgress||!appCanMutate())return false;
@@ -595,14 +612,14 @@ async function handleStudyDayRollover(options={}){
   stopTimerExecution();
   cancelPendingLiveDraftSave();
   const endedDate=SessionState.studyDate;
-  let savedDay=null,decision='empty';
+  let savedDay=null,decision='empty',quietSave=false;
   try{
     // A live device stores its session as it stands, so a day left for review
     // holds all its work; a woken device's copy is left as it was.
     if(!woke&&hasSaveableStudyDay())await flushLiveDraft({markChanged:false});
     activeSessionPersistenceBlocked=true;
     if(hasSaveableStudyDay()){
-      ({decision}=await rolloverDecision(woke,endedDate));
+      ({decision,quiet:quietSave=false}=await rolloverDecision(woke,endedDate));
       if(decision==='save'){
         if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
         PracticePacer.finalizeForDayClose();
@@ -630,8 +647,8 @@ async function handleStudyDayRollover(options={}){
       refreshStorageFallbackWarning();
       return true;
     });
-    if(savedDay){
-      markDayContentSaved(savedDay.date,savedDay.revision);
+    if(savedDay)markDayContentSaved(savedDay.date,savedDay.revision);
+    if(savedDay&&!quietSave){
       notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
       Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);
     }
