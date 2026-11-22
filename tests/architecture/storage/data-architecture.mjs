@@ -30,12 +30,12 @@ const sourceFiles=[];
 const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|ts|html)$/u.test(entry.name))sourceFiles.push(full);}};
 walk(path.join(root,'source'));
 
-assert.match(app,/localStorageKeys:@@SD_LOCAL_STORAGE_KEYS@@/u,'host must inject the canonical localStorage identity map into the typed bootstrap boundary');
+assert.match(app,/const RAW_LOCAL_STORAGE_KEYS=decodeBuildStringRecord\('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys'\)/u,'host must decode the canonical localStorage identity map at the typed bootstrap boundary');
+assert.match(app,/localStorageKeys:RAW_LOCAL_STORAGE_KEYS/u,'typed bootstrap must receive the decoded canonical localStorage identity map');
 assert.match(dataBootstrap,/deviceWide\.includes\(name\)\?rawLocal\[name\]:profileScope\.scoped\(rawLocal\[name\]\)/u,'every browser-storage key but the device-wide ones belongs to the open profile');
 assert.doesNotMatch(app,/['"]studyDirector\.(?:theme|presentation)\.v1['"]/u,'pre-hydration presentation bootstrap must use build-injected storage identities');
-assert.match(app,/sessionStorageKeys:@@SD_SESSION_STORAGE_KEYS@@/u);
-
-assert.match(app,/appMetaKeys:@@SD_APP_META_KEYS@@/u);
+assert.match(app,/sessionStorageKeys:decodeBuildJson\('@@SD_SESSION_STORAGE_KEYS_URI@@','session storage keys'\)/u);
+assert.match(app,/appMetaKeys:decodeBuildJson\('@@SD_APP_META_KEYS_URI@@','AppMeta keys'\)/u);
 
 assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory; attachment cleanup keeps no record of its own');
 assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'sessionHandoffSafety'),false,'Drive claims settle interrupted Continue Here without a local marker');
