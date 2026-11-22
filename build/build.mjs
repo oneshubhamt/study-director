@@ -177,7 +177,7 @@ function assertCanonicalSource(){
   invariant(externalModules.every(module=>module.execution==='startup'||module.execution==='on-demand'||module.execution==='worker'),'External runtime execution mode is invalid.');
   const insightsModule=externalModules.find(module=>module.id==='insights');
   const insightsSources=insightsModule?moduleSourceFiles(insightsModule):[];
-  invariant(JSON.stringify(insightsSources)===JSON.stringify(['external/insights-model.ts','external/insights-protocol.ts','external/insights-worker.ts','external/insights-compute.ts','external/insights-rendering.ts','external/insights-runtime.ts','external/insights.js']),'The checked Insights model, protocol, worker bridge, renderer and retained runtime must remain ordered inside one runtime asset.');
+  invariant(JSON.stringify(insightsSources)===JSON.stringify(['external/insights-model.ts','external/insights-protocol.ts','external/insights-worker.ts','external/insights-compute.ts','external/insights-rendering.ts','external/insights-runtime.ts']),'The checked Insights model, protocol, worker bridge, renderer and retained runtime must remain ordered inside one runtime asset.');
   const insightsPortable=insightsSources.slice(0,2).map(sourceFile).join('\n');
   invariant(!/\b(?:document|localStorage|sessionStorage|requestAnimationFrame|Worker|querySelector|createElement)\b/u.test(insightsPortable),'Insights model/protocol must remain independent of DOM, browser storage, animation, and worker APIs.');
 }

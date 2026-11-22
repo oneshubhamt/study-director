@@ -8,7 +8,6 @@ const host=read('source/core/insights-host.ts');
 const publicApiHost=read('source/core/public-api-host.ts');
 const app=readHostHtml();
 const manifest=read('build/module-manifest.mjs');
-const legacy=read('source/external/insights.js');
 
 assert.match(runtime,/StudyDirector\?\.data\?\.deviceState/u,'Insights runtime must consume only the public bounded device-state capability');
 assert.match(host,/function createDeviceState\(input[\s\S]{0,620}readInsightsWindow:[\s\S]{0,140}input\.readWindow[\s\S]{0,220}writeInsightsWindow:[\s\S]{0,140}input\.writeWindow/u,'checked Insights host owns bounded window persistence');
@@ -32,8 +31,8 @@ assert.doesNotMatch(app,/const PluginRuntime=\(\(\)=>\{/u,'unchecked generic plu
 assert.doesNotMatch(runtime,/AppData\.|localStorage|indexedDB/u,'Insights retained runtime must not reach host persistence directly');
 assert.doesNotMatch(runtime,/\beval\s*\(|new Function\s*\(/u,'Insights runtime must not use string-to-code execution');
 assert.doesNotMatch(runtime,/querySelector(?:All)?\(`[^`]*\$\{/u,'Insights runtime values must not be interpolated into CSS selectors');
-assert.match(manifest,/external\/insights-rendering\.ts','external\/insights-runtime\.ts','external\/insights\.js'/u,'one generated Insights asset must keep renderer then checked retained runtime then inert tracked shell');
-assert.doesNotMatch(legacy,/\b(?:const|let|var|function)\b|=>|\(\)\s*\{/u,'legacy Insights shell must remain non-executable until separately authorized deletion');
+assert.match(manifest,/external\/insights-rendering\.ts','external\/insights-runtime\.ts'/u,'one generated Insights asset must keep renderer then checked retained runtime as its final authored sources');
+assert.doesNotMatch(manifest,/external\/insights\.js/u,'obsolete tracked Insights JavaScript shell must not return to the runtime manifest');
 
 const workerExit=runtime.indexOf("if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function')return;");
 const renderer=runtime.indexOf('const InsightsRendering=createInsightsRendering');
@@ -41,5 +40,5 @@ assert.ok(workerExit>=0&&renderer>workerExit,'worker context must exit before re
 
 console.log(JSON.stringify({
   status:'PASS',suite:'insights-runtime-boundary',
-  checkedHostPorts:true,genericLoaderChecked:true,workerExitBeforeDom:true,inertLegacyShell:true,staticSelectors:true,noStringCode:true,retainedRollback:true,retainedFocusRollback:true,readyAwaitsScroll:true,registrationCleanup:true
+  checkedHostPorts:true,genericLoaderChecked:true,workerExitBeforeDom:true,noLegacySourceShell:true,staticSelectors:true,noStringCode:true,retainedRollback:true,retainedFocusRollback:true,readyAwaitsScroll:true,registrationCleanup:true
 }));
