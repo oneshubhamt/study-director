@@ -5,6 +5,7 @@ import type {RuntimeEvidence} from './timer-engine.ts';
 import type {TaskIdentityPort,TaskSessionStore} from './execution-host.ts';
 import type {TimerStateModule} from '../source/core/timer-state.ts';
 import type {SessionOptions} from './session-lifecycle.ts';
+import type {PracticePause} from './practice-pacer.ts';
 
 type TimerStateController=ReturnType<TimerStateModule['createStateController']>;
 
@@ -29,8 +30,8 @@ export interface SessionSnapshotPorts{
   captureEvidence():RuntimeEvidence;
   timerPayload():TimerPayload|null;
   reviewSnapshot():SessionSnapshot['review'];
-  practiceSnapshot():PracticeState;
-  practiceRestore(value:PracticeState|undefined,options:Readonly<{forcePaused:boolean;pauseCause:string;savedAtMs:number}>):unknown;
+  practiceSnapshot():PracticeState|null;
+  practiceRestore(value:PracticeState|undefined,options:Readonly<{forcePaused:boolean;pauseCause:PracticePause;savedAtMs:number}>):unknown;
   getReviewDate():string;
   scheduleFingerprint():string;
   sessionFingerprint(session:ActiveSession):string;
@@ -100,7 +101,7 @@ export interface SessionHostInput{
     debounceMs:number;
     timerSnapshotIntervalMs:number;
     completionNone:'none';
-    practicePauseCauses:Readonly<{session:string;gap:string;main:string}>;
+    practicePauseCauses:Readonly<{session:PracticePause;gap:PracticePause;main:PracticePause}>;
   }>;
   readonly codec:Readonly<SessionCodecPort>;
   readonly repository:Readonly<SessionRepositoryPort>;

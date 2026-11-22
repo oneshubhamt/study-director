@@ -10,6 +10,8 @@ import type {InteractionsModule} from '../source/core/interactions.ts';
 import type {SessionCoordinator} from './session-lifecycle.ts';
 import type {PlanController,PlanTone} from './plan.ts';
 import type {MutationAuthority} from './mutation-coordinator.ts';
+import type {ReviewStateInput} from './review.ts';
+import type {ExecutionRenderKey} from './execution-views.ts';
 export type SessionApplyOptions={source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean};
 export interface SessionActionState{
   sessionPanelMode:'none'|'active'|'suspended'|'elsewhere'|'previous';sessionPanelSession:ActiveSession|null;
@@ -56,6 +58,6 @@ export interface SessionLifecycleViewInput{
  invalidateProgressPanel():void;richTextClose():PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;advanceTaskNoteScheduleRevision():unknown;
  clearTaskNoteEditorBinding(field:HTMLTextAreaElement):unknown;isValidIsoDate:TimeModel['isValidIsoDate'];getReviewDate():string;
  refreshAllSubjectNoteFieldsFromRepository():unknown;refreshPnote(options:{force:boolean}):unknown;
- hydrateReviewState(options:{date:string;snapshotReview:unknown;source:string}):unknown;refreshLibraryNotes():unknown;
- requestRender(...surfaces:string[]):unknown;appCanMutate():boolean;schedulePwaUpdateEvaluation(delay:number):unknown;
+ hydrateReviewState(options:{date:string;snapshotReview:ReviewStateInput|null;source:string}):unknown;refreshLibraryNotes():unknown;
+ requestRender(...surfaces:ExecutionRenderKey[]):unknown;appCanMutate():boolean;schedulePwaUpdateEvaluation(delay:number):unknown;
 }
