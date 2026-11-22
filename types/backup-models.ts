@@ -1,9 +1,10 @@
 import type {RecordCodecsModule} from '../source/core/record-codecs.ts';
 import type {Limits,DataContract,KeyedRecord,RecordHelpers,DailyRecord,NoteRecord,ActiveSession,PersonalData,PendingReview} from './record-models.ts';
-import type {ProcessingInputs,ProcessingOutputs,ProcessingOperation} from './portable-processing.ts';
+import type {ProcessingInputs,ProcessingOutputs} from './portable-processing.ts';
 export interface ProcessingOptions{signal?:AbortSignal|null|undefined}
+export type BackupProcessingOperation='checksum'|'chunk'|'decode.open'|'decode.next'|'decode.close'|'checksum.ranges';
 export interface ProcessingPort{
- run<K extends ProcessingOperation>(type:K,data:ProcessingInputs[K],options?:ProcessingOptions):Promise<ProcessingOutputs[K]>;
+ run<K extends BackupProcessingOperation>(type:K,data:ProcessingInputs[K],options?:ProcessingOptions):Promise<ProcessingOutputs[K]>;
  scope<T>(operation:()=>Promise<T>):Promise<T>;
 }
 export interface BackupOptions extends ProcessingOptions{filename?:string;yieldControl?:(()=>void|Promise<void>)|undefined;currentOnly?:boolean;validateOnly?:boolean}

@@ -2929,7 +2929,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
     tags:()=>NoteLinks.tags(),
     trash:key=>LibraryNoteWorkflows.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
-    versions:target=>withBackupPassword(()=>requireBackupRecoveryHost().history.openNote(target)),
+    versions:async target=>{const value=await withBackupPassword(()=>requireBackupRecoveryHost().history.openNote(target));if(!value||typeof value!=='object')return {};const reason=Reflect.get(value,'reason'),opened=Reflect.get(value,'opened');return Object.freeze({...((typeof reason==='string')?{reason}:{}),...((typeof opened==='boolean')?{opened}:{})});},
     print:(key,title)=>LibraryDocuments.printNote(key,title)
   }),
   attachments:Object.freeze<LibraryViewInput['ports']['attachments']>({
@@ -2955,16 +2955,17 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
 if(!Object.isFrozen(LibraryView)||LibraryView.format!=='study-director.library-view'||LibraryView.contractVersion!==1){
   throw new Error('Study Director Library view is unavailable or incompatible.');
 }
-NavigationController=NavigationModule.createController(Object.freeze<Parameters<typeof NavigationModule.createController>[0]>({
+type NavigationInput=Parameters<typeof NavigationModule.createController>[0];
+NavigationController=NavigationModule.createController(Object.freeze<NavigationInput>({
   window,
-  host:Object.freeze({
+  host:Object.freeze<NavigationInput['host']>({
     currentTab:()=>String(document.querySelector('.pane.on')?.id||'pane-plan').replace(/^pane-/,'')||'plan',
     prepare:prepareTabDeparture,
     present:presentTabCommit,
     commit:commitTabView,
     ready:waitForTabReady,
     report:(boundary,error)=>AppDiagnostics.capture(boundary,error,'warn'),
-    workspace:Object.freeze({
+    workspace:Object.freeze<NonNullable<NavigationInput['host']['workspace']>>({
       current:()=>WorkspaceRouteCoordinator.current(),
       reconcile:(descriptor,context)=>WorkspaceRouteCoordinator.reconcile(descriptor,context)
     })
@@ -3007,7 +3008,7 @@ function verifyRestoredSessionRuntime(...args:Parameters<typeof SessionActions.v
 type NoteReconciliationInput=Parameters<typeof ReconciliationUIModule.createController>[0];
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze<NoteReconciliationInput>({ports:Object.freeze<NoteReconciliationInput['ports']>({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
-  richText:Object.freeze<BackupCodecInput['richText']>({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
+  richText:Object.freeze<NoteReconciliationInput['ports']['richText']>({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
   assets:Object.freeze<NoteReconciliationInput['ports']['assets']>({get:assetId=>RichTextAssets.get(assetId)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   view:Object.freeze<NoteReconciliationInput['ports']['view']>({document,requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id)})
@@ -3035,14 +3036,14 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
   reconciliation:Object.freeze<BackupRuntimeHostInput['reconciliation']>({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
   noteReconciliation:Object.freeze<BackupRuntimeHostInput['noteReconciliation']>({controller:NoteReconciliationUI,maintenancePause:RecoveryAssetMaintenancePause,merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
   recoveryNotes:Object.freeze<BackupRuntimeHostInput['recoveryNotes']>({lifecycle:SessionLifecycle,date:()=>getReviewDate()}),
-  session:Object.freeze({
+  session:Object.freeze<BackupRuntimeHostInput['session']>({
     canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,
     checkpointPendingReview:async()=>await ReviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:true})!==false,
     hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:activeSessionPayload,
     withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)
   }),
   domain:Object.freeze<BackupRuntimeHostInput['domain']>({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
-  view:Object.freeze<NoteReconciliationInput['ports']['view']>({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
+  view:Object.freeze<BackupRuntimeHostInput['view']>({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
   events:Object.freeze<BackupRuntimeHostInput['events']>({
     libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
     restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
@@ -3050,10 +3051,14 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
     resetBackupNudge:()=>BackupNudge?.reset(),refreshStorageWarning:()=>refreshStorageFallbackWarning(),scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)
   }),
   verifiedRecovery:VerifiedRecovery,
-  interactions:Object.freeze({choose:options=>Interactions.choose(options),configure:options=>Interactions.configure(options),notify:options=>Interactions.notify(options)}),
+  interactions:Object.freeze<BackupRuntimeHostInput['interactions']>({
+    choose:async options=>await Interactions.choose(options),
+    configure:async options=>await Interactions.configure(options),
+    notify:async options=>Interactions.notify(options)
+  }),
   operations:Object.freeze<BackupRuntimeHostInput['operations']>({assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),canShare:()=>UnsupportedData.held()?'unsupported-data':true,clearFault:()=>AppMutationCoordinator.clearFault(),failClosed:message=>AppMutationCoordinator.failClosed(message),runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
-  environment:Object.freeze({AbortController,yieldTask:BackgroundTasks.yieldTask,clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay)}),
-  diagnostics:Object.freeze({capture:AppDiagnostics.capture,start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail})
+  environment:Object.freeze<BackupRuntimeHostInput['environment']>({AbortController,yieldTask:options=>BackgroundTasks.yieldTask(options),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay)}),
+  diagnostics:Object.freeze<BackupRuntimeHostInput['diagnostics']>({capture:AppDiagnostics.capture,start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail})
 }));
 if(!Object.isFrozen(BackupRuntimeHost)||BackupRuntimeHost.format!=='study-director.backup-runtime-host'||BackupRuntimeHost.contractVersion!==1){
   throw new Error('Study Director Backup runtime host is unavailable or incompatible.');
