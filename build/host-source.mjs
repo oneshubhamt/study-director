@@ -23,8 +23,10 @@ export function composeHostHtml(template,readSource){
   }
   let html=template;
   for(const script of hostScripts){
-    const body=compileScript(readSource(script.source),script.source);
-    if(/<\/script/i.test(body))throw new Error(`Host source contains a closing script tag: ${script.id}`);
+    const source=readSource(script.source);
+    if(/<\/script/i.test(source))throw new Error(`Host source contains a closing script tag: ${script.id}`);
+    const body=compileScript(source,script.source);
+    if(/<\/script/i.test(body))throw new Error(`Compiled host source contains a closing script tag: ${script.id}`);
     html=html.replace(script.marker,()=>body);
   }
   if(/@SD_HOST_[A-Z_]+@/.test(html))throw new Error('Unknown or unresolved host marker');
