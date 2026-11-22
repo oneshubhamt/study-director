@@ -946,7 +946,7 @@ const SessionEvidenceProjector=(()=>{
       quote:clampText(((document.getElementById('quote-input') as HTMLInputElement|null)?.value||'').trim(),APP_LIMITS.maxQuoteChars),
       realTimeSnapshot:includeRecords?compactRealTimeSnapshot(buildRealTimeSnapshot()):null,
       carryForward:clampText(getLatestCarryForward()||'',APP_LIMITS.maxCarryForwardChars)
-    });
+    }) as unknown as ReviewEvidence;
   }
   return Object.freeze({
     format:'study-director.session-evidence-projector',contractVersion:1,snapshot

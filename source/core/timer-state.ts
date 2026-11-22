@@ -245,7 +245,7 @@ const createModule=()=>{
     }
     function createEvidenceGateway<O extends object,E extends EvidenceBase>(projector:(options:Partial<O>,state:ReturnType<typeof snapshot>)=>E){
       if(typeof projector!=='function')throw new TypeError('Session evidence projector must be a function.');
-      function evidence(options:Partial<O>={}):DeepReadonly<E>{
+      function evidence(options:Partial<O>={}):E{
         const projected=projector(options,snapshot());
         if(!projected||typeof projected!=='object')throw new TypeError('Session evidence projector returned an invalid snapshot.');
         return cloneFrozen({
@@ -256,7 +256,7 @@ const createModule=()=>{
           timerMode:mode,paused,inactiveGap:inactiveGap||null,pendingGap:!!inactiveGap,
           contentRevision:Math.max(0,Math.round(Number(session.contentRevision)||0)),
           savedRevision:Math.max(0,Math.round(Number(session.savedRevision)||0))
-        }) as DeepReadonly<E>;
+        }) as unknown as E;
       }
       return freeze({
         format:'study-director.session-evidence-gateway',contractVersion:1,
