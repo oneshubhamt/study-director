@@ -95,7 +95,7 @@ assert.equal(DATA_ARCHITECTURE.cacheStorage.applicationShell.identity,CACHE_STOR
 assert.equal(DATA_ARCHITECTURE.external.deviceBackup.repositoryPrefix,EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix);
 assert.equal(DATA_ARCHITECTURE.external.driveBackup.repositoryRoot,EXTERNAL_REPOSITORY_IDENTITIES.driveFolder);
 assert.match(app,/sessionTabKey:SESSION_STORAGE_KEYS\.appTab/u);
-const pwaLifecycle=read('source/core/pwa-lifecycle.js');
+const pwaLifecycle=read('source/core/pwa-lifecycle.ts');
 assert.doesNotMatch(pwaLifecycle,/['"]studyDirector\.pwaReload\.v1['"]/u);
 assert.match(app,/reloadSessionKey:SESSION_STORAGE_KEYS\.pwaReload/u);
 for(const family of ['exact','prefixes'])for(const [name,surface] of Object.entries(DATA_ARCHITECTURE.appMeta[family]))assert.ok(surface.schema,`appMeta ${family}.${name} must declare its canonical value schema`);
