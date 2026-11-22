@@ -72,6 +72,7 @@ After resolving every review on the iPad and on the laptop, they came back again
 - **16. The app feels slow overall** (owner, 2026-11-05). Measure on the phone and iPad first (start-up, tab switches, Library, Plan, Execute, typing, dialogs, sync in the background), then fix the worst. Last among the bugs; includes observation 7.
 - **26. Editor mount and unmount lifecycle** (owner, 2026-11-16: wanted; after F28 is confirmed on the devices, as its own pull request). One clear owner of when an editor mounts, stays and goes, in place of the runtime, the lifecycle step and each view each deciding part of it. F28 closed the gaps that showed (item 28); more may remain, such as the diary editor or a note open through a date change or a restore.
 - **A full local safety copy before every bring-in** (seen in the item 25 traces, 2026-11-16 and 17: `local-safety-capture` 478,780 and 955,832 bytes, attachments included). That work grows with the library, for every sync, even one that changes one note. To weigh with the Drive speed work.
+- **Two browser checks fail on main** (found 2026-11-22, on F31 `ab17cf7` and F32 alike; not yet looked into). `populated-accessibility`: `keyboard.height>=32` is false. `native-overlays`: clicking `#pn-info-btn` meets a dialog's "Backup password (optional)" field over it. Neither is in smoke or quarantined.
 
 ### Fixed, to confirm on real devices
 
