@@ -133,8 +133,9 @@ export async function buildImageWorkerBundle(){return buildBrowserBundle(path.jo
 export async function buildAttachmentWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'portable/attachment-worker.ts'),'/* Study Director @@SD_RELEASE@@ attachment ingest worker. */\n');}
 
 export async function writeWordgardBundle(){
-  fs.mkdirSync(GENERATED_RUNTIME,{recursive:true});
   const [wordgard,richText,searchWorker,exportWorker,imageWorker,attachmentWorker]=await Promise.all([buildWordgardModule(),buildRichTextModule(),buildSearchWorkerBundle(),buildExportWorkerBundle(),buildImageWorkerBundle(),buildAttachmentWorkerBundle()]);
+  fs.rmSync(GENERATED_RUNTIME,{recursive:true,force:true});
+  fs.mkdirSync(GENERATED_RUNTIME,{recursive:true});
   fs.writeFileSync(path.join(GENERATED_RUNTIME,'export-worker.js'),exportWorker.source);
   fs.writeFileSync(path.join(GENERATED_RUNTIME,'image-worker.js'),imageWorker.source);
   fs.writeFileSync(path.join(GENERATED_RUNTIME,'attachment-worker.js'),attachmentWorker.source);
