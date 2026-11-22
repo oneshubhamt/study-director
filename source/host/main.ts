@@ -3104,6 +3104,35 @@ if(!Object.isFrozen(KeptVersions)||KeptVersions.format!=='study-director.kept-ve
   throw new Error('Study Director kept-version recovery controller is unavailable or incompatible.');
 }
 type SessionHandoffInput=Parameters<typeof SessionHandoffModule.createController>[0];
+type SessionHandoffProvider=SessionHandoffInput['provider'];
+type SessionHandoffSource=Awaited<ReturnType<SessionHandoffProvider['readHandoffSource']>>;
+type SessionHandoffClaimProjection=Awaited<ReturnType<SessionHandoffProvider['readClaim']>>;
+type SessionHandoffClaimResult=Awaited<ReturnType<SessionHandoffProvider['claimOwnership']>>;
+function objectField(value:unknown,key:string):unknown{return value&&typeof value==='object'?Reflect.get(value,key):undefined;}
+function normalizeSessionClaimProjection(value:unknown):SessionHandoffClaimProjection{
+  const state=objectField(value,'state');if(state!=='owned'&&state!=='released')return null;
+  const epoch=Number(objectField(value,'epoch'));if(!Number.isFinite(epoch))return null;
+  const projection:Record<string,unknown>={state,epoch,applies:objectField(value,'applies')===true,ownedHere:objectField(value,'ownedHere')===true};
+  const newer=objectField(value,'newer');if(typeof newer==='boolean')projection['newer']=newer;
+  for(const key of ['revision','observedRevision']){const item=Number(objectField(value,key));if(Number.isFinite(item))projection[key]=item;}
+  for(const key of ['ownerToken','observedOwnerToken','observedContentFingerprint','handoffToken']){const item=objectField(value,key);if(typeof item==='string')projection[key]=item;}
+  return Object.freeze(projection) as NonNullable<SessionHandoffClaimProjection>;
+}
+function normalizeSessionHandoffSource(value:unknown):SessionHandoffSource{
+  const status=String(objectField(value,'status')||'unavailable'),source:Record<string,unknown>={status};
+  for(const key of ['reason','checkpointId','sharedContentFingerprint']){const item=objectField(value,key);if(typeof item==='string')source[key]=item;}
+  if(value&&typeof value==='object'&&Reflect.has(value,'session'))source['session']=ActiveSessionCodec.sanitizeCurrent(objectField(value,'session'));
+  if(value&&typeof value==='object'&&Reflect.has(value,'priorClaim'))source['priorClaim']=normalizeSessionClaimProjection(objectField(value,'priorClaim'));
+  return Object.freeze(source) as SessionHandoffSource;
+}
+function normalizeSessionClaimResult(value:unknown):SessionHandoffClaimResult{
+  const result:Record<string,unknown>={status:String(objectField(value,'status')||'unavailable')};
+  const reason=objectField(value,'reason');if(typeof reason==='string')result['reason']=reason;
+  const rawClaim=objectField(value,'claim'),revision=Number(objectField(rawClaim,'revision'));
+  if(rawClaim&&typeof rawClaim==='object'&&Number.isFinite(revision))result['claim']=Object.freeze({...rawClaim as Record<string,unknown>,revision});
+  const rawSource=objectField(value,'source');if(rawSource&&typeof rawSource==='object')result['source']=normalizeSessionHandoffSource(rawSource);
+  return Object.freeze(result) as SessionHandoffClaimResult;
+}
 SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<SessionHandoffInput>({
   configuration:Object.freeze<SessionHandoffInput['configuration']>({
     providerId:'google-drive',claimWatchMs:SESSION_CLAIM_WATCH_MS,claimSyncRetryMs:SESSION_CLAIM_SYNC_RETRY_MS,
@@ -3116,10 +3145,13 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Sessio
   }),
   provider:Object.freeze<SessionHandoffInput['provider']>({
     connected:id=>BackupProviderRuntime.connected(id),
-    readHandoffSource:id=>BackupProviderRuntime.readSessionHandoffSource(id),
-    claimOwnership:(id,request)=>BackupProviderRuntime.claimSessionOwnership(id,request),
+    readHandoffSource:async id=>normalizeSessionHandoffSource(await BackupProviderRuntime.readSessionHandoffSource(id)),
+    claimOwnership:async(id,request)=>normalizeSessionClaimResult(await BackupProviderRuntime.claimSessionOwnership(id,{
+      date:request.date,handoffToken:request.handoffToken,onWrite:request.onWrite,
+      decide:async source=>({...await request.decide(normalizeSessionHandoffSource(source))})
+    })),
     releaseClaim:(id,claim)=>BackupProviderRuntime.releaseSessionClaim(id,claim),
-    readClaim:id=>BackupProviderRuntime.readSessionClaim(id),
+    readClaim:async id=>normalizeSessionClaimProjection(await BackupProviderRuntime.readSessionClaim(id)),
     scheduleSync:(id,reason)=>BackupProviderRuntime.scheduleSharedSync(id,reason),
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),
     wakeBackground:reason=>BackupProviderRuntime.wakeBackground(reason)
