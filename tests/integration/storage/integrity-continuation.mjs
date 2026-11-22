@@ -103,10 +103,10 @@ for(const corruptAt of [100,encrypted.size-1]){
  let failure;for(let i=0;i<5;i++){try{await h.pass();}catch(error){failure=error;break;}}assert.ok(failure&&!failure.code&&/staging is damaged/.test(failure.message));assert.equal(h.durable,null);let result;for(let i=0;i<8;i++){result=await h.pass();if(result.complete)break;}assert.equal(result.complete,true);cases.push('damaged cached '+(corruptAt===100?'ciphertext':'terminal tag')+' restarts with bounded range proofs');
 }
 {
- const bundle=fs.readFileSync('source/external/export-worker.js','utf8');
+ const bundle=fs.readFileSync('generated/runtime/export-worker.js','utf8');
  let receive=()=>{};
  const handle=await outputHandle(),messages=[],context=vm.createContext({Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,WeakMap,Map,Set,crypto:webcrypto,performance,navigator:{storage:{getDirectory:async()=>({getDirectoryHandle:async()=>({getFileHandle:async()=>handle})})}},self:{postMessage:value=>{messages.push(value);receive(value);}}});
- vm.runInContext(bundle,context,{filename:'source/external/export-worker.js'});
+ vm.runInContext(bundle,context,{filename:'generated/runtime/export-worker.js'});
  // Browser event dispatch ignores return values; completion is the correlated reply.
  const request=message=>new Promise(resolve=>{receive=value=>{if(value.id===message.data.id&&('value' in value||'error' in value))resolve(value);};context.self.onmessage(message);});
  await request({data:{id:1,type:'integrity.append',data:{chunk:new Blob(['worker segment']),offset:0,hash:null,output:{kind:'opfs',name:'backup-00000000-0000-0000-0000-000000000001',directory:'@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'}}}});assert.equal(messages.at(-1).value?.offset,14,JSON.stringify(messages.at(-1).error));

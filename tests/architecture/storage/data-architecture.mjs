@@ -138,8 +138,8 @@ const streamEncryptionSource=read('portable/stream-encryption.ts');
 assert.ok(attachmentWorkerSource.includes("const DIRECTORY='@@SD_ATTACHMENT_OPFS_DIRECTORY@@',SEPARATOR='@@SD_PROFILE_SCOPE_SEPARATOR@@',"),'standalone attachment worker must consume the build-injected canonical OPFS identity');
 // The worker bundles are built before the release fills in folder names, so a
 // folder check that measured a name would keep the placeholder's length.
-for(const bundle of ['source/external/attachment-worker.js','source/external/export-worker.js']){const text=read(bundle);assert.ok(text.includes('split("@@SD_PROFILE_SCOPE_SEPARATOR@@")'),bundle+' checks a profile folder by splitting its name');assert.doesNotMatch(text,/startsWith\([^)]*\)&&[^;]{0,40}\.slice\(\d+\)/u,bundle+' never fixes a placeholder length');}
-assert.ok(read('source/external/attachment-worker.js').includes('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),'emitted attachment-worker source must retain the canonical OPFS token until the release build renders it');
+for(const bundle of ['generated/runtime/attachment-worker.js','generated/runtime/export-worker.js']){const text=read(bundle);assert.ok(text.includes('split("@@SD_PROFILE_SCOPE_SEPARATOR@@")'),bundle+' checks a profile folder by splitting its name');assert.doesNotMatch(text,/startsWith\([^)]*\)&&[^;]{0,40}\.slice\(\d+\)/u,bundle+' never fixes a placeholder length');}
+assert.ok(read('generated/runtime/attachment-worker.js').includes('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),'emitted attachment-worker source must retain the canonical OPFS token until the release build renders it');
 const protectedMagicLiteral=JSON.stringify(EXTERNAL_FORMATS.protectedBackup.magic).slice(1,-1);
 assert.ok(streamEncryptionSource.includes(`new TextEncoder().encode('${protectedMagicLiteral}')`),'standalone encryption worker magic must mechanically match the canonical manifest');
 assert.ok(streamEncryptionSource.includes(`header[8]!==${EXTERNAL_FORMATS.protectedBackup.version}`),'standalone encryption reader version must mechanically match the canonical manifest');

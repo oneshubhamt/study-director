@@ -10,13 +10,14 @@ import {PRODUCTION_LIMITS,assertProductionLimits} from '../contracts/production-
 import {LOCAL_STORAGE_KEYS,DEVICE_WIDE_LOCAL_STORAGE_KEYS,PROFILE_SCOPE_SEPARATOR,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
 import {RUNTIME_DATA_CONTRACT,INDEXED_DB_STORE_NAMES,OPFS_IDENTITIES,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities} from '../contracts/canonical-identities.mjs';
 import {
-  privateModules,externalModules,styleModules,trustedExternalModuleIds,runtimeDependencies,htmlSource,privateModuleMarker,hostScripts,
+  privateModules,authoredExternalModules,generatedRuntimeModules,externalModules,styleModules,trustedExternalModuleIds,runtimeDependencies,htmlSource,privateModuleMarker,hostScripts,
   platformFiles,staticAssets,legalReaderAssets
 } from './module-manifest.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 export const WORK=path.resolve(HERE,'..');
 export const SOURCE=path.join(WORK,'source');
+export const GENERATED_RUNTIME=path.join(WORK,'generated','runtime');
 export const DIST=path.join(WORK,'dist');
 
 function invariant(condition,message){if(!condition)throw new Error(message);}
@@ -26,9 +27,32 @@ function normalizePath(value){return value.split(path.sep).join('/');}
 const PWA_RELEASE_SENTINEL='0'.repeat(24);
 function sourceFile(relative){return fs.readFileSync(path.join(SOURCE,relative),'utf8');}
 function sourceBytes(relative){return fs.readFileSync(path.join(SOURCE,relative));}
-function moduleSourceFiles(module){return Array.isArray(module.sources)?[...module.sources]:[module.source];}
-function moduleSource(module){return moduleSourceFiles(module).map(sourceFile).join('\n');}
-function externalSourceFiles(){return externalModules.flatMap(moduleSourceFiles);}
+function generatedRuntimeFile(relative){return fs.readFileSync(path.join(GENERATED_RUNTIME,relative),'utf8');}
+function authoredModuleSourceFiles(module){return Array.isArray(module.sources)?[...module.sources]:module.source?[module.source]:[];}
+function generatedModuleFiles(module){return Array.isArray(module.generatedSources)?[...module.generatedSources]:module.generated?[module.generated]:[];}
+function externalModuleFiles(module){
+  const authored=authoredModuleSourceFiles(module),generated=generatedModuleFiles(module);
+  invariant((authored.length===0)!==(generated.length===0),`External module ${module.id} must have exactly one source origin.`);
+  return authored.length?authored.map(file=>({origin:'source',file})):generated.map(file=>({origin:'generated',file}));
+}
+function externalModuleSource(module){return externalModuleFiles(module).map(row=>row.origin==='source'?sourceFile(row.file):generatedRuntimeFile(row.file)).join('\n');}
+function authoredExternalSourceFiles(){return authoredExternalModules.flatMap(authoredModuleSourceFiles);}
+function generatedRuntimeFiles(){return generatedRuntimeModules.flatMap(generatedModuleFiles);}
+function relativeFiles(directory){
+  const files=[];
+  function walk(current,prefix=''){
+    for(const entry of fs.readdirSync(current,{withFileTypes:true})){
+      const relative=prefix?`${prefix}/${entry.name}`:entry.name,absolute=path.join(current,entry.name);
+      if(entry.isDirectory())walk(absolute,relative);else files.push(relative);
+    }
+  }
+  walk(directory);return files.sort();
+}
+function assertGeneratedRuntime(){
+  invariant(fs.existsSync(GENERATED_RUNTIME),'Generated runtime directory is missing; run the runtime bundle builder.');
+  const expected=generatedRuntimeFiles().sort(),actual=relativeFiles(GENERATED_RUNTIME);
+  invariant(JSON.stringify(actual)===JSON.stringify(expected),'Generated runtime inventory differs from the generated-module manifest.');
+}
 function escapeRegExp(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function escapeHtml(value){return String(value).replace(/[&<>]/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[character]));}
 
@@ -110,29 +134,23 @@ function renderPlatformTokens(value,identity,sourceName,tokens={}){
   return renderTokens(rendered,identity,sourceName);
 }
 function renderExternalModule(module,identity,tokens={}){
-  return moduleSourceFiles(module).map(source=>{
-    const rendered=renderPlatformTokens(sourceFile(source),identity,source,tokens);
-    return source.endsWith('.ts')?compileScript(rendered,source):rendered;
+  return externalModuleFiles(module).map(({origin,file})=>{
+    const sourceName=origin==='source'?file:`generated/runtime/${file}`;
+    const value=origin==='source'?sourceFile(file):generatedRuntimeFile(file);
+    const rendered=renderPlatformTokens(value,identity,sourceName,tokens);
+    return file.endsWith('.ts')?compileScript(rendered,sourceName):rendered;
   }).join('\n');
 }
 function assertCanonicalSource(){
   const expected=[
-    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
+    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...authoredExternalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source),...staticAssets.map(row=>row.source)
   ].sort();
-  const actual=[];
-  function walk(directory,prefix=''){
-    for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
-      const relative=prefix?`${prefix}/${entry.name}`:entry.name;
-      if(entry.isDirectory())walk(path.join(directory,entry.name),relative);
-      else actual.push(relative);
-    }
-  }
-  walk(SOURCE);
-  actual.sort();
+  const actual=relativeFiles(SOURCE);
+  invariant(!actual.some(name=>name.endsWith('.js')),'Canonical source must not contain JavaScript runtime artifacts.');
   invariant(JSON.stringify(actual)===JSON.stringify(expected),'Canonical source inventory differs from the module manifest.');
   const joined=[
-    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
+    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...authoredExternalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source)
   ].map(name=>sourceFile(name)).join('\n');
   invariant(!/\bSDV[A-Z]\d+[a-z]*(?:[NR]\d+)?\b/.test(joined),'Canonical source contains a stamped SDV release.');
@@ -170,19 +188,20 @@ function assertCanonicalSource(){
   invariant(JSON.stringify(required)===JSON.stringify(expectedRequired),'The host must resolve every private application module exactly once and no others.');
   invariant(!/INTERNAL_MODULES\.require\(/u.test(html),'The host must validate private-module exports through the canonical loader.');
   for(const module of externalModules){
-    const value=moduleSource(module);
+    const value=externalModuleSource(module);
     invariant(!value.includes("Symbol.for('studyDirector.internalModules.v1')"),`External module ${module.id} reaches into the private registry.`);
   }
   invariant(externalModules.map(module=>module.id).join('|')===trustedExternalModuleIds.join('|'),'External runtime modules differ from the fixed reviewed allowlist.');
   invariant(externalModules.every(module=>module.execution==='startup'||module.execution==='on-demand'||module.execution==='worker'),'External runtime execution mode is invalid.');
   const insightsModule=externalModules.find(module=>module.id==='insights');
-  const insightsSources=insightsModule?moduleSourceFiles(insightsModule):[];
+  const insightsSources=insightsModule?authoredModuleSourceFiles(insightsModule):[];
   invariant(JSON.stringify(insightsSources)===JSON.stringify(['external/insights-model.ts','external/insights-protocol.ts','external/insights-worker.ts','external/insights-compute.ts','external/insights-rendering.ts','external/insights-runtime.ts']),'The checked Insights model, protocol, worker bridge, renderer and retained runtime must remain ordered inside one runtime asset.');
   const insightsPortable=insightsSources.slice(0,2).map(sourceFile).join('\n');
   invariant(!/\b(?:document|localStorage|sessionStorage|requestAnimationFrame|Worker|querySelector|createElement)\b/u.test(insightsPortable),'Insights model/protocol must remain independent of DOM, browser storage, animation, and worker APIs.');
 }
 
 export function renderBuild(){
+  assertGeneratedRuntime();
   assertCanonicalSource();
   const identity=releaseIdentity();
   const privateSources=new Map(privateModules.map(module=>[
@@ -310,7 +329,7 @@ export function renderBuild(){
 
 function sourceHashes(){
   return Object.fromEntries([
-    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...externalSourceFiles(),...styleModules.map(row=>row.source),
+    htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...authoredExternalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source),...staticAssets.map(row=>row.source)
   ].sort().map(name=>[name,sha256(sourceBytes(name))]));
 }

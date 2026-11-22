@@ -8,7 +8,7 @@ import {nextTurn} from '../../helpers/async-tools.mjs';
 
 for(const file of ['internal','operation-lifecycle','exports']){const filename=coreScriptPath(file);vm.runInThisContext(readCoreScript(file),{filename});}
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('exports',1,Object.freeze({lifecycle:globalThis[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)}));
-const workerSource=fs.readFileSync('source/external/export-worker.js','utf8');
+const workerSource=fs.readFileSync('generated/runtime/export-worker.js','utf8');
 let alive=0,created=0,downloads=0,failStart=false,hold=false,lastWorker=null;const workerTypes=[];
 const fakeWindow={URL:{createObjectURL:()=> 'blob:test',revokeObjectURL:()=>{}},setTimeout:fn=>fn()};
 const document={body:{appendChild:()=>{}},createElement:()=>({click:()=>{downloads++;},remove:()=>{}})};

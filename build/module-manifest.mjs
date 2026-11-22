@@ -169,19 +169,24 @@ export const runtimeDependencies=Object.freeze({
 });
 
 export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
-export const externalModules=Object.freeze([
+export const authoredExternalModules=Object.freeze([
   Object.freeze({id:'glass',source:'external/glass.ts',stem:'sd.glass',execution:'startup'}),
   Object.freeze({id:'aurora',source:'external/aurora.ts',stem:'sd.aurora',execution:'startup'}),
   Object.freeze({id:'guide',source:'external/guide.ts',stem:'sd.guide',execution:'on-demand'}),
   Object.freeze({id:'insights',sources:Object.freeze(['external/insights-model.ts','external/insights-protocol.ts','external/insights-worker.ts','external/insights-compute.ts','external/insights-rendering.ts','external/insights-runtime.ts']),stem:'sd.insights',execution:'on-demand'}),
-  Object.freeze({id:'drive',source:'external/drive.ts',stem:'sd.drive',execution:'startup'}),
-  // Wordgard is its own module, loaded with (before) Study Director's editor.
-  Object.freeze({id:'rich-text',sources:Object.freeze(['external/wordgard.js','external/rich-text.js']),stem:'sd.richtext',execution:'startup'}),
-  Object.freeze({id:'search-worker',source:'external/search-worker.js',stem:'sd.note-search',execution:'worker'}),
-  Object.freeze({id:'image-worker',source:'external/image-worker.js',stem:'sd.image-worker',execution:'worker'}),
-  Object.freeze({id:'attachment-worker',source:'external/attachment-worker.js',stem:'sd.attachment-worker',execution:'worker'}),
-  Object.freeze({id:'export-worker',source:'external/export-worker.js',stem:'sd.export-worker',execution:'worker'})
+  Object.freeze({id:'drive',source:'external/drive.ts',stem:'sd.drive',execution:'startup'})
 ]);
+
+export const generatedRuntimeModules=Object.freeze([
+  // Wordgard is its own generated module, loaded with (before) Study Director's editor.
+  Object.freeze({id:'rich-text',generatedSources:Object.freeze(['wordgard.js','rich-text.js']),stem:'sd.richtext',execution:'startup'}),
+  Object.freeze({id:'search-worker',generated:'search-worker.js',stem:'sd.note-search',execution:'worker'}),
+  Object.freeze({id:'image-worker',generated:'image-worker.js',stem:'sd.image-worker',execution:'worker'}),
+  Object.freeze({id:'attachment-worker',generated:'attachment-worker.js',stem:'sd.attachment-worker',execution:'worker'}),
+  Object.freeze({id:'export-worker',generated:'export-worker.js',stem:'sd.export-worker',execution:'worker'})
+]);
+
+export const externalModules=Object.freeze([...authoredExternalModules,...generatedRuntimeModules]);
 
 export const styleModules=Object.freeze([
   Object.freeze({id:'core',source:'styles/core.css',stem:'sd.core'})

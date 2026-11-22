@@ -6,5 +6,6 @@ import {externalModules} from '../../build/module-manifest.mjs';
 // Director's editor, joined into one script in that order (as the build does).
 export function richTextRuntimeSource(root=process.cwd()){
   const module=externalModules.find(row=>row.id==='rich-text');
-  return module.sources.map(file=>fs.readFileSync(path.join(root,'source',file),'utf8')).join('\n');
+  if(!module||!Array.isArray(module.generatedSources))throw new Error('Rich-text generated runtime manifest entry is missing.');
+  return module.generatedSources.map(file=>fs.readFileSync(path.join(root,'generated','runtime',file),'utf8')).join('\n');
 }

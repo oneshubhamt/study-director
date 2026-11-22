@@ -6,7 +6,7 @@ import {PERFORMANCE_BUDGETS} from '../../../contracts/performance-budgets.mjs';
 import {createNoteSnapshotHarness} from '../../helpers/note-snapshot-harness.mjs';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
-const workerSource=read('source/external/search-worker.js');
+const workerSource=read('generated/runtime/search-worker.js');
 const notesRepository=read('source/core/repositories-notes.ts');
 
 // The note limit, with ten million words between them.

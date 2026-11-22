@@ -11,8 +11,7 @@ import {renderBuild,validateBuild} from '../../../build/build.mjs';
 const build=renderBuild();
 assert.equal(validateBuild(build),true);
 
-// P5.13 closure: every tracked JavaScript runtime under source/ is a
-// reproducible generated bundle verified by rich-text-bundle.mjs.
+// P5.13 closure: canonical authored source contains no JavaScript runtime.
 const sourceJavaScript=[];
 function collectSourceJavaScript(directory,prefix='source'){
   for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
@@ -23,15 +22,14 @@ function collectSourceJavaScript(directory,prefix='source'){
 }
 collectSourceJavaScript(path.join(process.cwd(),'source'));
 sourceJavaScript.sort();
-const generatedRuntimeJavaScript=[
-  'source/external/attachment-worker.js',
-  'source/external/export-worker.js',
-  'source/external/image-worker.js',
-  'source/external/rich-text.js',
-  'source/external/search-worker.js',
-  'source/external/wordgard.js'
-].sort();
-assert.deepEqual(sourceJavaScript,generatedRuntimeJavaScript,'tracked JavaScript runtime inventory must contain only reproducible generated bundles at TypeScript closure');
+assert.deepEqual(sourceJavaScript,[],'canonical source must contain no JavaScript runtime artifacts');
+
+const generatedRuntimeDirectory=path.join(process.cwd(),'generated','runtime');
+const generatedRuntimeEntries=fs.readdirSync(generatedRuntimeDirectory,{withFileTypes:true});
+assert.ok(generatedRuntimeEntries.every(entry=>entry.isFile()&&entry.name.endsWith('.js')),'generated/runtime must contain only generated JavaScript files');
+const generatedRuntimeJavaScript=generatedRuntimeEntries.map(entry=>entry.name).sort();
+const expectedGeneratedRuntimeJavaScript=['attachment-worker.js','export-worker.js','image-worker.js','rich-text.js','search-worker.js','wordgard.js'].sort();
+assert.deepEqual(generatedRuntimeJavaScript,expectedGeneratedRuntimeJavaScript,'generated runtime inventory must stay exact at TypeScript closure');
 for(const id of ['canonical','save-lane','domain','operation-lifecycle','repository-policy']){
   const file=`source/core/${id}.ts`,source=fs.readFileSync(file,'utf8'),output=readScript(file);
   assert.equal(output.length,source.length);

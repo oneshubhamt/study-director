@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
-const workerSource=read('source/external/search-worker.js');
+const workerSource=read('generated/runtime/search-worker.js');
 
 let handler=null;const replies=[];
 const self={

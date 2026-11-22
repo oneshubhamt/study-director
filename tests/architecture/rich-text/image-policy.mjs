@@ -12,7 +12,7 @@ const bootstrap=readScript('source/core/data-bootstrap-host.ts');
 const attachments=readScript('source/core/attachments.ts');
 const codec=readScript('source/core/backup-codec.ts');
 const richBundle=richTextRuntimeSource();
-const imageWorker=fs.readFileSync('source/external/image-worker.js','utf8');
+const imageWorker=fs.readFileSync('generated/runtime/image-worker.js','utf8');
 
 assert.equal(PRODUCTION_LIMITS.richAssetMaxBytes,12*1024*1024);
 assert.equal(PRODUCTION_LIMITS.richAssetMaxDimensionPx,4096);

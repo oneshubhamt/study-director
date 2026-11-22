@@ -12,9 +12,10 @@ const ROOT=path.resolve(HERE,'..');
 const ENTRY=path.join(ROOT,'rich-text/editor.ts');
 const WORDGARD_ENTRY=path.join(ROOT,'rich-text/wordgard-module.ts');
 const SEARCH_ENTRY=path.join(ROOT,'rich-text/search-worker.ts');
-const OUTPUT=path.join(ROOT,'source/external/rich-text.js');
-const WORDGARD_OUTPUT=path.join(ROOT,'source/external/wordgard.js');
-const SEARCH_OUTPUT=path.join(ROOT,'source/external/search-worker.js');
+const GENERATED_RUNTIME=path.join(ROOT,'generated','runtime');
+const OUTPUT=path.join(GENERATED_RUNTIME,'rich-text.js');
+const WORDGARD_OUTPUT=path.join(GENERATED_RUNTIME,'wordgard.js');
+const SEARCH_OUTPUT=path.join(GENERATED_RUNTIME,'search-worker.js');
 const WORDGARD_FACADE=path.join(ROOT,'rich-text/wordgard-source');
 // Where each Wordgard package specifier comes from in vendor/wordgard (through
 // the build-only facades, which pick what Study Director reaches).
@@ -132,10 +133,11 @@ export async function buildImageWorkerBundle(){return buildBrowserBundle(path.jo
 export async function buildAttachmentWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'portable/attachment-worker.ts'),'/* Study Director @@SD_RELEASE@@ attachment ingest worker. */\n');}
 
 export async function writeWordgardBundle(){
+  fs.mkdirSync(GENERATED_RUNTIME,{recursive:true});
   const [wordgard,richText,searchWorker,exportWorker,imageWorker,attachmentWorker]=await Promise.all([buildWordgardModule(),buildRichTextModule(),buildSearchWorkerBundle(),buildExportWorkerBundle(),buildImageWorkerBundle(),buildAttachmentWorkerBundle()]);
-  fs.writeFileSync(path.join(ROOT,'source/external/export-worker.js'),exportWorker.source);
-  fs.writeFileSync(path.join(ROOT,'source/external/image-worker.js'),imageWorker.source);
-  fs.writeFileSync(path.join(ROOT,'source/external/attachment-worker.js'),attachmentWorker.source);
+  fs.writeFileSync(path.join(GENERATED_RUNTIME,'export-worker.js'),exportWorker.source);
+  fs.writeFileSync(path.join(GENERATED_RUNTIME,'image-worker.js'),imageWorker.source);
+  fs.writeFileSync(path.join(GENERATED_RUNTIME,'attachment-worker.js'),attachmentWorker.source);
   fs.writeFileSync(WORDGARD_OUTPUT,wordgard.source);
   fs.writeFileSync(OUTPUT,richText.source);
   fs.writeFileSync(SEARCH_OUTPUT,searchWorker.source);
