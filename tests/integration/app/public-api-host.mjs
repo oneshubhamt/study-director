@@ -13,6 +13,7 @@ function scriptElement(){
 const document={
   head:{appendChild(node){scripts.push(node);return node;}},
   createElement(tag){if(tag==='script')return scriptElement();throw new Error('Unexpected element: '+tag);},
+  getElementById(){return null;},
   querySelector(selector){return selector==='.nav-item.on[data-tab]'?{dataset:{tab:activeTab}}:null;}
 };
 const tabPort=freeze({
