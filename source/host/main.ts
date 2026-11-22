@@ -3184,7 +3184,7 @@ BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze
     exports:Exports,backupController:BackupController,providers:BackupProviderRuntime
   }),
   data:Object.freeze<BackgroundMaintenanceInput['data']>({maintenance:AppData.maintenance,notes:AppData.notes}),
-  diagnostics:Object.freeze({
+  diagnostics:Object.freeze<BackupIntegrityInput['diagnostics']>({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     start:(kind,label,details)=>BackupOperationDiagnostics.start(kind,label,details),
     mark:(kind,details,traceId)=>BackupOperationDiagnostics.mark(kind,details,traceId),
@@ -3345,7 +3345,8 @@ if(!Object.isFrozen(BackupRecoveryHost)||BackupRecoveryHost.format!=='study-dire
   throw new Error('Study Director backup-recovery host is unavailable or incompatible.');
 }
 
-const RepositoryIntegrityContinuation=IntegrityContinuationModule.create({files:BackupFiles,processing:Object.freeze({run:(type,data,options)=>Exports.run(type,data,options),scope:operation=>Exports.scope(operation)}),protection:BackupProtection,yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})});
+type RepositoryIntegrityContinuationInput=Parameters<typeof IntegrityContinuationModule.create>[0];
+const RepositoryIntegrityContinuation=IntegrityContinuationModule.create(Object.freeze<RepositoryIntegrityContinuationInput>({files:BackupFiles,processing:Exports as RepositoryIntegrityContinuationInput['processing'],protection:BackupProtection,yieldTask:async()=>{await BackgroundTasks.yieldTask({priority:'background'});}}));
 type BackupIntegrityInput=Parameters<typeof BackupIntegrityHostModule.createController>[0];
 BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze<BackupIntegrityInput>({
   lifecycle:OperationLifecycle,metadata:Object.freeze<BackupIntegrityInput['metadata']>({attachment:HostAppMeta,repository:BackupAppMeta}),attachmentMetadataName:'attachmentIntegrityAudit',repositoryMetadataName:'repositoryIntegrityScrub',
@@ -3366,7 +3367,7 @@ BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze<BackupI
     fail:(error,details,traceId)=>BackupOperationDiagnostics.fail(error,details,traceId)
   }),
   document,environment:Object.freeze<BackupIntegrityInput['environment']>({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
-  limits:Object.freeze({attachmentIntervalMs:24*60*60*1000,attachmentRetryMs:10*60*1000,repositoryBatchObjects:4,repositoryBatchBytes:256*1024*1024})
+  limits:Object.freeze<BackupIntegrityInput['limits']>({attachmentIntervalMs:24*60*60*1000,attachmentRetryMs:10*60*1000,repositoryBatchObjects:4,repositoryBatchBytes:256*1024*1024})
 }));
 if(!Object.isFrozen(BackupIntegrity)||BackupIntegrity.format!=='study-director.backup-integrity-host'||BackupIntegrity.contractVersion!==1){
   throw new Error('Study Director backup integrity host is unavailable or incompatible.');
@@ -3393,17 +3394,18 @@ BackupProviderRuntime.configureSessionOwnership(Object.freeze<Parameters<typeof 
   read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
 }));
 /* PWA SHELL AND SAFE UPDATE COORDINATION */
-const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<Parameters<typeof PwaUpdateHostModule.createController>[0]>({
-  configuration:Object.freeze({
+type PwaRuntimeInput=Parameters<typeof PwaUpdateHostModule.createController>[0];
+const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<PwaRuntimeInput>({
+  configuration:Object.freeze<PwaRuntimeInput['configuration']>({
     assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload,scope:'./',workerUrl:trustedAssetURL('./sw.js'),
     updateCheckStorageKey:STORAGE_KEYS.pwaUpdateCheck,primaryState:OWNERSHIP_STATES.PRIMARY,secondaryState:OWNERSHIP_STATES.SECONDARY,runningTimerMode:TIMER_MODES.RUNNING
   }),
-  lifecycle:Object.freeze({
+  lifecycle:Object.freeze<PwaRuntimeInput['lifecycle']>({
     module:PwaLifecycleModule,
-    environment:Object.freeze({AbortController,MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,clearTimeout:timer=>clearTimeout(timer),document,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),window})
+    environment:Object.freeze<PwaRuntimeInput['environment']>({AbortController,MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,clearTimeout:timer=>clearTimeout(timer),document,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),window})
   }),
   environment:Object.freeze({document,window,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now()}),
-  state:Object.freeze({
+  state:Object.freeze<PwaRuntimeInput['state']>({
     startupReady:()=>StartupLifecycle.status().fullyInitialized,ownership:()=>AppOwnership.status(),sessionLifecycle:()=>SessionLifecycle.status(),mutation:()=>AppMutationCoordinator.status(),reviewSave:()=>ReviewSaveService.status(),
     imagePreparationCount:()=>imagePreparationCount,attachmentLibraryBusy:()=>AttachmentLibrary.status().busy,attachmentIngestBusy:()=>AttachmentIngest.status().busy,exportsBusy:()=>Exports.status().busy,
     backupBusy:()=>BackupController.status().busy,providerBusy:()=>BackupProviderRuntime.status().busy,
@@ -3413,22 +3415,22 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<Parameters<t
     blockingUiOpen:()=>!!document.querySelector('dialog[open],[data-rich-asset-picker="active"]'),workRevision:()=>pwaWorkRevision,tasks:()=>TASKS,
     isTrackableTask:task=>isTrackableBlock(task),isTaskResolved:index=>isTaskResolved(index),currentTaskIndex:()=>TimerState.currentIndex
   }),
-  reservation:Object.freeze({
+  reservation:Object.freeze<PwaRuntimeInput['reservation']>({
     settleMutation:()=>AppMutationCoordinator.settled(),suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
-    settleAttachmentIntegrity:()=>AttachmentIntegrityJob.settled(),quiesceRichText:run=>RichTextRuntime.quiesce(run),
-    runExclusive:(name,run)=>AppMutationCoordinator.runExclusive(name,run),runManagedRecovery:run=>ManagedRecoveryQuiescence.run(run),
+    settleAttachmentIntegrity:()=>AttachmentIntegrityJob?AttachmentIntegrityJob.settled():Promise.resolve(),quiesceRichText:run=>RichTextRuntime.quiesce(run),
+    runExclusive:(name,run)=>requireMutationCoordinator().runExclusive(name,authority=>run({assert:()=>requireMutationCoordinator().assertAuthority({authority})})),runManagedRecovery:run=>ManagedRecoveryQuiescence.run(run),
     projectOwnership:()=>OwnershipUiProjection.apply(),foregroundChanged:()=>foregroundChanged()
   }),
-  persistence:Object.freeze({
+  persistence:Object.freeze<PwaRuntimeInput['persistence']>({
     settleDiary:()=>LibraryView.settleDiary(),flushPlanDraft:()=>PlanDraftEditor.flush(),planAuthoredText:()=>PlanDraftEditor.authoredText(),planReadDraft:()=>PlanData.readDraft(),
-    savePlanDraft:()=>PlanDraftEditor.save(),settlePlanData:()=>PlanData.settled(),readStoredPlan:()=>AppData.planData.read(),
-    flushPendingReview:()=>flushPendingReviewSave({strict:true,allowDuringRecoveryQuiescence:true}),settleReviewEditor:()=>ReviewEditor.settled(),
+    savePlanDraft:async()=>await PlanDraftEditor.save()!==false,settlePlanData:()=>PlanData.settled(),readStoredPlan:()=>AppData.planData.read(),
+    flushPendingReview:async()=>await flushPendingReviewSave({strict:true,allowDuringRecoveryQuiescence:true})!==false,settleReviewEditor:()=>ReviewEditor.settled(),
     writeLiveDraft:allowDuringRecoveryQuiescence=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence}),flushNotes:()=>AppData.notes.flush(),noteFailure:()=>AppData.notes.failure(),
-    flushDeletionRecovery:()=>AppData.deletionRecovery.flush(),settleActiveSession:()=>AppData.activeSession.settled(),loadActiveSession:()=>AppData.activeSession.load(),
+    flushDeletionRecovery:async()=>await AppData.deletionRecovery.flush()!==false,settleActiveSession:()=>AppData.activeSession.settled(),loadActiveSession:()=>AppData.activeSession.load(),
     activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded)
   }),
-  effects:Object.freeze({
-    automaticBackupsWaiting:()=>automaticBackupsWaiting(),flushAutomaticBackups:reason=>flushAutomaticBackups(reason),pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
+  effects:Object.freeze<PwaRuntimeInput['effects']>({
+    automaticBackupsWaiting:()=>automaticBackupsWaiting(),flushAutomaticBackups:async reason=>{await flushAutomaticBackups(reason);},pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
     publishNotice:value=>NoticeCoordinator.publish('update',value),capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     localGet:(key,fallback)=>AppData.local.getText(key,fallback),localSet:(key,value)=>AppData.local.setText(key,value)
   })
