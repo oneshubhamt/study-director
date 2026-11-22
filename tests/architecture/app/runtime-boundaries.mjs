@@ -283,7 +283,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checked
 const host=readHostHtml(),notesHost=readScript('source/core/notes-host.ts'),library=fs.readFileSync('source/core/library.ts','utf8');
 assert.match(host,/const NotesHostModule=INTERNAL_MODULES\.load\('notes-host',1,'study-director\.notes-host-module',1\);/u,'P5.6A host loads the checked notes owner');
 assert.match(host,/NotesRuntime=NotesHostModule\.createController\(Object\.freeze\s*\(\{/u,'note/editor host behavior crosses the checked P5.6A boundary');
-assert.match(host,/function taskNoteEditorIsVisible\(field\)\{return NotesRuntime\?NotesRuntime\.editorVisible\(field\):false;\}/u,'rich-text visibility checks retain a thin checked P5.6A host bridge');
+assert.match(host,/function taskNoteEditorIsVisible\(field\s*\)\{return NotesRuntime\?NotesRuntime\.editorVisible\(field\):false;\}/u,'rich-text visibility checks retain a thin checked P5.6A host bridge');
 assert.match(host,/LibraryNoteWorkflows=NotesHostModule\.createLibraryWorkflows\(Object\.freeze\s*\(\{/u,'Library note mutations and Plan fan-out cross the checked P5.6A boundary');
 for(const stale of ["const NOTE_EDITOR_BINDING_VERSION='area-v2'","function taskNoteEditorIdentity(","async function applyNoteRename(entry,value,{inPlans=true}={}){\n      const identity=normalizeNoteArea(value);\n      if(!identity||identity.label===entry.label||!canMutate())return false;\n      const where=planAreaPlaces(planAreaUse(entry.key));\n      const notice=notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',message:'Renaming the note…'});\n      try{\n        let outcome=await renameNote(entry.key"]){
   assert.equal(host.includes(stale),false,`main host must not retain legacy P5.6A note owner: ${stale.slice(0,48)}`);
@@ -297,7 +297,7 @@ assert.match(notesHost,/catch\(error\)\{planError=error;\}/u,'Plan fan-out failu
 assert.doesNotMatch(notesHost,/dailyRecords|DailyRecord|Saved Day|commitDailyRecord/u,'P5.6A does not absorb Diary or Saved-Day persistence');
 assert.doesNotMatch(library,/renameAreaInPlans/u,'Library no longer owns an untyped Plan Area rename port');
 assert.match(library,/The note change is saved, but/u,'Library reports a committed note rename truthfully when the Plan follow-up fails');
-assert.match(host,/rename:\(entry,value,options\)=>LibraryNoteWorkflows\.rename\(entry,value,options\)/u,'Library callers use the checked note workflow rather than the repository rename primitive');
+assert.match(host,/rename:\(entry\s*,value\s*,options\s*\)=>LibraryNoteWorkflows\.rename\(entry,value,options\)/u,'Library callers use the checked note workflow rather than the repository rename primitive');
 console.log(JSON.stringify({status:'PASS',boundary:'p5.6a-notes-host',ownershipFence:true,noteIdentityFence:true,planFanout:true,diaryOutOfScope:true},null,2));
 }
 

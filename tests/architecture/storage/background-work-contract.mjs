@@ -212,11 +212,11 @@ assert.match(startupOwner,/void p\.collectFiles\(\)\.catch/u,'cold startup must 
 }
 // Background sync waits while offline; coming back online wakes it at once.
 assert.match(syncStatusHost,/environment\.window\.addEventListener\('online',[\s\S]*input\.providers\(\)\.wakeBackground\('online'\)/u,'back online, the checked sync/status owner wakes background sync at once rather than at its next retry');
-assert.match(app,/SyncStatusHost\.install\(\)/u,'startup installs the checked sync/status event owner');
+assert.match(app,/requireSyncStatusHost\(\)\.install\(\)/u,'startup installs the checked sync/status event owner');
 
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));
 
 assert.match(maintenanceHost,/function createProviderBackgroundBridge\(/u,'provider change/flush/waiting policy lives in the checked maintenance owner');
-assert.match(app,/function notifyBackupChange\(change\)\{return BackupProviderBackground\.noteChange\(change\);\}/u,'canonical change notification host bridge is thin');
-assert.match(app,/function flushAutomaticBackups\(reason\)\{return BackupProviderBackground\.flush\(reason\);\}/u,'PWA backup flush bridge is thin');
+assert.match(app,/function notifyBackupChange\(change\s*\)\{return BackupProviderBackground\.noteChange\(change\);\}/u,'canonical change notification host bridge is thin');
+assert.match(app,/function flushAutomaticBackups\(reason\s*\)\{return BackupProviderBackground\.flush\(reason\);\}/u,'PWA backup flush bridge is thin');
 assert.doesNotMatch(app,/BackupProviderRuntime\?\.noteChange\(|Promise\.allSettled\(\[BackupProviderRuntime\.flushAutomatic/u,'main host must not regain provider background policy');

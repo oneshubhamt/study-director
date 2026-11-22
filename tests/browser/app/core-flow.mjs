@@ -13,7 +13,7 @@ async function editReflection(text,quality){
 }
 
 try{
-  page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});
+  page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,bypassServiceWorker:true,viewport:{width:1280,height:860,mobile:false,scale:1}});
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership'});
   // Start-up and the background jobs it wakes log nothing on a clean start.
