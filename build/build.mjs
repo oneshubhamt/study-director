@@ -100,7 +100,6 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_CACHE_STORAGE_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(CACHE_STORAGE_IDENTITIES)))
     .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES))
     .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES)))
-    .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES)))
 
   invariant(!/@@SD_[A-Z_]+@@/.test(rendered),`Unresolved release token in ${sourceName}.`);
   return rendered;

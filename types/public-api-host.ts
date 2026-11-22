@@ -8,6 +8,7 @@ import type {PresentationHostController} from './presentation-host.ts';
 import type {ProviderConfig} from './backup-provider.ts';
 import type {PlanController} from './plan.ts';
 import type {InsightsHostBoundary,InsightsHostModule,InsightsPreviewProvider} from '../source/core/insights-host.ts';
+import type {BackupModule} from '../source/core/backup.ts';
 
 export type CapabilityMap=Readonly<Record<string,number>>;
 export type PluginFileState='not-requested'|'loading'|'loaded'|'registered'|'missing'|'incompatible'|'failed';
@@ -40,8 +41,8 @@ export interface BackupProfilePublic{
  deleted(info:Readonly<{profile:string}>):unknown|PromiseLike<unknown>;
  controls(control:Readonly<{deleteLibrary:()=>Promise<boolean>}>):unknown;
 }
-export interface BackupPublicInput{
- createCheckpoint:(...args:never[])=>unknown;inspect:(...args:never[])=>unknown;restore:(...args:never[])=>unknown;downloadSafetyCopy:(...args:never[])=>unknown;
+type PublicBackupController=Pick<ReturnType<BackupModule['createRuntime']>['controller'],'createCheckpoint'|'inspect'|'restore'|'downloadSafetyCopy'>;
+export interface BackupPublicInput extends PublicBackupController{
  releaseFile(file:Blob):unknown|PromiseLike<unknown>;
  receiveStream(stream:ReadableStream<Uint8Array>,size:number,options?:Readonly<{signal?:AbortSignal|null;onProgress?:(value:Readonly<{loaded?:number;total?:number;phase?:string}>)=>void}>):unknown|PromiseLike<unknown>;
  checksum(blob:Blob,signal?:AbortSignal|null):unknown|PromiseLike<unknown>;
