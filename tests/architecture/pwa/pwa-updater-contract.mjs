@@ -32,7 +32,7 @@ assert.ok(preflightIndex>=0&&pauseIndex>preflightIndex,'Pause & Update must pref
 assert.match(updater,/activeReservation!==token/u,'reservation validation must be tied to the exact operation token');
 assert.match(updater,/token\.workRevision!==state\.workRevision\(\)/u,'reservation validation must reject newer work');
 assert.match(updater,/await input\.reservation\.settleMutation\(\)/u,'unreserved preparation must still wait for the mutation coordinator');
-assert.match(app,/flushPendingReview:\(\)=>flushPendingReviewSave\(\{strict:true,allowDuringRecoveryQuiescence:true\}\)/u,'PWA-owned Review checkpoint must be allowed inside its recovery-quiesced reservation');
+assert.match(app,/flushPendingReview:async\(\)=>await flushPendingReviewSave\(\{strict:true,allowDuringRecoveryQuiescence:true\}\)!==false/u,'PWA-owned Review checkpoint must be allowed inside its recovery-quiesced reservation and normalize sync\/async persistence to a strict boolean');
 assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.revision\)/u,'active-session persistence must retain read-back verification');
 assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerBackgroundBackupActive\(\)/u,'a running background backup must defer update activation');
 assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked update safety must own the pre-update backup wait policy');

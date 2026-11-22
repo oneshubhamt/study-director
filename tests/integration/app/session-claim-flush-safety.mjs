@@ -73,7 +73,7 @@ function fixture(options={}){
 // writer. Close/rollover publication therefore cannot silently degrade to the
 // best-effort flush path that persistence blocking suppresses.
 {
-  const host=readRuntimeSource('source/host/main.js');
+  const host=readRuntimeSource('source/host/main.ts');
   assert.match(host,/writeCanonicalNow:\(operation,options\)=>ActiveSessionRuntime\.writeCanonicalNow\(operation,options\),writeLiveDraftNow/u);
   const review=readRuntimeSource('source/core/review.ts');
   assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the Study Day Active Session checkpoint'\);\s*if\(closesSession\)activeSessionPersistenceBlocked=true/u);

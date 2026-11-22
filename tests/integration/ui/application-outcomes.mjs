@@ -2,10 +2,9 @@ import {readCoreScript} from '../../helpers/core-script.mjs';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
-const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),library=readRuntimeSource('source/core/library.ts'),hostMain=fs.readFileSync('source/host/main.js','utf8');
+const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),library=readRuntimeSource('source/core/library.ts'),hostMain=readRuntimeSource('source/host/main.ts');
 const deferred=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};};
 const noop=()=>{};
 

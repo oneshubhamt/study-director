@@ -42,7 +42,7 @@ assert.match(styles,/\.backup-advanced-disclosure>summary/u);assert.doesNotMatch
 // The host draws Google Drive's row from the engine's status, like the Device Folder row.
 assert.doesNotMatch(provider,/document\.createElement\('button'\)|backup-provider-actions/u,'the engine reports status; it never draws location controls');
 assert.match(actions,/function renderDrive\(\)\{[\s\S]*providers\.locationStatus\('google-drive'\)[\s\S]*presentation\.locationLabel\('google-drive',state\)/u,'Drive row must use the shared location presentation with connection history');
-assert.match(app,/function renderDriveBackup\(\)\{return BackupActions\.renderDrive\(\);\}/u,'the host retains only the checked Drive render bridge');
+assert.match(app,/function renderDriveBackup\(\)\{return requireBackupActions\(\)\.renderDrive\(\);\}/u,'the host retains only the checked Drive render bridge');
 assert.match(app,/BackupProviderRuntime\.subscribeStatus\(renderDriveBackup\)/u);
 assert.match(provider,/normalized\.subscribeConnection\)normalized\.subscribeConnection\(\(\)=>\{[^\n]*notifyStatus\(\)/u,'provider UI must subscribe to live authorization changes instead of waiting for the next user action');
 assert.match(dataSurface,/id="connect-drive-backup"[\s\S]*id="cancel-drive-backup"[\s\S]*id="drive-backup-settings"[^>]*data-action="toggle-backup-settings"/u,'the Drive row has the same parts as the Device Folder row: connect, cancel and settings');
@@ -52,7 +52,7 @@ assert.doesNotMatch(provider,/backup-provider-import|importLabel/u,'provider ove
 assert.match(provider,/if\s*\(!checkpointId&&!missingOnly\s*\)throw new Error\s*\('Choose a version to restore\s*\. Nothing was changed\s*\.'\s*\);/u,'a restore without a chosen version stops before reading anything');
 assert.doesNotMatch(provider+device,/checkpoint-selection-start|repository\.choose|chooseCheckpoint/u);
 
-assert.match(app,/createKeptVersions\(Object\.freeze\(\{[\s\S]*controller:Object\.freeze\(\{[\s\S]*status:\(\)=>BackupController\.status\(\)[\s\S]*resolveConvergedKeptVersions:\(\)=>BackupController\.resolveConvergedKeptVersions\(\)[\s\S]*reviewKeptVersions:options=>BackupController\.reviewKeptVersions\(options\)/u,'Kept Versions must adapt the broad Backup controller to its exact checked port.');
+assert.match(app,/createKeptVersions\(Object\.freeze\s*\(\{[\s\S]*controller:Object\.freeze\s*\(\{[\s\S]*status:\(\)=>BackupController\.status\(\)[\s\S]*resolveConvergedKeptVersions:\(\)=>BackupController\.resolveConvergedKeptVersions\(\)[\s\S]*reviewKeptVersions:options=>BackupController\.reviewKeptVersions\(options\)/u,'Kept Versions must adapt the broad Backup controller to its exact checked port.');
 assert.match(host,/async function collectAll\(/u);
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'the host merges what the locations return; the repository is not asked to');
 assert.ok(host.includes('choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]'),'partial attachment backups must never offer exact Replace');

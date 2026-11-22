@@ -31,10 +31,10 @@ assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note
 { // p5.13a-public-api-plugin-boundary
 const host=readHostHtml(),owner=readScript('source/core/public-api-host.ts');
 assert.match(host,/const PublicApiHostModule=INTERNAL_MODULES\.load\('public-api-host',1,'study-director\.public-api-host-module',1\)/u,'P5.13a host loads the checked public API owner');
-assert.match(host,/const PluginRuntime=PublicApiHostModule\.createRuntime\(Object\.freeze\(\{/u,'optional-plugin runtime must cross the checked P5.13a boundary');
-assert.match(host,/const StudyDirectorPublicAPI=PluginRuntime\.createPublicApi\(Object\.freeze\(\{/u,'public capability construction must cross the checked P5.13a boundary');
+assert.match(host,/const PluginRuntime=PublicApiHostModule\.createRuntime\(Object\.freeze\s*\(\{/u,'optional-plugin runtime must cross the checked P5.13a boundary');
+assert.match(host,/const StudyDirectorPublicAPI=PluginRuntime\.createPublicApi\(Object\.freeze\s*\(\{/u,'public capability construction must cross the checked P5.13a boundary');
 assert.doesNotMatch(host,/const PluginRuntime=\(\(\)=>\{/u,'unchecked optional-plugin runtime must not remain in main');
-assert.doesNotMatch(host,/const StudyDirectorPublicAPI=Object\.freeze\(\{/u,'unchecked public API assembly must not remain in main');
+assert.doesNotMatch(host,/const StudyDirectorPublicAPI=Object\.freeze\s*\(\{/u,'unchecked public API assembly must not remain in main');
 for(const required of ['MAX_LOAD_ATTEMPTS=2','MAX_REGISTRATION_ATTEMPTS=2','function registerPlaceholders','function requestTab','function createPublicApi'])assert.ok(owner.includes(required),`checked public API owner is missing ${required}`);
 assert.match(owner,/if\(activeTabId\(\)===tabId\)input\.tabs\.renderTab\(tabId\)/u,'optional plugin completion may rerender only its active tab');
 assert.match(owner,/if\(unmet\.length\)[\s\S]{0,520}state:'incompatible'/u,'capability rejection happens before plugin setup');
@@ -46,12 +46,12 @@ assert.ok(published>=0&&published<ready&&ready<invalidate&&invalidate<startup&&s
 { // p5.7a-backup-actions-host-boundary
 const host=readHostHtml(),owner=readScript('source/core/backup-actions-host.ts'),ownerTypes=fs.readFileSync('types/backup-actions-host.ts','utf8'),deviceTypes=fs.readFileSync('types/device-backup.ts','utf8');
 assert.match(host,/const BackupActionsHostModule=INTERNAL_MODULES\.load\('backup-actions-host',1,'study-director\.backup-actions-host-module',1\)/u,'P5.7A host loads the checked backup-actions owner');
-assert.match(host,/BackupProtectionStorage=BackupActionsHostModule\.createProtectionStorage\(Object\.freeze\(\{/u,'backup protection metadata mutation crosses the checked P5.7A boundary');
-assert.match(host,/BackupProtectionHost=BackupActionsHostModule\.createProtectionHost\(Object\.freeze\(\{/u,'backup protection crosses the checked P5.7A boundary');
-assert.match(host,/BackupActions=BackupActionsHostModule\.createControls\(Object\.freeze\(\{/u,'file and location controls cross the checked P5.7A boundary');
-assert.match(host,/DeviceBackupHooks=BackupActionsHostModule\.createDeviceHooks\(Object\.freeze\(\{/u,'Device Folder repository-choice and owner callbacks cross the checked P5.7A boundary');
-assert.match(host,/DeviceBackup=BackupActionsHostModule\.createDeviceBackup\(Object\.freeze\(\{/u,'Device Folder composition crosses the checked P5.7A boundary');
-assert.match(host,/DeviceBackupActivation=BackupActionsHostModule\.createDeviceActivation\(Object\.freeze\(\{/u,'Device Folder permission refresh policy crosses the checked P5.7A boundary');
+assert.match(host,/BackupProtectionStorage=BackupActionsHostModule\.createProtectionStorage\(Object\.freeze\s*\(\{/u,'backup protection metadata mutation crosses the checked P5.7A boundary');
+assert.match(host,/BackupProtectionHost=BackupActionsHostModule\.createProtectionHost\(Object\.freeze\s*\(\{/u,'backup protection crosses the checked P5.7A boundary');
+assert.match(host,/BackupActions=BackupActionsHostModule\.createControls\(Object\.freeze\s*\(\{/u,'file and location controls cross the checked P5.7A boundary');
+assert.match(host,/DeviceBackupHooks=BackupActionsHostModule\.createDeviceHooks\(Object\.freeze\s*\(\{/u,'Device Folder repository-choice and owner callbacks cross the checked P5.7A boundary');
+assert.match(host,/DeviceBackup=BackupActionsHostModule\.createDeviceBackup\(Object\.freeze\s*\(\{/u,'Device Folder composition crosses the checked P5.7A boundary');
+assert.match(host,/DeviceBackupActivation=BackupActionsHostModule\.createDeviceActivation\(Object\.freeze\s*\(\{/u,'Device Folder permission refresh policy crosses the checked P5.7A boundary');
 for(const stale of ['let fileBackupRowReady=false;','const BackupProtection=ExportsModule.createProtection(','DeviceBackup=DeviceBackupModule.createController(','async function backUpEverywhere(){']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.7A owner: ${stale}`);
 }
@@ -70,8 +70,8 @@ console.log(JSON.stringify({status:'PASS',boundary:'p5.7a-backup-actions-host',p
 { // p5.7b-reconciliation-and-recovery-owner
 const host=readHostHtml(),recovery=readScript('source/core/backup-recovery-host.ts'),reconciliationUi=readScript('source/core/reconciliation-ui.ts'),backup=readScript('source/core/backup.ts');
 assert.match(host,/const ReconciliationUIModule=INTERNAL_MODULES\.load\('reconciliation-ui',1,'study-director\.reconciliation-ui-module',1\)/u,'P5.7B reconciliation UI crosses the checked private-module boundary');
-assert.match(host,/KeptVersionsView=BackupRecoveryHostModule\.createKeptVersionsView\(Object\.freeze\(\{/u,'Kept Versions banner presentation crosses the checked recovery owner');
-assert.match(host,/KeptVersions=BackupRecoveryHostModule\.createKeptVersions\(Object\.freeze\(\{/u,'Kept Versions state is composed through the checked recovery owner');
+assert.match(host,/KeptVersionsView=BackupRecoveryHostModule\.createKeptVersionsView\(Object\.freeze\s*\(\{/u,'Kept Versions banner presentation crosses the checked recovery owner');
+assert.match(host,/KeptVersions=BackupRecoveryHostModule\.createKeptVersions\(Object\.freeze\s*\(\{/u,'Kept Versions state is composed through the checked recovery owner');
 assert.doesNotMatch(host,/const KeptVersions=\(\(\)=>\{/u,'the untyped host Kept Versions owner is retired');
 assert.match(recovery,/function createKeptVersions\(/u,'the recovery host owns kept-version refresh and review');
 assert.match(recovery,/resolveConvergedKeptVersions\(\)/u,'verified convergence remains the only automatic kept-version resolution');
@@ -98,11 +98,11 @@ console.log(JSON.stringify({status:'PASS',boundary:'p5.7b-reconciliation-recover
 
 { // p5.7-parent-source-ownership-closure
 const host=readHostHtml(),readiness=readScript('source/core/backup-readiness-host.ts'),recovery=readScript('source/core/backup-recovery-host.ts');
-assert.match(host,/BackupReadinessHostModule\.createVerifiedRecovery\(Object\.freeze\(\{/u,'verified backup readiness crosses the checked owner');
-assert.match(host,/BackupReadinessHostModule\.createBackupNudge\(Object\.freeze\(\{/u,'backup readiness reminder policy crosses the checked owner');
-assert.match(host,/BackupRecoveryHostModule\.createRuntime\(Object\.freeze\(\{/u,'the production Backup runtime adapters cross the checked owner');
-assert.match(host,/BackupRecoveryHostModule\.createStorageReset\(Object\.freeze\(\{/u,'browser-data-clear recovery crosses the checked owner');
-assert.match(host,/BackupRecoveryHostModule\.createRetainedBackupFiles\(Object\.freeze\(\{/u,'recovery scratch retention crosses the checked owner');
+assert.match(host,/BackupReadinessHostModule\.createVerifiedRecovery\(Object\.freeze\s*\(\{/u,'verified backup readiness crosses the checked owner');
+assert.match(host,/BackupReadinessHostModule\.createBackupNudge\(Object\.freeze\s*\(\{/u,'backup readiness reminder policy crosses the checked owner');
+assert.match(host,/BackupRecoveryHostModule\.createRuntime\(Object\.freeze\s*\(\{/u,'the production Backup runtime adapters cross the checked owner');
+assert.match(host,/BackupRecoveryHostModule\.createStorageReset\(Object\.freeze\s*\(\{/u,'browser-data-clear recovery crosses the checked owner');
+assert.match(host,/BackupRecoveryHostModule\.createRetainedBackupFiles\(Object\.freeze\s*\(\{/u,'recovery scratch retention crosses the checked owner');
 assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(readiness,/function createBackupNudge\(/u);assert.match(recovery,/function createMaintenancePause\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime\s*\(/u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
 for(const stale of [
   'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(','async function maybePromptBackupNudge(','backupNudgeMessage','backupNudgeCheckedAt','backupNudgeNotifiedDate',
@@ -113,7 +113,7 @@ for(const stale of [
 assert.match(host,/function canonicalLocalRecoveryEmpty\(\)\{return StorageResetRecovery\?StorageResetRecovery\.canonicalEmpty\(\):Promise\.resolve\(null\);\}/u,'remaining storage-reset helper is a thin deferred forwarder');
 assert.match(host,/function handleCanonicalCommit\(event\)\{return CanonicalCommitHost\.handle\(event\);\}/u,'canonical commit remains a thin checked forwarder');
 assert.match(host,/RecoveryAssetMaintenancePause=BackupRecoveryHostModule\.createMaintenancePause|const RecoveryAssetMaintenancePause=BackupRecoveryHostModule\.createMaintenancePause/u,'attachment-maintenance recovery coordination crosses the checked owner');
-assert.match(host,/ManagedRecoveryQuiescence=BackupRecoveryHostModule\.createQuiescence\(Object\.freeze\(\{/u,'timer/rich-text recovery quiescence crosses the checked owner');
+assert.match(host,/ManagedRecoveryQuiescence=BackupRecoveryHostModule\.createQuiescence\(Object\.freeze\s*\(\{/u,'timer/rich-text recovery quiescence crosses the checked owner');
 console.log(JSON.stringify({status:'PASS',boundary:'p5.7-parent-source-ownership',verifiedRecovery:true,storageReset:true,runtimeAdapters:true,scratchRetention:true,noSubstantiveHostRemainder:true},null,2));
 }
 
@@ -137,7 +137,7 @@ function section(source,start,end){
   return source.slice(from,to);
 }
 
-assert.match(host,/const DecisionClock=Object\.freeze\(\{nowMs:\(\)=>Date\.now\(\)\}\);/,'DecisionClock is a nowMs-only capability');
+assert.match(host,/const DecisionClock=Object\.freeze\s*\(\{nowMs:\(\)=>Date\.now\(\)\}\);/,'DecisionClock is a nowMs-only capability');
 assert.doesNotMatch(host,/DecisionClock\.nowIso\b/,'DecisionClock must not grow informational timestamp helpers');
 assert.match(host,/document,window,now:DecisionClock\.nowMs,randomIdPart,/,'App ownership decisions use the shared DecisionClock');
 
@@ -148,7 +148,7 @@ assert.doesNotMatch(timer,/clockNowIso|ports\.clock\.nowIso/,'Timer engine must 
 assert.doesNotMatch(attachments,/\bp\.clock\b|\bclock\.nowIso\b|Attachment reference clock/,'Attachment reference rollback must not depend on DecisionClock');
 assert.match(attachments,/const nowIso=\(\)=>new Date\(\)\.toISOString\(\);/,'Attachment rollback stamps remain ordinary wall-clock metadata');
 
-assert.match(host,/MutationCoordinatorModule\.createCoordinator\(Object\.freeze\(\{[\s\S]*now:DecisionClock\.nowMs/u,'the extracted mutation coordinator receives the shared DecisionClock as its lease-decision clock');
+assert.match(host,/MutationCoordinatorModule\.createCoordinator\(Object\.freeze\s*\(\{[\s\S]*now:DecisionClock\.nowMs/u,'the extracted mutation coordinator receives the shared DecisionClock as its lease-decision clock');
 assert.match(mutation,/const nowMs=\(\)=>\{const value=Number\(input\.environment\.now\(\)\)/u,'mutation lease decisions use the injected decision clock');
 assert.match(mutation,/Number\(value\.expiresAt\)>nowMs\(\)/,'foreign mutation-lease expiry uses the injected decision clock');
 assert.equal((mutation.match(/nowMs\(\)\+LEASE_MS/g)||[]).length,3,'local and durable lease acquisition/refresh expiry use the injected decision clock');
@@ -163,7 +163,7 @@ const runtimePayload=section(execution,'function timerRuntimePayload(', 'functio
 assert.doesNotMatch(runtimePayload,/Date\.now\(\)/,'persisted timer runtime arithmetic uses DecisionClock');
 assert.match(runtimePayload,/DecisionClock\.nowMs\(\)/,'timer runtime captures decision time from DecisionClock');
 
-assert.match(host,/SessionHostModule\.createController\(Object\.freeze\(\{/u,'canonical Active Session composition crosses the checked session host');
+assert.match(host,/SessionHostModule\.createController\(Object\.freeze\s*\(\{/u,'canonical Active Session composition crosses the checked session host');
 const executionComposition=section(host,'const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({','const {\n  TimerState,SessionState');
 const hostReviewPort=section(executionComposition,'reviewEvidence:Object.freeze({','}),\n    clockEnvironment');
 assert.doesNotMatch(hostReviewPort,/buildRealTimeSnapshot|exactTaskCompletionPercent|liveTaskOutcome|resolveTaskCompletion|setTaskDoneState|setTaskSkippedState/u,'execution host must not self-reference runtime exports before ExecutionRuntime is initialized');
@@ -174,7 +174,7 @@ assert.match(sessionHost,/persistence\.recoveryWorkActive\(\)/u,'timer snapshots
 for(const token of ['claimSessionOwnership','continueSessionHere','BackupProviderRuntime','sessionHandoff']){
   assert.equal(sessionHost.includes(token),false,`P5.4B session host must not absorb P5.4C distributed ownership: ${token}`);
 }
-assert.match(host,/SessionHandoffModule\.createController\(Object\.freeze\(\{/u,'distributed session ownership crosses the checked P5.4C handoff boundary');
+assert.match(host,/SessionHandoffModule\.createController\(Object\.freeze\s*\(\{/u,'distributed session ownership crosses the checked P5.4C handoff boundary');
 assert.doesNotMatch(sessionHandoff,/Date\.now\(\)|new Date\(/u,'handoff decisions and stamps use injected clocks');
 for(const token of ['BackupProviderRuntime','AppData.activeSession','google-drive','document.','window.']){
   assert.equal(sessionHandoff.includes(token),false,`P5.4C handoff core consumes ports instead of host/provider implementation details: ${token}`);
@@ -214,7 +214,7 @@ const views=readScript('source/core/execution-views.ts');
 const timer=readScript('source/core/timer-engine.ts');
 const plan=readScript('source/core/plan.ts');
 const review=readScript('source/core/review.ts');
-assert.match(host,/ExecutionHostModule\.createRuntime\(Object\.freeze\(\{/u,'live execution composition crosses the checked execution host');
+assert.match(host,/ExecutionHostModule\.createRuntime\(Object\.freeze\s*\(\{/u,'live execution composition crosses the checked execution host');
 assert.doesNotMatch(host,/const TaskSessionState=\(\(\)=>\{/u,'per-task runtime evidence no longer has an untyped host implementation');
 for(const direct of [
   /TimerStateModule\.createStateController\(/u,
@@ -248,14 +248,14 @@ assert.doesNotMatch(review,/function setCompletionState\(/u,'Review must consume
 assert.match(review,/resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState/u,'Review completion editing consumes the checked execution evidence port');
 const reviewHost=readScript('source/core/review-host.ts');
 assert.match(host,/const ReviewHostModule=INTERNAL_MODULES\.load\('review-host',1,'study-director\.review-host-module',1\);/u,'Review composition loads the checked P5.5A host owner');
-assert.match(host,/const ReviewSubsystem=ReviewHostModule\.createSubsystem\(Object\.freeze\(\{[\s\S]*?module:ReviewModule,[\s\S]*?subsystem:Object\.freeze\(\{/u,'Review subsystem composition crosses the checked P5.5A host boundary');
+assert.match(host,/const ReviewSubsystem=ReviewHostModule\.createSubsystem\(Object\.freeze\s*\(\{[\s\S]*?module:ReviewModule,[\s\S]*?subsystem:Object\.freeze\s*\(\{/u,'Review subsystem composition crosses the checked P5.5A host boundary');
 assert.doesNotMatch(host,/ReviewModule\.createReviewSubsystem\(/u,'the main host must not bypass the checked Review host boundary');
 assert.match(reviewHost,/input\.module\.format!=='study-director\.review'[\s\S]*input\.module\.contractVersion!==1/u,'Review host rejects an incompatible feature module');
 assert.match(reviewHost,/!Object\.isFrozen\(input\.subsystem\)/u,'Review host rejects mutable provider composition');
 assert.match(reviewHost,/!Object\.isFrozen\(subsystem\)[\s\S]*subsystem\.format!=='study-director\.review-subsystem'[\s\S]*subsystem\.contractVersion!==1/u,'Review host validates the composed subsystem before publication');
 assert.match(review,/qualityFields\.some\(field=>[\s\S]{0,420}reviewOwnershipRevision[\s\S]{0,240}getOwnershipRevision\(\)[\s\S]{0,240}reviewLifecycleRevision/u,'quality controls are fenced by both ownership and lifecycle revisions before Review persistence');
 const reviewPersistence=readScript('source/core/review-persistence.ts');
-assert.match(host,/const ReviewPersistence=ReviewPersistenceModule\.createPersistence\(Object\.freeze\(\{/u,'Daily Reflection and Diary persistence cross the checked P5.5B owner');
+assert.match(host,/const ReviewPersistence=ReviewPersistenceModule\.createPersistence\(Object\.freeze\s*\(\{/u,'Daily Reflection and Diary persistence cross the checked P5.5B owner');
 assert.doesNotMatch(host,/const DailyReflectionPersistence=\(\(\)=>|const LibraryDiaryEditor=\(\(\)=>/u,'the host must not retain parallel untyped reflection or Diary persistence engines');
 assert.match(reviewPersistence,/storage[\s\S]{0,180}indexeddb/u,'reflection persistence refuses fallback-only write receipts');
 assert.match(reviewPersistence,/await records\.verifyCanonical\(next\)|await records\.verifyCanonical\(diary\)/u,'reflection persistence requires canonical read-back after writes');
@@ -282,9 +282,9 @@ console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checked
 { // p5.6a-notes-host-boundary
 const host=readHostHtml(),notesHost=readScript('source/core/notes-host.ts'),library=fs.readFileSync('source/core/library.ts','utf8');
 assert.match(host,/const NotesHostModule=INTERNAL_MODULES\.load\('notes-host',1,'study-director\.notes-host-module',1\);/u,'P5.6A host loads the checked notes owner');
-assert.match(host,/NotesRuntime=NotesHostModule\.createController\(Object\.freeze\(\{/u,'note/editor host behavior crosses the checked P5.6A boundary');
+assert.match(host,/NotesRuntime=NotesHostModule\.createController\(Object\.freeze\s*\(\{/u,'note/editor host behavior crosses the checked P5.6A boundary');
 assert.match(host,/function taskNoteEditorIsVisible\(field\)\{return NotesRuntime\?NotesRuntime\.editorVisible\(field\):false;\}/u,'rich-text visibility checks retain a thin checked P5.6A host bridge');
-assert.match(host,/LibraryNoteWorkflows=NotesHostModule\.createLibraryWorkflows\(Object\.freeze\(\{/u,'Library note mutations and Plan fan-out cross the checked P5.6A boundary');
+assert.match(host,/LibraryNoteWorkflows=NotesHostModule\.createLibraryWorkflows\(Object\.freeze\s*\(\{/u,'Library note mutations and Plan fan-out cross the checked P5.6A boundary');
 for(const stale of ["const NOTE_EDITOR_BINDING_VERSION='area-v2'","function taskNoteEditorIdentity(","async function applyNoteRename(entry,value,{inPlans=true}={}){\n      const identity=normalizeNoteArea(value);\n      if(!identity||identity.label===entry.label||!canMutate())return false;\n      const where=planAreaPlaces(planAreaUse(entry.key));\n      const notice=notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',message:'Renaming the note…'});\n      try{\n        let outcome=await renameNote(entry.key"]){
   assert.equal(host.includes(stale),false,`main host must not retain legacy P5.6A note owner: ${stale.slice(0,48)}`);
 }
@@ -305,8 +305,8 @@ console.log(JSON.stringify({status:'PASS',boundary:'p5.6a-notes-host',ownershipF
 const host=readHostHtml(),library=readRuntimeSource('source/core/library.ts'),links=readRuntimeSource('source/core/note-links.ts');
 assert.match(host,/const NoteLinksModule=INTERNAL_MODULES\.load\('note-links',1,'study-director\.note-links-module',1\);/u,'P5.6B host loads the checked note-links owner');
 assert.match(host,/const LibraryModule=INTERNAL_MODULES\.load\('library',1,'study-director\.library-module',1\);/u,'P5.6B host loads the checked Library owner');
-assert.match(host,/const NoteLinkNavigation=NoteLinksModule\.createNavigation\(Object\.freeze\(\{/u,'note-link navigation crosses the checked P5.6B boundary');
-assert.match(host,/const LibraryView=LibraryModule\.createView\(Object\.freeze\(\{ports:Object\.freeze\(\{/u,'Library navigation and record presentation cross the checked P5.6B boundary');
+assert.match(host,/const NoteLinkNavigation=NoteLinksModule\.createNavigation\(Object\.freeze\s*\(\{/u,'note-link navigation crosses the checked P5.6B boundary');
+assert.match(host,/const LibraryView=LibraryModule\.createView\(Object\.freeze\s*\(\{ports:Object\.freeze\s*\(\{/u,'Library navigation and record presentation cross the checked P5.6B boundary');
 for(const stale of ['async function openLinkedNote(','function richTextNotes(','async function showNotesTagged(']){
   assert.equal(host.includes(stale),false,`main host must not retain legacy P5.6B link-navigation owner: ${stale}`);
 }
