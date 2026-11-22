@@ -7,8 +7,9 @@ export type IntegrityPart={name:string;offset:number;hash:HashSnapshot|null;fram
 export type IntegrityState={version:1;objectId:string;storedChecksum:string;storedBytes:number;phase:'stored'|'plain'|'verified';sourceVersion:string;stored:IntegrityPart;plain:IntegrityPart};
 export type RepositoryObject={objectId:string;kind:string;storedChecksum:string;storedBytes:number;sourceBytes:number;fingerprint:string};
 export type ScratchFile={name:string;directory:string;handle:Pick<FilePort,'getFile'>};
+export type IntegrityProcessingOperation='integrity.append'|'integrity.digest'|'crypto.info'|'checksum';
 export interface IntegrityProcessing extends Omit<ProcessingPort,'run'>{
- run<K extends keyof (ProcessingInputs&IntegrityInputs)>(type:K,data:(ProcessingInputs&IntegrityInputs)[K],options?:ProcessingOptions):Promise<(ProcessingOutputs&IntegrityOutputs)[K]>;
+ run<K extends IntegrityProcessingOperation>(type:K,data:(ProcessingInputs&IntegrityInputs)[K],options?:ProcessingOptions):Promise<(ProcessingOutputs&IntegrityOutputs)[K]>;
 }
 export interface IntegrityInput{
  files:{stage():Promise<ScratchFile>;resume(name:string):Promise<ScratchFile>;release(name:string):Promise<unknown>};processing:IntegrityProcessing;
