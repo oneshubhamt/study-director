@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## Post-P5.13 Insights shell removal · OPEN · 2026-11-22
+
+- **Baseline:** `3d9cdc6aa667c7684695065e12dd5847824b3666` on `ts-exp`.
+- **Authorized outcome:** delete the inert tracked `source/external/insights.js` shell and make the Insights runtime topology exactly the six checked TypeScript sources: model, protocol, worker, compute, rendering and retained runtime.
+- **Invariants:** emitted Insights browser asset naming remains unchanged; no Insights behavior or worker protocol changes; generated worker/rich-text JavaScript remains untouched; strict TypeScript closure must leave only the six reproducible generated JavaScript bundles under `source/`.
+- **Planned verification:** strict types/lint, TypeScript inventory/runtime-boundary checks, direct Insights lifecycle/architecture checks, fresh build/generated verification/syntax, P5.13 targeted host gate and Repository Checks. Full QA remains out of scope.
+
 ## P5.13 · VERIFIED — TARGETED · 2026-11-22 · DE NOVO CONTRACT-HARDENING CLOSEOUT
 
 - **Programme baseline / corrected implementation head:** P5.13 started at `7c5f0170b8489c3f6c69e85926a572e9bb7986f2`; the prior stabilized handoff was `bdb0de5ff1bde3ea61b8e715f4fb483cac1b3571`. A user-requested de novo source audit found one remaining type-contract defect and one dead build replacement. Corrected implementation head is `9e509e3a1c636d1b08b5872e415f3b1d92b7f02f`.
