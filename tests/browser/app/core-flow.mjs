@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'CoreFlowQA QA',updatedAt:new Date().toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
-const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'study-director-qa-core-'});let page=null;
+const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'study-director-qa-core-'}),freshBrowser=await launchChromium({profilePrefix:'study-director-qa-core-fresh-'});let page=null,freshPage=null;
 const result={status:'PASS',release:server.manifest.release,checks:{}};
 async function editReflection(text,quality){
   await page.evaluate(`__PWA6.goTab('review')`);
@@ -13,6 +13,16 @@ async function editReflection(text,quality){
 }
 
 try{
+  freshPage=await freshBrowser.createPage(server.url('deployment','instrumented.html'),{viewport:{width:1280,height:860,mobile:false,scale:1}});
+  await waitForStudyDirector(freshPage,{instrumented:true});
+  await waitFor(()=>freshPage.evaluate(`__PWA6.AppOwnership.status().hasControl&&document.getElementById('first-start-dialog')?.open===true`),{label:'cold fresh-profile startup'});
+  const freshState=await freshPage.evaluate(`(()=>({profile:__PWA6.Profiles.current(),apiFrozen:Object.isFrozen(StudyDirector),startup:__PWA6.StartupLifecycle.status()}))()`);
+  assert.equal(freshState.profile?.fresh,true,'a pristine browser profile must enter first-start as a fresh profile');
+  assert.equal(freshState.apiFrozen,true,'public capabilities must already be frozen when fresh-profile startup completes');
+  assert.equal(freshState.startup.fullyInitialized,true,'fresh-profile startup must reach the checked lifecycle boundary');
+  result.checks.coldFreshProfileStartup=true;
+  await freshBrowser.closePage(freshPage);freshPage=null;
+
   page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership'});
@@ -34,5 +44,5 @@ try{
   const saved=await page.evaluate(`(async()=>{const d=__PWA6;await d.saveDayRecord();const record=await d.AppData.dailyRecords.get(d.todayISO());d.goTab('library');d.LibraryView.invalidate();d.LibraryView.render();await new Promise(r=>setTimeout(r,100));const first=await d.BackupController.createCheckpoint(),inspected=await d.BackupController.inspect(first.blob,{filename:first.filename}),second=await d.BackupController.createCheckpoint();return {record:{...record,reflection:StudyDirectorRichText.toPlainText(record.reflection)},libraryCards:document.querySelectorAll('.library-card').length,first:{size:first.blob.size,counts:first.counts},preview:inspected.preview,second:{size:second.blob.size,counts:second.counts}};})()`);
   assert.equal(saved.record.reflection,'Newer active-session review');assert.ok(saved.first.size>0&&saved.second.size>0);assert.equal(saved.first.counts.dailyRecord,1);assert.equal(Object.prototype.hasOwnProperty.call(saved.first.counts,'reflectionDraft'),false);assert.deepEqual(saved.second.counts,saved.first.counts);result.checks.savedDaySaveBackupReexport=true;
   const unexpected=page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text||''));assert.deepEqual(unexpected,[]);result.checks.noRuntimeErrors=true;
-}finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close();await server.close();}
+}finally{if(freshPage)await freshBrowser.closePage(freshPage).catch(()=>{});if(page)await browser.closePage(page).catch(()=>{});await freshBrowser.close();await browser.close();await server.close();}
 console.log(JSON.stringify(result,null,2));

@@ -1,0 +1,80 @@
+name: P5.13 targeted host closure
+
+on:
+  push:
+    branches: [ts-exp]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p513-targeted-host-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: P5.13 public API, startup and host boundaries
+        run: |
+          node tests/integration/app/public-api-host.mjs
+          node tests/integration/app/startup-lifecycle-module.mjs
+          node tests/architecture/app/internal-module-boundary.mjs
+          node tests/architecture/app/runtime-boundaries.mjs
+          node tests/architecture/build/host-source.mjs
+          node tests/architecture/build/typescript-pipeline.mjs
+          node tests/architecture/build/typescript-gates.mjs
+      - name: Fresh source build
+        run: npm run build
+      - name: Generated runtime provenance
+        run: node tests/architecture/build/rich-text-bundle.mjs
+      - name: Verify generated build
+        run: npm run verify
+      - name: Verify generated syntax
+        run: npm run test:release:generated-syntax
+
+  host-browser:
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Changed cold/populated core-flow witness x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "P5.13 core-flow pass $pass/5"
+            node tests/browser/app/core-flow.mjs
+          done
+      - name: Optional-plugin and secondary-tab ownership witnesses
+        run: |
+          node tests/browser/security/runtime-boundary.mjs
+          node tests/browser/storage/multi-tab.mjs

@@ -10,6 +10,30 @@ import {renderBuild,validateBuild} from '../../../build/build.mjs';
 // The exact erased program is consumed by both the build and VM harnesses.
 const build=renderBuild();
 assert.equal(validateBuild(build),true);
+
+// P5.13 closure: every tracked JavaScript runtime under source/ is either a
+// reproducible generated bundle (verified by rich-text-bundle.mjs) or inert.
+const sourceJavaScript=[];
+function collectSourceJavaScript(directory,prefix='source'){
+  for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
+    const relative=`${prefix}/${entry.name}`,absolute=path.join(directory,entry.name);
+    if(entry.isDirectory())collectSourceJavaScript(absolute,relative);
+    else if(entry.name.endsWith('.js'))sourceJavaScript.push(relative);
+  }
+}
+collectSourceJavaScript(path.join(root,'source'));
+sourceJavaScript.sort();
+const generatedRuntimeJavaScript=[
+  'source/external/attachment-worker.js',
+  'source/external/export-worker.js',
+  'source/external/image-worker.js',
+  'source/external/rich-text.js',
+  'source/external/search-worker.js',
+  'source/external/wordgard.js'
+].sort();
+assert.deepEqual(sourceJavaScript,['source/external/insights.js',...generatedRuntimeJavaScript].sort(),'tracked JavaScript runtime inventory must stay explicit at TypeScript closure');
+const inertInsightsShell=fs.readFileSync(path.join(root,'source/external/insights.js'),'utf8');
+assert.equal(inertInsightsShell.replace(/\/\*[\s\S]*?\*\//gu,'').trim(),'','the retained Insights JavaScript shell must remain non-executable');
 for(const id of ['canonical','save-lane','domain','operation-lifecycle','repository-policy']){
   const file=`source/core/${id}.ts`,source=fs.readFileSync(file,'utf8'),output=readScript(file);
   assert.equal(output.length,source.length);
