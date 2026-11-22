@@ -936,7 +936,7 @@ const SessionEvidenceProjector=(()=>{
     });
     const practice=PracticePacer.snapshot();
     const localDate=getReviewDate();
-  return cloneFrozen<ReviewEvidence>({
+  return cloneFrozen({
       format:'study-director.review-evidence',version:1,date:localDate,
       schedule:scheduleFingerprint(),adjustmentsRevision:getScheduleDerivedState().adjustmentsRevision,
       contentRevision:cleanDayRevision(TimerState.contentRevision),savedRevision:cleanDayRevision(TimerState.savedRevision),
@@ -946,7 +946,7 @@ const SessionEvidenceProjector=(()=>{
       quote:clampText(((document.getElementById('quote-input') as HTMLInputElement|null)?.value||'').trim(),APP_LIMITS.maxQuoteChars),
       realTimeSnapshot:includeRecords?compactRealTimeSnapshot(buildRealTimeSnapshot()):null,
       carryForward:clampText(getLatestCarryForward()||'',APP_LIMITS.maxCarryForwardChars)
-    });
+    }) as unknown as ReviewEvidence;
   }
   return Object.freeze({
     format:'study-director.session-evidence-projector',contractVersion:1,snapshot
