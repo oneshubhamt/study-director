@@ -74,7 +74,15 @@ jobs:
             echo "P5.13 core-flow pass $pass/5"
             node tests/browser/app/core-flow.mjs
           done
-      - name: Optional-plugin and secondary-tab ownership witnesses
+      - name: Changed optional-plugin runtime-boundary witness x5 isolated
         run: |
-          node tests/browser/security/runtime-boundary.mjs
-          node tests/browser/storage/multi-tab.mjs
+          for pass in 1 2 3 4 5; do
+            echo "P5.13 runtime-boundary pass $pass/5"
+            node tests/browser/security/runtime-boundary.mjs
+          done
+      - name: Changed secondary-tab ownership witness x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "P5.13 multi-tab pass $pass/5"
+            node tests/browser/storage/multi-tab.mjs
+          done
