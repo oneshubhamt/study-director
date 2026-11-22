@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
+import {eraseTypes} from '../../build/source-script.mts';
 
 function functionSource(source,name){
   const marker=`function ${name}(`,start=source.indexOf(marker);
@@ -14,9 +15,10 @@ function functionSource(source,name){
 }
 
 function noteSnapshotImplementation(repositoriesSource){
+  const runtimeSource=eraseTypes(repositoriesSource,'source/core/repositories-notes.ts');
   const declaration='let snapshotRevision=0,metadataSnapshotCache=null,searchSnapshotCache=null;';
-  assert.ok(repositoriesSource.includes(declaration),'Note snapshot declaration was not found.');
-  return [declaration,'touchSnapshot','metadataSnapshot','searchSnapshot'].map((part,index)=>index?functionSource(repositoriesSource,part):part).join('\n');
+  assert.match(runtimeSource,/let snapshotRevision=0,\s*metadataSnapshotCache\s*=null,\s*searchSnapshotCache\s*=null;/u,'Note snapshot declaration was not found.');
+  return [declaration,'touchSnapshot','metadataSnapshot','searchSnapshot'].map((part,index)=>index?functionSource(runtimeSource,part):part).join('\n');
 }
 
 export function createNoteSnapshotHarness(repositoriesSource,entries){
