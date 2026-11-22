@@ -9,6 +9,8 @@ import type {RewriteTarget} from './library-clear.ts';
 import type {WorkerProgress} from '../portable/worker-contracts.ts';
 import type {AuthorityOptions} from './mutation-coordinator.ts';
 import type {ScratchHandle} from './exports.ts';
+import type {NoticeCoordinator} from '../source/core/notice-coordinator.ts';
+import type {InteractionsModule} from '../source/core/interactions.ts';
 declare const makeAssetStore:AssetStorageModule['create'];
 type AssetStore=ReturnType<typeof makeAssetStore<WriteToken>>;
 type AppData=ReturnType<RepositoriesModule['createAppData']>;
@@ -42,10 +44,10 @@ export type AttachmentElements={
 };
 export interface AttachmentsInput{
  store:AssetStore;processing:ReturnType<ExportsModule['createCoordinator']>;document:Document;
- notifications:{begin(input:AttachmentNoticeInput):AttachmentNotice;feedback(input:AttachmentNoticeInput):unknown};
- interactions:{choose(input:{title:string;danger:boolean;message:string;details:string[];cancelLabel:string;choices:{value:string;label:string;description:string;kind?:string}[]}):Promise<string|null>;confirm(input:{title:string;message:string;confirmLabel:string;cancelLabel?:string}):Promise<boolean>;input(input:{title:string;inputLabel:string;value:string;defaultValue:string;maxLength:number;required:boolean;confirmLabel:string}):Promise<{value:string}|null>};
+ notifications:Pick<ReturnType<NoticeCoordinator['presentation']>,'begin'|'feedback'>;
+ interactions:Pick<ReturnType<InteractionsModule['createController']>,'choose'|'confirm'|'input'>;
  canMutate():boolean;requireOwner():void;token():WriteToken;onWorkStart?:()=>void;cleanup?:()=>unknown;integrityIssue?:(id:string)=>AssetIssue|null;
- sources(options?:SourceOptions):Promise<readonly AttachmentSource[]>;destinations():Promise<readonly {key:string;label:string}[]>;insert(key:string,row:AssetRow):Promise<unknown>;
+ sources(options?:SourceOptions&{referencesOnly?:false}):Promise<readonly AttachmentSource[]>;destinations():PromiseLike<readonly {key:string;label:string}[]>|readonly {key:string;label:string}[];insert(key:string,row:AssetRow):Promise<unknown>;
  renderReference(element:HTMLElement,reference:AttachmentSource):unknown;openSource(reference:AttachmentSource):Promise<boolean>;
  deletionGuard(options?:{allowLibraryClearJournal:boolean}):Promise<()=>boolean>;settle():Promise<unknown>;removeReferences(id:string,refs:readonly AttachmentSource[]):Promise<ReferenceChange|null>;
  runExclusive<T>(kind:string,operation:(authority?:{assert(options?:AuthorityOptions):unknown})=>Promise<T>):Promise<T>;
