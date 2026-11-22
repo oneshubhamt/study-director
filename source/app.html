@@ -7173,14 +7173,17 @@ function onQuoteChange(options={}){
   if(disp)disp.textContent=v;
   saveQuoteDraft();
 }
+// A clock tick far behind the last one means the page was asleep (a laptop
+// left open, a phone in the background), not live, while the day changed.
+const CLOCK_WAKE_GAP_MS=3*60*1000;let lastClockTickMs=0;
 function tickClock(){
-  const n=new Date();
+  const n=new Date(),gapMs=lastClockTickMs?n.getTime()-lastClockTickMs:0;lastClockTickMs=n.getTime();
   setTextSafe('clock',n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}));
   const dd=document.getElementById('day-date');
   const autoDate=todayISO(n);
   // Previous-day Review is an explicit recovery choice, not a live study
   // session eligible for automatic rollover or a surprise Day save.
-  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
+  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover({woke:gapMs>CLOCK_WAKE_GAP_MS});return;}
   if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate){
     SessionLifecycle.runSync('date-rollover',{date:autoDate,autoDate:true,},()=>{
       dd.value=autoDate;return true;
@@ -9475,7 +9478,11 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
       runLifecycleSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation),
       saveLiveDraft,setReviewDateTitle,setSessionPanelMode,stopTimerExecution:()=>TimerEngine.stopExecution(),
-      appCanMutate,writeLiveDraftNow
+      appCanMutate,writeLiveDraftNow,
+      // The stored session against its Saved Day. A live device writes its
+      // session just before the rollover asks, so this is the session as it stands.
+      storedSessionCovered:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});return !!loaded?.value&&await savedDayCoversActiveSession(loaded.value);},
+      reconsiderStoredSession:()=>attemptAutoRestoreActiveSession()
     }),
     notesDefaults:Object.freeze({
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField:field=>richTextCloseField(field),commitTaskNoteEditor,currentNoteEntriesForWorkTasks,

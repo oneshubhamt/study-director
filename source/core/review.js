@@ -36,7 +36,7 @@ registry.define('review',1,()=>{
       'handleActiveSessionRepositoryResult','lifecycleCanWrite',
       'markDayContentChanged','markDayContentSaved','resetRuntimeSessionState','runLifecycle','runLifecycleSync','saveLiveDraft',
       'setReviewDateTitle','setSessionPanelMode','stopTimerExecution','appCanMutate',
-      'writeLiveDraftNow'
+      'writeLiveDraftNow','storedSessionCovered','reconsiderStoredSession'
     ]),
     notesDefaults:freeze([
       'noteStoredValueForKey','bindTaskNoteEditor','closeRichTextField','commitTaskNoteEditor','currentNoteEntriesForWorkTasks',
@@ -109,7 +109,7 @@ registry.define('review',1,()=>{
       handleActiveSessionRepositoryResult,lifecycleCanWrite,
       markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,runLifecycle,runLifecycleSync,saveLiveDraft,
       setReviewDateTitle,setSessionPanelMode,stopTimerExecution,appCanMutate,
-      writeLiveDraftNow
+      writeLiveDraftNow,storedSessionCovered,reconsiderStoredSession
     }=ports.session;
     const {
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
@@ -569,38 +569,64 @@ function clearReviewForNewDay(options={}){
 function studyDayRolledOver(now=new Date()){
   return !!(SessionState.studyDate&&SessionState.studyDate!==todayISO(now));
 }
-async function handleStudyDayRollover(){
+// The day changes under a loaded session. Saving it here is right only for
+// this device's own unsaved work, seen live up to midnight. A device that
+// slept through midnight (a laptop left open, a phone in the background) may
+// hold an older copy than a Saved Day made since on another device: it saves
+// nothing and does what a fresh start does, which retires a covered day
+// quietly and otherwise asks. A live device never re-saves a covered day and
+// never overwrites a Saved Day it did not make (owner, 2026-11-22: the
+// morning re-save had replaced the laptop's save, kept for review on the
+// phone).
+// Coverage is read before the day-close capture, which itself records the
+// open block and Pacer run and so would look like new work.
+async function rolloverDecision(woke,endedDate){
+  if(woke)return {decision:'defer'};
+  const existing=await AppData.dailyRecords.get(endedDate);
+  if(!existing||existing.recordKind==='diary')return {decision:'save'};
+  if(await storedSessionCovered())return {decision:'quiet'};
+  return {decision:cleanDayRevision(existing.sourceRevision)===cleanDayRevision(SessionState.savedRevision)?'save':'defer'};
+}
+async function handleStudyDayRollover(options={}){
   if(rolloverSaveInProgress||!appCanMutate())return false;
   if(!studyDayRolledOver())return false;
-  activeSessionPersistenceBlocked=true;
+  const woke=options&&options.woke===true;
+  rolloverSaveInProgress=true;
   stopTimerExecution();
   cancelPendingLiveDraftSave();
-  rolloverSaveInProgress=true;
   const endedDate=SessionState.studyDate;
-  let savedDay=null;
+  let savedDay=null,decision='empty';
   try{
+    // A live device stores its session as it stands, so a day left for review
+    // holds all its work; a woken device's copy is left as it was.
+    if(!woke&&hasSaveableStudyDay())await flushLiveDraft({markChanged:false});
+    activeSessionPersistenceBlocked=true;
     if(hasSaveableStudyDay()){
-      if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
-      PracticePacer.finalizeForDayClose();
-      captureReviewInputs();
-      syncUnfinishedNoteDraft();
-      saveReviewState({markChanged:false,strict:true});
-      await flushLiveDraft();
-      const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
-      savedDay={date:rec.date,revision:doc.sourceRevision};
-      markStorageHealthTimestamp('lastStudyDataSaveAt');
+      ({decision}=await rolloverDecision(woke,endedDate));
+      if(decision==='save'){
+        if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
+        PracticePacer.finalizeForDayClose();
+        captureReviewInputs();
+        syncUnfinishedNoteDraft();
+        saveReviewState({markChanged:false,strict:true});
+        await flushLiveDraft();
+        const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
+        savedDay={date:rec.date,revision:doc.sourceRevision};
+        markStorageHealthTimestamp('lastStudyDataSaveAt');
+      }
     }else{
       Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
     }
     await runLifecycle('study-day-rollover',{
       scheduleIdentity:true,date:todayISO(),autoDate:true,review:true
     },async()=>{
-      await clearCanonicalSessionAfterSavedDay();
+      // A deferred day keeps its stored session for the fresh-start decision.
+      if(decision!=='defer')await clearCanonicalSessionAfterSavedDay();
       resetRuntimeSessionState({lifecycleManaged:true,source:'study-day-rollover',date:todayISO()});
       clearReviewForNewDay({lifecycleManaged:true});
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset('Previous study day is closed. Apply today’s schedule when ready.','New Study Day');
-      setPlanStatus('New study day ready. Apply today’s schedule when ready.');
+      setPlanStatus(decision==='quiet'?`✓ ${prettyDate(endedDate)} is already saved in Library.`:'New study day ready. Apply today’s schedule when ready.');
       refreshStorageFallbackWarning();
       return true;
     });
@@ -620,6 +646,7 @@ async function handleStudyDayRollover(){
   }finally{
     rolloverSaveInProgress=false;
     activeSessionPersistenceBlocked=false;
+    if(decision==='defer')void Promise.resolve().then(reconsiderStoredSession).catch(error=>AppDiagnostics.capture('session.rollover-reconsider',error,'warn'));
   }
 }
 

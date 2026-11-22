@@ -8,6 +8,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('next-morning-saved-day','tests/browser/app/next-morning-saved-day.mjs',['execute','review','library','active-session','recovery','indexeddb']),
     test('session-draft-edit','tests/browser/app/session-draft-edit.mjs',['plan','execute','practice-pacer','backup']),
     test('practice-review-new-day','tests/browser/app/practice-review-new-day.mjs',['review','practice-pacer','execute','active-session','rollover']),
+    test('rollover-saved-day','tests/browser/app/rollover-saved-day.mjs',['review','active-session','rollover','library','recovery'],300000),
     test('session-merge-timer','tests/browser/app/session-merge-timer.mjs',['execute','sync','active-session']),
     test('storage-census','tests/browser/app/storage-census.mjs',['diagnostics','indexeddb','opfs','cache-storage']),
     test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),

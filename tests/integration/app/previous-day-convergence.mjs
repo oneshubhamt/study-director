@@ -357,13 +357,14 @@ for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] o
   const clock=production('function tickClock(){');
   const rollover=production('async function handleStudyDayRollover(...args){');
   for(const mode of ['previous','active']){
-    let clockRollover=0,serviceRollover=0,announced=0;
+    let clockRollover=0,serviceRollover=0,announced=0;const rolloverArgs=[];
     const ctx=vm.createContext({
+      CLOCK_WAKE_GAP_MS:3*60*1000,lastClockTickMs:0,
       sessionPanelMode:mode,
       document:{getElementById:()=>null},
       setTextSafe:()=>{},todayISO:()=>today,
       studyDayRolledOver:()=>true,
-      handleStudyDayRollover:()=>{clockRollover++;},
+      handleStudyDayRollover:options=>{clockRollover++;rolloverArgs.push(options);},
       maybePromptScheduleEndSave:()=>{},maybePromptBackupNudge:()=>{},
       maybeAutoStartScheduledBlock:()=>true,
       ReviewSaveService:{handleRollover:async()=>{serviceRollover++;return true;}},
@@ -374,6 +375,13 @@ for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] o
     ctx.clock();
     assert.equal(clockRollover,mode==='previous'?0:1,
       mode+' clock must not schedule an automatic historical Review save');
+    if(mode==='active'){
+      // A page live through midnight is not woken; one whose last tick is
+      // minutes old slept through it and must not save its copy.
+      assert.equal(rolloverArgs[0]?.woke,false,'a live clock rolls over as live');
+      ctx.lastClockTickMs=Date.now()-10*60*1000;ctx.clock();
+      assert.equal(rolloverArgs[1]?.woke,true,'a clock waking after minutes rolls over as woken');
+    }
 
     vm.runInContext(rollover+'\nglobalThis.rollover=handleStudyDayRollover;',ctx);
     assert.equal(await ctx.rollover(),mode!=='previous');
