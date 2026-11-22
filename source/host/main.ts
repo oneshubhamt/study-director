@@ -1659,7 +1659,7 @@ const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<Parameters
     status:()=>requireDeviceBackup().status(),
     deleteBackups:()=>requireDeviceBackup().deleteBackups()
   }),
-  interactions:Object.freeze({
+  interactions:Object.freeze<LibraryViewInput['ports']['interactions']>({
     choose:options=>Interactions.choose(options),
     confirm:async options=>(await Interactions.confirm(options))===true,
     notify:options=>Interactions.notify(options)
@@ -2679,8 +2679,8 @@ BackupProtectionHost=BackupActionsHostModule.createProtectionHost(Object.freeze<
     issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),
     assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption')
   }),
-  environment:Object.freeze({window,backgroundBlocker:()=>backgroundBlocker()}),
-  view:Object.freeze({
+  environment:Object.freeze<LibraryViewInput['ports']['environment']>({window,backgroundBlocker:()=>backgroundBlocker()}),
+  view:Object.freeze<LibraryViewInput['ports']['view']>({
     document,clampText,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,
     resolveSettingNotice:()=>NoticeCoordinator.resolveEvent('backup-protection','settings'),
     publishSettingError:message=>NoticeCoordinator.emit({source:'backup-protection',id:'settings',surfaceId:'backup-protection-hint',surface:'inline',severity:'error',lifecycle:'failed',cue:'none',message}),
@@ -2697,7 +2697,7 @@ const BackupProtection=BackupProtectionHost.protection;
 BackupProtectionHost.install();
 const NoteExporter=NoteExportModule.createExporter(Object.freeze<Parameters<typeof NoteExportModule.createExporter>[0]>({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
-  notes:Object.freeze({get:key=>AppData.notes.get(key)}),
+  notes:Object.freeze<LibraryViewInput['ports']['notes']>({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze({chooseSave:Exports.chooseSave,save:Exports.save}),
@@ -2716,12 +2716,16 @@ const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<Parameters<type
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
 }));
 let AttachmentLibrary:ReturnType<typeof AttachmentsModule.create>|null=null;
+function requireAttachmentLibrary(){if(!AttachmentLibrary)throw new Error('Study Director attachment library is unavailable.');return AttachmentLibrary;}
+function requireKeptVersions(){if(!KeptVersions)throw new Error('Study Director kept-version controller is unavailable.');return KeptVersions;}
+function requireBackupRecoveryHost(){if(!BackupRecoveryHost)throw new Error('Study Director backup recovery host is unavailable.');return BackupRecoveryHost;}
+function journalHasState(value:unknown){return !!(value&&typeof value==='object'&&Reflect.get(value,'state'));}
 const LibraryDocuments=DocumentHostModule.createIntegration(Object.freeze<Parameters<typeof DocumentHostModule.createIntegration>[0]>({
   limits:Object.freeze({maxRichAssetPerDocument:APP_LIMITS.richAssetMaxPerDocument,maxRichAssetBytesPerDocument:RichTextApi.assetPolicy.maxBytesPerDocument}),
   notes:AppData.notes,
-  ownership:Object.freeze({issue:reason=>AppOwnership.issueWriteToken(reason),assert:(token,reason)=>AppOwnership.assertWriteToken(token,reason)}),
-  editor:RichTextRuntime,review:ReviewEditor,session:Object.freeze({settled:()=>AppData.activeSession.settled()}),
-  library:()=>LibraryView,attachmentLibrary:()=>AttachmentLibrary,attachmentTypes:AttachmentsModule,assets:RichTextAssets,richText:RichTextApi,
+  ownership:Object.freeze<LibraryViewInput['ports']['ownership']>({issue:reason=>AppOwnership.issueWriteToken(reason),assert:(token,reason)=>AppOwnership.assertWriteToken(token,reason)}),
+  editor:RichTextRuntime,review:ReviewEditor,session:Object.freeze<LibraryViewInput['ports']['session']>({settled:()=>AppData.activeSession.settled()}),
+  library:()=>LibraryView,attachmentLibrary:()=>requireAttachmentLibrary(),attachmentTypes:AttachmentsModule,assets:RichTextAssets,richText:RichTextApi,
   content:Object.freeze({withinLimits:value=>editorContentWithinLimits(value)}),printer:NotePrinter,exporter:NoteExporter
 }));
 if(!Object.isFrozen(LibraryDocuments)||LibraryDocuments.format!=='study-director.document-integration'||LibraryDocuments.contractVersion!==1){
@@ -2729,55 +2733,58 @@ if(!Object.isFrozen(LibraryDocuments)||LibraryDocuments.format!=='study-director
 }
 /* LIBRARY MODULE COMPOSITION */
 const settleAttachmentWriters=LibraryDocuments.settleAttachmentWriters;
-const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.freeze<Parameters<typeof AttachmentsModule.createReferenceCoordinator>[0]>({
+type AttachmentReferenceInput=Parameters<typeof AttachmentsModule.createReferenceCoordinator>[0];
+const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.freeze<AttachmentReferenceInput>({
   data:AppData,
   scan:value=>RichTextApi.scanAttachmentReferences(String(value||'')),
   rewriteReferences:targets=>LibraryClearState.rewriteReferences(targets),
   withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
-  review:Object.freeze({hydrate:options=>ReviewEditor.hydrate(options),invalidateBindings:()=>ReviewEditor.invalidateBindings()}),
-  background:Object.freeze({budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options)}),
-  live:Object.freeze({
-    fields:()=>document.querySelectorAll('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection'),
+  review:Object.freeze<AttachmentReferenceInput['review']>({hydrate:options=>ReviewEditor.hydrate(options),invalidateBindings:()=>ReviewEditor.invalidateBindings()}),
+  background:Object.freeze<AttachmentReferenceInput['background']>({budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options)}),
+  live:Object.freeze<AttachmentReferenceInput['live']>({
+    fields:()=>document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection'),
     reviewDate:()=>getReviewDate(),todayIso:()=>todayISO(),noteKey:area=>{const title=normalizeAreaName(area);return title?AppData.notes.get(title)?.id||title:'';}
   })
 }));
-const LibraryClearState=LibraryClearModule.createState(Object.freeze<Parameters<typeof LibraryClearModule.createState>[0]>({
+type LibraryClearStateInput=Parameters<typeof LibraryClearModule.createState>[0];
+const LibraryClearState=LibraryClearModule.createState(Object.freeze<LibraryClearStateInput>({
   createRollbackScope:(plan,policy)=>LibraryClearModule.createRollbackScope(plan,policy),
   withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
   data:AppData,
-  references:Object.freeze({
+  references:Object.freeze<LibraryClearStateInput['references']>({
     scan:value=>AttachmentReferences.scan(value),
     remove:(value,ids)=>RichTextApi.removeAttachmentReferences(value,ids),
     listSources:()=>AttachmentReferences.sources({includeLive:false})
   }),
-  attachments:Object.freeze({
-    inventory:()=>AttachmentLibrary.inventory(),
-    verifyMetadata:rows=>AttachmentLibrary.verifyMetadata(rows),
-    restoreMetadata:rows=>AttachmentLibrary.restoreMetadata(rows)
+  attachments:Object.freeze<LibraryClearStateInput['attachments']>({
+    inventory:()=>requireAttachmentLibrary().inventory(),
+    verifyMetadata:rows=>requireAttachmentLibrary().verifyMetadata(rows),
+    restoreMetadata:rows=>requireAttachmentLibrary().restoreMetadata(rows)
   }),
-  review:Object.freeze({hydrate:options=>ReviewEditor.hydrate(options),invalidateBindings:()=>ReviewEditor.invalidateBindings()}),
+  review:Object.freeze<LibraryClearStateInput['review']>({hydrate:options=>ReviewEditor.hydrate(options),invalidateBindings:()=>ReviewEditor.invalidateBindings()}),
   nowIso:()=>new Date().toISOString()
 }));
 const validateAttachmentInsertionValue=LibraryDocuments.validateAttachmentInsertion;
 const insertAttachmentIntoNote=LibraryDocuments.insertAttachment;
 const quiesceAttachmentMutation=LibraryDocuments.quiesceAttachmentMutation;
-AttachmentLibrary=AttachmentsModule.create({
-  notifications:NoticeCoordinator.presentation('attachments',Object.freeze({label:'Open attachments',run:async()=>{if(await goTab('library')){LibraryView.showSection('data');const panel=document.getElementById('library-attachments');panel.open=true;panel.scrollIntoView({block:'start'});}}})),
+type AttachmentLibraryInput=Parameters<typeof AttachmentsModule.create>[0];
+AttachmentLibrary=AttachmentsModule.create(Object.freeze<AttachmentLibraryInput>({
+  notifications:NoticeCoordinator.presentation('attachments',Object.freeze({label:'Open attachments',run:async()=>{if(await goTab('library')){LibraryView.showSection('data');const panel=document.getElementById('library-attachments');if(panel instanceof HTMLDetailsElement){panel.open=true;panel.scrollIntoView({block:'start'});}}}})),
   onWorkStart:()=>{pwaWorkRevision++;},
   store:AttachmentStorage,processing:Exports,document,interactions:Interactions,
   canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),
-  isActive:()=>document.getElementById('pane-library').classList.contains('on')&&!document.getElementById('library-data').hidden,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>BackupIntegrity?.attachmentIssue(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
+  isActive:()=>document.getElementById('pane-library')?.classList.contains('on')===true&&document.getElementById('library-data')?.hidden===false,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>BackupIntegrity?.attachmentIssue(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
   openSource:async source=>{if(!await goTab('library',{source:'attachment-reference'}))return false;if(source.kind==='note')return LibraryView.revealNoteReference(source.key);if(source.kind==='day')return LibraryView.openDay(source.key);return false;},
   preparePdfOpen:()=>PdfDocuments.prepareNativeWindow(),
   openPdf:(row,file,reservedWindow,releaseReader)=>PdfDocuments.open(row,file,reservedWindow,releaseReader),
-  deletionGuard:async options=>{if((await AppData.restoreJournal.read())?.state)throw new Error('Finish backup recovery before deleting attachments.');if(!options?.allowLibraryClearJournal&&(await AppData.libraryClearJournal.read())?.state)throw new Error('Finish Library data recovery before deleting attachments.');const token=AppOwnership.issueWriteToken('delete attachment'),revision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();if(dataset===null)throw new Error('Saved notes could not be verified.');return ()=>{AppOwnership.assertWriteToken(token,'delete attachment');return revision===richAssetReferenceRevision;};},
+  deletionGuard:async options=>{if(journalHasState(await AppData.restoreJournal.read()))throw new Error('Finish backup recovery before deleting attachments.');if(!options?.allowLibraryClearJournal&&journalHasState(await AppData.libraryClearJournal.read()))throw new Error('Finish Library data recovery before deleting attachments.');const token=AppOwnership.issueWriteToken('delete attachment'),revision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();if(dataset===null)throw new Error('Saved notes could not be verified.');return ()=>{AppOwnership.assertWriteToken(token,'delete attachment');return revision===richAssetReferenceRevision;};},
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,authority=>withRestoreSessionPersistenceSuppressed(()=>operation(authority))),
   quiesce:(operation,options)=>quiesceAttachmentMutation(operation,options),
   removeReferences:id=>AttachmentReferences.removeEverywhere(id),
   insert:(key,row)=>insertAttachmentIntoNote(key,row)
- });
+ }));
 const RichTextAttachmentPort=LibraryDocuments.richAttachmentPort;
-invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
+invalidateAttachmentLibrary=()=>requireAttachmentLibrary().invalidate();
 
 function normalizeAttachmentIntegrityState(value:Parameters<typeof BackupIntegrityHostModule['normalizeAttachmentState']>[0]){return BackupIntegrityHostModule.normalizeAttachmentState(value,AttachmentsModule.validId);}
 function normalizeRepositoryIntegrityTarget(value:Parameters<typeof BackupIntegrityHostModule['normalizeRepositoryTarget']>[0]){return BackupIntegrityHostModule.normalizeRepositoryTarget(value,IntegrityContinuationModule.normalize);}
@@ -2789,17 +2796,18 @@ function installAttachmentIntegrityAudit(){return BackupIntegrity?.installAttach
 function installRepositoryIntegrityScrub(){return BackupIntegrity?.installRepository()||Promise.resolve(null);}
 
 async function libraryClearSnapshot(){
-  const [attachments,sources]=await Promise.all([AttachmentLibrary.inventory(),AttachmentReferences.sources({includeLive:false})]);
+  const [attachments,sources]=await Promise.all([requireAttachmentLibrary().inventory(),AttachmentReferences.sources({includeLive:false})]);
   return Object.freeze({attachments,sources});
 }
 async function assertLibraryClearEligible(){
   if(hasBlockingActiveSession())throw new Error('End or suspend the active session before clearing Library data.');
-  if((await AppData.restoreJournal.read())?.state)throw new Error('Finish backup recovery before clearing Library data.');
-  if((await AppData.libraryClearJournal.read())?.state)throw new Error('An interrupted Library clear requires recovery before another clear can start.');
+  if(journalHasState(await AppData.restoreJournal.read()))throw new Error('Finish backup recovery before clearing Library data.');
+  if(journalHasState(await AppData.libraryClearJournal.read()))throw new Error('An interrupted Library clear requires recovery before another clear can start.');
   if(!appCanMutate())throw new Error('Use the primary tab to clear Library data.');
   return true;
 }
-const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze<Parameters<typeof LibraryClearModule.createCoordinator>[0]>({
+type LibraryClearCoordinatorInput=Parameters<typeof LibraryClearModule.createCoordinator>[0];
+const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze<LibraryClearCoordinatorInput>({
   diagnostics:Object.freeze({start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail}),
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,()=>withRestoreSessionPersistenceSuppressed(operation)),
   canMutate:()=>AppOwnership.canMutate(),assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),assertEligible:assertLibraryClearEligible,settle:settleAttachmentWriters,snapshot:libraryClearSnapshot,
@@ -2814,9 +2822,13 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
     return safety;
   },capture:LibraryClearState.capture,
   deleteNotes:()=>AppData.notes.clearAll(),deleteSavedDays:()=>AppData.dailyRecords.clearAll(),removeReferences:LibraryClearState.rewriteReferences,verifyLogical:LibraryClearState.verifyLogical,
-  removeAttachmentMetadata:ids=>AttachmentLibrary.removeMetadata(ids),verifyFinal:LibraryClearState.verifyFinal,restore:LibraryClearState.restore,verifyRestore:LibraryClearState.verifyRestore,sweep:()=>AttachmentLibrary.sweepOrphans(),
+  removeAttachmentMetadata:ids=>requireAttachmentLibrary().removeMetadata(ids),verifyFinal:LibraryClearState.verifyFinal,restore:LibraryClearState.restore,verifyRestore:LibraryClearState.verifyRestore,sweep:()=>requireAttachmentLibrary().sweepOrphans(),
   failClosed:message=>AppMutationCoordinator.failClosed(message,'library-clear'),clearFault:()=>AppMutationCoordinator.clearFault(),
-  journal:Object.freeze({prepare:value=>AppData.libraryClearJournal.prepare(value),read:()=>AppData.libraryClearJournal.read(),mark:(id,phase)=>AppData.libraryClearJournal.mark(id,phase),clear:id=>AppData.libraryClearJournal.clear(id)})
+  journal:Object.freeze<LibraryClearCoordinatorInput['journal']>({
+    prepare:async value=>{const raw=await AppData.libraryClearJournal.prepare(value);const state=raw&&typeof raw==='object'?Reflect.get(raw,'state'):null,id=state&&typeof state==='object'?String(Reflect.get(state,'id')||''):'';if(!id)throw new Error('Library clear journal preparation did not return an identity.');return {state:{id},payload:raw&&typeof raw==='object'?Reflect.get(raw,'payload'):null};},
+    read:async()=>{const raw=await AppData.libraryClearJournal.read();const state=raw&&typeof raw==='object'?Reflect.get(raw,'state'):null,id=state&&typeof state==='object'?String(Reflect.get(state,'id')||''):'';return id?{state:{id},payload:raw&&typeof raw==='object'?Reflect.get(raw,'payload'):null}:null;},
+    mark:(id,phase)=>AppData.libraryClearJournal.mark(id,phase),clear:id=>AppData.libraryClearJournal.clear(id)
+  })
 }));
 // P5.7B owns kept-version refresh/review state in the checked recovery host.
 // Library/profile callers keep this deferred reference because they are composed
@@ -2835,18 +2847,19 @@ async function checkUnsupportedUpdate(){
     if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
   }catch(error){AppDiagnostics.capture('unsupported-data.update-check',error,'warn');}
 }
-const LibraryView=LibraryModule.createView(Object.freeze<Parameters<typeof LibraryModule.createView>[0]>({ports:Object.freeze({
+type LibraryViewInput=Parameters<typeof LibraryModule.createView>[0];
+const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({ports:Object.freeze<LibraryViewInput['ports']>({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),
-  records:Object.freeze({
+  records:Object.freeze<LibraryViewInput['ports']['records']>({
     get:date=>AppData.dailyRecords.get(date),
     remove:date=>AppData.dailyRecords.remove(date),
     sortedSummaries:()=>AppData.dailyRecords.sortedSummaries()
   }),
-  domain:Object.freeze({
-    countTaskOutcomes,earliestSupportedSavedDate:()=>APP_LIMITS.minSupportedSavedDate,isTrackableBlock,isValidIsoDate,isSupportedSavedDate,todayISO,sanitizePracticeRuns,
+  domain:Object.freeze<LibraryViewInput['ports']['domain']>({
+    countTaskOutcomes:tasks=>countTaskOutcomes([...tasks]),earliestSupportedSavedDate:()=>APP_LIMITS.minSupportedSavedDate,isTrackableBlock,isValidIsoDate,isSupportedSavedDate,todayISO,sanitizePracticeRuns,
     sanitizeTaskOutcomeCounts,taskOutcomeSummaryText
   }),
-  presentation:Object.freeze({
+  presentation:Object.freeze<LibraryViewInput['ports']['presentation']>({
     createSavedDayTaskReviewCard,createPomodoroSummaryLine,emptyMsg,
     optionalDurationLabel,optionalHoursLabel,optionalPercentLabel,populatePracticeRunTable,prettyDate,renderRichTextContent,textEl,plainTextContent,
   }),
@@ -2863,7 +2876,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<Parameters<typeof Libra
     requestAnimationFrame:callback=>requestAnimationFrame(callback)
   }),
   exporter:LibraryDocuments.exporter,
-  diary:Object.freeze({
+  diary:Object.freeze<LibraryViewInput['ports']['diary']>({
     bindEditor:(field,date,record,options)=>LibraryDiaryEditor.bind(field,date,record,options),
     captureEditor:(field,event)=>LibraryDiaryEditor.capture(field,event),
     deleteEntry:(date,options)=>LibraryDiaryEditor.deleteEntry(date,options),
@@ -2885,7 +2898,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<Parameters<typeof Libra
     commitEditor:commitTaskNoteEditor,
     find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
     findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
-    get:(key,label)=>AppData.notes.get(key,label),
+    get:key=>AppData.notes.get(key),
     importFiles:(files,parent)=>importNoteFiles(files,parent),
     linksBar:options=>NoteLinks.bar(options),
     normalizeArea:normalizeOngoingAreaInput,
@@ -2897,35 +2910,35 @@ const LibraryView=LibraryModule.createView(Object.freeze<Parameters<typeof Libra
     rename:(entry,value,options)=>LibraryNoteWorkflows.rename(entry,value,options),
     renderInherited:renderInheritedNotes,
     restore:key=>LibraryNoteWorkflows.restore(key),
-    reviewKept:id=>void KeptVersions.review(id),
-    keptVersion:id=>KeptVersions.note(id),
+    reviewKept:id=>void requireKeptVersions().review(id),
+    keptVersion:id=>requireKeptVersions().note(id),
     searchDocuments:noteSearchDocuments,
     size:()=>NotesRuntime.size(),
     tagged:names=>NoteLinks.tagged(names),
     tags:()=>NoteLinks.tags(),
     trash:key=>LibraryNoteWorkflows.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
-    versions:target=>withBackupPassword(()=>BackupRecoveryHost.history.openNote(target)),
+    versions:target=>withBackupPassword(()=>requireBackupRecoveryHost().history.openNote(target)),
     print:(key,title)=>LibraryDocuments.printNote(key,title)
   }),
-  attachments:Object.freeze({
-    batch:operation=>AttachmentLibrary.batch(operation),
-    close:()=>AttachmentLibrary.close(),
-    count:()=>AttachmentLibrary.count(),
-    invalidate:()=>AttachmentLibrary.invalidate(),
-    reconcile:()=>AttachmentLibrary.reconcile(),
-    refresh:()=>AttachmentLibrary.refresh()
+  attachments:Object.freeze<LibraryViewInput['ports']['attachments']>({
+    batch:operation=>requireAttachmentLibrary().batch(operation),
+    close:()=>requireAttachmentLibrary().close(),
+    count:()=>requireAttachmentLibrary().count(),
+    invalidate:()=>requireAttachmentLibrary().invalidate(),
+    reconcile:()=>requireAttachmentLibrary().reconcile(),
+    refresh:()=>requireAttachmentLibrary().refresh()
   }),
-  preferences:Object.freeze({
+  preferences:Object.freeze<LibraryViewInput['ports']['preferences']>({
     read:()=>AppData.local.getJson(STORAGE_KEYS.libraryView,null),
     write:value=>AppData.local.setJson(STORAGE_KEYS.libraryView,value)
   }),
-  clearLibrary:Object.freeze({
+  clearLibrary:Object.freeze<LibraryViewInput['ports']['clearLibrary']>({
     preflight:selection=>LibraryClearCoordinator.preflight(selection),
     execute:options=>RichTextRuntime.quiesce(()=>LibraryClearCoordinator.execute(options))
   }),
   ownership:Object.freeze({canMutate:()=>appCanMutate()}),
-  overlays:Object.freeze({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
+  overlays:Object.freeze<LibraryViewInput['ports']['overlays']>({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
   session:Object.freeze({hasActiveSession:hasBlockingActiveSession})
 })}));
 if(!Object.isFrozen(LibraryView)||LibraryView.format!=='study-director.library-view'||LibraryView.contractVersion!==1){
