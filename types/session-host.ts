@@ -39,7 +39,7 @@ export interface SessionSnapshotPorts{
   getCarryForward():string;
   setCarryForward(value:string):unknown;
   clearProgress():unknown;
-  sanitizeAdjustedSchedule(value:unknown):SessionSnapshot['scheduleAdjustments'];
+  sanitizeAdjustedSchedule(value:unknown):TimerStateController['adjustedSchedule'];
   invalidateScheduleDerived(options:Readonly<{adjustments?:boolean;render?:boolean;identity?:boolean}>):unknown;
   setCurrentTask(index:number):unknown;
   timerRestoreValid(runtime:TimerPayload|null):boolean;
