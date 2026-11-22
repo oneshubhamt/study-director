@@ -3528,7 +3528,7 @@ function currentBackupDiagnosticStates(){
   },value=>({job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}));
   sample('Attachment cleanup',()=>RichTextAssetMaintenance.status(),value=>({...value,job:'Attachment cleanup'}));
   sample('Backup scratch cleanup',()=>BackupFiles.status(),value=>({...value,job:'Backup scratch cleanup'}));
-  sample('Attachment processor',()=>AttachmentIngest.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy,pending:value.pending>0}),job:'Attachment processor'}));
+  sample('Attachment processor',()=>AttachmentIngest.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy}),job:'Attachment processor'}));
   sample('File processor',()=>Exports.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy}),job:'File processor',phase:value.phase}));
   sample('App update',()=>PwaLifecycle.status(),pwa=>{const update=PwaRuntime.diagnostics();return {job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:update.nextCheckAt>0,nextEligibleAt:update.nextCheckAt?new Date(update.nextCheckAt).toISOString():'',completedAt:update.lastSuccessfulCheckAt?new Date(update.lastSuccessfulCheckAt).toISOString():'',retryAttempt:update.failureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''};});
   for(const row of BackupIntegrity?.diagnosticRows()||[])states.push(row as DiagnosticRow);
