@@ -53,7 +53,7 @@ export const commits=()=>[...drive.state.files.values()].filter(file=>!file.tras
 export const noteText=(page,key)=>page.evaluate(`(()=>{const note=__PWA6.AppData.notes.get(${JSON.stringify(key)});return note?String(note.text||''):null;})()`);
 export const sync=page=>page.evaluate(`__PWA6.BackupProviderRuntime.diagnosticSync()[0]||null`);
 export async function open(browser,server,who){
-  const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload});
+  const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,bypassServiceWorker:true});
   await attachDrive(page,who);
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership'});
