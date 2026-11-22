@@ -490,8 +490,10 @@ async function saveReflectionOnlyRecord(){
   const notice=notifications.begin({id:'save-reflection',surfaceId:'save-status',title:'Save reflection',message:'Saving reflection…'});
   let committed=false;
   try{
-    const saved=await flushReflectionOnlySave();
-    const hasContent=!!String(saved?.canonical||'').trim();committed=true;
+    // An unchanged reflection is not written again, so the stored reflection,
+    // kept current by every write, says what Diary holds.
+    const saved=await flushReflectionOnlySave(),canonical=reflectionOnlyState.date===binding.date?reflectionOnlyState.canonical:saved?.canonical;
+    const hasContent=!!String(canonical||'').trim();committed=true;
     ReviewView.sync();
     notice.finish('succeeded',hasContent?'✓ Reflection saved in Diary.':'No reflection saved. Empty reflections are not kept in Diary.',{announce:hasContent,title:'Reflection saved'});return true;
   }catch(error){
