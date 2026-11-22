@@ -852,9 +852,10 @@ function storageSizeLabel(bytes:unknown){
 // is returned to at most once an hour, so a tab left open for days still warns
 // before storage fills. It is kept in memory for diagnostics.
 const STORAGE_ESTIMATE_REFRESH_MS=60*60*1000;
-const CapabilityStorage=CapabilitiesHostModule.createStorage(Object.freeze<Parameters<typeof CapabilitiesHostModule.createStorage>[0]>({
+type CapabilityStorageInput=Parameters<typeof CapabilitiesHostModule.createStorage>[0];
+const CapabilityStorage=CapabilitiesHostModule.createStorage(Object.freeze<CapabilityStorageInput>({
   document,navigator,
-  limits:Object.freeze<BackupIntegrityInput['limits']>({storageCriticalRatio:APP_LIMITS.storageCriticalRatio,storageWarningRatio:APP_LIMITS.storageWarningRatio}),
+  limits:Object.freeze<CapabilityStorageInput['limits']>({storageCriticalRatio:APP_LIMITS.storageCriticalRatio,storageWarningRatio:APP_LIMITS.storageWarningRatio}),
   controller:()=>NativeCapabilities,
   storageSizeLabel,markStorageHealthError,markStorageHealthOk,renderStorageHealth
 }));
@@ -1655,7 +1656,7 @@ type ProfileDeletionInput=Parameters<typeof ProfilesHostModule.createDeletion>[0
 const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<ProfileDeletionInput>({
   profiles:Profiles,
   provider:Object.freeze<ProfileDeletionInput['provider']>({
-    locationStatus:id=>BackupProviderRuntime.locationStatus(id),
+    locationStatus:id=>{const status=BackupProviderRuntime.locationStatus(id);return status?Object.freeze({connected:status.connected,waiting:status.waiting,...(status.sync?{sync:Object.freeze({syncedAt:status.sync.syncedAt,syncing:status.sync.syncing})}:{})}):null;},
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   device:Object.freeze<ProfileDeletionInput['device']>({
@@ -2824,7 +2825,7 @@ async function assertLibraryClearEligible(){
 }
 type LibraryClearCoordinatorInput=Parameters<typeof LibraryClearModule.createCoordinator>[0];
 const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze<LibraryClearCoordinatorInput>({
-  diagnostics:Object.freeze<BackupIntegrityInput['diagnostics']>({start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail}),
+  diagnostics:Object.freeze<NonNullable<LibraryClearCoordinatorInput['diagnostics']>>({start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail}),
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,()=>withRestoreSessionPersistenceSuppressed(operation)),
   canMutate:()=>AppOwnership.canMutate(),assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),assertEligible:assertLibraryClearEligible,settle:settleAttachmentWriters,snapshot:libraryClearSnapshot,
   // The connected backup location keeps a protected copy first: the Device
@@ -2982,7 +2983,7 @@ updateNoteSearchDocument=LibraryView.updateSearchDocument;
 /* BACKUP MODULE COMPOSITION */
 type BackupCodecInput=Parameters<typeof BackupCodecModule.createBackupCodec>[0];
 const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze<BackupCodecInput>({
-  processing:Object.freeze<BackupCodecInput['processing']>({run:(type,data,options)=>Exports.run(type,data,options),scope:operation=>Exports.scope(operation)}),
+  processing:Exports as BackupCodecInput['processing'],
   appConfig:Object.freeze<BackupCodecInput['appConfig']>({
     appName:APP_CONFIG.appName,
     attribution:APP_CONFIG.attribution
@@ -3042,7 +3043,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
   session:Object.freeze<BackupRuntimeHostInput['session']>({
     canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,
     checkpointPendingReview:async()=>await ReviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:true})!==false,
-    hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:activeSessionPayload,
+    hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:snapshot=>activeSessionPayload(snapshot),
     withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)
   }),
   domain:Object.freeze<BackupRuntimeHostInput['domain']>({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
@@ -3056,11 +3057,11 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
   verifiedRecovery:VerifiedRecovery,
   interactions:Object.freeze<BackupRuntimeHostInput['interactions']>({
     choose:async options=>await Interactions.choose(options),
-    configure:async options=>await Interactions.configure(options),
+    configure:async options=>{const {signal,cancelLabel,...rest}=options;return await Interactions.configure({...rest,...(cancelLabel===undefined?{}:{cancelLabel}),...(signal?{signal}:{})});},
     notify:async options=>Interactions.notify(options)
   }),
   operations:Object.freeze<BackupRuntimeHostInput['operations']>({assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),canShare:()=>UnsupportedData.held()?'unsupported-data':true,clearFault:()=>AppMutationCoordinator.clearFault(),failClosed:message=>AppMutationCoordinator.failClosed(message),runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
-  environment:Object.freeze<BackupRuntimeHostInput['environment']>({AbortController,yieldTask:options=>BackgroundTasks.yieldTask(options),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay)}),
+  environment:Object.freeze<BackupRuntimeHostInput['environment']>({AbortController,yieldTask:options=>BackgroundTasks.yieldTask(options?.signal?{signal:options.signal,...(options.priority?{priority:options.priority}:{})}:options?.priority?{priority:options.priority}:undefined),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay)}),
   diagnostics:Object.freeze<BackupRuntimeHostInput['diagnostics']>({capture:AppDiagnostics.capture,start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail})
 }));
 if(!Object.isFrozen(BackupRuntimeHost)||BackupRuntimeHost.format!=='study-director.backup-runtime-host'||BackupRuntimeHost.contractVersion!==1){

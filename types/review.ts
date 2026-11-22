@@ -90,7 +90,7 @@ export type SavedDayPresentationTask=Omit<ReviewRecordViewTask,'completion'>&Rea
 export type PracticeTaskRef=Readonly<Pick<Task,'id'|'name'>>;
 export interface ReviewRecordView{
   readonly date:string;readonly tasks:readonly ReviewRecordViewTask[];readonly practiceRuns:readonly PracticeRun[];readonly carryForwardDraft:string;
-  readonly completedEquivalentMinutes:number|null;readonly actualFocusMinutes:number;readonly completionPercent:number;
+  readonly completedEquivalentMinutes:number|null;readonly actualFocusMinutes:number|null;readonly completionPercent:number|null;
 }
 export interface ReviewTaskHeaderInput{readonly name:string;readonly area:string;readonly pct:number|null;readonly statusInfo:Readonly<{label:string;status:string}>;readonly shifted?:boolean;readonly tracked?:boolean;readonly pctId?:string;readonly source?:string}
 export interface ReviewTimingRowInput{readonly original:string;readonly adjusted:string;readonly shifted?:boolean;readonly actualSec?:number|null;readonly deltaSec?:number|null;readonly wallStart?:string|null|undefined;readonly wallEnd?:string|null|undefined}
