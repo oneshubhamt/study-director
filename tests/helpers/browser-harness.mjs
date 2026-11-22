@@ -51,12 +51,8 @@ function contentType(name){
 // carrying the data and the selection's range. Wordgard reads the second.
 export const pasteInPage=`((target,data)=>{const paste=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});target.dispatchEvent(paste);if(paste.defaultPrevented)return paste;const selection=getSelection(),range=selection&&selection.rangeCount?selection.getRangeAt(0):null;const input=new InputEvent('beforeinput',{inputType:'insertFromPaste',dataTransfer:data,targetRanges:range?[new StaticRange(range)]:[],bubbles:true,cancelable:true});target.dispatchEvent(input);return input;})`;
 export function withoutPwaChecks(html){
-  const disabled=html
-    .replace(/void\s+(?:PwaRuntime|PwaLifecycle)\s*\.\s*install\s*\(\s*\)(?:\s*\.\s*then\s*\(\s*\(\s*\)\s*=>\s*schedulePwaUpdateCheck\s*\(\s*750\s*\)\s*\))?\s*;/u,'/* Dedicated PWA browser tests cover installation. */')
-    .replace(/async\s+function\s+checkPwaUpdateIfDue\([^\n]+\)\{/u,'export function withoutPwaChecks(html){
-  return html.replace(/void (?:PwaRuntime|PwaLifecycle)\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'/* Dedicated PWA browser tests cover installation. */')
-    .replace(/async function checkPwaUpdateIfDue\([^\n]+\)\{/,'$& return false; /* Dedicated PWA browser tests cover update checks. */');
-} return false; /* Dedicated PWA browser tests cover update checks. */');
+  let disabled=html.replace(/void\s+(?:PwaRuntime|PwaLifecycle)\s*\.\s*install\s*\(\s*\)(?:\s*\.\s*then\s*\(\s*\(\s*\)\s*=>\s*schedulePwaUpdateCheck\s*\(\s*750\s*\)\s*\))?\s*;/u,'/* Dedicated PWA browser tests cover installation. */');
+  disabled=disabled.replace(/async\s+function\s+checkPwaUpdateIfDue\([^\n]+\)\{/u,match=>match+' return false; /* Dedicated PWA browser tests cover update checks. */');
   if(/\b(?:PwaRuntime|PwaLifecycle)\s*\.\s*install\s*\(/u.test(disabled))throw new Error('PWA install call remained in a PWA-disabled browser fixture.');
   return disabled;
 }
