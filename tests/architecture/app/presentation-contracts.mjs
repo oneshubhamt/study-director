@@ -55,6 +55,18 @@ assert.doesNotMatch(coreCss,/text-transform:uppercase/u,'capitalisation is a typ
 assert.match(coreCss,/--sd-type-caps-tracking-scale:1;/u,'Director keeps its capitals tracking through the shared scale.');
 assert.match(glassCss,/--sd-type-caps-tracking-scale:0;/u,'Glass drops capitals tracking through the shared scale rather than per-selector patches.');
 
+// No :is() holding a combinator ("#pane-review .review-hero",
+// ".ui-disclosure>summary"): Chrome 150 skipped such rules while it applied
+// plain ones on the same element, so Director Light's dark cards kept dark
+// text (owner, 2026-11-22). Lists of simple selectors inside :is() work.
+for(const [name,css] of [['core.css',coreCss],['glass.js',glassCss],['aurora.js',auroraCss]]){
+  for(const match of css.matchAll(/:is\(/gu)){
+    let depth=1,index=match.index+4;while(index<css.length&&depth){if(css[index]==='(')depth++;else if(css[index]===')')depth--;index++;}
+    const args=css.slice(match.index+4,index-1);
+    if(/^\)? \(see /u.test(args)||/^\) \(see/u.test(args))continue;
+    assert.doesNotMatch(args,/[^,\s]\s*[>+~]\s*\S|\S\s+[.#[a-zA-Z:]/u,`${name}: :is(${args.slice(0,80)}) holds a combinator; write it as a plain selector list`);
+  }
+}
 // A plain selector list, not :is() (owner's Chrome, 2026-11-22).
 assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #pane-execute \.cd-card,\nhtml\[data-theme="light"\]\[data-presentation="director-current"\] #pane-review \.review-hero,\nhtml\[data-theme="light"\]\[data-presentation="director-current"\] #pane-plan \.si\.active \.si-card\{\s*color-scheme:dark;[\s\S]*?--sd-color-accent-primary:#e8ff00;/u,'Director Light heroes are dark instrument islands that re-declare the semantic roles their children read.');
 assert.match(glassCss,/html\[data-presentation="glass"\]\[data-theme="light"\] #pane-execute \.cd-card,\nhtml\[data-presentation="glass"\]\[data-theme="light"\] #pane-review \.review-hero\{\s*color-scheme:dark;/u,'Glass Light heroes are colour islands rather than recoloured light surfaces.');

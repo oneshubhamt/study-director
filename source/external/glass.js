@@ -503,7 +503,8 @@ html[data-presentation="glass"] :is(.np-name,.review-date,.library-title,.execut
 }
 html[data-presentation="glass"] .primary-controls .btn{letter-spacing:var(--sd-type-control-tracking)}
 html[data-presentation="glass"] .si-name{font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold)}
-html[data-presentation="glass"] :is(.ui-disclosure>summary,.plan-composer>summary){
+html[data-presentation="glass"] .ui-disclosure>summary,
+html[data-presentation="glass"] .plan-composer>summary{
   letter-spacing:.005em;font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold);
 }
 html[data-presentation="glass"] :is(.ui-disclosure,.plan-composer,.review-collapse,.backup-advanced-disclosure)>summary::after,

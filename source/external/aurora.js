@@ -508,7 +508,8 @@ html[data-presentation="aurora"] :is(.np-name,.review-date,.library-title,.execu
 }
 html[data-presentation="aurora"] .primary-controls .btn{letter-spacing:var(--sd-type-control-tracking)}
 html[data-presentation="aurora"] .si-name{font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold)}
-html[data-presentation="aurora"] :is(.ui-disclosure>summary,.plan-composer>summary){
+html[data-presentation="aurora"] .ui-disclosure>summary,
+html[data-presentation="aurora"] .plan-composer>summary{
   letter-spacing:.005em;font-family:var(--sd-font-body);font-weight:var(--sd-font-weight-semibold);
 }
 html[data-presentation="aurora"] :is(.ui-disclosure,.plan-composer,.review-collapse,.backup-advanced-disclosure)>summary::after,
