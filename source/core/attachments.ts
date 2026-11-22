@@ -270,7 +270,7 @@ const createModule=()=>{
       if(opened===false){invalidate();status(`This referenced ${referenceType(ref)} is no longer available.`);return false;}
       return true;
     }
-    async function references(id:string,options?:SourceOptions){return (await p.sources(options)).filter(source=>source.ids.has(id));}
+    async function references(id:string,options?:SourceOptions&{referencesOnly?:false}){return (await p.sources(options)).filter(source=>source.ids.has(id));}
     async function count(){return (await logicalRows()).length;}
     async function inventory(){return store.list();}
     async function verifyMetadata(rows:readonly unknown[]){p.requireOwner();return store.verifyMetadata(rows);}
@@ -369,7 +369,7 @@ const createModule=()=>{
       content.append(element('p',row.library?'This attachment is retained independently. Remove independent retention if you want it to be eligible for cleanup after its last reference is removed.':'This attachment is kept while it is used. Retain it independently if you want it to remain after its last reference is removed.','ui-helper'));
       actions.append(button(row.library?'Remove independent retention':'Retain independently',()=>operation(async()=>{p.requireOwner();await store.setLibrary(id,!row.library);status(row.library?'Independent retention removed.':'Attachment retained independently.');return true;}),true,'retention'));
       actions.append(
-        button('Rename',()=>operation(async()=>{const answer=await interactions.input({title:'Rename attachment',inputLabel:'Name',value:row.name||'Note image',defaultValue:row.name||'Note image',maxLength:160,required:true,confirmLabel:'Rename'});if(!answer)return false;p.requireOwner();await store.rename(id,cleanName(answer.value));status('Attachment renamed.');return true;}),true,'rename'),
+        button('Rename',()=>operation(async()=>{const answer=await interactions.input({title:'Rename attachment',inputLabel:'Name',defaultValue:row.name||'Note image',maxLength:160,required:true,confirmLabel:'Rename'});if(!answer)return false;p.requireOwner();await store.rename(id,cleanName(answer.value));status('Attachment renamed.');return true;}),true,'rename'),
         button('Delete',()=>operation(()=>remove(id,row.library===true),{refresh:false}),true,'delete')
       );
       const sources=await p.sources(),refs=sources.filter(r=>r.ids.has(id));if(epoch!==generation)return {stale:true,content,url:''};

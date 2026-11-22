@@ -14,7 +14,7 @@ import {
 } from './typography';
 import {looksLikeMarkdown,markdownDocument,markdownToHtml} from './markdown';
 import type {MarkdownNode} from './markdown';
-import type {OverlayHandle,OverlayOptions,OverlayHistoryOptions,WorkspaceDescriptor} from '../types/workspace.ts';
+import type {OverlayHandle,OverlayOptions,OverlayHistory,WorkspaceDescriptor} from '../types/workspace.ts';
 import {normalizeTag,renameTagInInline,renameTagInText,tagMatches,tagsInText} from './tags';
 declare const __SD_WORDGARD_VERSION__:string;
 import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
@@ -38,7 +38,7 @@ type AttachmentKind='pdf'|'audio';
 type AttachmentUploadDecorationState={pos:number;widget:Widget<HTMLElement>};
 export interface AttachmentPort{upload(file:File,options?:AttachmentUploadOptions):Promise<{id:string;name:string;type:string}>}
 export type WorkspaceHistoryDescriptor=WorkspaceDescriptor;
-export type WorkspaceHistoryOptions=OverlayHistoryOptions&Readonly<{kind:'focus'|'audio'}>;
+export type WorkspaceHistoryOptions=OverlayHistory&Readonly<{kind:'focus'|'audio'}>;
 export type WorkspaceOverlayHandle=OverlayHandle;
 export interface WorkspaceOverlayPort{open(options:OverlayOptions):WorkspaceOverlayHandle|null}
 // Notes, for links to them: the picker, a note's title (null once deleted) and
