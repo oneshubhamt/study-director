@@ -18,7 +18,7 @@ assert.match(host,/DocumentHostModule\.createPrinter/,'note print composition mu
 assert.match(host,/DocumentHostModule\.createIntegration/,'attachment/export integration must use the checked document owner');
 assert.match(host,/RichTextHostModule\.createRuntime/,'rich editor lifetime must use the checked rich-text host owner');
 for(const stale of ['function mutateBackupProtection(','async function refreshDeviceBackgroundPermission(','function openPdfWorkspace(','function openPdfFallback(','async function printNote(','async function insertAttachmentIntoNote(','const RichTextRuntime=(()=>'])assert.ok(!host.includes(stale),`host must not regain P5.6C implementation: ${stale}`);
-assert.match(host,/richText:Object\.freeze(?:<[^\n]+>)?\(\{assetIds:value=>RichTextApi\.assetIds\(value\),exportDocument:value=>RichTextApi\.exportDocument\(value\)\}\)/,'actual note-export host provider uses exportDocument');
+assert.match(host,/richText:Object\.freeze\s*\(\{assetIds:value=>RichTextApi\.assetIds\(value\),exportDocument:value=>RichTextApi\.exportDocument\(value\)\}\)/,'actual note-export host provider uses exportDocument');
 assert.match(documentHost,/function createPdfController/);assert.match(documentHost,/function createPrinter/);assert.match(documentHost,/function createIntegration/);
 assert.match(richHost,/function createRuntime/);assert.match(noteExport,/function createExporter/);
 assert.match(richHost,/const sameDocument=fieldRichDocumentId\(record\.field\)===record\.documentId&&fieldRichRevision\(record\.field\)===record\.revision;/u,'a disposed rich editor may restore conflict state only while its original document and revision still own the textarea');
