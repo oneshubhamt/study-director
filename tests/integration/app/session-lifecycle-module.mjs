@@ -171,15 +171,25 @@ for(const successor of ['invalidated','active','completed']){
     querySelector:()=>null,
     getElementById:()=>null
   };
+  const hydrations=[];
   const views=SessionActions.createLifecycleViews(Object.freeze({
     document,NOTE_EDITOR_BINDING_VERSION:'v1',setTimeout:callback=>{callback();return 1;},
     ReviewEditor:Object.freeze({invalidateBindings:()=>true}),
     ReviewView:Object.freeze({invalidate:()=>true,refresh:()=>true,syncMode:()=>true,activate:()=>true}),
     invalidateProgressPanel:()=>true,richTextClose:async()=>true,cancelPendingLiveDraftSave:()=>true,advanceTaskNoteScheduleRevision:()=>1,
     clearTaskNoteEditorBinding:()=>true,isValidIsoDate:()=>true,getReviewDate:()=> '2026-08-04',
-    refreshAllSubjectNoteFieldsFromRepository:()=>true,refreshPnote:()=>true,hydrateReviewState:()=>true,refreshLibraryNotes:()=>true,
+    refreshAllSubjectNoteFieldsFromRepository:()=>true,refreshPnote:()=>true,hydrateReviewState:options=>{hydrations.push(options);return true;},refreshLibraryNotes:()=>true,
     requestRender:()=>true,appCanMutate:()=>true,schedulePwaUpdateEvaluation:()=>true
   }));
+  const reconcileContext=options=>Object.freeze({
+    format:'study-director.session-lifecycle-context',contractVersion:1,id:'review-presence',kind:'app-restart-ready',revision:98,
+    options:Object.freeze(options),startedAt:'2026-08-05T00:00:00.000Z'
+  });
+  views.reconcileLifecycleEditors(reconcileContext({date:'2026-08-05'}));
+  assert.equal(Object.prototype.hasOwnProperty.call(hydrations.at(-1),'snapshotReview'),false,'a lifecycle reconcile without snapshotReview must preserve the already-hydrated Review');
+  views.reconcileLifecycleEditors(reconcileContext({date:'2026-08-05',snapshotReview:null}));
+  assert.equal(Object.prototype.hasOwnProperty.call(hydrations.at(-1),'snapshotReview'),true,'an explicit snapshotReview must remain authoritative');
+  assert.equal(hydrations.at(-1).snapshotReview,null,'explicit null snapshotReview must still clear Review state');
   views.completeLifecycleTransition(Object.freeze({
     format:'study-director.session-lifecycle-context',contractVersion:1,id:'failed-ui',kind:'study-day-rollover',revision:99,
     options:Object.freeze({date:'2026-08-05'}),startedAt:'2026-08-05T00:00:00.000Z',

@@ -58,6 +58,6 @@ export interface SessionLifecycleViewInput{
  invalidateProgressPanel():void;richTextClose():PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;advanceTaskNoteScheduleRevision():unknown;
  clearTaskNoteEditorBinding(field:HTMLTextAreaElement):unknown;isValidIsoDate:TimeModel['isValidIsoDate'];getReviewDate():string;
  refreshAllSubjectNoteFieldsFromRepository():unknown;refreshPnote(options:{force:boolean}):unknown;
- hydrateReviewState(options:{date:string;snapshotReview:ReviewStateInput|null;source:string}):unknown;refreshLibraryNotes():unknown;
+ hydrateReviewState(options:{date:string;snapshotReview?:ReviewStateInput|null;source:string}):unknown;refreshLibraryNotes():unknown;
  requestRender(...surfaces:ExecutionRenderKey[]):unknown;appCanMutate():boolean;schedulePwaUpdateEvaluation(delay:number):unknown;
 }

@@ -666,9 +666,10 @@ function reconcileLifecycleEditors(context:SessionContext){
   }
   refreshAllSubjectNoteFieldsFromRepository();
   refreshPnote({force:true});
+  const hasSnapshotReview=Object.prototype.hasOwnProperty.call(options,'snapshotReview');
   const candidateReview=options['snapshotReview'];
   const snapshotReview:ReviewStateInput|null=candidateReview&&typeof candidateReview==='object'&&!Array.isArray(candidateReview)?candidateReview as ReviewStateInput:null;
-  hydrateReviewState({date:targetDate,snapshotReview,source:context.kind});
+  hydrateReviewState({date:targetDate,...(hasSnapshotReview?{snapshotReview}:{}),source:context.kind});
   refreshLibraryNotes();
   ports.ReviewView.invalidate();
   if(document.getElementById('pane-review')?.classList.contains('on'))ports.ReviewView.refresh({force:true});
