@@ -29,6 +29,7 @@ const storedSession=page=>page.evaluate(`__PWA6.AppData.activeSession.load().the
 // attention" banner never carries it.
 const autoSaved=page=>page.evaluate(`(()=>{const c=__PWA6.NoticeCoordinator,s=c.status();return [s.active,...s.queued,...c.recent().entries].some(row=>row&&/Study day auto-saved/u.test(String(row.title||'')));})()`);
 const bannerSaysSaved=page=>page.evaluate(`(()=>{__PWA6.refreshStorageFallbackWarning();const s=__PWA6.NoticeCoordinator.status();return [s.active,...s.queued].some(row=>row&&/auto-saved/u.test(String(row.message||'')));})()`);
+const banner=page=>page.evaluate(`(()=>{__PWA6.refreshStorageFallbackWarning();const s=__PWA6.NoticeCoordinator.status();return [s.active,...s.queued].filter(Boolean).map(row=>String(row.message||'')).join(' | ');})()`);
 const answer=(page,label)=>page.evaluate(`(()=>{const d=document.getElementById('sd-interaction-dialog');const b=[...d.querySelectorAll('button')].find(x=>x.textContent.trim().startsWith(${JSON.stringify(label)}));b.click();return true;})()`);
 const askedOnApply=page=>page.evaluate(`(()=>{const d=document.getElementById('sd-interaction-dialog');return !!(d&&d.open&&/Today’s plan would replace it/u.test(d.textContent));})()`);
 const asked=page=>page.evaluate(`(()=>{const d=document.getElementById('sd-interaction-dialog');return !!(d&&d.open&&/Previous study day needs review/u.test(d.textContent));})()`);
@@ -73,6 +74,20 @@ const cases={
     assert.equal(await savedDay(page,day),null,'a woken device saves nothing');
     assert.equal(await storedSession(page),day,'the day stays stored for review');
     return 'asks';
+  },
+  // Recovered in Review and saved: the "Recovered unsaved … Save or discard
+  // it" warning goes with the save.
+  async 'woke, recovered and saved'(browser){
+    const page=await openApp(browser,0),day=await dayOf(page);await sleep(1500);
+    await page.evaluate(skew(86400000));await rolledOver(page,day);
+    await waitFor(()=>asked(page),{timeout:15000,label:'the previous day is asked about'});
+    await answer(page,'Recover in Review');
+    await waitFor(async()=>/Recovered unsaved/u.test(await banner(page)),{timeout:15000,label:'Review holds the day, not saved yet'});
+    assert.equal(await page.evaluate(`__PWA6.saveDayRecord()`),true,'saved');await sleep(800);
+    assert.ok(await savedDay(page,day));
+    assert.equal(await storedSession(page),null);
+    assert.doesNotMatch(await banner(page),/Recovered unsaved|remains stored/u,'the warning goes with the save');
+    return 'warning cleared';
   },
   // Keep stored, then today's plan: the plan waits until the day is saved or
   // discarded (2026-11-22: it replaced the day with no save).

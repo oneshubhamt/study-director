@@ -529,6 +529,9 @@ async function saveDayRecord(options={}){
       reflectionLane.cancel();setReflectionRichSync('saved','Saved');
     }
     if(closesPriorDay){
+      // The day is saved: "Recovered unsaved … Save or discard it" no longer
+      // applies. The save's own notice says it was saved.
+      Runtime.setSafetyMessage('');
       resetRuntimeSessionState({source:'recovered-day-close',date:todayISO()});
       clearReviewForNewDay();
       setSessionPanelMode('none');
