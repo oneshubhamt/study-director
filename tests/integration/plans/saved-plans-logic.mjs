@@ -74,7 +74,8 @@ const ports=freeze({
   ownership:freeze({canMutate:()=>canMutate,requirePrimary:()=>canMutate}),
   interactions:freeze({confirm:async()=>true,input:async()=>renameAnswer}),
   overlays:freeze({createAnchoredPopover:popup=>{popup.hidden=true;let trigger=null;return {show:target=>{trigger=target;target.popoverTargetElement=popup;popup.hidden=false;},hide:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;},destroy:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;}};}}),
-  environment:freeze({clearTimeout:()=>{timerCallback=null;},setTimeout:callback=>{timerCallback=callback;return 1;}})
+  environment:freeze({clearTimeout:()=>{timerCallback=null;},setTimeout:callback=>{timerCallback=callback;return 1;}}),
+  previousDay:freeze({holdsApply:()=>false})
 });
 const runtime=PlanModule.createController(freeze({ports}));
 

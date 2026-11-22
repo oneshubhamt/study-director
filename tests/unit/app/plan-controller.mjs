@@ -50,7 +50,7 @@ const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
 let breakActive=false,breakEnds=0;
-let blockedWrite=null,canonicalDraft=null;const saveOptions=[];
+let blockedWrite=null,canonicalDraft=null,previousDayHolds=false;const saveOptions=[];
 const feedback=[];
 const timers=new Map();let nextTimer=0;
 const scheduleTimer=(callback,ms)=>{const id=++nextTimer;timers.set(id,{callback,ms});return id;};
@@ -136,7 +136,8 @@ const ports=Object.freeze({
   notifications:Object.freeze({begin:()=>({read:()=>({lifecycle:'resolved'}),finish:()=>{}}),
     feedback:details=>{feedback.push(details);return true;}}),
   overlays:Object.freeze({createAnchoredPopover:()=>({destroy(){},hide(){}})}),
-  environment:Object.freeze({clearTimeout:clearScheduledTimer,setTimeout:scheduleTimer})
+  environment:Object.freeze({clearTimeout:clearScheduledTimer,setTimeout:scheduleTimer}),
+  previousDay:Object.freeze({holdsApply:()=>previousDayHolds})
 });
 const plan=PlanModule.createController(Object.freeze({ports}));
 const state=()=>({label:ids['plan-board-state'].textContent,mode:ids['plan-board'].dataset.mode,
@@ -471,6 +472,23 @@ assert.equal(await plan.apply(),true,'a support block may use the Area');
 assert.equal(plan.apply({scheduleText:'ROW:'+JSON.stringify(insideSupport),source:'active-session-restore',persistDraft:false,forceReload:true}),true,'a restored session keeps its Area');
 assert.equal(tasks[0].area,'Support Activities > Gym');
 
+// With no day loaded, a typed Plan asks about a stored previous day first,
+// and is not applied while that day holds it (2026-11-22: Keep stored, then
+// Apply, replaced an unsaved previous day). A restore is never held.
+{
+  const kept=tasks.splice(0,tasks.length),keptFingerprint=currentFingerprint;currentFingerprint='';
+  ids['plan-input'].value='Draft after a previous day';
+  previousDayHolds=true;const held=applyCount;
+  assert.equal(await plan.apply(),false,'held by an unsaved previous day');
+  assert.equal(applyCount,held,'nothing applied');
+  assert.equal(canonicalDraft,'Draft after a previous day','the draft is still saved');
+  assert.equal(plan.apply({scheduleText:'Restored canonical',source:'active-session-restore',persistDraft:false,forceReload:true}),true,'a restore is not held');
+  tasks.splice(0,tasks.length);currentFingerprint='';
+  previousDayHolds=false;
+  assert.equal(await plan.apply(),true,'applied once the previous day is settled');
+  assert.equal(applyCount,held+2);
+  tasks.splice(0,tasks.length,...kept);currentFingerprint=keptFingerprint;
+}
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
@@ -478,4 +496,4 @@ console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
     'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default',
-    'work-area-inside-support-refused-restore-kept']}));
+    'work-area-inside-support-refused-restore-kept','previous-day-holds-apply']}));
