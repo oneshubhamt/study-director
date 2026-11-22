@@ -43,8 +43,8 @@ export interface RuntimeDataContract extends DataContract{
     readonly Note:{readonly version:3;readonly key:string;readonly trashKeyPrefix:string};
     readonly PendingReview:{readonly version:2;readonly key:string};
     readonly AppMeta:{readonly version:number;readonly key:string};
-    readonly CheckpointMetadata:{readonly version:number;readonly format:string};
-    readonly CheckpointProtectedManifest:{readonly version:number;readonly format:string};
+    readonly CheckpointMetadata:{readonly version:1;readonly format:'study-director.checkpoint-metadata'};
+    readonly CheckpointProtectedManifest:{readonly version:3;readonly format:'study-director.checkpoint-protected-manifest'};
     readonly Backup:{readonly version:24;readonly format:string};
   };
 }

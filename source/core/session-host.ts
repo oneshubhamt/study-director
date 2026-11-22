@@ -78,10 +78,11 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
       }
       if(Object.keys(state).length)taskState[taskId]=state;
     }
+    const practice=snapshot.practiceSnapshot();
     return snapshot.timerState.projectSessionSnapshot({
       version:configuration.sessionSnapshotVersion,date:snapshot.getReviewDate(),fingerprint:snapshot.scheduleFingerprint(),taskState,
       timerRuntime:snapshot.timerPayload(),latestCarryForward:domain.clampText(snapshot.getCarryForward(),configuration.maxCarryForwardChars),
-      review:snapshot.reviewSnapshot(),practice:snapshot.practiceSnapshot(),updatedAt:clock.nowIso()
+      review:snapshot.reviewSnapshot(),...(practice?{practice}:{}),updatedAt:clock.nowIso()
     }) as SessionSnapshot|null;
   }
   function applySnapshot(value:SessionSnapshot|null):boolean{
