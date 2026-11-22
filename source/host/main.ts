@@ -3529,7 +3529,7 @@ function currentBackupDiagnosticStates(){
   sample('Attachment cleanup',()=>RichTextAssetMaintenance.status(),value=>({...value,job:'Attachment cleanup'}));
   sample('Backup scratch cleanup',()=>BackupFiles.status(),value=>({...value,job:'Backup scratch cleanup'}));
   sample('Attachment processor',()=>AttachmentIngest.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy,pending:value.pending>0}),job:'Attachment processor'}));
-  sample('File processor',()=>Exports.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy,pending:value.pending>0}),job:'File processor',phase:value.phase}));
+  sample('File processor',()=>Exports.status(),value=>({...OperationLifecycle.snapshot({busy:value.busy}),job:'File processor',phase:value.phase}));
   sample('App update',()=>PwaLifecycle.status(),pwa=>{const update=PwaRuntime.diagnostics();return {job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:update.nextCheckAt>0,nextEligibleAt:update.nextCheckAt?new Date(update.nextCheckAt).toISOString():'',completedAt:update.lastSuccessfulCheckAt?new Date(update.lastSuccessfulCheckAt).toISOString():'',retryAttempt:update.failureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''};});
   for(const row of BackupIntegrity?.diagnosticRows()||[])states.push(row as DiagnosticRow);
   sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:requireKeptVersions().count()})));
@@ -3772,7 +3772,7 @@ const OWNER_REQUIRED_BLUR_ACTIONS=new Set(['profile-name','save-reflection']);
 const OWNER_REQUIRED_KEYDOWN_ACTIONS=new Set(['profile-name','first-start','gap-split','practice-start']);
 const ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set(['clear-library','pick-import-file','open-version-history','recover-managed-version']);
 const ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS=new Set(['import-backup']);
-const ACTIVE_SESSION_BLOCKED_IDS=new Set([]);
+const ACTIVE_SESSION_BLOCKED_IDS=new Set<string>();
 const ACTIVE_SESSION_DISABLED_REASON='Suspend or reset today’s active session to restore a backup or clear Library data.';
 const BlockedActionHint=(()=>{
   let popover:HTMLDivElement|null=null,target:HTMLElement|null=null,controller:ReturnType<typeof RichTextApi.createAnchoredPopover>|null=null,installed=false;
@@ -4043,11 +4043,11 @@ const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<PublicA
     maxFileBytes:APP_LIMITS.backupMaxFileBytes,
     repositoryPolicy:RepositoryPolicyModule.protocol,
     device:()=>AppData.provenance.installationId(),
-    profile:Object.freeze<PublicApiInput['backup']['profile']>({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
+    profile:Object.freeze<PublicApiInput['backup']['profile']>({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary({...info,library:info.library?{savedAt:info.library.savedAt,...(info.library.notes===null?{}:{notes:info.library.notes})}:null}),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
     providers:Object.freeze<PublicApiInput['backup']['providers']>({register:config=>BackupProviderRuntime.register(config),list:()=>BackupProviderRuntime.list()})
   }),
   installation:Object.freeze<PublicApiInput['installation']>({
-    status:()=>requireNativeCapabilities().status(),promptInstall:options=>requireNativeCapabilities().promptInstall(options),inspectInstallation:()=>requireNativeCapabilities().inspectInstallation(),revealInstallHelp:()=>requireNativeCapabilities().revealInstallHelp()
+    status:()=>requireNativeCapabilities().status(),promptInstall:()=>requireNativeCapabilities().promptInstall(),inspectInstallation:()=>requireNativeCapabilities().inspectInstallation(),revealInstallHelp:()=>requireNativeCapabilities().revealInstallHelp()
   }),
   appearance:Object.freeze<PublicApiInput['appearance']>({
     theme:Object.freeze<PublicApiInput['appearance']['theme']>({defaultId:DEFAULT_THEME_ID,supported:PUBLIC_THEME_METADATA.filter((item):item is NonNullable<(typeof PUBLIC_THEME_METADATA)[number]>=>item!==undefined),get:PRESENTATION_KERNEL.activeThemeId,set:setTheme}),
