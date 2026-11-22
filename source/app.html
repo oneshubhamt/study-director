@@ -4781,10 +4781,11 @@ function isFinishedActiveSession(session){
   return !!activeSessionSnapshot(session);
 }
 // Only the plan: no block has time, progress, completion, an outcome or a
-// started clock, and there is no Pacer run, reflection, rating or
-// carry-forward note.
+// started clock, no timer was started, the plan was not shifted, and there is
+// no Pacer run, reflection, rating or carry-forward note.
 function sessionHoldsNoWork(session){
   const snapshot=activeSessionSnapshot(session);if(!snapshot)return false;
+  if(snapshot.timerRuntime||Object.keys(snapshot.scheduleAdjustments||{}).length)return false;
   const worked=row=>!!row&&(row.resolvedState==='done'||row.resolvedState==='skipped'||Number(row.completion)>0||
     (!!row.completionSource&&row.completionSource!==COMPLETION_SOURCES.NONE)||Number(row.progress?.done)>0||
     Number(row.actual?.seconds)>0||!!row.actual?.clock?.startedAt||Number(row.actual?.record?.sessionCount)>0);

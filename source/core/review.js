@@ -587,10 +587,10 @@ async function rolloverDecision(woke,endedDate){
   // keeps a plan-only copy quietly until a sync clears it.
   if(woke)return {decision:'defer'};
   const existing=await AppData.dailyRecords.get(endedDate),unsaved=!existing||existing.recordKind==='diary';
-  // Live, a plan applied with nothing recorded is kept as an empty day,
-  // without a notice (owner, 2026-11-22): Insights counts it as planned and
-  // missed.
-  if(unsaved&&dayHoldsNoWork(buildDailyRecord()))return {decision:'save',quiet:true};
+  // Live, a plan applied with nothing recorded and no timer running is kept
+  // as an empty day, without a notice (owner, 2026-11-22): Insights counts it
+  // as planned and missed.
+  if(unsaved&&!isLiveTrackableTimer()&&dayHoldsNoWork(buildDailyRecord()))return {decision:'save',quiet:true};
   if(unsaved)return {decision:'save'};
   if(await storedSessionCovered())return {decision:'quiet'};
   return {decision:cleanDayRevision(existing.sourceRevision)===cleanDayRevision(SessionState.savedRevision)?'save':'defer'};

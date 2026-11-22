@@ -20,6 +20,7 @@ const coversWork=production('async function savedDayCoversWork(date,captured=nul
 const savedExists=production('async function savedRecordExistsForDate(date){');
 const reminder=production('async function revalidateSaveReminderAfterCanonicalConvergence(){');
 const prompt=production('async function promptSaveToday(){');
+const planOnly=production('function sessionHoldsNoWork(session){');
 const day='2026-11-04',today='2026-11-05';
 const session=(status,runningOn='inst_here',date=day)=>({
   id:'current',version:10,revision:7,date,status,runningOn,
@@ -394,5 +395,34 @@ for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] o
   }
 }
 
+// What counts as only the plan (2026-11-22). Anything recorded, a started
+// timer or a shifted plan is work and keeps the day's review.
+{
+  const context=vm.createContext({
+    activeSessionSnapshot:session=>session?.snapshot||null,
+    COMPLETION_SOURCES:{NONE:'none'},
+    plainTextContent:value=>String(value||'').replace(/<[^>]*>/gu,'')
+  });
+  vm.runInContext(planOnly,context);
+  const plan={contentRevision:3,savedRevision:0,taskState:{t1:{resolvedState:'pending',completion:0,completionSource:'none',progress:{done:0},actual:{seconds:0}}},
+    scheduleAdjustments:{},timerRuntime:null,review:{reflection:'',studyQuality:null},latestCarryForward:''};
+  const holdsNoWork=change=>context.sessionHoldsNoWork({snapshot:{...plan,...change}});
+  assert.equal(holdsNoWork({}),true,'a plan with nothing recorded');
+  assert.equal(context.sessionHoldsNoWork({}),false,'no snapshot is never plan-only');
+  for(const [label,change] of [
+    ['time on a block',{taskState:{t1:{...plan.taskState.t1,actual:{seconds:60}}}}],
+    ['a started clock',{taskState:{t1:{...plan.taskState.t1,actual:{seconds:0,clock:{startedAt:'2026-11-04T08:00:00Z'}}}}}],
+    ['progress',{taskState:{t1:{...plan.taskState.t1,progress:{done:2}}}}],
+    ['an outcome',{taskState:{t1:{...plan.taskState.t1,resolvedState:'skipped'}}}],
+    ['a set completion',{taskState:{t1:{...plan.taskState.t1,completionSource:'manual'}}}],
+    ['a started timer',{timerRuntime:{version:2,taskId:'t1'}}],
+    ['a shifted plan',{scheduleAdjustments:{t1:{startMin:600,endMin:630,reason:'push'}}}],
+    ['a Pacer run',{practice:{active:null,runs:[{id:'r1'}]}}],
+    ['a reflection',{review:{reflection:'<p>Went well</p>',studyQuality:null}}],
+    ['a rating',{review:{reflection:'',studyQuality:3}}],
+    ['a carry-forward note',{latestCarryForward:'Finish chapter 4'}]
+  ])assert.equal(holdsNoWork(change),false,label+' is work');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'previous-day-convergence',
-  scenarios:'previous-day routing, remote ownership, stored review actions, stale decisions, strict discard, save notice convergence, captured evidence'}));
+  scenarios:'previous-day routing, remote ownership, stored review actions, stale decisions, strict discard, save notice convergence, captured evidence, plan only'}));
