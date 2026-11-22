@@ -1729,11 +1729,12 @@ const bindDriveLibrary=ProfileDriveBinding.bind;
 // First start (and Add profile): name, an optional password and Google
 // Drive. Someone joining their own Drive library takes its name and settings
 // from it, so nothing typed here competes with them.
-const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<Parameters<typeof ProfilesHostModule.createFirstStart>[0]>({
+type FirstStartInput=Parameters<typeof ProfilesHostModule.createFirstStart>[0];
+const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<FirstStartInput>({
   document,
   profiles:Profiles,
   backupProtection:Object.freeze({enable:password=>BackupProtection.enable(password)}),
-  provider:Object.freeze<SessionHandoffInput['provider']>({locationStatus:id=>BackupProviderRuntime.locationStatus(id)}),
+  provider:Object.freeze<FirstStartInput['provider']>({locationStatus:id=>BackupProviderRuntime.locationStatus(id)}),
   connectDriveForProfile:()=>connectDriveForProfile(),
   getStudentName:()=>getStudentNameFromDisplay(),
   isDefaultStudentName,
@@ -2721,14 +2722,16 @@ const NoteExporter=NoteExportModule.createExporter(Object.freeze<NoteExporterInp
 if(!Object.isFrozen(NoteExporter)||NoteExporter.format!=='study-director.note-exporter'||NoteExporter.contractVersion!==2){
   throw new Error('Study Director note exporter is unavailable or incompatible.');
 }
-const PdfDocuments=DocumentHostModule.createPdfController(Object.freeze<Parameters<typeof DocumentHostModule.createPdfController>[0]>({
+type PdfDocumentsInput=Parameters<typeof DocumentHostModule.createPdfController>[0];
+const PdfDocuments=DocumentHostModule.createPdfController(Object.freeze<PdfDocumentsInput>({
   document,window,urls:URL,store:AttachmentStorage,overlay:WorkspaceOverlay,
   notifications:Object.freeze({notify:input=>Interactions.notify(input),resolve:(source,key)=>NoticeCoordinator.resolveEvent(source,key)}),
-  diagnostics:Object.freeze<BackgroundMaintenanceInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  diagnostics:Object.freeze<PdfDocumentsInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
-const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<Parameters<typeof DocumentHostModule.createPrinter>[0]>({
+type NotePrinterInput=Parameters<typeof DocumentHostModule.createPrinter>[0];
+const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<NotePrinterInput>({
   document,window,richText:RichTextApi,assets:RichTextAssets,plain:value=>plainTextContent(value),
-  diagnostics:Object.freeze<StorageResetInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
+  diagnostics:Object.freeze<NotePrinterInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
 }));
 let AttachmentLibrary:ReturnType<typeof AttachmentsModule.create>|null=null;
 function journalHasState(value:unknown){return !!(value&&typeof value==='object'&&Reflect.get(value,'state'));}
@@ -3007,7 +3010,7 @@ function verifyRestoredSessionRuntime(...args:Parameters<typeof SessionActions.v
 // replaces the catalogue; physical reclamation still waits for all readers.
 type NoteReconciliationInput=Parameters<typeof ReconciliationUIModule.createController>[0];
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze<NoteReconciliationInput>({ports:Object.freeze<NoteReconciliationInput['ports']>({
-  configuration:Object.freeze<SessionHandoffInput['configuration']>({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
+  configuration:Object.freeze<NoteReconciliationInput['ports']['configuration']>({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
   richText:Object.freeze<NoteReconciliationInput['ports']['richText']>({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
   assets:Object.freeze<NoteReconciliationInput['ports']['assets']>({get:assetId=>RichTextAssets.get(assetId)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
@@ -3069,23 +3072,24 @@ const KeptVersionsView=BackupRecoveryHostModule.createKeptVersionsView(Object.fr
 if(!Object.isFrozen(KeptVersionsView)||KeptVersionsView.format!=='study-director.kept-versions-view'||KeptVersionsView.contractVersion!==1){
   throw new Error('Study Director Kept Versions view is unavailable or incompatible.');
 }
-KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createKeptVersions>[0]>({
-  controller:Object.freeze({
+type KeptVersionsInput=Parameters<typeof BackupRecoveryHostModule.createKeptVersions>[0];
+KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze<KeptVersionsInput>({
+  controller:Object.freeze<KeptVersionsInput['controller']>({
     status:()=>BackupController.status(),
     resolveConvergedKeptVersions:()=>BackupController.resolveConvergedKeptVersions(),
     reviewKeptVersions:options=>BackupController.reviewKeptVersions(options)
   }),
-  reviews:Object.freeze({list:()=>AppData.pendingReviews.list()}),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  environment:Object.freeze<BackgroundMaintenanceInput['environment']>({
+  reviews:Object.freeze<KeptVersionsInput['reviews']>({list:()=>AppData.pendingReviews.list()}),
+  diagnostics:Object.freeze<KeptVersionsInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  environment:Object.freeze<KeptVersionsInput['environment']>({
     canMutate:()=>appCanMutate(),now:()=>Date.now(),
     connectCardOpen:()=>SyncStatusHost?.connectCardOpen()===true,sessionYieldedAt:()=>sessionYieldedAt
   }),
-  notifications:Object.freeze({
+  notifications:Object.freeze<KeptVersionsInput['notifications']>({
     notify:options=>Interactions.notify(options),
     resolveEvent:(source,id)=>NoticeCoordinator.resolveEvent(source,id)
   }),
-  view:Object.freeze<StorageResetInput['view']>({
+  view:Object.freeze<KeptVersionsInput['view']>({
     render:()=>KeptVersionsView.render(),renderLocation:()=>renderDriveBackup(),scheduleStatus:()=>scheduleSyncStatus(),
     refreshNotes:()=>LibraryView.refreshNotes()
   })
@@ -3095,7 +3099,7 @@ if(!Object.isFrozen(KeptVersions)||KeptVersions.format!=='study-director.kept-ve
 }
 type SessionHandoffInput=Parameters<typeof SessionHandoffModule.createController>[0];
 SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<SessionHandoffInput>({
-  configuration:Object.freeze<DeviceBackupCompositionInput['configuration']>({
+  configuration:Object.freeze<SessionHandoffInput['configuration']>({
     providerId:'google-drive',claimWatchMs:SESSION_CLAIM_WATCH_MS,claimSyncRetryMs:SESSION_CLAIM_SYNC_RETRY_MS,
     claimSaveWarning:'The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.'
   }),
@@ -3104,7 +3108,7 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Sessio
     visible:()=>document.visibilityState==='visible',online:()=>navigator.onLine!==false,
     hasTasks:()=>TASKS.length>0,panelElsewhere:()=>sessionPanelMode==='elsewhere'
   }),
-  provider:Object.freeze<StorageResetInput['provider']>({
+  provider:Object.freeze<SessionHandoffInput['provider']>({
     connected:id=>BackupProviderRuntime.connected(id),
     readHandoffSource:id=>BackupProviderRuntime.readSessionHandoffSource(id),
     claimOwnership:(id,request)=>BackupProviderRuntime.claimSessionOwnership(id,request),
@@ -3203,10 +3207,11 @@ if(!Object.isFrozen(BackgroundMaintenance)||BackgroundMaintenance.format!=='stud
   throw new Error('Study Director background maintenance host is unavailable or incompatible.');
 }
 DataMaintenanceJob=BackgroundMaintenance.job;
-const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMaintenance(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createRepositoryMaintenance>[0]>({
+type RepositoryMaintenanceInput=Parameters<typeof BackupMaintenanceHostModule.createRepositoryMaintenance>[0];
+const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMaintenance(Object.freeze<RepositoryMaintenanceInput>({
   meta:BackupAppMeta,metadataName:'repositoryMaintenancePending',
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  environment:Object.freeze<StorageResetInput['environment']>({nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID()})
+  environment:Object.freeze<RepositoryMaintenanceInput['environment']>({nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID()})
 }));
 BackupProviderRuntime.configureRepositoryMaintenance(RepositoryMaintenanceHost.hooks);
 
@@ -3294,9 +3299,9 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<S
   ownership:Object.freeze<StorageResetInput['ownership']>({announceStorageReset:detectedAt=>AppOwnership.announceStorageReset(detectedAt)}),
   mutation:Object.freeze<StorageResetInput['mutation']>({settled:()=>AppMutationCoordinator.settled()}),background:Object.freeze<StorageResetInput['background']>({wake:reason=>wakeBackgroundOperations(reason)}),
   session:Object.freeze<StorageResetInput['session']>({hasBlocking:()=>hasBlockingActiveSession(),suspend:()=>suspendTodaySession()}),
-  view:Object.freeze({refreshAfterWriteback:()=>{refreshNoteConsumers();renderSched();}}),readiness:Object.freeze<StorageResetInput['readiness']>({reconcileStartupChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock()}),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  environment:Object.freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)})
+  view:Object.freeze<StorageResetInput['view']>({refreshAfterWriteback:()=>{refreshNoteConsumers();renderSched();}}),readiness:Object.freeze<StorageResetInput['readiness']>({reconcileStartupChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock()}),
+  diagnostics:Object.freeze<StorageResetInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  environment:Object.freeze<StorageResetInput['environment']>({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)})
 }));
 if(!Object.isFrozen(StorageResetRecovery)||StorageResetRecovery.format!=='study-director.storage-reset-recovery'||StorageResetRecovery.contractVersion!==1){
   throw new Error('Study Director storage-reset recovery is unavailable or incompatible.');
