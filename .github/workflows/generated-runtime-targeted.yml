@@ -1,0 +1,98 @@
+name: Generated runtime targeted closure
+
+on:
+  push:
+    branches: [ts-exp]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generated-runtime-targeted-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: Exact generated-runtime direct witnesses
+        run: |
+          node tests/integration/attachments/worker-behavior.mjs
+          node tests/integration/exports/exports.mjs
+          node tests/integration/search/search-worker.mjs
+          node --max-old-space-size=1536 tests/integration/search/search-worker-extreme.mjs
+          node tests/architecture/exports/file-worker-bundle.mjs
+          node tests/architecture/rich-text/image-policy.mjs
+          node tests/architecture/storage/data-architecture.mjs
+          node tests/architecture/storage/diagnostics-labels.mjs
+          node tests/architecture/rich-text/wordgard-adapter-boundary.mjs
+          node tests/integration/rich-text/reconciliation-engine.mjs
+      - name: Regenerate runtime and verify provenance
+        run: |
+          npm run build
+          node tests/architecture/build/rich-text-bundle.mjs
+          node tests/architecture/build/typescript-pipeline.mjs
+          npm run verify
+          npm run test:release:generated-syntax
+      - name: Minified deployment
+        run: |
+          npm run stage:firebase:minified
+          npm run test:release:minified
+
+  browser:
+    needs: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: notes
+            script: tests/browser/library/notes-management.mjs
+          - id: attachment-editor
+            script: tests/browser/attachments/attachment-editor.mjs
+          - id: attachment-library
+            script: tests/browser/attachments/attachments.mjs
+          - id: exports
+            script: tests/browser/exports/exports.mjs
+          - id: insights
+            script: tests/browser/insights/insights-populated-ui.mjs
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: ${{ matrix.id }} browser witness x5 isolated
+        shell: bash
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "${{ matrix.id }} pass $pass/5"
+            node "${{ matrix.script }}"
+          done
