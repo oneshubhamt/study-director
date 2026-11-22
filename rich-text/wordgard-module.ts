@@ -1,7 +1,7 @@
-// Wordgard as its own module (source/external/wordgard.js): the parts of each
+// Wordgard as its own module (generated/runtime/wordgard.js): the parts of each
 // Wordgard package that Study Director's editor reaches, one namespace per
 // package, plus the shared inert HTML parser that Wordgard's HTML reading
-// uses. Study Director's editor (source/external/rich-text.js) reads them from
+// uses. Study Director's editor (generated/runtime/rich-text.js) reads them from
 // globalThis.StudyDirectorWordgard.
 export * as doc from 'wordgard/doc';
 export * as types from 'wordgard/types';

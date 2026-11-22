@@ -139,13 +139,13 @@ The IndexedDB owner counts a database recreated under an open page the moment it
 
 ## The editor (Wordgard)
 
-Vendored Wordgard (`vendor/wordgard`) is the exact upstream source. Study Director's runtime behaviour on top of it (the shared Trusted Types parser and cut handling) is reached only through `rich-text/wordgard-adapter.ts`. The few build-time rewrites Wordgard offers no extension point for (`build/wordgard-source-patches.mjs`) each name the upstream text they replace, so a new Wordgard version builds as is unless that text moved; `rich-text/wordgard-patches/README.md` lists them. Wordgard ships as its own readable module (`source/external/wordgard.js`, on `globalThis.StudyDirectorWordgard`) that Study Director's editor (`source/external/rich-text.js`) reads; the minified deployment ships one lean build of both instead.
+Vendored Wordgard (`vendor/wordgard`) is the exact upstream source. Study Director's runtime behaviour on top of it (the shared Trusted Types parser and cut handling) is reached only through `rich-text/wordgard-adapter.ts`. The few build-time rewrites Wordgard offers no extension point for (`build/wordgard-source-patches.mjs`) each name the upstream text they replace, so a new Wordgard version builds as is unless that text moved; `rich-text/wordgard-patches/README.md` lists them. Wordgard ships as its own readable module (`generated/runtime/wordgard.js`, on `globalThis.StudyDirectorWordgard`) that Study Director's editor (`generated/runtime/rich-text.js`) reads; the minified deployment ships one lean build of both instead.
 
 | What | Where |
 |---|---|
 | Upstream source, exact | `vendor/wordgard` is Wordgard 0.6.2, checked against `build/wordgard-metadata.mjs`. |
-| Wordgard's own module | `source/external/wordgard.js`: readable (not minified), the parts of each Wordgard package the editor uses, on `globalThis.StudyDirectorWordgard`. Entry `rich-text/wordgard-module.ts`. |
-| Study Director's editor | `source/external/rich-text.js` reads Wordgard from that global (`wordgardGlobalPlugin` in `build/wordgard-bundle.mjs`); it holds no Wordgard code. |
+| Wordgard's own module | `generated/runtime/wordgard.js`: readable (not minified), the parts of each Wordgard package the editor uses, on `globalThis.StudyDirectorWordgard`. Entry `rich-text/wordgard-module.ts`. |
+| Study Director's editor | `generated/runtime/rich-text.js` reads Wordgard from that global (`wordgardGlobalPlugin` in `build/wordgard-bundle.mjs`); it holds no Wordgard code. |
 | How they ship | Development and the plain deployment load both as one script, Wordgard first (`rich-text` has two sources in `build/module-manifest.mjs`). The minified deployment (`stage:firebase:minified`) ships the lean build instead: the editor and only the Wordgard code it reaches, tree-shaken and minified together. |
 | Our changes to Wordgard | Build-time rewrites (`build/wordgard-source-patches.mjs`) and runtime additions behind `rich-text/wordgard-adapter.ts`, unchanged in kind. |
 | Vendor boundary | `vendor/wordgard/**` is immutable throughout this programme. Rebuild our editor/adapters with `npm run build:richtext`; an upstream upgrade requires a separate explicit owner instruction. |

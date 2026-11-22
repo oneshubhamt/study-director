@@ -3,3 +3,6 @@
 *.png binary
 *.wav binary
 *.woff2 binary
+
+# Deterministic tracked runtime bundles; never hand-authored.
+generated/runtime/*.js linguist-generated=true

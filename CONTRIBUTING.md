@@ -4,7 +4,7 @@ This is a private, source-available project. Contributions require the copyright
 
 ## Development
 
-Use the pinned Node.js 26.12.1 and npm 12.2.1 toolchain, plus Python 3. Run `npm ci --ignore-scripts` and `npm run check:types` for typed changes; see [TypeScript tooling](docs/TYPESCRIPT.md). See the [README](README.md) for building and running the app. Source belongs at the repository root; generated `dist`, installed dependencies, personal backups and QA output do not belong in commits.
+Use the pinned Node.js 26.12.1 and npm 12.2.1 toolchain, plus Python 3. Run `npm ci --ignore-scripts` and `npm run check:types` for typed changes; see [TypeScript tooling](docs/TYPESCRIPT.md). See the [README](README.md) for building and running the app. Authored source belongs at the repository root; deterministic machine-owned runtime bundles are tracked only in `generated/runtime/`. Disposable `dist`, installed dependencies, personal backups and QA output do not belong in commits.
 
 For the TypeScript program, work only on `ts-exp` and follow [AGENTS](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and [documentation map](docs/README.md). Keep the persistent scratchpad current during each pass; record source reconciliation and actual QA before closure. Do not create another branch or a PR unless the owner asks. Outside that program, use a separate branch for coherent changes and obtain the owner’s instructions before opening a PR. Describe the resulting behaviour and the checks actually run. Keep runtime changes separate from unrelated formatting or repository maintenance.
 
@@ -18,9 +18,9 @@ npm run test:targeted -- tests/integration/storage/background-gc-reliability.mjs
 
 Select additional affected tests as needed. Full regression, coverage, mutation and browser checks are explicitly invoked; do not describe skipped checks as passed. Keep relevant product/architecture/data-contract documentation aligned with implemented changes, and update the active worklog during execution. Use [the documentation map](docs/README.md) to find the owning document rather than creating redundant pass reports. [QA design](tests/README.md) and [verification procedure](docs/VERIFICATION.md) define the existing contracts.
 
-If build inputs change, run `node build/build.mjs`, `node build/verify-build.mjs` and the relevant generated-syntax checks in a disposable checkout. Keep QA evidence outside the working tree.
+If authored inputs to `generated/runtime/` change, regenerate the bundles through `npm run build:richtext` and commit the resulting machine output; never edit those bundles by hand. If build inputs change, run `node build/build.mjs`, `node build/verify-build.mjs` and the relevant generated-syntax checks in a disposable checkout. Keep QA evidence outside the working tree.
 
-Change first-party code in `source`, `portable` or `rich-text`. Regenerate external bundles through their build scripts, and preserve reviewed dependency notices. `release.config.mjs` is the only release-identity source. The root `LICENSE` mirrors `source/legal/LICENSE.txt`; keep both texts identical when an authorised licence change is made.
+Change first-party code in `source`, `portable` or `rich-text`. Regenerate `generated/runtime/` bundles through their build scripts, and preserve reviewed dependency notices. `release.config.mjs` is the only release-identity source. The root `LICENSE` mirrors `source/legal/LICENSE.txt`; keep both texts identical when an authorised licence change is made.
 
 ## Automation
 

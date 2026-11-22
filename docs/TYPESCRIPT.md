@@ -53,7 +53,7 @@ The five authored host scripts now live in `source/host/`, with inline positions
 
 For portable ES modules, source-only readers use `eraseTypes`, not the classic-script parser. Erasure preserves spaces where annotations/generic arguments existed; source assertions must allow those spaces while keeping the behavioral/structural requirement intact. Host substring tests remain transitional: composed HTML offsets do not establish authored host-file coverage.
 
-Vendored Wordgard source remains immutable. Generated runtime bundles are rebuilt only through the builder; the owner authorized the Phase 2 style-mod update. Build validation belongs in disposable checkouts; QA output stays outside the repository.
+Vendored Wordgard source remains immutable. Tracked generated runtime bundles live only under `generated/runtime/` and are rebuilt through the builder; the owner authorized the Phase 2 style-mod update. Build validation belongs in disposable checkouts; QA output stays outside the repository.
 
 
 ## Vendor declarations and shared contracts

@@ -13,6 +13,6 @@ Everything Study Director changes lives in two places:
 
 Each rewrite names the upstream text it replaces. A future separately authorized Wordgard upgrade would replace `vendor/wordgard` and run `npm run build:richtext`: a rewrite whose text moved fails with its name. Then record the new snapshot in `build/wordgard-metadata.mjs`, which `tests/architecture/rich-text/wordgard-upstream-integrity.mjs` checks.
 
-The build makes Wordgard its own module, `source/external/wordgard.js` (readable, on `globalThis.StudyDirectorWordgard`), and Study Director's editor, `source/external/rich-text.js`, which reads it from there. The minified deployment ships one lean build of both instead. `parseInertHTML` lives in the Wordgard module, so there is one `sd-inert-html` policy.
+The build makes Wordgard its own module, `generated/runtime/wordgard.js` (readable, on `globalThis.StudyDirectorWordgard`), and Study Director's editor, `generated/runtime/rich-text.js`, which reads it from there. The minified deployment ships one lean build of both instead. `parseInertHTML` lives in the Wordgard module, so there is one `sd-inert-html` policy.
 
 The original review of the four rewrites and two runtime additions against Wordgard 0.6.2 is preserved in [product history](../../docs/history/PRODUCT-DEVELOPMENT.md). This is historical evidence, not a new compatibility certification. On this conversion branch, upstream Wordgard remains byte-for-byte immutable; no vendor upgrade is authorized by this guide.

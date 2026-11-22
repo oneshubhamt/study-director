@@ -4,7 +4,7 @@ This is the current source/runtime map for `ts-exp` (P5.1 baseline `de4872a`). [
 
 ## Composition and source ownership
 
-The host in `source/host/main.js`, composed into the `source/app.html` shell, constructs private registry modules through explicit capability ports. Modules do not freely resolve one another. `build/module-manifest.mjs` defines source paths, registration order and dependency edges; `contracts/` defines durable identities and limits. Runtime identity/version/shape checks remain necessary even where TypeScript checks callers.
+The host in `source/host/main.ts`, composed into the `source/app.html` shell, constructs private registry modules through explicit capability ports. Modules do not freely resolve one another. `build/module-manifest.mjs` defines source paths, registration order and dependency edges; `contracts/` defines durable identities and limits. Runtime identity/version/shape checks remain necessary even where TypeScript checks callers.
 
 ```mermaid
 flowchart TD
@@ -21,17 +21,17 @@ flowchart TD
 
 | Layer | Source owners | Boundary |
 | --- | --- | --- |
-| Bootstrap/composition | `source/app.html`, `source/host/`, `source/core/internal.ts`, `foundation-host.ts`, `startup.js`, `profiles.js` | Early scope/presentation before storage or hydration; explicit feature/service wiring |
+| Bootstrap/composition | `source/app.html`, `source/host/`, `source/core/internal.ts`, `foundation-host.ts`, `startup.ts`, `profiles.ts` | Early scope/presentation before storage or hydration; explicit feature/service wiring |
 | Core data | `domain.ts`, `record-codecs.ts`, `persistence.ts`, `app-meta.ts`, `repositories.ts`, `repositories-notes.ts` in `source/core/` | Unknown stored input → validated canonical records; strict transactions and stable identities |
 | Session/execution | `ownership.ts`, `mutation-coordinator.ts`, `session-lifecycle.ts`, `timer-state.ts`, `timer-engine.ts`, `pomodoro.ts`, `practice-pacer.ts`, plus host adapters | One writable owner; portable session evidence and local execution state |
-| Features | `plan.js`, `review.js`, `library.js`, `note-links.js`, `note-export.js`, host UI | User actions and presentation; durable writes through domain services |
+| Features | `plan.ts`, `review.ts`, `library.ts`, `note-links.ts`, `note-export.ts`, host UI | User actions and presentation; durable writes through domain services |
 | Editor/files | Authored `rich-text/`, `attachments.ts`, `asset-storage.ts`, `attachment-ingest.ts`, `asset-maintenance.ts`, `portable/` | Rich-text serialization, references, verified bytes, scoped worker/file lifetimes |
 | Backup/recovery | `backup-capture.ts`, `backup-codec.ts`, `managed-repository.ts`, `backup-provider.ts`, `backup.ts`, recovery/journal/reconciliation modules | Verified captures, publication, current-format restore and rollback |
 | Background/presentation | `operation-lifecycle.ts`, `repository-background.ts`, diagnostics, `notice-coordinator.ts`, `interactions.ts`, `backup-presentation.ts`, `audio-engine.ts` | Explicit job outcomes, priority/settlement and one notification policy |
-| External authored features | `source/external/{drive,insights-model,insights,guide,glass,aurora}.js` | Transport, analytics, help and presentation contracts |
-| Platform/build | `source/platform/sw.js`, `pwa-lifecycle.js`, `native-capabilities.js`, `build/` | Offline/update protocols, capability checks, deterministic output/CSP |
+| External authored features | checked TypeScript under `source/external/` (`drive`, Insights model/protocol/worker/compute/rendering/runtime, `guide`, `glass`, `aurora`) | Transport, analytics, help and presentation contracts |
+| Platform/build | `source/platform/sw.ts`, `pwa-lifecycle.ts`, `native-capabilities.ts`, `build/`, tracked `generated/runtime/` | Offline/update protocols, capability checks, deterministic output/CSP |
 
-File extensions reflect the current mixed-source boundary. [TypeScript tooling](TYPESCRIPT.md) explains admitted implementations; [Phase 5](typescript/PHASE-5.md) owns remaining runtime conversion. Generated `source/external/{wordgard,rich-text,search-worker,image-worker,attachment-worker,export-worker}.js` are built from reviewed authored/vendor inputs; do not edit them by hand.
+Canonical authored runtime under `source/`, `portable/` and `rich-text/` is TypeScript. The six deterministic browser/worker bundles are tracked separately under `generated/runtime/{wordgard,rich-text,search-worker,image-worker,attachment-worker,export-worker}.js`; they are machine-owned build products reproduced byte-for-byte from reviewed authored/vendor inputs and must not be edited by hand. Disposable release output remains under untracked `dist/`.
 
 ## Startup and active lifecycle
 
