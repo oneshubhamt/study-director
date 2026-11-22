@@ -196,6 +196,7 @@ function requireDeviceBackup(){if(!DeviceBackup)throw new Error('Study Director 
 function requireBackupActions(){if(!BackupActions)throw new Error('Study Director backup controls are unavailable.');return BackupActions;}
 function requireBackupProtectionHost(){if(!BackupProtectionHost)throw new Error('Study Director backup protection is unavailable.');return BackupProtectionHost;}
 function requireAttachmentLibrary(){if(!AttachmentLibrary)throw new Error('Study Director attachment library is unavailable.');return AttachmentLibrary;}
+function requireBackupRecoveryHost(){if(!BackupRecoveryHost)throw new Error('Study Director backup recovery host is unavailable.');return BackupRecoveryHost;}
 
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
 const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze<Parameters<typeof PersistenceModule.createLocalStorage>[0]>({
@@ -1649,20 +1650,19 @@ function handleProfileNameKey(event:Parameters<typeof ProfilePanelActions['handl
 
 function profileDriveAction(){return ProfileViews.profileDriveAction();}
 // Profile deletion composes backup/provider effects behind a checked profile-owned adapter.
-const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<Parameters<typeof ProfilesHostModule.createDeletion>[0]>({
+type ProfileDeletionInput=Parameters<typeof ProfilesHostModule.createDeletion>[0];
+const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<ProfileDeletionInput>({
   profiles:Profiles,
-  provider:Object.freeze({
+  provider:Object.freeze<ProfileDeletionInput['provider']>({
     locationStatus:id=>BackupProviderRuntime.locationStatus(id),
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
-  device:Object.freeze({
+  device:Object.freeze<ProfileDeletionInput['device']>({
     status:()=>requireDeviceBackup().status(),
     deleteBackups:()=>requireDeviceBackup().deleteBackups()
   }),
-  interactions:Object.freeze<LibraryViewInput['ports']['interactions']>({
-    choose:options=>Interactions.choose(options),
-    confirm:async options=>(await Interactions.confirm(options))===true,
-    notify:options=>Interactions.notify(options)
+  interactions:Object.freeze<ProfileDeletionInput['interactions']>({
+    choose:options=>Interactions.choose(options),confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify(options)
   }),
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   getStudentName:()=>getStudentNameFromDisplay(),
@@ -2460,7 +2460,7 @@ const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze<ReviewHostI
       originalStartMin,scheduleFingerprint
     }),
     evidence:Object.freeze<ReviewSubsystemInput['ports']['evidence']>({
-      actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
+      actualRecordsSnapshot,applicableNotesForTask:task=>applicableNotesForTask('start' in task?task:{id:task.id,start:task.originalStart,dur:task.dur,name:task.name,kind:task.kind,area:task.area,measure:task.measure,target:task.target}),clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
       resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState,updateTimerFocusMetrics
     }),
@@ -2593,7 +2593,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
     writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input instanceof HTMLTextAreaElement||input instanceof HTMLInputElement)input.value=value;},
     previewPlanDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
     setStudyDate:(date,automatic)=>{const dd=document.getElementById('day-date');if(dd instanceof HTMLInputElement){dd.value=date;dd.dataset['autoDate']=automatic?'1':'0';}},
-    applySessionSchedule:input=>applySchedule({source:input.source,skipNotify:true,studyDate:input.studyDate,reviewOnly:input.reviewOnly,forceReload:true,sessionSnapshot:input.snapshot,lifecycleManaged:true,scheduleText:input.scheduleText,persistDraft:false})
+    applySessionSchedule:async input=>(await applySchedule({source:input.source,skipNotify:true,studyDate:input.studyDate,reviewOnly:input.reviewOnly,forceReload:true,sessionSnapshot:input.snapshot,lifecycleManaged:true,scheduleText:input.scheduleText,persistDraft:false}))!==false
   }),
   reset:Object.freeze<SessionHostInput['reset']>({
     stopTimerPresentation:()=>TimerPresentation.stop(),
@@ -2727,9 +2727,6 @@ const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<Parameters<type
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
 }));
 let AttachmentLibrary:ReturnType<typeof AttachmentsModule.create>|null=null;
-function requireAttachmentLibrary(){if(!AttachmentLibrary)throw new Error('Study Director attachment library is unavailable.');return AttachmentLibrary;}
-function requireKeptVersions(){if(!KeptVersions)throw new Error('Study Director kept-version controller is unavailable.');return KeptVersions;}
-function requireBackupRecoveryHost(){if(!BackupRecoveryHost)throw new Error('Study Director backup recovery host is unavailable.');return BackupRecoveryHost;}
 function journalHasState(value:unknown){return !!(value&&typeof value==='object'&&Reflect.get(value,'state'));}
 type LibraryDocumentsInput=Parameters<typeof DocumentHostModule.createIntegration>[0];
 const LibraryDocuments=DocumentHostModule.createIntegration(Object.freeze<LibraryDocumentsInput>({
