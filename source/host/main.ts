@@ -3173,7 +3173,7 @@ requireBackupActions().install();
 type BackgroundMaintenanceInput=Parameters<typeof BackupMaintenanceHostModule.createBackground>[0];
 BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze<BackgroundMaintenanceInput>({
   lifecycle:OperationLifecycle,
-  environment:Object.freeze<DeviceBackupCompositionInput['environment']>({now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
+  environment:Object.freeze<BackgroundMaintenanceInput['environment']>({now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
   authority:Object.freeze<BackgroundMaintenanceInput['authority']>({
     canMutate:()=>appCanMutate(),fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,
     storageResetUnresolved:()=>storageResetUnresolved(),unsupportedDataHeld:()=>UnsupportedData.held()
@@ -3241,9 +3241,9 @@ const DeviceBackupHooks=BackupActionsHostModule.createDeviceHooks(Object.freeze<
 type DeviceBackupCompositionInput=Parameters<typeof BackupActionsHostModule.createDeviceBackup>[0];
 DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze<DeviceBackupCompositionInput>({
   module:DeviceBackupModule,storageModule:DeviceFolderStorageModule,
-  configuration:Object.freeze({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
+  configuration:Object.freeze<DeviceBackupCompositionInput['configuration']>({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
   engine:BackupProviderRuntime,
-  environment:Object.freeze({
+  environment:Object.freeze<DeviceBackupCompositionInput['environment']>({
     backgroundBlocker:()=>backgroundBlocker(),canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
     showDirectoryPicker:typeof Reflect.get(window,'showDirectoryPicker')==='function'?async options=>await Reflect.apply(Reflect.get(window,'showDirectoryPicker') as (...args:unknown[])=>Promise<unknown>,window,[options]) as Awaited<ReturnType<NonNullable<DeviceBackupCompositionInput['environment']['showDirectoryPicker']>>>:undefined,
     withLock:work=>navigator.locks?.request?navigator.locks.request(ProfileScope.scoped('study-director-device-folder-prepare'),{mode:'exclusive'},()=>work()):Promise.resolve().then(work)
@@ -3256,7 +3256,7 @@ DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze<DeviceBack
     owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
-    environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
+    environment:Object.freeze<DeviceBackupCompositionInput['storage']['environment']>({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
     limits:Object.freeze<DeviceBackupCompositionInput['storage']['limits']>({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   })
 }));
