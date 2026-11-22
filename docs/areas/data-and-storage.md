@@ -105,7 +105,7 @@ PDF attachments retain their OPFS reader while an in-app iframe or an external v
 
 F30 retires the F29 upgrade machinery on the owner's assumption that all devices have already upgraded. Startup runs the read-only unsupported-data census; it does not convert data, rename stores, import old files or prove migration readiness. Older backup files, repository versions and ownership claims are refused. Unknown files/folders and held records are never silently removed or rewritten.
 
-The tab owner lease is version 2. Its page ID and claim distinguish a reloaded page or a second tab from the writer. The lease, storage-health record and their consumers use the current formats under the existing storage keys.
+The tab owner lease is version 2. Its page ID and claim distinguish a reloaded page or a second tab from the writer. The lease, storage-health record and their consumers use the current formats under the existing storage keys. Only the tab in control reconciles the session's rescue copy into IndexedDB. A tab without control (a second window, or a tab handing over) still reads the newer of the two copies in full, strict reads included, and its read does not fail for that.
 
 Recovery readers validate the whole current session, Note, Saved Day fallback or pending-deletion record before using its contents. Unreadable copies stay in place and block replay or cleanup. A session save replaces a readable rescue copy, and its commit retires it, whatever the two revisions. Save order decides, as it does in IndexedDB: a session brought in by sync or restore can carry a lower revision than the flush made here just before it.
 

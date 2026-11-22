@@ -218,6 +218,40 @@ assert.equal(h.sharedLocal.has('deletionRecovery'),false);
   assert.equal(fixture.sharedLocal.has('recovery'),false);
   assert.equal((await fixture.app.activeSession.load(0,{strict:true})).value?.scheduleText,later.scheduleText);
 }
+// A tab without control (a second window beside the app in control) reads the
+// session in full but never reconciles it, and its read does not fail for that:
+// the tab in control reconciles. Seen 2026-11-22: a second Chrome tab's
+// Attachment Library failed with "App ownership is unavailable before
+// reconciling the active session".
+{
+  const controls={},fixture=createHarness(new Map(),null,controls);
+  const saved={...session,revision:10,scheduleText:'08:00 30 Saved',updatedAt:'2026-09-17T12:00:00.000Z'};
+  assert.equal((await fixture.app.activeSession.save(saved)).storage.idb,true);
+  controls.owned=false;
+  const plain=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(plain.ok,true);assert.equal(plain.error,null);
+  assert.equal(plain.value?.scheduleText,saved.scheduleText,'without control, a strict read returns the stored session');
+  const empty=createHarness(new Map(),null,{owned:false});
+  const none=await empty.app.activeSession.load(0,{strict:true});
+  assert.deepEqual([none.ok,none.value,none.error],[true,null,null],'without control, a strict read of no session is empty, not an error');
+  // The tab in control left a newer rescue copy: its emergency save wrote the
+  // copy, and the database write failed.
+  const rescue={...saved,revision:11,scheduleText:'08:00 30 Rescue copy',updatedAt:'2026-09-17T12:01:00.000Z'};
+  controls.owned=true;controls.failSessionWrite=true;
+  await fixture.app.activeSession.save(rescue,{emergency:true}).catch(()=>null);
+  controls.failSessionWrite=false;controls.owned=false;
+  assert.equal(fixture.sharedLocal.get('recovery')?.revision,11,'the rescue copy is kept while the database write failed');
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,saved.scheduleText);
+  const newer=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(newer.value?.scheduleText,rescue.scheduleText,'without control, the newer copy is what reads');
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,saved.scheduleText,'a tab without control writes nothing');
+  assert.equal(fixture.sharedLocal.get('recovery')?.revision,11,'a tab without control leaves the rescue copy to the tab in control');
+  controls.owned=true;
+  const owned=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(owned.value?.scheduleText,rescue.scheduleText);
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,rescue.scheduleText,'the tab in control reconciles the rescue copy into the database');
+  assert.equal(fixture.sharedLocal.has('recovery'),false,'and retires it');
+}
 {
   const fixture=createHarness(),date='2026-09-17';
   await fixture.app.dailyRecords.save(day(date));

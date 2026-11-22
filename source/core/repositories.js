@@ -921,8 +921,12 @@ async function loadActiveSessionRecord(retry=0,options={}){
     let reconciliationError=null;
     activeSessionWriteChain=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-reconciliation',error,'error');}).then(async()=>{
       if(readEpoch!==activeSessionMutationEpoch)return;
+      // Reconciling writes, so only the tab in control does it. A tab without
+      // control (a second window, a tab handing over) still reads the newer
+      // copy, and its read does not fail for that: the owner reconciles.
       let reconciliationToken=null;
-      try{reconciliationToken=issueWriteToken('reconciling the active session',{allowHydrating:true});}catch(error){reconciliationError=error;}
+      if(!value)return;
+      try{reconciliationToken=issueWriteToken('reconciling the active session',{allowHydrating:true});}catch(error){if(!isOwnershipLostError(error))reconciliationError=error;return;}
       if(reconciliationToken&&value===localSession&&value&&(!idbSession||newerActiveSession(idbSession,value)===value)){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
