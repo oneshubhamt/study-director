@@ -82,11 +82,21 @@ try{
     }
     const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const canonical=__InsightsUiDebug.DailyRecordCodec.sanitizeCurrentDailyRecord(record);if(!canonical)throw new Error('Invalid canonical fixture at '+index+': '+JSON.stringify(record));return canonical;}));
     localStorage.setItem('studyDirector.insights.window.v1','all');
+    // A first open shows the loading panel, then the view replaces it; the view
+    // must arrive with the pane entrance, like a reopen (docs/areas/ui.md).
+    const pane=document.getElementById('pane-insights'),loadingPanel=node=>!!node.classList?.contains('plugin-loading-panel');window.__InsightsArrival=null;let seenLoading=false;
+    const arrival=new MutationObserver(records=>{
+      if([...pane.children].some(loadingPanel)||records.some(record=>[...record.removedNodes].some(loadingPanel)))seenLoading=true;
+      const view=pane.querySelector(':scope>.insights-wrap');if(!view)return;arrival.disconnect();
+      window.__InsightsArrival={loadingFirst:seenLoading,marked:pane.hasAttribute('data-sd-enter'),animated:view.getAnimations().some(a=>/^sd-pane-enter-/u.test(a.animationName||''))};});
+    arrival.observe(pane,{childList:true});
     const started=performance.now();__InsightsUiDebug.goTab('insights');
     return {saved,started,total};
   })()`);
   assert.equal(seeded.total,590);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&!!window.__StudyDirectorInsightsLastProfile`),{timeout:15000,label:'dense Insights render'});
+  assert.deepEqual(await page.evaluate('window.__InsightsArrival'),{loadingFirst:true,marked:true,animated:true},'a first open: the view replaces the loading panel and arrives with the pane entrance');
+  await waitFor(()=>page.evaluate(`!document.getElementById('pane-insights').hasAttribute('data-sd-enter')`),{timeout:3000,label:'entrance marker cleared after the first open'});
   const desktop=await page.evaluate(`(()=>{
     const pane=document.getElementById('pane-insights');
     const evidence=[...pane.querySelectorAll('.insights-evidence-item')].map(item=>({label:item.querySelector('.l')?.textContent||'',value:item.querySelector('.v')?.textContent||'',note:item.querySelector('.n')?.textContent||''}));
@@ -137,8 +147,7 @@ try{
   assert.deepEqual(page.events,[]);
 
   // Reopened, Insights shows the view it kept and animates like every other
-  // pane (Glass and Director skins); only a first open, rendering behind its
-  // loading panel, arrives still.
+  // pane, as a first open does once its view lands.
   const reopened=await page.evaluate(`(async()=>{const d=__InsightsUiDebug,pane=document.getElementById('pane-insights'),wait=ms=>new Promise(r=>setTimeout(r,ms));
     d.goTab('plan');await wait(1000);d.goTab('insights');let entered=false;for(let i=0;i<20&&!entered;i++){entered=pane.hasAttribute('data-sd-enter');if(!entered)await wait(10);}
     return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);

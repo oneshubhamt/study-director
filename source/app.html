@@ -7592,17 +7592,23 @@ function captureNavigationState(context){
   const active=document.activeElement;
   navigationFocusState.set(context.generation,Object.freeze({departingHadFocus:!!(pane&&active&&pane.contains(active))}));
 }
-const paneEntranceTimers=new Map();
+const paneEntranceTimers=new Map(),paneEntranceWatchers=new Map();
 function markPaneEntrance(pane){
   // Presentation-owned entrance: CSS animates the arriving pane's sections for
   // one beat. The marker is cleared afterwards so later re-renders stay still.
-  // Insights renders progressively behind its own loading panel the first
-  // time; animating that render made it about 300 ms slower, so a first open
-  // arrives still. Reopened, it shows the view it kept and animates like any pane.
-  if(pane.id==='pane-insights'&&(!pane.firstElementChild||pane.querySelector('.plugin-loading-panel')))return;
+  // A first Insights open shows a loading panel while its view renders, so the
+  // marker waits for the view to replace it: the view then arrives like any
+  // pane, however long the first render takes. (Measured 2026-11-22: animating
+  // that render costs nothing measurable; an earlier ~300 ms cost is gone.)
   clearTimeout(paneEntranceTimers.get(pane.id));
+  paneEntranceWatchers.get(pane.id)?.disconnect();paneEntranceWatchers.delete(pane.id);
   pane.setAttribute('data-sd-enter','');
-  paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
+  const settle=()=>paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
+  const loading=()=>!pane.firstElementChild||!!pane.querySelector(':scope>.plugin-loading-panel');
+  if(pane.id!=='pane-insights'||!loading()){settle();return;}
+  const watcher=new MutationObserver(()=>{if(loading())return;watcher.disconnect();paneEntranceWatchers.delete(pane.id);settle();});
+  watcher.observe(pane,{childList:true});
+  paneEntranceWatchers.set(pane.id,watcher);
 }
 async function presentTabCommit(context,update){
   // Primary tab changes are intentionally immediate. Navigation owns state,

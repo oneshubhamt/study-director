@@ -77,7 +77,8 @@ assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::bef
 // the document made every tab change restyle the whole page each frame.
 assert.doesNotMatch(glassCss,/@property --sd-aurora-[abcd]\{[^}]*inherits:true/u,'aurora colours must not inherit.');
 assert.match(glassCss,/html\[data-material="glass"\] body::before\{\s*transition:--sd-aurora-a/u,'the aurora glide runs on the background layer.');
-assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?if\(pane\.id==='pane-insights'&&\(!pane\.firstElementChild\|\|pane\.querySelector\('\.plugin-loading-panel'\)\)\)return;/u,'Insights arrives still only while it renders behind its loading panel; a kept view animates like any pane.');
+assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?const loading=\(\)=>!pane\.firstElementChild\|\|!!pane\.querySelector\(':scope>\.plugin-loading-panel'\);\n\s*if\(pane\.id!=='pane-insights'\|\|!loading\(\)\)\{settle\(\);return;\}/u,'a first Insights open keeps the entrance until its view replaces the loading panel.');
+assert.doesNotMatch(html,/function markPaneEntrance\(pane\)\{[^}]*?\)return;\n/u,'no pane skips its entrance.');
 assert.match(html,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\.sdArea=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
 assert.doesNotMatch(coreCss,/--row-name-color:rgba\(/u,'plan row names must not be dimmed with alpha below readable contrast.');
 
