@@ -19,7 +19,7 @@ const createModule=():StartupLifecycleContract=>{
     ],'Startup/lifecycle ownership');
     functions(input.timer,['stopPresentation','syncAfterWake'],'Startup/lifecycle Timer adapter');
     functions(input.flushers,[
-      'planDraft','preferences','activeSession','notes','deletionRecovery'
+      'planDraft','preferences','review','activeSession','notes','deletionRecovery'
     ],'Startup/lifecycle flushers');
     functions(input.startup,[
       'prepareCanonicalData','restoreAppearance','bindDom','recoverInterruptedLibraryClear','recoverInterruptedRestore','loadNotes','hydrateDrafts','previewPlan',
@@ -101,6 +101,9 @@ const createModule=():StartupLifecycleContract=>{
       if(!ownership.canMutate())return false;
       flushOne('lifecycle.flush-schedule',flushers.planDraft);
       flushOne('lifecycle.flush-preferences',flushers.preferences);
+      // Review/editor state must reach the session snapshot before the generic
+      // Active Session safety flush persists it on hide or page exit.
+      flushOne('lifecycle.flush-review',flushers.review);
       flushOne('lifecycle.flush-session',flushers.activeSession);
       flushOne('lifecycle.flush-notes',flushers.notes);
       flushOne('lifecycle.flush-deletion-recovery',flushers.deletionRecovery);

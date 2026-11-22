@@ -39,7 +39,7 @@ export interface StartupLifecycleInput{
     flushAndRelease():unknown|PromiseLike<unknown>;transitionReleasing():unknown;release():unknown;setPrimary(value:boolean):unknown;
   }>;
   readonly timer:Readonly<{stopPresentation():unknown;syncAfterWake():unknown}>;
-  readonly flushers:Readonly<{planDraft:Operation;preferences:Operation;activeSession:Operation;notes:Operation;deletionRecovery:Operation}>;
+  readonly flushers:Readonly<{planDraft:Operation;preferences:Operation;review:Operation;activeSession:Operation;notes:Operation;deletionRecovery:Operation}>;
   readonly startup:Readonly<{
     prepareCanonicalData:Operation;restoreAppearance:Operation;bindDom:Operation;recoverInterruptedLibraryClear:Operation;recoverInterruptedRestore:Operation;
     loadNotes:Operation;hydrateDrafts:Operation;previewPlan:Operation;startClock:Operation;startHeaderClock:Operation;refreshCoreUi:Operation;

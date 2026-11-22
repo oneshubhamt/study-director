@@ -40,7 +40,7 @@ const coordinator=StartupHost.createCoordinator(Object.freeze({
   }),
   timer:Object.freeze({stopPresentation:fn('timer-stop'),syncAfterWake:()=>{sequence.push('wake-reconcile');return false;}}),
   flushers:Object.freeze({
-    planDraft:()=>{sequence.push('flush-plan');return rejectPlanFlush?Promise.reject(new Error('plan flush rejected')):true;},preferences:fn('flush-preferences'),activeSession:fn('flush-session'),
+    planDraft:()=>{sequence.push('flush-plan');return rejectPlanFlush?Promise.reject(new Error('plan flush rejected')):true;},preferences:fn('flush-preferences'),review:fn('flush-review'),activeSession:fn('flush-session'),
     notes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
   }),
   startup:Object.freeze({
@@ -79,7 +79,8 @@ assert.ok(index('canonical-verification:end')<index('startup-ready'));
 
 coordinator.flush();
 assert.ok(index('flush-plan')<index('flush-preferences'));
-assert.ok(index('flush-preferences')<index('flush-session'));
+assert.ok(index('flush-preferences')<index('flush-review'));
+assert.ok(index('flush-review')<index('flush-session'),'Review/editor state must be projected before the Active Session exit snapshot');
 assert.ok(index('flush-session')<index('flush-deletion-recovery'));
 assert.equal(sequence.includes('capture-notes'),false);
 rejectPlanFlush=true;coordinator.flush();await drain();rejectPlanFlush=false;
@@ -122,7 +123,7 @@ const failureCoordinator=StartupHost.createCoordinator(Object.freeze({
     setPrimary:value=>{primary2=!!value;failureSequence.push(`primary:${primary2}`);return primary2;}
   }),
   timer:Object.freeze({stopPresentation:()=>true,syncAfterWake:()=>true}),
-  flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,activeSession:()=>true,notes:()=>true,deletionRecovery:()=>true}),
+  flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,review:()=>true,activeSession:()=>true,notes:()=>true,deletionRecovery:()=>true}),
   startup:Object.freeze({
     prepareCanonicalData:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
     loadNotes:async()=>true,hydrateDrafts:()=>true,previewPlan:()=>true,startClock:()=>true,startHeaderClock:()=>true,refreshCoreUi:()=>true,renderRecovery:()=>true,

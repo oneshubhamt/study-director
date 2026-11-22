@@ -4012,6 +4012,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze<Parameters<ty
   flushers:Object.freeze({
     planDraft:PlanDraftEditor.flush,
     preferences:()=>flushProtectedPreferences(),
+    review:()=>ReviewEditor.flushPending({strict:false}),
     activeSession:flushLiveDraft,
     notes:()=>AppData.notes.flush(),
     deletionRecovery:AppData.deletionRecovery.flush
