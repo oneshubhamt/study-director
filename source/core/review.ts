@@ -491,7 +491,7 @@ function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):R
     const scheduleRow=schedule[row.idx];
     if(!row.trackable||!scheduleRow)return;
     const raw:DailyResult={
-      completion:row.completion,completionSource:row.completionSource,
+      ...(row.completion===null?{}:{completion:row.completion}),completionSource:row.completionSource,
       ...(row.progress.done!==undefined&&row.progress.done!==null?{done:row.progress.done}:{}),
       ...(row.progress.total!==undefined&&row.progress.total!==null?{total:row.progress.total}:{}),
       ...(row.actualSeconds!==null?{actualSeconds:row.actualSeconds}:{}),
@@ -781,9 +781,9 @@ function calculateReviewMetrics(evidence:ReviewEvidence):ReviewMetrics{
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
   const workBlocks:ReviewTaskRow[]=evidence.reviewTasks.filter(row=>row.work);
-  const completions=workBlocks.map(row=>row.completion);
+  const completions=workBlocks.map(row=>row.completion??0);
   const originalPlannedStudyMinutes=workBlocks.reduce((sum,row)=>sum+row.duration,0);
-  const completedEquivalentMinutes=workBlocks.reduce((sum,row)=>sum+(row.duration*row.completion/100),0);
+  const completedEquivalentMinutes=workBlocks.reduce((sum,row)=>sum+(row.duration*(row.completion??0)/100),0);
   const actualFocusMinutes=workBlocks.reduce((sum,row)=>sum+((row.actualSeconds||0)/60),0);
   const completionPercent=originalPlannedStudyMinutes?(completedEquivalentMinutes/originalPlannedStudyMinutes*100):0;
   const averageBlockCompletion=workBlocks.length?(completions.reduce((a,b)=>a+b,0)/workBlocks.length):0;

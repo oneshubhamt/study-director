@@ -82,7 +82,7 @@ export interface ReviewMetrics{
 export type ReviewScheduleRow=StoredSchedule;
 export type ReviewProjectedStudyRecord=Extract<DailyRecord,{recordKind:'study'}>;
 export interface ReviewRecordViewTask{
-  readonly idx:number;readonly id:string;readonly name:string;readonly kind:'work'|'support'|'fixed';readonly area:string;readonly dur:number;readonly measure:string;readonly target:number|null;readonly completion:number;readonly completionSource:CompletionSource;
+  readonly idx:number;readonly id:string;readonly name:string;readonly kind:'work'|'support'|'fixed';readonly area:string;readonly dur:number;readonly measure:string;readonly target:number|null;readonly completion:number|null;readonly completionSource:CompletionSource;
   readonly actualSeconds:number|null;readonly actualDeltaSeconds:number|null;readonly hasAdjustment:boolean;readonly originalStart:string;readonly originalEnd:string;
   readonly adjustedStart:string;readonly adjustedEnd:string;readonly actualStart:string|null;readonly actualEnd:string|null;readonly pauseEvents:readonly PauseEvent[];readonly done:number|null;readonly enteredTotal:number|null;readonly skipped:boolean;readonly doneFlag:boolean;
 }
