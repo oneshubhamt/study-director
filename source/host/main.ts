@@ -2992,8 +2992,12 @@ refreshLibraryNotes=LibraryView.refreshNotes;
 updateNoteSearchDocument=LibraryView.updateSearchDocument;
 /* BACKUP MODULE COMPOSITION */
 type BackupCodecInput=Parameters<typeof BackupCodecModule.createBackupCodec>[0];
+const BackupCodecProcessing=Object.freeze<BackupCodecInput['processing']>({
+  run:Exports.run as BackupCodecInput['processing']['run'],
+  scope:operation=>Exports.scope(operation)
+});
 const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze<BackupCodecInput>({
-  processing:Exports as BackupCodecInput['processing'],
+  processing:BackupCodecProcessing,
   appConfig:Object.freeze<BackupCodecInput['appConfig']>({
     appName:APP_CONFIG.appName,
     attribution:APP_CONFIG.attribution

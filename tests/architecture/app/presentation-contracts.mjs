@@ -20,7 +20,7 @@ const metadataSyncIndex=html.indexOf('value.synchronizeMetadata();',metadataBoot
 const coreStyleIndex=html.indexOf('<link rel="stylesheet" href="@@SD_CORE_STYLE_FILENAME@@">');
 assert.ok(criticalStyleIndex>=0&&metadataBootstrapIndex>criticalStyleIndex&&metadataSyncIndex>metadataBootstrapIndex&&coreStyleIndex>metadataSyncIndex,'saved-theme browser chrome must synchronize from the checked metadata bootstrap and critical CSS before the full stylesheet is requested.');
 assert.equal((html.match(/value\.synchronizeMetadata\(\);/g)||[]).length,1,'first-paint metadata synchronization must have one canonical call site.');
-assert.match(html,/function persistProtectedPreferences\(overrides=\{\}\)\{[\s\S]*?if\('theme' in overrides\|\|'presentation' in overrides\|\|'fontScale' in overrides\)void flushProtectedPreferences\(\)\.catch\(\(\)=>\{\}\);[\s\S]*?else scheduleProtectedPreferencesWrite\(\);/u,'appearance changes must bypass the debounce so canonical persistence settles before its startup mirror is refreshed.');
+assert.match(html,/function persistProtectedPreferences\(overrides(?::[^=)]+)?=\{\}\)\{[\s\S]*?if\('theme' in overrides\|\|'presentation' in overrides\|\|'fontScale' in overrides\)void flushProtectedPreferences\(\)\.catch\(\(\)=>\{\}\);[\s\S]*?else scheduleProtectedPreferencesWrite\(\);/u,'appearance changes must bypass the debounce so canonical persistence settles before its startup mirror is refreshed.');
 const preferenceFlushStart=html.indexOf('async function flushProtectedPreferences(');
 const preferenceFlushEnd=html.indexOf('function scheduleProtectedPreferencesWrite()',preferenceFlushStart);
 const preferenceFlush=html.slice(preferenceFlushStart,preferenceFlushEnd);
