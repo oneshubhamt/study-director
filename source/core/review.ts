@@ -607,7 +607,7 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
       setPlanStatus('Recovered previous study day saved. Apply the current study-day schedule when ready.');
       refreshStorageFallbackWarning();
     }
-    notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes??0)} · actual focus ${durationLabel(rec.actualFocusMinutes)} · ${displayPercent(rec.completionPercent)}`);
+    notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes??0)} · actual focus ${durationLabel(rec.actualFocusMinutes??0)} · ${displayPercent(rec.completionPercent??0)}`);
   }catch(e){
     notice.finish('failed',(committed?'Study Day saved locally in Library; follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+errorMessage(e),{title:committed?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committed?'local-save-completed':'local-save-failed'});
     return false;
