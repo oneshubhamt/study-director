@@ -38,7 +38,7 @@ interface DeleteLibraryControl{deleteLibrary():PromiseLike<unknown>}
 interface DeletionInput{
   readonly profiles:ProfilesController;
   readonly provider:Readonly<{
-    locationStatus(id:'google-drive'):Readonly<{connected?:boolean;waiting?:boolean;sync?:Readonly<{syncedAt?:unknown;syncing?:unknown}>}>|null;
+    locationStatus(id:'google-drive'):Readonly<{connected?:boolean;waiting?:boolean;sync?:Readonly<{syncedAt?:unknown;syncing?:unknown}>|null}>|null;
     suspendBackground(reason:string):Readonly<{release():unknown;settled?:PromiseLike<unknown>}>|null;
   }>;
   readonly device:Readonly<{status():Readonly<{connected?:boolean}>;deleteBackups():PromiseLike<unknown>}>;

@@ -1197,7 +1197,7 @@ const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<RichT
   budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options),
   invalidate:()=>invalidateAttachmentLibrary(),
   captureError:error=>AppDiagnostics.capture('rich-text.assets.maintenance',error,'warn'),
-  diagnostics:Object.freeze<RichTextAssetMaintenancePorts['diagnostics']>({start:(kind,source,details)=>BackupOperationDiagnostics.start(kind,source,details),mark:(name,details,id)=>BackupOperationDiagnostics.mark(name,details,id),finish:(details,id)=>BackupOperationDiagnostics.finish(details,id),fail:(error,details,id)=>BackupOperationDiagnostics.fail(error,details,id)})
+  diagnostics:Object.freeze<NonNullable<RichTextAssetMaintenancePorts['diagnostics']>>({start:(kind,source,details)=>BackupOperationDiagnostics.start(kind,source,details),mark:(name,details,id)=>BackupOperationDiagnostics.mark(name,details,id),finish:(details,id)=>BackupOperationDiagnostics.finish(details,id),fail:(error,details,id)=>BackupOperationDiagnostics.fail(error,details,id)})
 }),Object.freeze({lease:RichTextAssetWriteLease}));
 // Cleanup runs after each day's upkeep, and soon after anything leaves a file
 // unused. A request lost to a reload is caught by the next day's sweep.
@@ -1337,7 +1337,7 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
     }),
     activeSessionId:ACTIVE_SESSION_ID,
     clock:Object.freeze<RepositoryCompositionInput['appData']['clock']>({nowMs:DecisionClock.nowMs}),
-    helpers:Object.freeze<BackupCodecInput['helpers']>({
+    helpers:Object.freeze<RepositoryCompositionInput['appData']['helpers']>({
       boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
       activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay:value=>{const day=isoDateDay(value);if(day===null)throw new TypeError('Canonical ISO date is invalid.');return day;},normalizeTimestamp,jsonByteLength
     }),
@@ -2546,7 +2546,7 @@ const SessionLifecycleHooks=ReviewHostModule.createLifecycleHooks(Object.freeze<
   canMutate:()=>appCanMutate(),
   reviewEditor:ReviewEditor,
   lifecycleViews:SessionLifecycleViews,
-  diagnostics:Object.freeze<NoteReconciliationInput['ports']['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  diagnostics:Object.freeze<Parameters<typeof ReviewHostModule.createLifecycleHooks>[0]['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze<Parameters<typeof SessionLifecycleModule.createCoordinator>[0]>({hooks:SessionLifecycleHooks}));
 if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director.session-lifecycle-coordinator'||SessionLifecycle.contractVersion!==1){
@@ -2555,7 +2555,7 @@ if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director
 
 type SessionHostInput=Parameters<typeof SessionHostModule.createController>[0];
 ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHostInput>({
-  configuration:Object.freeze<NoteReconciliationInput['ports']['configuration']>({
+  configuration:Object.freeze<SessionHostInput['configuration']>({
     activeSessionId:ACTIVE_SESSION_ID,activeSessionVersion:DATA_CONTRACT.schemas.ActiveSession.version,
     sessionSnapshotVersion:DATA_CONTRACT.schemas.SessionSnapshot.version,maxCarryForwardChars:APP_LIMITS.maxCarryForwardChars,
     maxScheduleChars:APP_LIMITS.maxScheduleChars,maxTasksPerDay:APP_LIMITS.maxTasksPerDay,
@@ -2621,7 +2621,7 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<R
     appliedScheduleText:()=>PlanRuntime.appliedScheduleText(),appCanMutate:()=>appCanMutate(),panelMode:()=>sessionPanelMode,
     safetyMessage:()=>sessionSafetyMessage,setSafetyMessage:value=>{sessionSafetyMessage=String(value||'');},
     isSuspended:session=>isSuspendedActiveSession(session),activeSessionSnapshot:session=>activeSessionSnapshot(session),
-    applyStoredSessionSnapshot:(session,snapshot,options)=>applyStoredSessionSnapshot(session,snapshot,options),
+    applyStoredSessionSnapshot:async(session,snapshot,options)=>(await applyStoredSessionSnapshot(session,snapshot,options))!==false,
     setPanelMode:(mode,session)=>setSessionPanelMode(mode,session),setTimerDone:()=>setTimerMode(TIMER_MODES.DONE,'suspended-session-saved'),
     updateSessionControls
   }),
@@ -2678,13 +2678,15 @@ const Exports=ExportsModule.createCoordinator(Object.freeze<ExportCoordinatorInp
 }));
 let BackupProtectionHost:ReturnType<typeof BackupActionsHostModule.createProtectionHost>|null=null;
 function backupBackgroundAvailability(){return BackupProtectionHost?BackupProtectionHost.backgroundAvailability():backgroundBlocker()||'locked';}
-function setBackupProtectionSurfaceError(error){return BackupProtectionHost?.surfaceError(error)||false;}
+function setBackupProtectionSurfaceError(error:unknown){return BackupProtectionHost?.surfaceError(error)||false;}
 const BackupProtectionStorage=BackupActionsHostModule.createProtectionStorage(Object.freeze<Parameters<typeof BackupActionsHostModule.createProtectionStorage>[0]>({meta:ExportsAppMeta,settingName:'backupProtection',settingKey:APP_META_KEYS.backupProtection}));
 type BackupProtectionHostInput=Parameters<typeof BackupActionsHostModule.createProtectionHost>[0];
 BackupProtectionHost=BackupActionsHostModule.createProtectionHost(Object.freeze<BackupProtectionHostInput>({
   module:ExportsModule,processing:Exports,storage:BackupProtectionStorage,
   interactions:Object.freeze<BackupProtectionHostInput['interactions']>({
-    input:options=>Interactions.input(options),confirm:async options=>(await Interactions.confirm(options))===true,choose:options=>Interactions.choose(options)
+    input:async options=>{const {signal,...rest}=options;const result=await Interactions.input(signal?{...rest,signal}:rest);return result?{value:result.value}:null;},
+    confirm:async options=>(await Interactions.confirm(options))===true,
+    choose:async options=>await Interactions.choose(options)
   }),settingKey:APP_META_KEYS.backupProtection,
   mutation:Object.freeze<BackupProtectionHostInput['mutation']>({
     remember:()=>Profiles.list().length<2,canMutate:()=>appCanMutate(),
@@ -2710,7 +2712,7 @@ BackupProtectionHost.install();
 type NoteExporterInput=Parameters<typeof NoteExportModule.createExporter>[0];
 const NoteExporter=NoteExportModule.createExporter(Object.freeze<NoteExporterInput>({ports:Object.freeze<NoteExporterInput['ports']>({
   assets:Object.freeze<NoteExporterInput['ports']['assets']>({get:id=>RichTextAssets.get(id)}),
-  notes:Object.freeze<LibraryViewInput['ports']['notes']>({get:key=>AppData.notes.get(key)}),
+  notes:Object.freeze<NoteExporterInput['ports']['notes']>({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze<NoteExporterInput['ports']['processing']>({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze<NoteExporterInput['ports']['scheduling']>({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze<NoteExporterInput['ports']['output']>({chooseSave:Exports.chooseSave,save:Exports.save}),
@@ -2801,7 +2803,7 @@ function normalizeAttachmentIntegrityState(value:Parameters<typeof BackupIntegri
 function normalizeRepositoryIntegrityTarget(value:Parameters<typeof BackupIntegrityHostModule['normalizeRepositoryTarget']>[0]){return BackupIntegrityHostModule.normalizeRepositoryTarget(value,IntegrityContinuationModule.normalize);}
 function normalizeRepositoryIntegrityState(value:Parameters<typeof BackupIntegrityHostModule['normalizeRepositoryState']>[0]){return BackupIntegrityHostModule.normalizeRepositoryState(value,IntegrityContinuationModule.normalize);}
 function renderIntegrityStatuses(){return BackupIntegrity?.render()||false;}
-function requestRepositoryIntegrityRecheck(target){return BackupIntegrity?.requestRepositoryRecheck(target)||Promise.resolve(false);}
+function requestRepositoryIntegrityRecheck(target:Parameters<NonNullable<typeof BackupIntegrity>['requestRepositoryRecheck']>[0]){return BackupIntegrity?.requestRepositoryRecheck(target)||Promise.resolve(false);}
 function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){return BackupIntegrity?.scheduleAttachment(delay,trigger)||false;}
 function installAttachmentIntegrityAudit(){return BackupIntegrity?.installAttachment()||Promise.resolve(null);}
 function installRepositoryIntegrityScrub(){return BackupIntegrity?.installRepository()||Promise.resolve(null);}
@@ -2895,7 +2897,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
     flushEditor:(field,options)=>LibraryDiaryEditor.flush(field,options),
     settled:field=>LibraryDiaryEditor.settled(field)
   }),
-  notes:Object.freeze<NoteExporterInput['ports']['notes']>({
+  notes:Object.freeze<LibraryViewInput['ports']['notes']>({
     areaUse:title=>LibraryNoteWorkflows.areaUse(title),
     bindEditor:bindNoteEditor,
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
