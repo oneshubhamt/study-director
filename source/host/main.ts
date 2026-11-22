@@ -3402,12 +3402,12 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<PwaRuntimeIn
   }),
   lifecycle:Object.freeze<PwaRuntimeInput['lifecycle']>({
     module:PwaLifecycleModule,
-    environment:Object.freeze<PwaRuntimeInput['environment']>({AbortController,MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,clearTimeout:timer=>clearTimeout(timer),document,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),window})
+    environment:Object.freeze<PwaRuntimeInput['lifecycle']['environment']>({AbortController,MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,clearTimeout:timer=>clearTimeout(timer),document,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),window})
   }),
-  environment:Object.freeze({document,window,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now()}),
+  environment:Object.freeze<PwaRuntimeInput['environment']>({document,window,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now()}),
   state:Object.freeze<PwaRuntimeInput['state']>({
-    startupReady:()=>StartupLifecycle.status().fullyInitialized,ownership:()=>AppOwnership.status(),sessionLifecycle:()=>SessionLifecycle.status(),mutation:()=>AppMutationCoordinator.status(),reviewSave:()=>ReviewSaveService.status(),
-    imagePreparationCount:()=>imagePreparationCount,attachmentLibraryBusy:()=>AttachmentLibrary.status().busy,attachmentIngestBusy:()=>AttachmentIngest.status().busy,exportsBusy:()=>Exports.status().busy,
+    startupReady:()=>StartupLifecycle.status().fullyInitialized,ownership:()=>AppOwnership.status(),sessionLifecycle:()=>SessionLifecycle.status(),mutation:()=>requireMutationCoordinator().status(),reviewSave:()=>ReviewSaveService.status(),
+    imagePreparationCount:()=>imagePreparationCount,attachmentLibraryBusy:()=>requireAttachmentLibrary().status().busy,attachmentIngestBusy:()=>AttachmentIngest.status().busy,exportsBusy:()=>Exports.status().busy,
     backupBusy:()=>BackupController.status().busy,providerBusy:()=>BackupProviderRuntime.status().busy,
     providerBackgroundBackupActive:()=>BackupProviderRuntime.list().some(row=>BackupProviderRuntime.locationStatus(row.id)?.backingUp===true),
     providerDriveBackingUp:()=>BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true,
@@ -3416,7 +3416,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<PwaRuntimeIn
     isTrackableTask:task=>isTrackableBlock(task),isTaskResolved:index=>isTaskResolved(index),currentTaskIndex:()=>TimerState.currentIndex
   }),
   reservation:Object.freeze<PwaRuntimeInput['reservation']>({
-    settleMutation:()=>AppMutationCoordinator.settled(),suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
+    settleMutation:()=>requireMutationCoordinator().settled(),suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
     settleAttachmentIntegrity:()=>AttachmentIntegrityJob?AttachmentIntegrityJob.settled():Promise.resolve(),quiesceRichText:run=>RichTextRuntime.quiesce(run),
     runExclusive:(name,run)=>requireMutationCoordinator().runExclusive(name,authority=>run({assert:()=>requireMutationCoordinator().assertAuthority({authority})})),runManagedRecovery:run=>ManagedRecoveryQuiescence.run(run),
     projectOwnership:()=>OwnershipUiProjection.apply(),foregroundChanged:()=>foregroundChanged()
