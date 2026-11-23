@@ -3053,7 +3053,7 @@ const BackupProviderRuntime=BackupProviderModule.createRuntime(freeze({
     exports:freeze({run:Exports.run,protect:Exports.protect,unprotect:Exports.unprotect,followProtection:Exports.followProtection}),
     domain:freeze({clampText}),
     view:freeze({presentation:ports.view.presentation}),
-    ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),canShare:()=>ports.operations.canShare(),requireMutationControl:requireBackupMutationControl}),
+    ownership:freeze({canRunBackground:()=>!appCanMutate()?'awaiting-control':Exports.backgroundAvailable(),canShare:()=>ports.operations.canShare(),requireMutationControl:requireBackupMutationControl,runExclusive:ports.operations.runExclusive}),
     environment:freeze({clearTimeout,setTimeout}),
     diagnostics:freeze({capture:AppDiagnostics.capture,start:OperationDiagnostics.start,mark:OperationDiagnostics.mark,finish:OperationDiagnostics.finish,fail:OperationDiagnostics.fail})
   })

@@ -31,7 +31,7 @@ const createModule=(input:ProviderModuleInput)=>{
     exports:freeze(['followProtection','protect','run','unprotect']),
     domain:freeze(['clampText']),
     view:freeze(['presentation']),
-    ownership:freeze(['canRunBackground','canShare','requireMutationControl']),
+    ownership:freeze(['canRunBackground','canShare','requireMutationControl','runExclusive']),
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
@@ -48,7 +48,7 @@ const createModule=(input:ProviderModuleInput)=>{
     requireFunctions(RepositoryCheckpointPipeline,REPOSITORY_FIELDS.filter(key=>key!=='retention'),'Backup provider repository pipeline');
     if(!RepositoryCheckpointPipeline.retention||!Object.isFrozen(RepositoryCheckpointPipeline.retention))throw new TypeError('Backup provider retention policy is invalid.');
     if(!Object.isFrozen(ports.view.presentation)||(['begin','read','feedback','condition','notice','detail','outcome','locationLabel','resolve','reset','subscribe'] as const).some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
-    const APP_VERSION=ports.configuration.appVersion,BackupController=ports.controller,Exports=ports.exports,clampText=ports.domain.clampText,requireBackupMutationControl=ports.ownership.requireMutationControl;
+    const APP_VERSION=ports.configuration.appVersion,BackupController=ports.controller,Exports=ports.exports,clampText=ports.domain.clampText,requireBackupMutationControl=ports.ownership.requireMutationControl,runExclusive=ports.ownership.runExclusive;
     const {clearTimeout,setTimeout}=ports.environment;
     const AppDiagnostics=freeze({capture:ports.diagnostics.capture});
     const OperationDiagnostics=freeze({start:ports.diagnostics.start,mark:ports.diagnostics.mark,finish:ports.diagnostics.finish,fail:ports.diagnostics.fail});
@@ -976,9 +976,9 @@ const createModule=(input:ProviderModuleInput)=>{
   // version this build cannot read. A fresh scan under the maintenance lease
   // confirms which it is first; any other version is kept. The commit goes
   // first, so an interrupted removal leaves only an unfinished leftover.
-  async function removeProviderVersion(selected:Provider,checkpointId:string,{signal=null}:ExportOptions={}){
+  async function removeProviderVersion(selected:Provider,checkpointId:string,{signal=null,controlChecked=false}:ExportOptions&{controlChecked?:boolean}={}){
     selected=repositoryOperationSelected(selected,{signal});
-    requireBackupMutationControl('removing a version from '+selected.label);
+    if(!controlChecked)requireBackupMutationControl('removing a version from '+selected.label);
     const requested=String(checkpointId||'');let maintenanceLease=null;
     if(repositoryCoordinationCapable(selected)){
       maintenanceLease=await beginRepositoryMaintenance(selected);
@@ -1705,10 +1705,11 @@ const createModule=(input:ProviderModuleInput)=>{
   async function removeRepositoryProviderVersion(id:string,checkpointId:string){
     if(busy)return freeze({removed:false,reason:'busy'});
     const selected=providers.get(safeId(id));if(!selected||!selected.repository)throw new Error('Backup location is unavailable.');
+    requireBackupMutationControl('removing a version from '+selected.label);
     const foreground=beginForeground(selected);if(!foreground)return freeze({removed:false,reason:'busy'});busy=true;
     try{
       await foreground.settled;if(selected.prepare)await selected.prepare();await authorize(selected,'remove-version');
-      return await removeProviderVersion(selected,checkpointId,{signal:foreground.signal});
+      return await runExclusive('remove backup version',()=>removeProviderVersion(selected,checkpointId,{signal:foreground.signal,controlChecked:true}));
     }catch(error){await providerMaintenanceScheduler(selected)?.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'});throw error;}
     finally{await release(selected,'remove-version');busy=false;foreground.release();}
   }
