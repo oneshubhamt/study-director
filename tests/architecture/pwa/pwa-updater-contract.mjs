@@ -39,6 +39,11 @@ assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked 
 assert.doesNotMatch(app,/PWA_UPDATE_BACKUP_WAIT_MS|function backUpBeforeUpdate\b/u,'PWA-specific backup wait policy must not remain in unchecked main');
 assert.match(lifecycle,/function externalController\(\).*worker!==baselineController/u,'external update state must mean a genuinely different controller rather than a same-controller boot mismatch');
 assert.match(lifecycle,/const external=!!activated&&activated!==baselineController,context\s*=freeze\(\{requestId:target\.requestId,releaseId:target\.releaseId,automatic:options\.automatic===true,external,follower:external/u,'a genuinely changed controller must classify every non-initiating window as a follower without consulting racy ownership state');
+const messageStart=lifecycle.indexOf('function handleMessage('),messageEnd=lifecycle.indexOf('function reportClient(',messageStart);
+assert.ok(messageStart>=0&&messageEnd>messageStart,'checked PWA message handler must remain inspectable');
+const messageBody=lifecycle.slice(messageStart,messageEnd),sourceGate=messageBody.indexOf("![serviceWorker?.controller,registration?.active,registration?.waiting,registration?.installing].includes(source)"),updateAvailable=messageBody.indexOf("data['type']==='SD_PWA_UPDATE_AVAILABLE'");
+assert.ok(sourceGate>=0&&updateAvailable>sourceGate,'worker-message provenance must be established before an update-available announcement can watch or trust its sender');
+
 assert.match(lifecycle,/return apply\(\{automatic:true\}\);/u,'external controller reconciliation must retain automatic edit-idle protection');
 assert.doesNotMatch(lifecycle,/captureFollower|followerWorkers|followerIdentities|rememberFollower|reconcileFollowerRole/u,'follower classification must not depend on candidate-message timing or ownership handoff hints');
 assert.match(updater,/const follower=current\.externalUpdate;/u,'host retry logic must preserve follower semantics after a secondary acquires primary ownership');

@@ -54,8 +54,8 @@ await test('candidate announcement remains advisory until registration exposes a
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();h.candidate.state='installing';
  h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:h.candidate.buildId,assetId:h.candidate.assetId}});await flush();
  assert.equal(h.api.status().updateReady,false);assert.equal(h.counts().reserves,0);assert.equal(h.counts().reloads,0);
- h.registration.installing=h.candidate;h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
- assert.equal(h.api.status().waitingReleaseId,'next','candidate availability must still come from verified registration state and worker identity');
+ h.registration.installing=h.candidate;h.registration.emit('updatefound');h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
+ assert.equal(h.api.status().waitingReleaseId,'next','candidate availability must come from verified registration state and worker identity, not an untrusted announcement');
 });
 await test('external controller handoff is follower-safe even when candidate announcements are missed',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
@@ -66,10 +66,12 @@ await test('direct waiting-update apply remains a primary persistence path',asyn
  const h=harness();await h.api.install();assert.equal(await h.api.apply(),true);
  assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false);assert.equal(h.prepares[0].automatic,false);assert.ok(h.candidate.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));h.win.emit('pagehide');await flush();
 });
-await test('forged candidate announcement cannot create update authority or authorize reload',async()=>{
+await test('forged candidate announcement cannot create trust, update authority or reload permission',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();const rogue=h.worker('rogue','installing');
  h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:'rogue-build',assetId:'b'.repeat(24)}});await flush();
- assert.equal(h.api.status().updateReady,false);assert.equal(await h.api.apply(),false);assert.equal(h.counts().reserves,0);assert.equal(h.counts().prepareCalls,0);assert.equal(h.counts().reloads,0);
+ h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_INSTALL_FAILED',releaseId:'rogue',reason:'cache-limit'}});await flush();
+ assert.equal(h.api.status().updateReady,false);assert.equal(h.api.status().checkError,'','an unregistered announcement sender must not become trusted for later worker-status messages');assert.equal(h.api.status().phase,'idle');
+ assert.equal(await h.api.apply(),false);assert.equal(h.counts().reserves,0);assert.equal(h.counts().prepareCalls,0);assert.equal(h.counts().reloads,0);
 });
 await test('candidate replacement during preparation never gets stale release request',async()=>{
  const h=harness(),gate=deferred();await h.api.install();h.behavior.prepare=()=>gate.promise;const task=h.api.apply();await flush();const newer=h.worker('newer');h.registration.waiting=newer;h.message('SD_PWA_UPDATE_AVAILABLE',newer);await flush();gate.resolve({ok:true});assert.equal(await task,false);assert.equal(h.counts().held,0);assert.ok(!newer.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));assert.equal(h.api.status().waitingReleaseId,'newer');
