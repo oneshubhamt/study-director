@@ -1,5 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {PwaBootState,PwaCacheReason,PwaCacheState,PwaIdentityMessage,PwaLifecycleController,PwaLifecycleInput,PwaLifecycleStatus,PwaMessageChannel,PwaMessageEventPort,PwaPhase,PwaPreparationResult,PwaRegistrationPort,PwaUpdateContext,PwaUpdateGuard,PwaWorkerPort} from '../../types/pwa-lifecycle.ts';
+import type {PwaIdentityMessage} from '../../types/pwa-protocol.ts';
+import type {PwaBootState,PwaCacheReason,PwaCacheState,PwaLifecycleController,PwaLifecycleInput,PwaLifecycleStatus,PwaMessageChannel,PwaMessageEventPort,PwaPhase,PwaPreparationResult,PwaRegistrationPort,PwaUpdateContext,PwaUpdateGuard,PwaWorkerPort} from '../../types/pwa-lifecycle.ts';
 const sdPwaLifecycleFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'pwa-lifecycle','study-director.pwa-lifecycle-module'>|undefined;

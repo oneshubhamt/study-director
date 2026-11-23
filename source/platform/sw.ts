@@ -1,7 +1,7 @@
 /* Study Director Service Worker · @@SD_RELEASE@@
    Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.
    Source-available for personal and noncommercial use only. See LICENSE.txt and NOTICE.txt. */
-import type {PwaActivationAckMessage,PwaCacheStatusMessage,PwaIdentityMessage,PwaWorkerToPageMessage} from '../../types/pwa-lifecycle.ts';
+import type {PwaActivationAckMessage,PwaCacheStatusMessage,PwaIdentityMessage,PwaWorkerToPageMessage} from '../../types/pwa-protocol.ts';
 'use strict';
 type CacheIdentityMap=Readonly<{shellPrefix:string;clientState:string}>;type PrecacheSource=Readonly<{path:string;sha256:string}>;type PrecacheAsset=Readonly<{path:string;sha256:string;url:string}>;type Cleanup=Readonly<{state:PwaCacheStatusMessage['state'];reason?:PwaCacheStatusMessage['reason'];removed?:number;retained?:number}>;
 const scope=self as unknown as ServiceWorkerGlobalScope,isRecord=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object';
