@@ -111,6 +111,28 @@ function device(fault={}){
 }
 
 {
+  // A new profile's id also becomes its storage scope. After renew/adoption,
+  // existing ids and scopes can differ, so allocation must avoid both plus
+  // scopes whose deletion is still pending.
+  const d=device(),first=d.page('');first.ensure('Ana');first.add();
+  const added=d.list().profiles[1],second=d.page(added.scope),renewed=second.renew();
+  assert.notEqual(renewed.id,added.scope);assert.equal(renewed.scope,added.scope);
+  const parts=added.scope.split('_'),creationMs=parseInt(parts[2],36),scopeTail=parts[3];
+  let attempts=0;
+  const collisionPage=ProfilesModule.createController(freeze({ports:freeze({
+    scope:freeze({pattern,registryKey:REGISTRY,scope:added.scope,separator:'~'}),
+    storage:freeze({keys:()=>[...d.store.keys()],read:()=>d.store.get(REGISTRY)??null,remove:key=>d.store.delete(key),write:text=>{d.store.set(REGISTRY,text);return true;}}),
+    names:freeze({database:'sdmLocalAppDB.v1',directories:freeze([]),keys:freeze([])}),
+    platform:freeze({deleteDatabase:async()=>true,listen:()=>()=>{},now:()=>creationMs,random:()=>{attempts++;return attempts===1?scopeTail:'feedbeef';},reload:()=>{},removeDirectory:async()=>true}),
+    limits:freeze({maxName:60})
+  })}));
+  assert.equal(collisionPage.add(),true);
+  const newest=d.list().profiles.at(-1);
+  assert.notEqual(newest.scope,added.scope,'allocation retries rather than reusing an existing storage scope');
+  assert.match(newest.id,/_feedbeef$/u);assert.equal(collisionPage.unsupported(),false);
+}
+
+{
   // At most twelve profiles on one device.
   const d=device(),first=d.page('');first.ensure('Ana');
   for(let index=1;index<12;index++){d.tick(1);first.add();}

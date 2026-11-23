@@ -89,7 +89,7 @@ const createModule=()=>{
       return read();
     }
     function newId(name:unknown,list:Readonly<ProfileListState>=read()){
-      const slug=cleanName(name).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/gu,'').slice(0,24)||'profile',used=new Set(list.profiles.map(row=>row.id));
+      const slug=cleanName(name).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/gu,'').slice(0,24)||'profile',used=new Set([...list.profiles.flatMap(row=>[row.id,row.scope]),...list.removing]);
       for(let attempt=0;attempt<8;attempt++){
         const candidate=`prof_${slug}_${Math.floor(platform.now()).toString(36)}_${String(platform.random(4))}`;
         if(validId(candidate)&&!used.has(candidate))return candidate;
