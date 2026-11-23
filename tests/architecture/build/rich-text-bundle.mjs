@@ -5,9 +5,9 @@ import releaseConfig from '../../../release.config.mjs';
 import {generatedRuntimePath} from '../../../build/generated-runtime-paths.mjs';
 
 const root=process.cwd();
-const generated=file=>fs.readFileSync(generatedRuntimePath(root,file),'utf8');
-const committed=generated('rich-text.js');
-const committedWordgard=generated('wordgard.js');
+const readGenerated=file=>fs.readFileSync(generatedRuntimePath(root,file),'utf8');
+const committed=readGenerated('rich-text.js');
+const committedWordgard=readGenerated('wordgard.js');
 // Wordgard ships as its own readable module; Study Director's editor reads it
 // from a global. The minified deployment ships the lean build (generated)
 // in place of both: the editor and only the Wordgard code it reaches.
@@ -26,13 +26,13 @@ for(const suffix of ['table/cellselection.ts','table/correct.ts','table/tablepas
 for(const unused of ['editor/dialog.ts','editor/menubar.ts','editor/panel.ts','editor/tooltip.ts','editor/dropcursor.ts'])
   assert.ok(!wordgardModule.inputs.some(name=>name.endsWith(`vendor/wordgard/src/${unused}`)),`Unused Wordgard UI module entered the Wordgard module: ${unused}`);
 const [generatedExportWorker,generatedImageWorker,generatedAttachmentWorker]=await Promise.all([buildExportWorkerBundle(),buildImageWorkerBundle(),buildAttachmentWorkerBundle()]);
-assert.equal(generatedExportWorker.source,generated('export-worker.js'),'Portable worker must reproduce from its shared sources.');
-assert.equal(generatedImageWorker.source,generated('image-worker.js'),'Image worker must reproduce from its shared source.');
-assert.equal(generatedAttachmentWorker.source,generated('attachment-worker.js'),'Attachment ingest worker must reproduce from its shared source.');
+assert.equal(generatedExportWorker.source,readGenerated('export-worker.js'),'Portable worker must reproduce from its shared sources.');
+assert.equal(generatedImageWorker.source,readGenerated('image-worker.js'),'Image worker must reproduce from its shared source.');
+assert.equal(generatedAttachmentWorker.source,readGenerated('attachment-worker.js'),'Attachment ingest worker must reproduce from its shared source.');
 assert.ok(!generatedExportWorker.inputs.some(name=>/vendor\/wordgard|node_modules/.test(name)),'Export worker must not include editor or dependencies.');
 assert.ok(!generatedImageWorker.inputs.some(name=>/vendor\/wordgard|node_modules/.test(name)),'Image worker must not include editor or npm dependencies.');
 assert.ok(!generatedAttachmentWorker.inputs.some(name=>/vendor\/wordgard|node_modules/.test(name)),'Attachment worker must not include editor or npm dependencies.');
-const committedSearchWorker=generated('search-worker.js');
+const committedSearchWorker=readGenerated('search-worker.js');
 const generatedSearchWorker=await buildSearchWorkerBundle();
 assert.equal(generatedSearchWorker.source,committedSearchWorker,'Tracked generated notes search worker is not reproducible from the declared build pipeline.');
 assert.ok(generated.inputs.some(name=>/vendor\/wordgard\/src\/editor\/editor\.ts$/.test(name)));
