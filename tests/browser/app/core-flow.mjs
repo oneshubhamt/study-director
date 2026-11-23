@@ -33,6 +33,8 @@ try{
   // Start-up and the background jobs it wakes log nothing on a clean start.
   await page.evaluate(`new Promise(resolve=>setTimeout(resolve,1500))`);
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/.test(text)),[],'a clean startup logs no app warnings');result.checks.cleanStartup=true;
+  await page.click('#pane-plan > details.plan-composer:not(#saved-plans-panel) > summary');
+  await waitFor(()=>page.evaluate(`document.querySelector('#pane-plan > details.plan-composer:not(#saved-plans-panel)')?.open===true`),{label:'Plan Composer opened through native disclosure'});
   await page.evaluate(`(()=>{const now=new Date(),m=now.getHours()*60+now.getMinutes()-1,fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0'),field=document.getElementById('plan-input');field.value=[fmt(m)+' | 20 | CoreFlowQA Core Block | work | Medicine | pages | 12',fmt(m+20)+' | 10 | CoreFlowQA Review | support | Planning | block | 1'].join('\\n');field.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));})()`);
   await waitFor(()=>page.evaluate(`document.querySelector('[data-action="apply-schedule"]')?.disabled===false`),{label:'Plan Apply delegated control enabled'});
   await page.click('[data-action="apply-schedule"]');
