@@ -25,7 +25,7 @@ class FakeDocument {
 globalThis.HTMLElement=FakeElement;
 const key=Symbol.for('studyDirector.internalModules.v1');
 vm.runInThisContext(readRuntimeSource('source/core/internal.ts'),{filename:'source/core/internal.ts'});
-vm.runInThisContext(readRuntimeSource('source/core/workspace-overlay.ts'),{filename:'workspace-overlay.js'});
+vm.runInThisContext(readRuntimeSource('source/core/workspace-overlay.ts'),{filename:'source/core/workspace-overlay.ts'});
 const module=globalThis[key].require('workspace-overlay',1);
 
 const document=new FakeDocument();

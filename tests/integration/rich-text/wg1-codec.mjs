@@ -11,7 +11,7 @@ const codecSandbox={console,TextEncoder,TextDecoder,JSON:codecJson};codecSandbox
 const codec=codecSandbox.WG1Codec;
 
 const richJson={parse(value){richParses++;return JSON.parse(value)},stringify:JSON.stringify};
-const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON:richJson};richSandbox.globalThis=richSandbox;vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'rich-text.js'});
+const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON:richJson};richSandbox.globalThis=richSandbox;vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'generated/runtime/rich-text.js'});
 const rich=richSandbox.StudyDirectorRichText;
 
 const text=(param,marks)=>marks?{type:'Text',param,marks}:{type:'Text',param};

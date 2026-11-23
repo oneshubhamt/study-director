@@ -73,8 +73,8 @@ function createWindow(url='https://study-director.web.app/',{native=false}={}){
 function loadModule(){
   const context=vm.createContext({console,URL,Symbol,Object,Set,Map,Promise,TypeError,Error,globalThis:null});
   context.globalThis=context;
-  vm.runInContext(internal,context,{filename:'internal.js'});
-  vm.runInContext(navigationSource,context,{filename:'navigation.js'});
+  vm.runInContext(internal,context,{filename:'source/core/internal.ts'});
+  vm.runInContext(navigationSource,context,{filename:'source/core/navigation.ts'});
   return context[Symbol.for('studyDirector.internalModules.v1')].require('navigation',1);
 }
 function harness(options={}){

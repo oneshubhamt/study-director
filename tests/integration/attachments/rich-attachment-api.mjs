@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const source=richTextRuntimeSource();
-const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(source,sandbox,{filename:'rich-text.js'});
+const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,structuredClone};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(source,sandbox,{filename:'generated/runtime/rich-text.js'});
 const rich=sandbox.StudyDirectorRichText;
 const A='att-1234567890abcdefghij',B='att-abcdefghij1234567890';
 let n=0;const eq=(name,actual,expected)=>{assert.deepEqual(actual,expected,name);n++;console.log('ok - '+name)};const ok=(name,v)=>{assert.ok(v,name);n++;console.log('ok - '+name)};

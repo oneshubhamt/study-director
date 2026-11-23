@@ -15,7 +15,7 @@ function runtime(seed={},kind={type:'iphone',browser:'safari'}){
     crypto:globalThis.crypto,localStorage,globalThis:null
   });
   context.globalThis=context;
-  for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`${file}.js`});
+  for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`source/core/${file}.ts`});
   const persistence=context[Symbol.for('studyDirector.internalModules.v1')].require('persistence',1);
   const local=persistence.createLocalStorage();
   const identity=persistence.createInstallationIdentity(Object.freeze({local,keys:Object.freeze({installationId:'installation'}),describe:()=>kind}));

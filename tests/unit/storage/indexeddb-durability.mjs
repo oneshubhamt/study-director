@@ -22,8 +22,8 @@ function createPrimitiveHarness({strictUnsupported=false}={}){
   const indexedDB={open(){const request={result:db,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};queueMicrotask(()=>request.onsuccess?.());return request;}};
   const context=vm.createContext({console,queueMicrotask,setTimeout,clearTimeout,Date,Promise,Object,Array,String,Number,Math,JSON,RegExp,Error,TypeError,Uint8Array,TextEncoder,indexedDB,globalThis:null});
   context.globalThis=context;
-  vm.runInContext(internal,context,{filename:'internal.js'});
-  vm.runInContext(persistence,context,{filename:'persistence.js'});
+  vm.runInContext(internal,context,{filename:'source/core/internal.ts'});
+  vm.runInContext(persistence,context,{filename:'source/core/persistence.ts'});
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('persistence',1);
   const api=module.createIndexedDb(Object.freeze({
     config:Object.freeze({

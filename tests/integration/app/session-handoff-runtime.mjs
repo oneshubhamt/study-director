@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 
 const context={Object,Symbol,TypeError,Error,Promise,console};context.globalThis=context;vm.createContext(context);
-for(const name of ['internal','session-handoff'])vm.runInContext(readCoreScript(name),context,{filename:'source/core/'+name+'.js'});
+for(const name of ['internal','session-handoff'])vm.runInContext(readCoreScript(name),context,{filename:'source/core/'+name+'.ts'});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('session-handoff',1);
 const DATE='2026-10-27',LOCAL='inst_local',REMOTE='inst_remote',CHECKPOINT='cp_'+'a'.repeat(32),FINGERPRINT='f'.repeat(64);
 const sessionBase={id:'active',type:'activeSession',version:1,revision:10,date:DATE,status:'active',runningOn:LOCAL,scheduleText:'07:00 | 30 | Work | work | Ethics | units | 1',snapshot:{version:1,date:DATE,fingerprint:'x',contentRevision:1,savedRevision:0,currentTaskId:null,taskState:{},scheduleAdjustments:{},timerRuntime:{token:'timer'},latestCarryForward:'',updatedAt:'2026-10-27T08:00:00.000Z',review:{reflection:'',studyQuality:null},practice:{token:'practice'}},suspendedAt:null,updatedAt:'2026-10-27T08:00:00.000Z'};

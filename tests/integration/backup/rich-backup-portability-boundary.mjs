@@ -18,7 +18,7 @@ const BackupCodecs=registry.require('backup-codec',1);
 const Persistence=registry.require('persistence',1),freeze=Object.freeze,MiB=1024*1024;
 
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};
-vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'rich-text.js'});
+vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'generated/runtime/rich-text.js'});
 const rich=vm.runInContext('globalThis.StudyDirectorRichText',richSandbox);
 assert.equal(limits.backupMaxEntryBytes,5*MiB);
 assert.equal(limits.backupMaxLineBytes,16*MiB);

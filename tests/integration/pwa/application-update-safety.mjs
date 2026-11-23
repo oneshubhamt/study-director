@@ -4,7 +4,7 @@ import {readCoreScript} from '../../helpers/core-script.mjs';
 
 const context={Object,Symbol,TypeError,Error,Promise,Set,WeakSet,Map,AbortController,console};
 context.globalThis=context;vm.createContext(context);
-for(const name of ['internal','pwa-update-host'])vm.runInContext(readCoreScript(name),context,{filename:`source/core/${name}.js`});
+for(const name of ['internal','pwa-update-host'])vm.runInContext(readCoreScript(name),context,{filename:`source/core/${name}.ts`});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')],UpdateHost=registry.require('pwa-update-host',1);
 
 const baseStatus=()=>({

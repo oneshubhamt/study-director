@@ -68,7 +68,7 @@ function loadModules(indexedDB){
     crypto:globalThis.crypto,indexedDB,setTimeout:fastTimeout,clearTimeout,queueMicrotask,globalThis:null
   });
   context.globalThis=context;
-  for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`${file}.js`});
+  for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`source/core/${file}.ts`});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')];
   return {persistence:registry.require('persistence',1)};
 }

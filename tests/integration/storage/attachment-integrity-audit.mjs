@@ -189,8 +189,8 @@ const Attachments=context[Symbol.for('studyDirector.internalModules.v1')].requir
 }
 // The GC's unresolved-key count replaces a repeated keys.every() traversal.
 // Durable source-revision and untrusted-text checks remain the deletion gate.
-vm.runInContext(readCoreScript('operation-lifecycle'),context,{filename:'source/core/operation-lifecycle.js'});
-vm.runInContext(readCoreScript('asset-maintenance'),context,{filename:'source/core/asset-maintenance.js'});
+vm.runInContext(readCoreScript('operation-lifecycle'),context,{filename:'source/core/operation-lifecycle.ts'});
+vm.runInContext(readCoreScript('asset-maintenance'),context,{filename:'source/core/asset-maintenance.ts'});
 const Lifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),Maintenance=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-maintenance',1,Object.freeze({lifecycle:Lifecycle}));
 function gcFixture(size,{untrusted=false,untrustedLive=false,emptyNotes=false}={}){
  let currentRevision=1,notesRead=0,removed=0,scanned=0,daysRead=0,activeRead=0,callbacks=[],seq=0;
