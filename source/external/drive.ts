@@ -1,4 +1,5 @@
 import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,ProviderItem,RepositoryKind,RepositoryTransport,Upload} from '../../types/backup-provider.ts';
+import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts';
 
 /*
   Study Director Google Drive Backup Provider
@@ -33,7 +34,6 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   type RepositoryPolicy=Readonly<Record<string,unknown>>;
   type ReceiveStream=(stream:ReadableStream<Uint8Array>,size:number,options?:{signal?:AbortSignal|null;onProgress?:(value:{loaded?:number;total?:number;phase?:string})=>void})=>Promise<Blob>;
   type PluginApi={capabilities:Readonly<Record<string,number>>;backup:{repositoryPolicy:RepositoryPolicy;receiveStream:ReceiveStream;releaseFile:(file:Blob)=>unknown|PromiseLike<unknown>;limits:{maxFileBytes:number};device:()=>string;profile:DriveProfilePort;providers:{register:(config:ProviderConfig)=>unknown}}};
-  type PluginDescriptor=Readonly<{name:string;version:string;requires:Readonly<Record<string,number>>;setup:(api:unknown)=>boolean}>;
   type TrustedTypesPort={createPolicy:(name:string,rules:{createScriptURL:(value:string)=>string})=>{createScriptURL:(value:string)=>unknown}};
   type CoordinationLease=Lease&{kind:string;remoteId:string;verificationScope:string;name:string;modifiedAt:string;renews?:boolean;startedAt?:string;device?:string};
   type RepositoryListOptions={kind:RepositoryKind;signal?:AbortSignal|null;freshDigests?:boolean};
@@ -1329,11 +1329,11 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     return api.backup.providers.register(providerConfig)!==false;
   }
   const PLUGIN_READY_EVENT='studydirector:ready';
-  const PLUGIN_DESCRIPTOR:PluginDescriptor=Object.freeze({name:'SD-google-drive-backup',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,setup});
+  const PLUGIN_DESCRIPTOR=Object.freeze({name:'SD-google-drive-backup',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,setup}) satisfies StudyDirectorPluginDescriptor;
   let registered=false;
   function connect():boolean{
     if(registered)return true;
-    const register=(window as unknown as {StudyDirector?:{registerPlugin?:(descriptor:PluginDescriptor)=>unknown}}).StudyDirector?.registerPlugin;
+    const register=(window as unknown as {StudyDirector?:{registerPlugin?:(descriptor:StudyDirectorPluginDescriptor)=>unknown}}).StudyDirector?.registerPlugin;
     if(typeof register!=='function')return false;
     try{registered=register(PLUGIN_DESCRIPTOR)===true;}catch(error){}
     return registered;
