@@ -21,7 +21,7 @@ interface ConnectCardState {
 interface ConnectionState {readonly token:number;readonly profile:string}
 
 function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStatusHostController>{
-  exactObject(input,['document','providers','presentation','device','protection','keptVersions','profileKey','profileEmail','profileName','deviceName','markDriveRequested','storageIssues','unsupportedDataHeld','backupReminder','updateReady','sessionElsewhere','sessionReady','unseen','actions','environment','capture'],'Sync status host input');
+  exactObject(input,['document','providers','presentation','device','protection','keptVersions','profileKey','profileEmail','profileName','deviceName','markDriveRequested','storageIssues','unsupportedDataHeld','backupReminder','updateReady','sessionElsewhere','sessionReady','unseen','canMutate','actions','environment','capture'],'Sync status host input');
   if(!Object.isFrozen(input.presentation)||!Object.isFrozen(input.actions)||!Object.isFrozen(input.environment))throw new TypeError('Sync status host providers must be frozen.');
   const {document,presentation,environment}=input;
   const OWNER_REQUIRED_ACTIONS=freeze(new Set(['sync-now','retry','sign-in','enter-password','unlock-sync','review-sync','review-kept','device-permission','continue-session']));
