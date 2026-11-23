@@ -206,7 +206,7 @@ const BackupCapture=BackupCaptureModule.create(freeze({
     pendingReviews:freeze({list:AppData.pendingReviews.list,readItems:AppData.pendingReviews.readItems})
   }),
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),
-  session:freeze({canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasTasks,toActiveSession:activeSessionPayload}),
+  session:freeze({canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,checkpointPendingReview,hasTasks,toActiveSession:activeSessionPayload}),
   personal:freeze({settle:personalSettle,export:personalExport}),assets:freeze({get:AssetData.get,list:AssetData.list}),
   exports:freeze({check:Exports.check,run:Exports.run}),
   persistence:freeze({sourceRevision:ports.persistence.sourceRevision,snapshotRevision:ports.persistence.snapshotRevision,dailyRecordDocuments:getDailyRecordDocumentsByDates,storageGeneration:ports.persistence.storageGeneration}),

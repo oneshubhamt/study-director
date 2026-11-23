@@ -3056,7 +3056,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
   recoveryNotes:Object.freeze<BackupRuntimeHostInput['recoveryNotes']>({lifecycle:SessionLifecycle,date:()=>getReviewDate()}),
   session:Object.freeze<BackupRuntimeHostInput['session']>({
     canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,
-    checkpointPendingReview:async()=>await ReviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:true})!==false,
+    checkpointPendingReview:async options=>await ReviewEditor.flushPending({strict:true,backupCapture:options?.backupCapture===true,allowDuringRecoveryQuiescence:true})!==false,
     hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:snapshot=>requireActiveSessionRuntime().payload(snapshot),
     withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)
   }),

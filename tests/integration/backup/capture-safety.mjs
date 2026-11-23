@@ -7,8 +7,8 @@ import {createHarness} from '../../helpers/repository-harness.mjs';
 for(const file of ['internal','backup-capture','backup-readiness-host','backup-recovery-host'])vm.runInThisContext(readCoreScript(file));
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('backup-capture',1),readinessModule=registry.require('backup-readiness-host',1),recoveryHostModule=registry.require('backup-recovery-host',1),freeze=Object.freeze;
 function harness(overrides={}){
-  let revision=1,generation=0,notes={Subject:{key:'Subject',text:'old'}},session={id:'current',text:'old session'},dates=['2026-09-28'];
-  const hooks={},calls=[],readOptions=[];
+  let revision=1,generation=0,notes={Subject:{key:'Subject',text:'old'}},session={id:'current',text:'old session'},dates=['2026-09-28'],reflection='old reflection';
+  const hooks={},calls=[],readOptions=[],reviewOptions=[];
   const hook=async name=>{calls.push(name);if(hooks[name])await hooks[name]();};
   const token=()=>revision.toString(16).padStart(32,'0'),sourceRevision=()=>new Date(Date.UTC(2026,8,28,0,revision)).toISOString();
   const load=async()=>{await hook('sessionRead');return {ok:true,error:null,value:session,storage:{idb:true}};};
@@ -22,15 +22,37 @@ function harness(overrides={}){
       mutationEpoch:freeze({read:async()=>({token:token()})}),preparationUnits:freeze({list:async()=>[],replace:async()=>[]}),provenance:freeze({installationId:()=> 'capture-test'}),pendingReviews:freeze({list:async()=>[],readItems:async ids=>ids.map(()=>null)})
     }),
     codecs:freeze({activeSession:freeze({sanitizeCurrent:value=>value}),backup:freeze({countShape:value=>value,assetIds:overrides.backup?.assetIds||(()=>[]),attachmentCoverage:values=>freeze({total:values.length,missing:values.filter(row=>row.missing).length,missingIds:freeze(values.filter(row=>row.missing).map(row=>row.assetId)),fullyRecoverable:!values.some(row=>row.missing)}),missingAttachmentWarning:values=>values.some(row=>row.missing)?'Partial attachment recovery: 1 attachment missing.':'',createCheckpointMetadata:(_id,createdAt)=>({checkpointId:'checkpoint',createdAt}),createProtectedManifest:()=>({checkpointId:'checkpoint'})})}),
-    session:freeze(overrides.session||{canMutate:()=>true,cancelLiveDraftSave:()=>{},captureSnapshot:()=>session,hasTasks:()=>false,toActiveSession:value=>value}),
+    session:freeze(overrides.session||{canMutate:()=>true,cancelLiveDraftSave:()=>{},captureSnapshot:()=>session,checkpointPendingReview:async options=>{reviewOptions.push(options);await hook('reviewSettle');return true;},hasTasks:()=>false,toActiveSession:value=>value}),
     personal:freeze({settle:async()=>hook('personalSettle'),export:async options=>{readOptions.push(options);await hook('personalRead');return {name:'Student'};}}),
     assets:freeze(overrides.assets||{get:async()=>null,list:async()=>[]}),exports:freeze({check:()=>{},run:async()=>{}}),
-    persistence:freeze(overrides.persistence||{sourceRevision:async()=>sourceRevision(),snapshotRevision:async()=>{await hook('fence');return `study-director.fast-capture-fence.v1|${token()}|${revision}`;},dailyRecordDocuments:async values=>values.map(date=>({date})),storageGeneration:()=>generation}),
+    persistence:freeze(overrides.persistence||{sourceRevision:async()=>sourceRevision(),snapshotRevision:async()=>{await hook('fence');return `study-director.fast-capture-fence.v1|${token()}|${revision}`;},dailyRecordDocuments:async values=>values.map(date=>({date,reflection})),storageGeneration:()=>generation}),
     diagnostics:freeze({capture:()=>{},mark:()=>{}}),domain:freeze({getStudentName:()=> 'Student',currentDailyRecords:values=>values}),environment:freeze({yieldTask:async()=>{}})
   }));
-  return {capture,hooks,calls,readOptions,clearBrowserData:()=>{generation++;},changeNote:()=>{notes={Subject:{key:'Subject',text:'new'}};revision++;},changeSession:()=>{session={id:'current',text:'new session'};revision++;},changeDates:()=>{dates=['2026-09-27','2026-09-28'];revision++;}};
+  return {capture,hooks,calls,readOptions,reviewOptions,clearBrowserData:()=>{generation++;},changeNote:()=>{notes={Subject:{key:'Subject',text:'new'}};revision++;},changeSession:()=>{session={id:'current',text:'new session'};revision++;},changeDates:()=>{dates=['2026-09-27','2026-09-28'];revision++;},changeReflection:()=>{reflection='new reflection';revision++;}};
 }
 
+// A pending Reflection is a first-class checkpoint input. Full and managed
+// capture settle it before their source fence, and a failed canonical save
+// stops capture instead of silently exporting the previous Reflection.
+{
+  const h=harness();h.hooks.reviewSettle=h.changeReflection;
+  const captured=await h.capture.captureLogicalCheckpoint();
+  assert.equal(captured.dailyDocuments[0].reflection,'new reflection');
+  assert.ok(h.calls.indexOf('reviewSettle')>=0&&h.calls.indexOf('reviewSettle')<h.calls.indexOf('fence'));
+  assert.deepEqual(h.reviewOptions,[{backupCapture:true}]);
+  const managed=harness();managed.hooks.reviewSettle=managed.changeReflection;
+  assert.ok(await managed.capture.beginManagedPreparationCapture());
+  assert.ok(managed.calls.indexOf('reviewSettle')>=0&&managed.calls.indexOf('reviewSettle')<managed.calls.indexOf('fence'));
+  assert.deepEqual(managed.reviewOptions,[{backupCapture:true}]);
+}
+{
+  const failed=harness();failed.hooks.reviewSettle=()=>{throw new Error('Injected Reflection save failure');};
+  await assert.rejects(()=>failed.capture.captureLogicalCheckpoint(),error=>error.code==='BACKUP_REVIEW_SETTLE_FAILED'&&error.backupStage==='checkpoint-review-settle');
+  assert.equal(failed.calls.includes('fence'),false,'failed Reflection settlement must stop before the capture fence');
+  const managed=harness();managed.hooks.reviewSettle=()=>{throw new Error('Injected Reflection save failure');};
+  await assert.rejects(()=>managed.capture.beginManagedPreparationCapture(),error=>error.code==='BACKUP_REVIEW_SETTLE_FAILED'&&error.backupStage==='checkpoint-review-settle');
+  assert.equal(managed.calls.includes('fence'),false,'managed capture must also stop before its fence');
+}
 // Mutation after the first payload read: notes have been read, then personal export yields to a note commit.
 {
   const h=harness();h.hooks.personalRead=h.changeNote;
@@ -56,6 +78,7 @@ function harness(overrides={}){
 {
   const h=harness();h.hooks.personalRead=h.changeNote;
   await assert.rejects(()=>h.capture.captureLogicalCheckpoint(undefined,{assumeFlushed:true}),/changed while capturing/);
+  assert.equal(h.calls.includes('reviewSettle'),false,'assumeFlushed callers own the Review-settlement precondition');
 }
 // Browser data cleared while a backup is being prepared: the capture read a mix of
 // old and emptied storage, so it is never saved. A clear before the capture
@@ -73,7 +96,7 @@ function harness(overrides={}){
   const prepared=harness(),preparation=await prepared.capture.beginManagedPreparationCapture();assert.ok(preparation);
   prepared.clearBrowserData();await assert.rejects(()=>prepared.capture.readManagedPreparationUnits(preparation,['activeSession']),/Browser data was cleared/);
 }
-const cases=['payload reads reject overlapping mutations','settle-time writes are included','incremental session reads are fenced','assumed settlement does not bypass fencing','a browser data clear during capture stops the backup'];
+const cases=['pending Reflection settles before full and managed capture fences','failed Reflection settlement stops backup capture','payload reads reject overlapping mutations','settle-time writes are included','incremental session reads are fenced','assumed settlement does not bypass fencing','a browser data clear during capture stops the backup'];
 
 // Quantified completeness: for every preparation route and settlement failure,
 // a canonical checkpoint is forbidden. A later successful retry must include
@@ -115,7 +138,7 @@ for(const route of ['canonical','assumed-settled','rescue','incremental'])for(co
 }
 // Without write control, only a canonical fast fence proves settled state.
 for(const proven of [true,false]){
-  const base=harness({session:freeze({canMutate:()=>false,cancelLiveDraftSave(){},captureSnapshot:()=>null,hasTasks:()=>false,toActiveSession:value=>value}),persistence:freeze({storageGeneration:()=>0,sourceRevision:async()=> '2026-10-01T12:00:00.000Z',snapshotRevision:async()=>proven?'study-director.fast-capture-fence.v1|'+'a'.repeat(32)+'|stable':'full-unsettled',dailyRecordDocuments:async dates=>dates.map(date=>({date}))})});
+  const base=harness({session:freeze({canMutate:()=>false,cancelLiveDraftSave(){},captureSnapshot:()=>null,checkpointPendingReview:async()=>true,hasTasks:()=>false,toActiveSession:value=>value}),persistence:freeze({storageGeneration:()=>0,sourceRevision:async()=> '2026-10-01T12:00:00.000Z',snapshotRevision:async()=>proven?'study-director.fast-capture-fence.v1|'+'a'.repeat(32)+'|stable':'full-unsettled',dailyRecordDocuments:async dates=>dates.map(date=>({date}))})});
   const captured=await base.capture.captureLogicalCheckpoint();assert.equal(captured.completeness.complete,proven);assert.equal(captured.completeness.deletionState,proven?'canonical':'uncertain');assert.ok(!base.calls.includes('deletionSettle'),'read-only capture must not reconcile deletions');await base.capture.assertLogicalCheckpointCurrent(captured);
   cases.push('read-only completeness requires '+(proven?'proven':'unavailable')+' canonical fence');
 }

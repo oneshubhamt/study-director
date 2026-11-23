@@ -10,7 +10,7 @@ export interface BackupCaptureInput{
  configuration:{limits:Limits};
  data:{activeSession:Pick<AppData['activeSession'],'save'|'settled'|'load'>;dailyRecords:Pick<AppData['dailyRecords'],'backupDates'|'backupMonth'>;notes:Pick<AppData['notes'],'flush'|'failure'|'readFreshPayload'|'exportPayload'|'readFreshItems'>;deletionRecovery:Pick<AppData['deletionRecovery'],'flush'|'savedDays'|'notes'|'attachments'>;mutationEpoch:Pick<AppData['mutationEpoch'],'read'>;preparationUnits:AppData['preparationUnits'];provenance:Pick<AppData['provenance'],'installationId'>;pendingReviews:Pick<AppData['pendingReviews'],'list'|'readItems'>};
  codecs:{activeSession:ReturnType<RecordCodecsModule['createActiveSessionCodec']>;backup:ReturnType<BackupCodecModule['createBackupCodec']>};
- session:{canMutate():boolean;cancelLiveDraftSave():void;captureSnapshot():SessionSnapshot|null;hasTasks():boolean;toActiveSession(snapshot:SessionSnapshot):ActiveSession|null};
+ session:{canMutate():boolean;cancelLiveDraftSave():void;captureSnapshot():SessionSnapshot|null;checkpointPendingReview(options?:Readonly<{backupCapture?:boolean}>):Promise<boolean>;hasTasks():boolean;toActiveSession(snapshot:SessionSnapshot):ActiveSession|null};
  personal:{settle(options:{backupCapture:boolean}):Promise<unknown>;export(options:{flush:boolean;backupCapture?:boolean}):Promise<PersonalData|null>};
  assets:{get(id:string):Promise<Blob|null>;list():Promise<AssetRow[]>};exports:Pick<ExportProcessing,'run'|'check'>;
  persistence:{sourceRevision():string|Promise<string>;snapshotRevision(options:{full:boolean}):Promise<string>;dailyRecordDocuments(dates:readonly string[],options:{requireCanonical:boolean}):Promise<unknown>;storageGeneration():number};

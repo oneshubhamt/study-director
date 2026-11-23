@@ -26,7 +26,7 @@ const createModule=()=>{
     const AppData=freeze({activeSession:activeSessionData,dailyRecords:dailyRecordData,notes:noteData,deletionRecovery:deletionData,mutationEpoch:mutationEpochData,preparationUnits:preparationData,provenance:provenanceData,pendingReviews:pendingReviewData});
     const codecs=exactObject(input.codecs,['activeSession','backup'],'Backup capture codecs');
     if(!Object.isFrozen(codecs.activeSession)||!Object.isFrozen(codecs.backup))throw new TypeError('Backup capture codecs must be frozen.');
-    const session=functions(input.session,['canMutate','cancelLiveDraftSave','captureSnapshot','hasTasks','toActiveSession'],'Backup capture session port');
+    const session=functions(input.session,['canMutate','cancelLiveDraftSave','captureSnapshot','checkpointPendingReview','hasTasks','toActiveSession'],'Backup capture session port');
     const personal=functions(input.personal,['settle','export'],'Backup capture personal-data port');
     const exports=functions(input.exports,['check','run'],'Backup capture export port');
     const persistence=functions(input.persistence,['sourceRevision','snapshotRevision','dailyRecordDocuments','storageGeneration'],'Backup capture persistence port');
@@ -37,7 +37,7 @@ const createModule=()=>{
     const AssetData=input.assets;
     const APP_LIMITS=configuration.limits;
     const ActiveSessionCodec=codecs.activeSession,BackupCodec=codecs.backup;
-    const appCanMutate=session.canMutate,cancelLiveDraftSave=session.cancelLiveDraftSave,captureSessionSnapshot=session.captureSnapshot,activeSessionPayload=session.toActiveSession;
+    const appCanMutate=session.canMutate,cancelLiveDraftSave=session.cancelLiveDraftSave,captureSessionSnapshot=session.captureSnapshot,checkpointPendingReview=session.checkpointPendingReview,activeSessionPayload=session.toActiveSession;
     const TASKS=freeze({get length(){return session.hasTasks()?1:0;}});
     const personalSettle=personal.settle,personalExport=personal.export,Exports=exports;
     const ports=freeze({persistence:freeze({sourceRevision:persistence.sourceRevision,snapshotRevision:persistence.snapshotRevision,storageGeneration:persistence.storageGeneration})});
@@ -56,6 +56,10 @@ async function backupPreparationStep<T>(code:string,stage:string,operation:()=>P
   OperationDiagnostics.mark(`${stage}-start`);
   try{const result=await operation();OperationDiagnostics.mark(`${stage}-complete`);return result;}
   catch(error){throw backupPreparationError(code,stage,'Backup preparation failed.',error);}
+}
+async function settlePendingReviewForBackup(){
+  if(await checkpointPendingReview({backupCapture:true})!==true)throw new Error('The pending Review did not reach canonical storage before backup capture.');
+  return true;
 }
 async function flushCurrentSessionForBackup(){
   let session:ActiveSession|null=null,warning='',canonical=true;
@@ -140,6 +144,7 @@ async function captureLogicalCheckpoint(exportedAt:string=new Date().toISOString
   const ownsControl=appCanMutate(),assumeFlushed=options&&options.assumeFlushed===true;
   // Settle writes before the fence; never retain a payload read during this phase.
   if(ownsControl&&!assumeFlushed){
+    await backupPreparationStep('BACKUP_REVIEW_SETTLE_FAILED','checkpoint-review-settle',settlePendingReviewForBackup);
     try{await AppData.notes.flush({backupCapture:true});}catch(error){AppDiagnostics.capture('backup.notes-flush',error,'warn');}
   }
   let settledSession=null;
@@ -277,6 +282,7 @@ async function beginManagedPreparationCapture(exportedAt=new Date().toISOString(
 }
 async function beginManagedPreparationCaptureAt(exportedAt:string):Promise<ManagedCapture|null>{
   if(!appCanMutate())return null;
+  await backupPreparationStep('BACKUP_REVIEW_SETTLE_FAILED','checkpoint-review-settle',settlePendingReviewForBackup);
   await backupPreparationStep('BACKUP_PLAN_SETTLE_FAILED','checkpoint-plan-settle',()=>personalSettle({backupCapture:true}));
   try{await backupPreparationStep('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle',()=>AppData.notes.flush({strict:true,backupCapture:true}));}catch(error){AppDiagnostics.capture('backup.incremental-notes-flush',error,'warn');throw error;}
   const noteFailure=AppData.notes.failure();if(noteFailure&&noteFailure.failed)throw backupPreparationError('BACKUP_NOTES_SETTLE_FAILED','checkpoint-notes-settle','Notes are not safely settled for repository preparation.');
