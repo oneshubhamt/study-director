@@ -69,7 +69,7 @@ jobs:
             script: tests/browser/attachments/attachment-editor.mjs
             passes: 1
           - id: exports
-            script: tests/browser/exports/exports.mjs
+            script: tests/browser/exports/generated-runtime.mjs
             passes: 1
           - id: insights
             script: tests/browser/insights/insights-populated-ui.mjs

@@ -43,6 +43,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('table-resize-context-coherence','tests/browser/rich-text/table-resize-controls.mjs',['rich-editor','wordgard','table','resize','toolbar','selection','mobile','desktop']),
     test('typography-refinement','tests/browser/rich-text/typography-refinement.mjs',['rich-editor','typography','popover','alignment','image','persistence','desktop']),
     test('workspace-overlay','tests/browser/rich-text/workspace-overlay.mjs',['rich-editor','focus-mode','overlay','pdf']),
+    test('generated-export-runtime','tests/browser/exports/generated-runtime.mjs',['export','worker','generated-runtime']),
     test('runtime-boundary','tests/browser/security/runtime-boundary.mjs',['security','trusted-types','paste','worker','execute','backup-protection','legal-center','export-worker']),
     test('storage-failures','tests/browser/storage/storage-failure-recovery.mjs',['storage','failure-injection','recovery']),
     test('site-data-clear','tests/browser/storage/site-data-clear.mjs',['storage','site-data-clear','recovery','indexeddb','notifications','reload'],0,{alone:'The app gives up opening IndexedDB after two 2.5 s attempts (persistence.js); right after a storage clear that reopen can take longer on a busy CPU.'}),
