@@ -33,6 +33,17 @@ const runtime=module.createRuntime(freeze({
 assert.equal(runtime.registerPlaceholders(),true);
 assert.equal(runtime.registerPlaceholders(),true);
 assert.equal([...tabs.keys()].filter(id=>id==='guide').length,1,'placeholder registration is idempotent');
+const rejectingRuntime=module.createRuntime(freeze({
+  configuration:freeze({
+    capabilities:freeze({pluginApi:1,tabRegistry:1,previewRecords:1}),
+    descriptors:freeze([freeze({tabId:'guide',label:'Guide',icon:'?',src:'guide.js',pluginName:'SD-guide'})])
+  }),
+  environment:freeze({document,trustedAssetURL:value=>value}),
+  tabs:freeze({registerTab:()=>false,renderTab:()=>null}),
+  preview:freeze({registerProvider:()=>true}),
+  clampText:(value,max)=>String(value||'').slice(0,max)
+}));
+assert.equal(rejectingRuntime.registerPlaceholders(),false,'placeholder registration must surface a broken shell to host composition');
 
 activeTab='guide';
 const first=runtime.requestTab('guide'),coalesced=runtime.requestTab('guide');
@@ -126,4 +137,4 @@ assert.throws(()=>{guideStatus.attempts=99;},TypeError);
 assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1,'mutating a returned status row must not corrupt internal plugin state');
 assert.equal(runtime.requestTab('missing'),null);
 
-console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,immutableStatus:true,frozenPublicApi:true}));
+console.log(JSON.stringify({status:'PASS',suite:'public-api-host',placeholderFailureSurfaced:true,coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,immutableStatus:true,frozenPublicApi:true}));
