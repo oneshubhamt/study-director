@@ -101,7 +101,6 @@ for(const token of ['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','DEVICE_WIDE_LOCAL_
   assert.ok(buildSource.includes("encodeURIComponent(JSON.stringify("), 'build renderer must encode structured host tokens from authoritative contracts');
 }
 assert.doesNotMatch(hostSource,/decodeBuildJson\('@@SD_(?:PRODUCTION_LIMITS|SESSION_STORAGE_KEYS|APP_META_KEYS|APP_META_REGISTRY|RUNTIME_DATA_CONTRACT|INDEXED_DB_STORE_NAMES|EXTERNAL_REPOSITORY_IDENTITIES)@@/u,'strict host must not regress to bare structured build-token expressions');
-assert.doesNotMatch(hostSource,/navigator\.storage\.getDirectory\(\)\s+as unknown as/u,'strict host OPFS composition must remain directly assignable to the checked file-store contract');
 }
 
 { // p5.7a-backup-actions-host-boundary

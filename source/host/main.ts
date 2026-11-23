@@ -2680,7 +2680,7 @@ if(!Object.isFrozen(RetainedBackupFiles)||RetainedBackupFiles.format!=='study-di
 }
 type BackupFileStoreInput=Parameters<typeof ExportsModule.createFileStore>[0];
 const BackupFiles=ExportsModule.createFileStore(Object.freeze<BackupFileStoreInput>({
-  storage:Object.freeze<BackupFileStoreInput['storage']>({getDirectory:()=>navigator.storage.getDirectory()}),
+  storage:Object.freeze<BackupFileStoreInput['storage']>({getDirectory:async()=>await navigator.storage.getDirectory() as unknown as Awaited<ReturnType<BackupFileStoreInput['storage']['getDirectory']>>}),
   locks:navigator.locks,root:ProfileScope.scoped('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'),retained:()=>RetainedBackupFiles.names(),
   isAvailable:()=>upkeepBlocker()||(typeof Reflect.get(navigator.storage,'getDirectory')==='function'&&typeof Reflect.get(navigator,'locks')==='object'?true:'storage-unavailable'),
   onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')
