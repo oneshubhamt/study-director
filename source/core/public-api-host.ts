@@ -218,7 +218,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     });
     const installation=freeze({status:apiInput.installation.status,prompt:apiInput.installation.promptInstall,inspect:apiInput.installation.inspectInstallation,showHelp:apiInput.installation.revealInstallHelp});
     const appearance=freeze({
-      theme:freeze({...apiInput.appearance.theme}),
+      theme:freeze({...apiInput.appearance.theme,supported:freeze([...apiInput.appearance.theme.supported])}),
       presentation:freeze({
         defaultId:apiInput.appearance.presentation.defaultId,
         get supported(){return apiInput.appearance.presentation.list();},

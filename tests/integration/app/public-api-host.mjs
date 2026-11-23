@@ -88,7 +88,7 @@ const rendersBeforeLateFailure=renders;activeTab='plan';scripts[0].onerror?.call
 assert.equal(await first,false);assert.equal(renders,rendersBeforeLateFailure,'late failure must not render an inactive optional tab');
 assert.equal(runtime.status().optionalFiles[0].state,'missing');
 
-const noop=()=>true;
+const noop=()=>true,mutableThemeMetadata=[];
 const publicApiInput=freeze({
   version:'SDVQ1',
   data:freeze({contract:freeze({}),deviceState:freeze({readInsightsWindow:()=>'',writeInsightsWindow:noop})}),
@@ -104,7 +104,7 @@ const publicApiInput=freeze({
   }),
   installation:freeze({status:()=>freeze({}),promptInstall:noop,inspectInstallation:noop,revealInstallHelp:noop}),
   appearance:freeze({
-    theme:freeze({defaultId:'dark',supported:freeze([]),get:()=> 'dark',set:()=> 'dark'}),
+    theme:freeze({defaultId:'dark',supported:mutableThemeMetadata,get:()=> 'dark',set:()=> 'dark'}),
     presentation:freeze({defaultId:'glass',invariants:freeze({}),breakpoints:freeze({}),tokens:freeze({contractVersion:1,public:freeze({}),internal:freeze({})}),manifest:freeze({}),list:()=>freeze([]),register:noop,get:()=> 'glass',set:()=> 'glass'})
   }),
   ui:freeze({
@@ -113,7 +113,8 @@ const publicApiInput=freeze({
   })
 });
 const publicApi=runtime.createPublicApi(publicApiInput);
-assert.ok(Object.isFrozen(publicApi)&&Object.isFrozen(publicApi.backup)&&Object.isFrozen(publicApi.installation)&&Object.isFrozen(publicApi.appearance)&&Object.isFrozen(publicApi.ui),'public API and nested capability groups must be frozen');
+assert.ok(Object.isFrozen(publicApi)&&Object.isFrozen(publicApi.backup)&&Object.isFrozen(publicApi.installation)&&Object.isFrozen(publicApi.appearance)&&Object.isFrozen(publicApi.appearance.theme)&&Object.isFrozen(publicApi.appearance.theme.supported)&&Object.isFrozen(publicApi.ui),'public API and nested capability groups must be frozen');
+assert.equal(Object.isFrozen(mutableThemeMetadata),false,'public API construction must not freeze the host input array in place');assert.notEqual(publicApi.appearance.theme.supported,mutableThemeMetadata,'public API must publish its own frozen theme-metadata collection');
 const budgetScripts=[];
 const budgetRuntime=failureRuntimeWith({
   document:{...document,head:{appendChild(node){budgetScripts.push(node);return node;}}},trustedAssetURL:value=>value
@@ -188,4 +189,4 @@ assert.throws(()=>{guideStatus.attempts=99;},TypeError);
 assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1,'mutating a returned status row must not corrupt internal plugin state');
 assert.equal(runtime.requestTab('missing'),null);
 
-console.log(JSON.stringify({status:'PASS',suite:'public-api-host',placeholderFailureSurfaced:true,coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,registrationBudgetRetryFence:true,immutableStatus:true,frozenPublicApi:true}));
+console.log(JSON.stringify({status:'PASS',suite:'public-api-host',placeholderFailureSurfaced:true,coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,registrationBudgetRetryFence:true,frozenThemeMetadata:true,immutableStatus:true,frozenPublicApi:true}));
