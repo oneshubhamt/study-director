@@ -101,7 +101,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     }
     return complete;
   }
-  type NormalizedPluginDescriptor=Readonly<{name:string;version:string;requires:Readonly<Record<string,number>>;previewProviders:Readonly<Record<string,InsightsPreviewProvider>>;setup:StudyDirectorPluginDescriptor['setup']}>;
+  type NormalizedPluginDescriptor=Readonly<{source:Record<string,unknown>;name:string;version:string;requires:Readonly<Record<string,number>>;previewProviders:Readonly<Record<string,InsightsPreviewProvider>>;setup:StudyDirectorPluginDescriptor['setup']}>;
   const isPluginSetup=(value:unknown):value is StudyDirectorPluginDescriptor['setup']=>typeof value==='function';
   const isPreviewProvider=(value:unknown):value is InsightsPreviewProvider=>typeof value==='function';
   function normalizePluginDescriptor(value:unknown):NormalizedPluginDescriptor|null{
@@ -118,7 +118,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
       if(!isRecord(value['previewProviders']))return null;
       for(const [target,provider] of Object.entries(value['previewProviders'])){if(!target||!isPreviewProvider(provider))return null;previewProviders[target]=provider;}
     }
-    return freeze({name,version,requires:freeze(requirements),previewProviders:freeze(previewProviders),setup:value['setup']});
+    return freeze({source:value,name,version,requires:freeze(requirements),previewProviders:freeze(previewProviders),setup:value['setup']});
   }
   function unmetCapabilities(requirements:Readonly<Record<string,number>>):Array<[string,number]>{
     return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<minimum);
@@ -143,7 +143,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
       if(descriptor){markFile(descriptor.tabId,'incompatible',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
     try{
-      const ok=plugin.setup(publicApi)!==false,detail=ok?'':'Plugin setup did not activate.';
+      const ok=Reflect.apply(plugin.setup,plugin.source,[publicApi])!==false,detail=ok?'':'Plugin setup did not activate.';
       if(ok)for(const [target,provider] of Object.entries(plugin.previewProviders))input.preview.registerProvider(target,provider);
       registered.set(name,{name,version:plugin.version,state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return ok;
