@@ -313,23 +313,26 @@ function createLifecycle(ports:LifecycleInput){
   const fail=(error:unknown)=>{ports.reportError(error);return false;};
   async function switchProfile(event:unknown){
     try{
+      if(!ports.appCanMutate())return false;
       const target=event&&typeof event==='object'&&'target' in event?(event as {target?:unknown}).target:null;
       const element=target instanceof Element?target.closest<HTMLElement>('[data-profile]'):null;
       const id=String(element?.dataset['profile']||'');if(!id)return false;
-      if(await ports.settleCurrentProfile()!==true)return false;
+      if(await ports.settleCurrentProfile()!==true||!ports.appCanMutate())return false;
       return ports.profiles.switchTo(id);
     }catch(error){return fail(error);}
   }
   async function addProfile(){
     try{
-      if(await ports.settleCurrentProfile()!==true)return false;
+      if(!ports.appCanMutate()||await ports.settleCurrentProfile()!==true||!ports.appCanMutate())return false;
       return ports.profiles.add();
     }catch(error){return fail(error);}
   }
   async function startProfile(){
     const name=ports.getStudentName(),named=!ports.isDefaultStudentName(name);let mine=ports.profiles.current();
-    if(!mine)mine=ports.profiles.ensure(named?name:'',{fresh:!named&&await ports.canonicalLocalRecoveryEmpty()===true});
-    else if(named)ports.profiles.rename(name);
+    if(ports.appCanMutate()){
+      if(!mine)mine=ports.profiles.ensure(named?name:'',{fresh:!named&&await ports.canonicalLocalRecoveryEmpty()===true});
+      else if(named)ports.profiles.rename(name);
+    }
     ports.renderProfile();if(mine?.fresh&&ports.appCanMutate())ports.firstStart.open();
   }
   function askProfilePassword(){

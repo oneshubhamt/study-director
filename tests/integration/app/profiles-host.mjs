@@ -14,16 +14,16 @@ try{
   const Host=registry.require('profiles-host',1);
   const freeze=Object.freeze;
   const profile={id:'prof_profile_mve00000_00000001',scope:'',name:'QA',email:'',folder:'',createdAt:'2026-11-10T00:00:00.000Z',fresh:false,from:null};
-  let switchCalls=0,addCalls=0,settleCalls=0,reportedErrors=0,throwSwitch=false,throwAdd=false,releaseSettle,settleValue=true;
+  let switchCalls=0,addCalls=0,ensureCalls=0,renameCalls=0,settleCalls=0,reportedErrors=0,throwSwitch=false,throwAdd=false,releaseSettle,settleValue=true,lifecycleAuthority=true;
   let settleGate=Promise.resolve();
   const profiles=freeze({
-    current:()=>profile,list:()=>[profile],ensure:()=>profile,rename:()=>profile,setAccount:()=>profile,adopt:()=>true,renew:()=>profile,finishFirstStart:()=>profile,
+    current:()=>profile,list:()=>[profile],ensure:()=>{ensureCalls++;return profile;},rename:()=>{renameCalls++;return profile;},setAccount:()=>profile,adopt:()=>true,renew:()=>profile,finishFirstStart:()=>profile,
     add:()=>{if(throwAdd)throw new Error('add failed');addCalls++;return true;},switchTo:()=>{if(throwSwitch)throw new Error('switch failed');switchCalls++;return true;},remove:()=>true,collect:async()=>({removed:false,error:null}),watch:()=>()=>{},removalPending:()=>0,unsupported:()=>false
   });
   const lifecycle=Host.createLifecycle(freeze({
     profiles,firstStart:freeze({open:()=>true,close:()=>{},render:()=>{},connect:async()=>true,finish:async()=>true,skip:()=>true,confirmField:()=>{},key:()=>true,joined:()=>{},isOpen:()=>false}),
     settleCurrentProfile:async()=>{settleCalls++;await settleGate;return settleValue;},
-    getStudentName:()=>profile.name,isDefaultStudentName:()=>false,canonicalLocalRecoveryEmpty:async()=>false,renderProfile:()=>true,appCanMutate:()=>true,reportError:()=>{reportedErrors++;},
+    getStudentName:()=>profile.name,isDefaultStudentName:()=>false,canonicalLocalRecoveryEmpty:async()=>false,renderProfile:()=>true,appCanMutate:()=>lifecycleAuthority,reportError:()=>{reportedErrors++;},
     backupProtection:freeze({ask:async()=>true}),setBackupProtectionSurfaceError:()=>{}
   }));
   settleGate=new Promise(resolve=>{releaseSettle=resolve;});
@@ -39,6 +39,16 @@ try{
   throwAdd=true;assert.equal(await lifecycle.addProfile(),false);throwAdd=false;
   assert.equal(reportedErrors,2,'delegated profile actions contain registry failures instead of leaking rejected promises');
   assert.equal(settleCalls,5);
+
+  lifecycleAuthority=false;
+  const settledBefore=settleCalls,switchBefore=switchCalls,addBefore=addCalls,renameBefore=renameCalls;
+  assert.equal(await lifecycle.switchProfile({target:new FakeElement('prof_other_mve00000_00000002')}),false);
+  assert.equal(await lifecycle.addProfile(),false);
+  await lifecycle.startProfile();
+  assert.equal(settleCalls,settledBefore,'secondary profile actions stop before current-profile settlement work');
+  assert.equal(switchCalls,switchBefore);assert.equal(addCalls,addBefore);assert.equal(renameCalls,renameBefore,'secondary startup cannot rename the device profile registry');
+  assert.equal(ensureCalls,0);
+  lifecycleAuthority=true;
 
   // First Start must re-check authority after asynchronous password setup.
   {
