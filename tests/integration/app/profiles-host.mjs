@@ -20,6 +20,30 @@ try{
     current:()=>profile,list:()=>[profile],ensure:()=>{ensureCalls++;return profile;},rename:()=>{renameCalls++;return profile;},setAccount:()=>profile,adopt:()=>true,renew:()=>profile,finishFirstStart:()=>profile,
     add:()=>{if(throwAdd)throw new Error('add failed');addCalls++;return true;},switchTo:()=>{if(throwSwitch)throw new Error('switch failed');switchCalls++;return true;},remove:()=>true,collect:async()=>({removed:false,error:null}),watch:()=>()=>{},removalPending:()=>0,unsupported:()=>false
   });
+  // Profile rename can finish on blur/dialog close after the initiating click.
+  // The checked owner must refuse an unsaved UI rename if ownership changed.
+  {
+    const priorInput=globalThis.HTMLInputElement;
+    class RenameInput{constructor(value=''){this.value=value;this.hidden=false;}focus(){}select(){}blur(){}}
+    globalThis.HTMLInputElement=RenameInput;
+    try{
+      const field=new RenameInput('Changed'),button={hidden:false,focus(){}};
+      let authority=false,applied=0,persisted=0,rendered=0;
+      const panel=Host.createPanelActions(freeze({
+        document:{getElementById:id=>id==='profile-name-input'?field:id==='profile-name-button'?button:null,querySelector:()=>null},
+        getStudentName:()=>profile.name,normalizeStudentName:value=>String(value||'').trim(),applyStudentName:value=>{applied++;return value;},
+        persistUserDefaultName:()=>{persisted++;return true;},renderPanel:()=>{rendered++;},reportError:()=>{},appCanMutate:()=>authority,
+        recent:freeze({opened:()=>{},closed:()=>{}})
+      }));
+      assert.equal(panel.saveName(),false,'rename completion after ownership loss must be refused inside the checked owner');
+      assert.equal(field.value,profile.name);assert.equal(applied,0);assert.equal(persisted,0);assert.equal(rendered,1);
+      assert.equal(panel.startRename(),false,'a secondary tab cannot open a local rename edit through the checked owner');
+      authority=true;field.value='Changed';assert.equal(panel.saveName(),true);assert.equal(applied,1);assert.equal(persisted,1);
+    }finally{
+      if(priorInput===undefined)delete globalThis.HTMLInputElement;else globalThis.HTMLInputElement=priorInput;
+    }
+  }
+
   const lifecycle=Host.createLifecycle(freeze({
     profiles,firstStart:freeze({open:()=>true,close:()=>{},render:()=>{},connect:async()=>true,finish:async()=>true,skip:()=>true,confirmField:()=>{},key:()=>true,joined:()=>{},isOpen:()=>false}),
     settleCurrentProfile:async()=>{settleCalls++;await settleGate;return settleValue;},

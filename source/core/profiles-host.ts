@@ -5,7 +5,7 @@ interface ProfilesControllerHostInput{readonly module:ProfilesModulePort;readonl
 interface PanelActionsInput{
   readonly document:Document;
   getStudentName():string;normalizeStudentName(value:unknown):string;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;
-  renderPanel():unknown;reportError(error:unknown):unknown;
+  renderPanel():unknown;reportError(error:unknown):unknown;appCanMutate():boolean;
   readonly recent:Readonly<{opened():unknown;closed():unknown}>;
 }
 interface FirstStartInput{
@@ -200,7 +200,9 @@ function createPanelActions(ports:PanelActionsInput){
   const input=()=>document.getElementById('profile-name-input') as HTMLInputElement|null;
   function saveName(){
     const field=input();if(!field)return false;
-    const before=ports.getStudentName(),raw=String(field.value||'').trim();if(!raw){field.value=before;return false;}
+    const before=ports.getStudentName();
+    if(!ports.appCanMutate()){field.value=before;ports.renderPanel();return false;}
+    const raw=String(field.value||'').trim();if(!raw){field.value=before;return false;}
     if(ports.normalizeStudentName(raw)===before)return true;
     try{
       const clean=ports.applyStudentName(raw);field.value=clean;ports.persistUserDefaultName(clean);return true;
@@ -210,7 +212,7 @@ function createPanelActions(ports:PanelActionsInput){
   }
   function startRename(){
     const button=document.getElementById('profile-name-button') as HTMLButtonElement|null,field=input();
-    if(!button||!field)return false;
+    if(!button||!field||!ports.appCanMutate())return false;
     field.value=ports.getStudentName();button.hidden=true;field.hidden=false;field.focus();field.select();return true;
   }
   function finishRename(){

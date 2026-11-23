@@ -1651,6 +1651,7 @@ const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze<Pa
   persistUserDefaultName,
   renderPanel:()=>renderProfilePanel(),
   reportError:error=>reportProfileActionError(error),
+  appCanMutate:()=>appCanMutate(),
   recent:NotificationRecent
 }));
 function openProfilePanel(){return ProfilePanelActions.open();}
