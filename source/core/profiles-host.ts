@@ -13,7 +13,7 @@ interface FirstStartInput{
   readonly backupProtection:Readonly<{enable(password:string):PromiseLike<unknown>}>;
   readonly provider:Readonly<{locationStatus(id:'google-drive'):Readonly<{connected?:boolean;engineBusy?:boolean}>|null}>;
   connectDriveForProfile():boolean|PromiseLike<boolean>;
-  getStudentName():string;isDefaultStudentName(value:string):boolean;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;renderProfile():unknown;reportError(error:unknown):unknown;
+  getStudentName():string;isDefaultStudentName(value:string):boolean;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;renderProfile():unknown;reportError(error:unknown):unknown;appCanMutate():boolean;
 }
 interface FirstStartController{
   open():boolean;close():void;render():void;connect():Promise<boolean>;finish():Promise<boolean>;skip():boolean;confirmField():void;key(event:KeyboardEvent):boolean;joined():void;isOpen():boolean;
@@ -280,21 +280,27 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
   function fail(error:unknown){
     ports.reportError(error);showError('This profile could not be updated safely. Retry after storage recovers.');return false;
   }
+  function requireMutationAuthority(){
+    if(ports.appCanMutate())return true;
+    showError('Another tab has control. Take control here before changing this profile.');
+    return false;
+  }
   async function connect(){
     try{
-      showError('');if(!await applyPassword())return false;
+      showError('');if(!requireMutationAuthority()||!await applyPassword()||!requireMutationAuthority())return false;
       const raw=String(field('first-start-name')?.value||'').trim();if(raw)profiles.rename(raw);
       const ok=await ports.connectDriveForProfile();render();return ok;
     }catch(error){return fail(error);}
   }
   async function finish(){
     try{
-      showError('');if(!await applyPassword())return false;
+      showError('');if(!requireMutationAuthority()||!await applyPassword()||!requireMutationAuthority())return false;
       applyName();profiles.finishFirstStart();close();ports.renderProfile();return true;
     }catch(error){return fail(error);}
   }
   function skip(){
     try{
+      if(!requireMutationAuthority())return false;
       const mine=profiles.current();if(mine&&mine.from!==null)return profiles.remove();
       profiles.finishFirstStart();close();ports.renderProfile();return true;
     }catch(error){return fail(error);}

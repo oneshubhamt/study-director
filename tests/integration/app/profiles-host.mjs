@@ -40,6 +40,39 @@ try{
   assert.equal(reportedErrors,2,'delegated profile actions contain registry failures instead of leaking rejected promises');
   assert.equal(settleCalls,5);
 
+  // First Start must re-check authority after asynchronous password setup.
+  {
+    const priorInput=globalThis.HTMLInputElement,priorDialog=globalThis.HTMLDialogElement;
+    class FakeInput{constructor(value=''){this.value=value;this.hidden=false;}focus(){}}
+    class FakeDialog{constructor(){this.open=true;}close(){this.open=false;}}
+    globalThis.HTMLInputElement=FakeInput;globalThis.HTMLDialogElement=FakeDialog;
+    try{
+      const nodes=new Map([
+        ['first-start-name',new FakeInput('Asha')],
+        ['first-start-password',new FakeInput('long-enough-password')],
+        ['first-start-confirm',new FakeInput('long-enough-password')],
+        ['first-start-error',{textContent:'',hidden:true}],
+        ['first-start-dialog',new FakeDialog()]
+      ]);
+      let authority=true,releasePassword,finishCalls=0,applyCalls=0;
+      const passwordGate=new Promise(resolve=>{releasePassword=resolve;});
+      const firstStart=Host.createFirstStart(freeze({
+        document:{getElementById:id=>nodes.get(id)||null},profiles:freeze({...profiles,finishFirstStart:()=>{finishCalls++;return profile;}}),
+        backupProtection:freeze({enable:async()=>{await passwordGate;return true;}}),provider:freeze({locationStatus:()=>null}),connectDriveForProfile:async()=>true,
+        getStudentName:()=>profile.name,isDefaultStudentName:()=>false,applyStudentName:value=>{applyCalls++;return value;},persistUserDefaultName:()=>true,renderProfile:()=>true,reportError:()=>{reportedErrors++;},
+        appCanMutate:()=>authority
+      }));
+      const finishing=firstStart.finish();await Promise.resolve();authority=false;releasePassword();
+      assert.equal(await finishing,false,'First Start cannot resume profile mutation after ownership is lost across an async password step');
+      assert.equal(finishCalls,0);assert.equal(applyCalls,0);
+      assert.match(nodes.get('first-start-error').textContent,/Another tab has control/);
+      assert.equal(firstStart.skip(),false,'First Start skip is also authority-fenced inside its checked owner');
+    }finally{
+      if(priorInput===undefined)delete globalThis.HTMLInputElement;else globalThis.HTMLInputElement=priorInput;
+      if(priorDialog===undefined)delete globalThis.HTMLDialogElement;else globalThis.HTMLDialogElement=priorDialog;
+    }
+  }
+
   let holdReleased=0,holdSettled=false,releaseHold;
   const holdGate=new Promise(resolve=>{releaseHold=()=>{holdSettled=true;resolve();};});
   let backupDeletes=0,removes=0,captures=0,notices=0;

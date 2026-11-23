@@ -1752,7 +1752,8 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<FirstStartInp
   applyStudentName,
   persistUserDefaultName,
   renderProfile:()=>renderProfile(),
-  reportError:error=>reportProfileActionError(error)
+  reportError:error=>reportProfileActionError(error),
+  appCanMutate:()=>appCanMutate()
 }));
 
 // A deliberate profile reload must not outrun writes owned by the current
