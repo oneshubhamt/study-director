@@ -3769,7 +3769,7 @@ const KEYDOWN_ACTIONS:DelegatedHostInput['KEYDOWN_ACTIONS']=Object.freeze({
 const OWNER_REQUIRED_CLICK_ACTIONS=new Set([
   'toggle-pause','practice-mode','practice-total-toggle','practice-cue-toggle','practice-start','practice-next','practice-undo','practice-reset','practice-reset-confirm','practice-delete-run','practice-toggle','practice-finish','mark-done','skip-task',
   'jump-scheduled-now','start-scheduled-full','start-remaining-window','shift-remaining-day',
-  'generate-carry-forward','close-unfinished-note','save-day','clear-library','pick-import-file','backup-protection','remove-managed-version','review-kept-versions','rename-profile',
+  'generate-carry-forward','close-unfinished-note','save-day','clear-library','pick-import-file','backup-protection','remove-managed-version','review-kept-versions','rename-profile','recheck-device-integrity','recheck-drive-integrity',
   'toggle-pomodoro','toggle-system-alerts','restore-session','suspend-session','finish-session','reset-session','edit-plan','confirm-plan-edit','cancel-plan-edit',
   'load-default','apply-schedule','clear-schedule-draft','take-pomodoro-break',
   'gap-focus','gap-break','gap-split','gap-ignore','gap-apply','profile-drive','switch-profile','add-profile','delete-profile','first-start-drive','first-start-continue','first-start-skip',
