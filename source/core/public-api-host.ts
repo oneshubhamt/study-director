@@ -145,17 +145,17 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     const nextAttempt=attempts+1,unmet=unmetCapabilities(plugin.requires);
     if(unmet.length){
       const detail='Missing capabilities: '+unmet.map(([key,minimum])=>`${key}>=${minimum}`).join(', ');
-      registered.set(name,{name,version:plugin.version,state:'incompatible',attempts:nextAttempt,detail:input.clampText(detail,160),updatedAt:nowStamp()});
+      registered.set(name,freeze({name,version:plugin.version,state:'incompatible',attempts:nextAttempt,detail:input.clampText(detail,160),updatedAt:nowStamp()}));
       if(descriptor){markFile(descriptor.tabId,'incompatible',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
     try{
       const ok=Reflect.apply(plugin.setup,plugin.source,[publicApi])!==false,detail=ok?'':'Plugin setup did not activate.';
       if(ok)for(const [target,provider] of Object.entries(plugin.previewProviders))input.preview.registerProvider(target,provider);
-      registered.set(name,{name,version:plugin.version,state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
+      registered.set(name,freeze({name,version:plugin.version,state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()}));
       if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return ok;
     }catch(error){
       const detail=input.clampText(isRecord(error)&&typeof error['message']==='string'&&error['message']||String(error),160);
-      registered.set(name,{name,version:plugin.version,state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()});
+      registered.set(name,freeze({name,version:plugin.version,state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()}));
       if(descriptor){markFile(descriptor.tabId,'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
   }
@@ -182,7 +182,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     if(retry&&canRetry(record))return startLoad(descriptor);
     return Promise.resolve(false);
   }
-  function status():PluginRuntimeStatus{return {optionalFiles:descriptors.map(descriptor=>fileState(descriptor.tabId)).filter((row):row is PluginFileStatus=>row!==null),registered:[...registered.values()]};}
+  function status():PluginRuntimeStatus{return freeze({optionalFiles:freeze(descriptors.map(descriptor=>fileState(descriptor.tabId)).filter((row):row is PluginFileStatus=>row!==null)),registered:freeze([...registered.values()])});}
 
   function createPublicApi(apiInput:Readonly<PublicApiInput>):StudyDirectorPublicApi{
     if(publicApi)return publicApi;
