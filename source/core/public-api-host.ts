@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule as PublicApiHostContract,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
+import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule as PublicApiHostContract,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPluginDescriptor,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
 import type {InsightsPreviewProvider} from './insights-host.ts';
 const sdPublicApiHostFactory=(()=>{
 'use strict';
@@ -101,13 +101,31 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     }
     return complete;
   }
-  function unmetCapabilities(requirements:unknown):Array<[string,unknown]>{
-    if(!isRecord(requirements))return [];
-    return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<Math.max(0,Number(minimum)||0));
+  type NormalizedPluginDescriptor=Readonly<{name:string;version:string;requires:Readonly<Record<string,number>>;previewProviders:Readonly<Record<string,InsightsPreviewProvider>>;setup:StudyDirectorPluginDescriptor['setup']}>;
+  const isPluginSetup=(value:unknown):value is StudyDirectorPluginDescriptor['setup']=>typeof value==='function';
+  const isPreviewProvider=(value:unknown):value is InsightsPreviewProvider=>typeof value==='function';
+  function normalizePluginDescriptor(value:unknown):NormalizedPluginDescriptor|null{
+    if(!isRecord(value)||!isPluginSetup(value['setup'])||typeof value['name']!=='string')return null;
+    const name=input.clampText(value['name'],80).trim();if(!name)return null;
+    let version='';if(value['version']!==undefined){if(typeof value['version']!=='string')return null;version=input.clampText(value['version'],40);}
+    const requirements:Record<string,number>={};
+    if(value['requires']!==undefined){
+      if(!isRecord(value['requires']))return null;
+      for(const [key,minimum] of Object.entries(value['requires'])){if(!key||typeof minimum!=='number'||!Number.isFinite(minimum)||minimum<0)return null;requirements[key]=minimum;}
+    }
+    const previewProviders:Record<string,InsightsPreviewProvider>={};
+    if(value['previewProviders']!==undefined){
+      if(!isRecord(value['previewProviders']))return null;
+      for(const [target,provider] of Object.entries(value['previewProviders'])){if(!target||!isPreviewProvider(provider))return null;previewProviders[target]=provider;}
+    }
+    return freeze({name,version,requires:freeze(requirements),previewProviders:freeze(previewProviders),setup:value['setup']});
+  }
+  function unmetCapabilities(requirements:Readonly<Record<string,number>>):Array<[string,number]>{
+    return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<minimum);
   }
   function register(value:unknown){
-    if(!isRecord(value)||typeof value['setup']!=='function'||!publicApi)return false;
-    const name=input.clampText(value['name']||'anonymous-plugin',80),descriptor=descriptorsByPlugin.get(name)||null,previous=registered.get(name);
+    const plugin=normalizePluginDescriptor(value);if(!plugin||!publicApi)return false;
+    const {name}=plugin,descriptor=descriptorsByPlugin.get(name)||null,previous=registered.get(name);
     if(previous?.state==='registered'){
       if(descriptor){markFile(descriptor.tabId,'registered','',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return true;
     }
@@ -118,20 +136,20 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     if(attempts>=MAX_REGISTRATION_ATTEMPTS){
       if(descriptor){markFile(descriptor.tabId,'failed','Registration attempt limit reached.',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
-    const nextAttempt=attempts+1,unmet=unmetCapabilities(value['requires']);
+    const nextAttempt=attempts+1,unmet=unmetCapabilities(plugin.requires);
     if(unmet.length){
-      const detail='Missing capabilities: '+unmet.map(([key,minimum])=>`${key}>=${Math.max(0,Number(minimum)||0)}`).join(', ');
-      registered.set(name,{name,version:input.clampText(value['version']||'',40),state:'incompatible',attempts:nextAttempt,detail:input.clampText(detail,160),updatedAt:nowStamp()});
+      const detail='Missing capabilities: '+unmet.map(([key,minimum])=>`${key}>=${minimum}`).join(', ');
+      registered.set(name,{name,version:plugin.version,state:'incompatible',attempts:nextAttempt,detail:input.clampText(detail,160),updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,'incompatible',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
     try{
-      const ok=(value['setup'] as (api:StudyDirectorPublicApi)=>unknown)(publicApi)!==false,detail=ok?'':'Plugin setup did not activate.';
-      if(ok&&isRecord(value['previewProviders']))for(const [target,provider] of Object.entries(value['previewProviders']))if(typeof provider==='function')input.preview.registerProvider(target,provider as InsightsPreviewProvider);
-      registered.set(name,{name,version:input.clampText(value['version']||'',40),state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
+      const ok=plugin.setup(publicApi)!==false,detail=ok?'':'Plugin setup did not activate.';
+      if(ok)for(const [target,provider] of Object.entries(plugin.previewProviders))input.preview.registerProvider(target,provider);
+      registered.set(name,{name,version:plugin.version,state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return ok;
     }catch(error){
       const detail=input.clampText(isRecord(error)&&typeof error['message']==='string'&&error['message']||String(error),160);
-      registered.set(name,{name,version:input.clampText(value['version']||'',40),state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()});
+      registered.set(name,{name,version:plugin.version,state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
   }
