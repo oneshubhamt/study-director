@@ -22,7 +22,7 @@ function makeHarness(options={}){
   let lifecycleStatus={...baseStatus(),...(options.lifecycle||{})},backupBusy=!!options.backupBusy,providerBusy=!!options.providerBusy;
   let timerLive=!!options.timerLive,timerPaused=!!options.timerPaused,pacerRunning=!!options.pacerRunning,tasks=options.tasks??[];
   let mutation={active:'',foreign:false,recoveryFault:'',...(options.mutation||{})},session={ready:true,transitioning:false,revision:1,...(options.session||{})};
-  const calls={pause:0,pacer:0,backup:0,backupMessage:'',apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,project:0,foreground:0,captures:[],localWrites:0};
+  const calls={pause:0,pacer:0,backup:0,backupMessage:'',apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,yieldFollower:0,project:0,foreground:0,captures:[],localWrites:0};
   const elements=new Map([['pwa-update-control',node()],['pwa-update-apply',node('button')],['pwa-update-message',node()]]);
   const listeners={document:new Map(),window:new Map()};
   const document={
@@ -55,6 +55,7 @@ function makeHarness(options={}){
     suspendProvider:()=>({settled:Promise.resolve(),release:()=>{calls.providerRelease++;}}),
     settleRichTextAssets:async()=>{},settleMaintenance:async()=>{},settleAttachmentIntegrity:async()=>{},
     quiesceRichText:async run=>run(),runExclusive:async(_name,run)=>run({assert(){}}),runManagedRecovery:async run=>run(),
+    yieldFollowerOwnership:()=>{calls.yieldFollower++;if(ownership.state==='primary')ownership={...ownership,state:'secondary',revision:ownership.revision+1};return true;},
     projectOwnership:()=>{calls.project++;},foregroundChanged:()=>{calls.foreground++;}
   });
   const persistence=Object.freeze({
@@ -167,7 +168,7 @@ function makeHarness(options={}){
   await guard.ready;
   assert.equal(guard.validate(),true,'captured follower role must survive a secondary-to-primary handoff before reservation');
   const prepared=await t.controller.prepare({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,follower:true,signal:abort.signal});
-  assert.equal(prepared.ok,true);assert.equal(t.calls.settleMutation,0,'captured follower handoff must remain read-only');
+  assert.equal(prepared.ok,true);assert.equal(t.calls.settleMutation,0,'captured follower handoff must remain read-only');assert.equal(t.calls.yieldFollower,1,'a follower that transiently acquired the lease must relinquish it before reload');assert.equal(guard.validate(),true,'follower guard must remain valid after deliberate lease relinquishment');
   await guard.release();
 }
 
@@ -187,6 +188,19 @@ function makeHarness(options={}){
 {
   const ok=makeHarness({checkResult:true});assert.equal(await ok.controller.checkIfDue({force:true}),true);assert.equal(ok.calls.check,1);assert.equal(ok.calls.localWrites,1);
   const failed=makeHarness({checkResult:false});assert.equal(await failed.controller.checkIfDue({force:true}),false);assert.equal(failed.calls.check,1);assert.equal(failed.calls.localWrites,0);assert.equal(failed.controller.diagnostics().failureCount,1);
+}
+
+
+// An external controller handoff stays automatic across ownership takeover:
+// recent edits defer it, then the stable follower path may proceed even if this
+// tab transiently became primary after the initiating tab reloaded.
+{
+  const t=makeHarness({lifecycle:{externalUpdate:true,bootState:'mismatch'}});
+  const input=t.listeners.document.get('input');assert.equal(typeof input,'function');
+  input({target:{isContentEditable:false,matches:()=>true}});
+  assert.equal(await t.controller.evaluateAutomatic(),false);assert.equal(t.calls.apply,0,'recent edits must defer an external handoff');
+  t.setNow(101801);
+  assert.equal(await t.controller.evaluateAutomatic(),true);assert.equal(t.calls.apply,1,'the external handoff must retry as a follower after edit-idle even with primary ownership');
 }
 
 // Automatic discovery yields to provider work before and after lock acquisition; force remains user-driven.

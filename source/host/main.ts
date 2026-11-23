@@ -3465,6 +3465,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<PwaRuntimeIn
     settleMutation:()=>requireMutationCoordinator().settled(),suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
     settleAttachmentIntegrity:()=>AttachmentIntegrityJob?AttachmentIntegrityJob.settled():Promise.resolve(),quiesceRichText:run=>RichTextRuntime.quiesce(run),
     runExclusive:(name,run)=>requireMutationCoordinator().runExclusive(name,authority=>run({assert:()=>{authority.assert();}})),runManagedRecovery:run=>ManagedRecoveryQuiescence.run(run),
+    yieldFollowerOwnership:()=>{const owner=AppOwnership.status();if(owner.state===OWNERSHIP_STATES.SECONDARY)return true;if(owner.state!==OWNERSHIP_STATES.PRIMARY)return false;AppOwnership.transitionReleasing();AppOwnership.release();AppOwnership.setPrimary(false);return true;},
     projectOwnership:()=>OwnershipUiProjection.apply(),foregroundChanged:()=>foregroundChanged()
   }),
   persistence:Object.freeze<PwaRuntimeInput['persistence']>({

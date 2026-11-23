@@ -23,7 +23,7 @@ interface UpdateStatePorts{
 interface ReservationPorts{
  settleMutation():PromiseLike<unknown>;suspendProvider():ProviderHold;settleRichTextAssets():PromiseLike<unknown>;settleMaintenance():PromiseLike<unknown>;settleAttachmentIntegrity():PromiseLike<unknown>;
  quiesceRichText<T>(run:()=>Promise<T>):Promise<T>;runExclusive<T>(name:string,run:(authority:UpdateAuthority)=>Promise<T>):Promise<T>;
- runManagedRecovery<T>(run:()=>Promise<T>):Promise<T>;projectOwnership():void;foregroundChanged():void;
+ runManagedRecovery<T>(run:()=>Promise<T>):Promise<T>;yieldFollowerOwnership():boolean;projectOwnership():void;foregroundChanged():void;
 }
 interface PersistencePorts{
  settleDiary():PromiseLike<boolean>;flushPlanDraft():PromiseLike<boolean>;planAuthoredText():string|null;planReadDraft():string|null;
@@ -61,7 +61,7 @@ const sdPwaUpdateHostFactory=(()=>{
    if(!input||!Object.isFrozen(input))throw new TypeError('PWA update host input must be frozen.');
    exactObject(input,['configuration','effects','environment','lifecycle','persistence','reservation','state'],'PWA update host input');
    functions(input.state,['startupReady','ownership','sessionLifecycle','mutation','reviewSave','imagePreparationCount','attachmentLibraryBusy','attachmentIngestBusy','exportsBusy','backupBusy','providerBusy','providerBackgroundBackupActive','providerDriveBackingUp','liveTimer','timerPaused','timerMode','pacerRunning','canMutate','blockingUiOpen','workRevision','tasks','isTrackableTask','isTaskResolved','currentTaskIndex'],'PWA update state ports');
-   functions(input.reservation,['settleMutation','suspendProvider','settleRichTextAssets','settleMaintenance','settleAttachmentIntegrity','quiesceRichText','runExclusive','runManagedRecovery','projectOwnership','foregroundChanged'],'PWA update reservation ports');
+   functions(input.reservation,['settleMutation','suspendProvider','settleRichTextAssets','settleMaintenance','settleAttachmentIntegrity','quiesceRichText','runExclusive','runManagedRecovery','yieldFollowerOwnership','projectOwnership','foregroundChanged'],'PWA update reservation ports');
    functions(input.persistence,['settleDiary','flushPlanDraft','planAuthoredText','planReadDraft','savePlanDraft','settlePlanData','readStoredPlan','flushPendingReview','settleReviewEditor','writeLiveDraft','flushNotes','noteFailure','flushDeletionRecovery','settleActiveSession','loadActiveSession','activeSessionIssue'],'PWA update persistence ports');
    functions(input.effects,['automaticBackupsWaiting','flushAutomaticBackups','pauseTimer','togglePacer','scheduleSyncStatus','publishNotice','capture','localGet','localSet'],'PWA update effect ports');
    const {configuration,environment,state,reservation,persistence,effects}=input,doc=environment.document,win=environment.window;
@@ -123,7 +123,7 @@ const sdPwaUpdateHostFactory=(()=>{
     const initial=blockReason(context as Readonly<Record<string,unknown>>);if(initial)return Object.freeze({ok:false,reason:initial});
     const reservationToken=activeReservation?.requestId===context.requestId?activeReservation:null;
     const check=()=>{context.signal?.throwIfAborted();if(reservationToken&&activeReservation!==reservationToken)throw new Error('Update preparation was cancelled.');};
-    if(context.external===true&&(state.ownership().state===configuration.secondaryState||reservationToken?.follower===true)){if(reservationToken)reservationToken.workRevision=state.workRevision();return Object.freeze({ok:true,reason:''});}
+    if(context.external===true&&(state.ownership().state===configuration.secondaryState||reservationToken?.follower===true)){if(reservationToken){reservationToken.workRevision=state.workRevision();if(reservationToken.follower&&!reservation.yieldFollowerOwnership())return Object.freeze({ok:false,reason:'This follower window could not safely relinquish update ownership. Retry after the other Study Director window settles.'});}return Object.freeze({ok:true,reason:''});}
     const workRevision=state.workRevision(),ownershipBefore=state.ownership(),lifecycleBefore=state.sessionLifecycle();
     try{
      if(!reservationToken)await input.reservation.settleMutation();
