@@ -1665,6 +1665,9 @@ function profileDriveAction(){return ProfileViews.profileDriveAction();}
 type ProfileDeletionInput=Parameters<typeof ProfilesHostModule.createDeletion>[0];
 const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<ProfileDeletionInput>({
   profiles:Profiles,
+  appCanMutate:()=>appCanMutate(),
+  settleCurrentProfile:()=>settleCurrentProfileBeforeReload(),
+  mutation:Object.freeze<ProfileDeletionInput['mutation']>({run:(kind,operation)=>requireMutationCoordinator().runExclusive(kind,authority=>operation(Object.freeze({assert:()=>authority.assert()})))}),
   provider:Object.freeze<ProfileDeletionInput['provider']>({
     locationStatus:id=>{const status=BackupProviderRuntime.locationStatus(id);return status?Object.freeze({connected:status.connected,waiting:status.waiting,...(status.sync?{sync:Object.freeze({syncedAt:status.sync.syncedAt,syncing:status.sync.syncing})}:{})}):null;},
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
@@ -1688,6 +1691,7 @@ const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
 type ProfileDriveBindingInput=Parameters<typeof ProfilesHostModule.createDriveBinding>[0];
 const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<ProfileDriveBindingInput>({
   profiles:Profiles,
+  appCanMutate:()=>appCanMutate(),
   interactions:Object.freeze<ProfileDriveBindingInput['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify(options)}),
   clearBaseline:()=>ReconciliationBaselineStore.clear(),
   renderProfile:()=>renderProfile(),

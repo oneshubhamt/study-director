@@ -97,11 +97,13 @@ try{
     }
   }
 
-  let holdReleased=0,holdSettled=false,releaseHold;
+  let holdReleased=0,holdSettled=false,releaseHold,deletionAuthority=true,deletionSettlements=0,mutationRuns=0,authorityAssertions=0;
   const holdGate=new Promise(resolve=>{releaseHold=()=>{holdSettled=true;resolve();};});
   let backupDeletes=0,removes=0,captures=0,notices=0;
   const deletion=Host.createDeletion(freeze({
     profiles:freeze({...profiles,remove:()=>{removes++;return true;}}),
+    appCanMutate:()=>deletionAuthority,settleCurrentProfile:async()=>{deletionSettlements++;return deletionAuthority;},
+    mutation:freeze({run:async(_kind,operation)=>{mutationRuns++;return operation(freeze({assert:()=>{authorityAssertions++;if(!deletionAuthority)throw new Error('authority lost');return true;}}));}}),
     provider:freeze({locationStatus:()=>null,suspendBackground:()=>freeze({settled:holdGate,release:()=>{holdReleased++;}})}),
     device:freeze({status:()=>({connected:false}),deleteBackups:async()=>{backupDeletes++;return true;}}),
     interactions:freeze({choose:async()=>null,confirm:async()=>true,notify:()=>{notices++;}}),
@@ -113,6 +115,14 @@ try{
   releaseHold();assert.equal(await deleting,true);
   assert.equal(backupDeletes,1);assert.equal(removes,1);assert.equal(holdSettled,true);assert.equal(holdReleased,1,'successful deletion releases its publication hold exactly once');
   assert.equal(captures,0);assert.equal(notices,0);
+  assert.equal(deletionSettlements,1,'destructive profile deletion settles the current profile before external/local deletion');
+  assert.equal(mutationRuns,1);assert.ok(authorityAssertions>=3,'destructive deletion reasserts mutation authority after asynchronous side effects');
+
+  deletionAuthority=false;
+  const removesBefore=removes,backupDeletesBefore=backupDeletes;
+  assert.equal(await deletion.deleteHere(),false,'profile deletion cannot begin without current write authority');
+  assert.equal(removes,removesBefore);assert.equal(backupDeletes,backupDeletesBefore);
+  deletionAuthority=true;
 
   // A reload only follows a complete writer barrier; any failed stage is contained.
   for(const failure of ['', 'draft', 'preferences', 'deletions', 'authority']){
