@@ -415,7 +415,7 @@ function createDeletion(ports:DeletionInput){
             await libraryControl.deleteLibrary();authority.assert();
           }
           await ports.device.deleteBackups();authority.assert();
-          return removeLocal();
+          return ports.profiles.remove();
         }finally{hold?.release();}
       });
     }catch(error){
@@ -439,7 +439,7 @@ function createDeletion(ports:DeletionInput){
       });
       if(choice==='device'){
         if(!synced&&!await ports.interactions.confirm({title:`Remove ${name} from this device?`,message:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',details:['Its Device Folder backups and backup files, if any, stay where they are.'],confirmLabel:'Remove from this device',danger:true}))return false;
-        return ports.profiles.remove();
+        return removeLocal();
       }
       if(choice!=='everywhere')return false;
       if(mine.email&&!drive?.connected){ports.interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
