@@ -64,16 +64,16 @@ jobs:
         include:
           - id: notes
             script: tests/browser/library/notes-management.mjs
-            passes: 2
+            passes: 1
           - id: attachment-editor
             script: tests/browser/attachments/attachment-editor.mjs
-            passes: 2
+            passes: 1
           - id: exports
             script: tests/browser/exports/exports.mjs
-            passes: 2
+            passes: 1
           - id: insights
             script: tests/browser/insights/insights-populated-ui.mjs
-            passes: 2
+            passes: 1
     steps:
       - uses: actions/checkout@v7.0.1
         with:
