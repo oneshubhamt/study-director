@@ -51,6 +51,7 @@ export interface SyncStatusHostInput {
   sessionElsewhere():string;
   sessionReady():string;
   unseen():number;
+  canMutate():boolean;
   readonly actions:Readonly<SyncStatusActions>;
   readonly environment:Readonly<SyncStatusEnvironment>;
   capture(scope:string,error:unknown):unknown;

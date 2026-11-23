@@ -24,6 +24,9 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
   exactObject(input,['document','providers','presentation','device','protection','keptVersions','profileKey','profileEmail','profileName','deviceName','markDriveRequested','storageIssues','unsupportedDataHeld','backupReminder','updateReady','sessionElsewhere','sessionReady','unseen','actions','environment','capture'],'Sync status host input');
   if(!Object.isFrozen(input.presentation)||!Object.isFrozen(input.actions)||!Object.isFrozen(input.environment))throw new TypeError('Sync status host providers must be frozen.');
   const {document,presentation,environment}=input;
+  const OWNER_REQUIRED_ACTIONS=freeze(new Set(['sync-now','retry','sign-in','enter-password','unlock-sync','review-sync','review-kept','device-permission','continue-session']));
+  const ownerRequired=(kind:unknown)=>OWNER_REQUIRED_ACTIONS.has(String(kind||''));
+  const markOwnerRequirement=(element:HTMLElement,kind:unknown)=>element.toggleAttribute('data-owner-mutation',ownerRequired(kind));
   const STATUS_HOST_IDS=Object.freeze(['profile-tag','profile-badge','profile-avatar'] as const);
   let sequence=0,connection:ConnectionState|null=null,card:ConnectCardState|null=null;
   let renderTimer:number|null=null,settleTimer:number|null=null,hideTimer:number|null=null,lastRing='',statusProfile='',installed=false;
@@ -115,7 +118,8 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     const primary=element('profile-status-primary');
     if(primary){
       primary.hidden=!model.action;
-      if(model.action){primary.textContent=model.action.label;primary.dataset['syncAction']=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}
+      if(model.action){primary.textContent=model.action.label;primary.dataset['syncAction']=model.action.action;markOwnerRequirement(primary,model.action.action);primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}
+      else primary.removeAttribute('data-owner-mutation');
     }
     const list=element('profile-status-items'),key=JSON.stringify(model.items);
     if(list&&list.dataset['key']!==key){
@@ -211,7 +215,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
         list.replaceChildren(...model.steps.map(step=>{
           const item=document.createElement('li');item.dataset['state']=step.state;if(step.state==='active')item.setAttribute('aria-current','step');
           const label=document.createElement('span');label.textContent=step.label||'';item.append(label);
-          if(inline&&inline.step===step.id){const link=document.createElement('button');link.type='button';link.className='drive-connect-step-action';link.dataset['action']='sync-status-action';link.dataset['syncAction']=inline.action;link.textContent=inline.label;item.append(link);}
+          if(inline&&inline.step===step.id){const link=document.createElement('button');link.type='button';link.className='drive-connect-step-action';link.dataset['action']='sync-status-action';link.dataset['syncAction']=inline.action;markOwnerRequirement(link,inline.action);link.textContent=inline.label;item.append(link);}
           return item;
         }));
       }
@@ -222,7 +226,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
       }
       const detail=element('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
       const action=element('drive-connect-action');
-      if(action){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset['syncAction']=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+      if(action){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset['syncAction']=model.action.action;markOwnerRequirement(action,model.action.action);if(action.textContent!==model.action.label)action.textContent=model.action.label;}else action.removeAttribute('data-owner-mutation');}
     }
     if(model.done&&hideTimer===null){
       const expected=state;
@@ -238,6 +242,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     const source=event.target as Element|null;
     const target=source&&typeof source.closest==='function'?source.closest<HTMLElement>('[data-sync-action]'):null;
     const kind=String(target?.dataset['syncAction']||'');
+    if(ownerRequired(kind)&&!input.canMutate())return false;
     if(!['sync-now','retry','sign-in'].includes(kind))input.actions.closeProfilePanel();
     try{
       switch(kind){

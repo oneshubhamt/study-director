@@ -180,7 +180,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
     profileKey:()=>profile,profileEmail:()=>'',profileName:()=>profile,deviceName:id=>id,
     markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
-    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,canMutate:()=>true,
     actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
     environment,capture:()=>{}
   }));
@@ -221,6 +221,35 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
 
 {
   const host=registry.require('sync-status-host',1);
+  let mutable=false,connects=0,syncSchedules=0,opened=0;
+  const target=kind=>({target:{closest:()=>({dataset:{syncAction:kind}})}});
+  const controller=host.createController(Object.freeze({
+    document:{getElementById:()=>null,addEventListener(){}},
+    providers:()=>Object.freeze({
+      locationStatus:()=>null,connect:()=>{connects++;return true;},scheduleSharedSync:()=>{syncSchedules++;return true;},
+      unlockSync:async()=>true,reviewSync:async()=>true,wakeBackground:()=>true,subscribeStatus:()=>()=>{}
+    }),
+    presentation,device:()=>null,protection:()=>null,keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
+    profileKey:()=>'profile-a',profileEmail:()=>'',profileName:()=>'Student',deviceName:id=>id,
+    markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,canMutate:()=>mutable,
+    actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>{opened++;return true;},applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>{opened++;return true;},continueSession:()=>true,openData:()=>{opened++;return true;}}),
+    environment:Object.freeze({window:{addEventListener(){}},now:()=>0,online:()=>true,visible:()=>true,setTimeout:()=>1,clearTimeout:()=>{},setInterval:()=>1}),
+    capture:()=>{}
+  }));
+  assert.equal(await controller.action(target('sign-in')),false,'secondary sync-status sign-in is blocked before provider connection work');assert.equal(connects,0);
+  assert.equal(await controller.action(target('sync-now')),false,'secondary sync-now is blocked before scheduling shared work');assert.equal(syncSchedules,0);
+  assert.equal(await controller.action(target('open-execute')),true,'read-only navigation remains available on a secondary tab');
+  assert.equal(await controller.action(target('open-data')),true,'read-only data navigation remains available on a secondary tab');
+  assert.equal(await controller.action(target('check-update')),true,'checking for an app update remains available on a secondary tab');
+  assert.equal(opened,3);
+  mutable=true;
+  assert.equal(await controller.action(target('sign-in')),true);assert.equal(connects,1);
+  assert.equal(await controller.action(target('sync-now')),true);assert.equal(syncSchedules,1);
+}
+
+{
+  const host=registry.require('sync-status-host',1);
   let profile='profile-a',ring='syncing',nextTimer=0;
   const timers=new Map(),hosts=new Map();
   const makeHost=()=>{const classes=new Set();return {
@@ -240,7 +269,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
     profileKey:()=>profile,profileEmail:()=>'',profileName:()=>profile,deviceName:id=>id,
     markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
-    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,canMutate:()=>true,
     actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
     environment:Object.freeze({
       window:{addEventListener(){}},now:()=>0,online:()=>true,visible:()=>true,
@@ -279,7 +308,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     protection:()=>null,keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
     profileKey:()=>'profile-a',profileEmail:()=>'',profileName:()=>'Student',deviceName:id=>id,
     markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
-    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,canMutate:()=>true,
     actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
     environment:Object.freeze({window:{addEventListener(){}},now:()=>0,online:()=>true,visible:()=>true,setTimeout:()=>1,clearTimeout:()=>{},setInterval:()=>1}),
     capture:()=>{}

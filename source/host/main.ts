@@ -1722,6 +1722,7 @@ SyncStatusHost=SyncStatusHostModule.createController(Object.freeze<SyncStatusHos
   sessionElsewhere:()=>sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
   sessionReady:()=>sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
   unseen:()=>NoticeCoordinator.recent().unseen,
+  canMutate:()=>appCanMutate(),
   actions:Object.freeze<SyncStatusHostInput['actions']>({
     closeProfilePanel:()=>closeProfilePanel(),
     enterPassword:()=>requireBackupActions().manageProtection(),
