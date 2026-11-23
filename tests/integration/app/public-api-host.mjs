@@ -117,7 +117,13 @@ assert.equal(previewRegistrations,1,'preview provider registration must happen e
 scripts[1].onload?.call(scripts[1],new Event('load'));
 assert.equal(await retry,true);
 assert.equal(runtime.status().optionalFiles[0].state,'registered');
-assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1);
+const registeredStatus=runtime.status();
+assert.equal(registeredStatus.registered.find(row=>row.name==='SD-guide')?.attempts,1);
+assert.ok(Object.isFrozen(registeredStatus)&&Object.isFrozen(registeredStatus.optionalFiles)&&Object.isFrozen(registeredStatus.registered),'plugin status snapshots and collections must be immutable');
+const guideStatus=registeredStatus.registered.find(row=>row.name==='SD-guide');
+assert.ok(guideStatus&&Object.isFrozen(guideStatus),'registration status rows must not expose mutable runtime-map records');
+assert.throws(()=>{guideStatus.attempts=99;},TypeError);
+assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1,'mutating a returned status row must not corrupt internal plugin state');
 assert.equal(runtime.requestTab('missing'),null);
 
-console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,frozenPublicApi:true}));
+console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,immutableStatus:true,frozenPublicApi:true}));
