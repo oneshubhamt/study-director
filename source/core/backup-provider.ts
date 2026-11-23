@@ -976,9 +976,8 @@ const createModule=(input:ProviderModuleInput)=>{
   // version this build cannot read. A fresh scan under the maintenance lease
   // confirms which it is first; any other version is kept. The commit goes
   // first, so an interrupted removal leaves only an unfinished leftover.
-  async function removeProviderVersion(selected:Provider,checkpointId:string,{signal=null,controlChecked=false}:ExportOptions&{controlChecked?:boolean}={}){
+  async function removeProviderVersionUnderAuthority(selected:Provider,checkpointId:string,{signal=null}:ExportOptions={}){
     selected=repositoryOperationSelected(selected,{signal});
-    if(!controlChecked)requireBackupMutationControl('removing a version from '+selected.label);
     const requested=String(checkpointId||'');let maintenanceLease=null;
     if(repositoryCoordinationCapable(selected)){
       maintenanceLease=await beginRepositoryMaintenance(selected);
@@ -1709,7 +1708,7 @@ const createModule=(input:ProviderModuleInput)=>{
     const foreground=beginForeground(selected);if(!foreground)return freeze({removed:false,reason:'busy'});busy=true;
     try{
       await foreground.settled;if(selected.prepare)await selected.prepare();await authorize(selected,'remove-version');
-      return await runExclusive('remove backup version',()=>removeProviderVersion(selected,checkpointId,{signal:foreground.signal,controlChecked:true}));
+      return await runExclusive('remove backup version',()=>removeProviderVersionUnderAuthority(selected,checkpointId,{signal:foreground.signal}));
     }catch(error){await providerMaintenanceScheduler(selected)?.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'});throw error;}
     finally{await release(selected,'remove-version');busy=false;foreground.release();}
   }
