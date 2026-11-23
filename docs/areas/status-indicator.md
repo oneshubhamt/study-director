@@ -155,4 +155,4 @@ one compact button (32 px, 36 px on touch screens).
 ## Ownership
 
 - `source/core/backup-presentation.ts` owns the pure status decision (no DOM, no clocks except the `now` it is given).
-- The checked host (`source/core/sync-status-host.ts`) gathers the inputs, draws the hosts and panel, owns the Connect-card lifecycle, and maps status actions to existing feature callbacks. `source/host/main.js` only composes those real providers/actions and preserves deferred initialization. Features keep their own operations; the indicator never starts work on its own.
+- The checked host (`source/core/sync-status-host.ts`) gathers the inputs, draws the hosts and panel, owns the Connect-card lifecycle, and maps status actions to existing feature callbacks. `source/host/main.ts` only composes those real providers/actions and preserves deferred initialization. Features keep their own operations; the indicator never starts work on its own.

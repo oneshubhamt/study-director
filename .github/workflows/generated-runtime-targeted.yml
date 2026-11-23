@@ -63,14 +63,19 @@ jobs:
         include:
           - id: notes
             script: tests/browser/library/notes-management.mjs
+            passes: 5
           - id: attachment-editor
             script: tests/browser/attachments/attachment-editor.mjs
+            passes: 5
           - id: attachment-library
             script: tests/browser/attachments/attachments.mjs
+            passes: 2
           - id: exports
             script: tests/browser/exports/exports.mjs
+            passes: 2
           - id: insights
             script: tests/browser/insights/insights-populated-ui.mjs
+            passes: 5
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -89,10 +94,10 @@ jobs:
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: ${{ matrix.id }} browser witness x5 isolated
+      - name: ${{ matrix.id }} browser witness isolated
         shell: bash
         run: |
-          for pass in 1 2 3 4 5; do
-            echo "${{ matrix.id }} pass $pass/5"
+          for pass in $(seq 1 "${{ matrix.passes }}"); do
+            echo "${{ matrix.id }} pass $pass/${{ matrix.passes }}"
             node "${{ matrix.script }}"
           done

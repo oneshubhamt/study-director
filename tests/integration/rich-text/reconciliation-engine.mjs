@@ -5,7 +5,7 @@ import {importRichTextReconciliationSource} from '../../helpers/typescript-sourc
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const R=await importRichTextReconciliationSource();
-const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(richTextRuntimeSource(),sandbox,{filename:'source/external/rich-text.js'});
+const sandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask,JSON};sandbox.globalThis=sandbox;vm.createContext(sandbox);vm.runInContext(richTextRuntimeSource(),sandbox,{filename:'generated/runtime/rich-text.js'});
 const runtime=sandbox.StudyDirectorRichText;
 const text=(param,marks)=>marks?{type:'Text',param,marks}:{type:'Text',param};
 const p=(...content)=>({type:'Paragraph',content:content.flat().map(node=>typeof node==='string'?text(node):node)});
