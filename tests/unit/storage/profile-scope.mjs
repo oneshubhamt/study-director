@@ -30,6 +30,18 @@ function run(value,existing=null){
   assert.equal(scope.scope,'__profile-registry-unreadable__');
 }
 {
+  const duplicateScope=run({version:1,active:idA,profiles:[{id:idA,scope:''},{id:idB,scope:''}]});
+  assert.equal(duplicateScope.safe,false,'two valid profiles cannot share the selected storage scope');
+  assert.equal(duplicateScope.scope,'__profile-registry-unreadable__');
+  const duplicateId=run({version:1,active:idA,profiles:[{id:idA,scope:''},{id:idA,scope:idB}]});
+  assert.equal(duplicateId.safe,false,'a duplicated selected profile id is ambiguous even when both rows are otherwise valid');
+  const newerAmbiguous=run({version:9,active:'missing',profiles:[{id:idA,scope:''},{id:idB,scope:''}]});
+  assert.equal(newerAmbiguous.safe,false,'newer-registry fallback must still resolve one unique storage namespace');
+  const newerKnown=run({version:9,active:idB,profiles:[{id:idA,scope:idA},{id:idB,scope:idB},{id:'prof_cat_mve00000_abcdef03',scope:idA}]});
+  assert.equal(newerKnown.safe,true,'unrelated newer-registry damage does not block a uniquely resolved active profile');
+  assert.equal(newerKnown.id,idB);assert.equal(newerKnown.scope,idB);
+}
+{
   const absent=run(undefined);
   assert.equal(absent.id,'');assert.equal(absent.scope,'');assert.equal(absent.safe,true,'an absent registry is a genuine first-start state');
   for(const value of ['{bad json',{version:1,active:'bad',profiles:[{id:'bad',scope:''}]},{version:1,active:'',profiles:[]}]){

@@ -235,9 +235,10 @@ const createModule=()=>{
       catch(error){capture('native.wake-release',error);}
       return true;
     }
-    async function requestWakeLock(){
+    function requestWakeLock(){
       if(wakeRequest)return wakeRequest;
-      wakeRequest=(async()=>{
+      let pending!:Promise<boolean>;
+      pending=Promise.resolve().then(async()=>{
         try{
           const wakeLock=nav?.wakeLock;
           if(!wakeLock)return false;
@@ -252,10 +253,9 @@ const createModule=()=>{
           },{once:true});
           return true;
         }catch(error){capture('native.wake-request',error);return false;}
-        finally{wakeRequest=null;publish();}
-      })();
-      publish();
-      return wakeRequest;
+      }).finally(()=>{if(wakeRequest===pending)wakeRequest=null;publish();});
+      wakeRequest=pending;publish();
+      return pending;
     }
     async function syncWake(options:SyncWakeOptions={}){
       if(!wakeSupported)return false;
@@ -311,22 +311,26 @@ const createModule=()=>{
       win.addEventListener('beforeinstallprompt',handleBeforeInstallPrompt);
       win.addEventListener('appinstalled',handleInstalled);
     }
-    async function inspectInstallation(){
+    function inspectInstallation(){
       if(installInspectionPromise)return installInspectionPromise;
       standalone=isStandalone();
       const inspect=nav?.getInstalledRelatedApps;
-      if(typeof inspect!=='function'){publish();return snapshot();}
-      installInspectionPromise=(async()=>{
-        installInspecting=true;publish();
+      if(typeof inspect!=='function'){publish();return Promise.resolve(snapshot());}
+      installInspecting=true;publish();
+      let pending!:Promise<NativeCapabilitiesStatus>;
+      pending=Promise.resolve().then(async()=>{
         try{
           const apps=await inspect.call(nav);
           relatedInstalled=Array.isArray(apps)&&apps.some((app:unknown)=>!!app&&typeof app==='object'&&Reflect.get(app,'platform')==='webapp');
           if(relatedInstalled){installing=false;installPrompt=null;}
         }catch(error){capture('native.install-inspection',error);}
-        finally{installInspecting=false;installInspectionPromise=null;publish();}
-        return snapshot();
-      })();
-      return installInspectionPromise;
+      }).finally(()=>{
+        installInspecting=false;
+        if(installInspectionPromise===pending)installInspectionPromise=null;
+        publish();
+      }).then(()=>snapshot());
+      installInspectionPromise=pending;
+      return pending;
     }
     function revealInstallHelp(){installHelpRequested=true;installFeedback='';return publish();}
     async function offerInstallNotice(){

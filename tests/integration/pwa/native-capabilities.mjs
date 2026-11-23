@@ -195,6 +195,33 @@ assert.match(unsupportedState.storageMessage,/browser-managed/i);
   assert.ok(rejected.some(row=>row.scope==='native.install-prompt'));
 }
 
+{ // synchronous provider exceptions clear memoized probes so later retries remain possible
+  const syncErrors=[];let wakeCalls=0,wakeThrows=true;
+  const wakeHarness=storageOnlyHarness({
+    userAgent:'Mozilla/5.0',
+    wakeLock:{request(){wakeCalls+=1;if(wakeThrows){wakeThrows=false;throw new Error('wake threw synchronously');}return Promise.resolve(wakeSentinel());}}
+  },(scope,error)=>syncErrors.push({scope,message:String(error)}),()=>true);
+  wakeHarness.controller.install();
+  await wakeHarness.controller.setKeepAwake(true);
+  assert.equal(wakeCalls,1);assert.equal(wakeHarness.controller.status().wakeAcquired,false);
+  assert.equal(await wakeHarness.controller.syncWake(),true,'a synchronous wake-lock exception must not poison later retries');
+  assert.equal(wakeCalls,2);assert.equal(wakeHarness.controller.status().wakeAcquired,true);
+  assert.ok(syncErrors.some(row=>row.scope==='native.wake-request'));
+
+  let inspectionCalls=0,inspectionThrows=true;
+  const inspectionHarness=storageOnlyHarness({
+    userAgent:'Mozilla/5.0',
+    getInstalledRelatedApps(){inspectionCalls+=1;if(inspectionThrows){inspectionThrows=false;throw new Error('inspection threw synchronously');}return Promise.resolve([{platform:'webapp'}]);}
+  },(scope,error)=>syncErrors.push({scope,message:String(error)}));
+  inspectionHarness.controller.install();
+  await drainMicrotasks();
+  assert.equal(inspectionCalls,1);assert.equal(inspectionHarness.controller.status().installedConfirmed,false);
+  const retried=await inspectionHarness.controller.inspectInstallation();
+  assert.equal(inspectionCalls,2,'a synchronous installed-app inspection exception must not remain cached');
+  assert.equal(retried.installedConfirmed,true);
+  assert.ok(syncErrors.some(row=>row.scope==='native.install-inspection'));
+}
+
 { // checked UI projection preserves unsupported fallbacks and deduplicates change events
   const nodes=new Map();
   const node=id=>{const value={id,hidden:false,textContent:'',title:'',disabled:false,checked:false,attrs:new Map(),classes:new Map(),classList:{toggle(name,on){value.classes.set(name,!!on);}},setAttribute(name,val){value.attrs.set(name,val);}};nodes.set(id,value);return value;};

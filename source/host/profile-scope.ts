@@ -23,7 +23,8 @@
       const activeId=typeof list?.['active']==='string'?list['active']:'';
       const selected=profiles.find(entry=>entry['id']===activeId);
       const active=version===1?selected:(selected||profiles[0]);
-      if(!active){safe=false;scope=unsafeScope;}
+      const uniquelyResolved=!!active&&profiles.filter(entry=>entry['id']===active['id']).length===1&&profiles.filter(entry=>entry['scope']===active['scope']).length===1;
+      if(!uniquelyResolved){safe=false;scope=unsafeScope;}
       else{
         id=typeof active['id']==='string'?active['id']:'';
         scope=typeof active['scope']==='string'?active['scope']:'';
