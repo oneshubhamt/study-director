@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import releaseConfig from '../release.config.mjs';
+import {generatedRuntimeDirectory,generatedRuntimePath} from './generated-runtime-paths.mjs';
 import {PRODUCTION_LIMITS,assertProductionLimits} from '../contracts/production-limits.mjs';
 import {LOCAL_STORAGE_KEYS,DEVICE_WIDE_LOCAL_STORAGE_KEYS,PROFILE_SCOPE_SEPARATOR,SESSION_STORAGE_KEYS,APP_META_KEYS,APP_META_RUNTIME_REGISTRY,assertDataArchitecture} from '../contracts/data-architecture.mjs';
 import {RUNTIME_DATA_CONTRACT,INDEXED_DB_STORE_NAMES,OPFS_IDENTITIES,CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES,assertCanonicalIdentities} from '../contracts/canonical-identities.mjs';
@@ -17,7 +18,7 @@ import {
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 export const WORK=path.resolve(HERE,'..');
 export const SOURCE=path.join(WORK,'source');
-export const GENERATED_RUNTIME=path.join(WORK,'generated','runtime');
+export const GENERATED_RUNTIME=generatedRuntimeDirectory(WORK);
 export const DIST=path.join(WORK,'dist');
 
 function invariant(condition,message){if(!condition)throw new Error(message);}
@@ -27,7 +28,7 @@ function normalizePath(value){return value.split(path.sep).join('/');}
 const PWA_RELEASE_SENTINEL='0'.repeat(24);
 function sourceFile(relative){return fs.readFileSync(path.join(SOURCE,relative),'utf8');}
 function sourceBytes(relative){return fs.readFileSync(path.join(SOURCE,relative));}
-function generatedRuntimeFile(relative){return fs.readFileSync(path.join(GENERATED_RUNTIME,relative),'utf8');}
+function generatedRuntimeFile(relative){return fs.readFileSync(generatedRuntimePath(WORK,relative),'utf8');}
 function authoredModuleSourceFiles(module){return Array.isArray(module.sources)?[...module.sources]:module.source?[module.source]:[];}
 function generatedModuleFiles(module){return Array.isArray(module.generatedSources)?[...module.generatedSources]:module.generated?[module.generated]:[];}
 function externalModuleFiles(module){
@@ -334,7 +335,7 @@ function sourceHashes(){
   ].sort().map(name=>[name,sha256(sourceBytes(name))]));
 }
 function generatedRuntimeHashes(){
-  return Object.fromEntries(generatedRuntimeFiles().sort().map(name=>[name,sha256(fs.readFileSync(path.join(GENERATED_RUNTIME,name)))]));
+  return Object.fromEntries(generatedRuntimeFiles().sort().map(name=>[name,sha256(fs.readFileSync(generatedRuntimePath(WORK,name)))]));
 }
 function outputHashes(files){return Object.fromEntries([...files].sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)]));}
 function validateReleaseIdentities(files,identity,label){

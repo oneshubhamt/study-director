@@ -145,10 +145,10 @@ Vendored Wordgard (`vendor/wordgard`) is the exact upstream source. Study Direct
 |---|---|
 | Upstream source, exact | `vendor/wordgard` is Wordgard 0.6.2, checked against `build/wordgard-metadata.mjs`. |
 | Wordgard's own module | `generated/runtime/wordgard.js`: readable (not minified), the parts of each Wordgard package the editor uses, on `globalThis.StudyDirectorWordgard`. Entry `rich-text/wordgard-module.ts`. |
-| Study Director's editor | `generated/runtime/rich-text.js` reads Wordgard from that global (`wordgardGlobalPlugin` in `build/wordgard-bundle.mjs`); it holds no Wordgard code. |
+| Study Director's editor | `generated/runtime/rich-text.js` reads Wordgard from that global (`wordgardGlobalPlugin` in `build/runtime-bundle.mjs`); it holds no Wordgard code. |
 | How they ship | Development and the plain deployment load both as one script, Wordgard first (`rich-text` has two sources in `build/module-manifest.mjs`). The minified deployment (`stage:firebase:minified`) ships the lean build instead: the editor and only the Wordgard code it reaches, tree-shaken and minified together. |
 | Our changes to Wordgard | Build-time rewrites (`build/wordgard-source-patches.mjs`) and runtime additions behind `rich-text/wordgard-adapter.ts`, unchanged in kind. |
-| Vendor boundary | `vendor/wordgard/**` is immutable throughout this programme. Rebuild our editor/adapters with `npm run build:richtext`; an upstream upgrade requires a separate explicit owner instruction. |
+| Vendor boundary | `vendor/wordgard/**` is immutable throughout this programme. Rebuild our editor/adapters with `npm run build:runtime`; an upstream upgrade requires a separate explicit owner instruction. |
 | Tests | Tests that load the editor read both files through `tests/helpers/rich-text-runtime.mjs`. |
 
 **Checked with 0.6.2: still needed.**

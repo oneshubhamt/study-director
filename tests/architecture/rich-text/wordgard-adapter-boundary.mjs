@@ -53,7 +53,7 @@ assert.match(read('rich-text/wordgard-adapter.ts'),/export \{cutHandling\}[^\n]*
 assert.match(editor,/tableCore,history\(\),cutHandling,/u,'The editor installs the adapter cut handling.');
 assert.match(read('rich-text/wordgard-source/command.ts'),/killToLineEnd, yankKilled/,'Command facade must resolve keymap imports without enabling the default keymap.');
 
-const buildSource=read('build/wordgard-bundle.mjs');
+const buildSource=read('build/runtime-bundle.mjs');
 assert.match(buildSource,/plugins:wordgardGlobal\?\[wordgardGlobalPlugin\(\)\]:\[wordgardSourcePatchPlugin\(\{root:ROOT\}\)\]/,'Wordgard builds apply the explicit source patch layer; the editor reads Wordgard from its module.');
 // The Wordgard module re-exports Wordgard packages and nothing of Study Director's.
 const wordgardModule=read('rich-text/wordgard-module.ts').replace(/^\s*\/\/.*$/gmu,'').trim().split('\n');

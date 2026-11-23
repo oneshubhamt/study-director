@@ -18,7 +18,7 @@ npm run test:targeted -- tests/integration/storage/background-gc-reliability.mjs
 
 Select additional affected tests as needed. Full regression, coverage, mutation and browser checks are explicitly invoked; do not describe skipped checks as passed. Keep relevant product/architecture/data-contract documentation aligned with implemented changes, and update the active worklog during execution. Use [the documentation map](docs/README.md) to find the owning document rather than creating redundant pass reports. [QA design](tests/README.md) and [verification procedure](docs/VERIFICATION.md) define the existing contracts.
 
-If authored inputs to `generated/runtime/` change, regenerate the bundles through `npm run build:richtext` and commit the resulting machine output; never edit those bundles by hand. If build inputs change, run `node build/build.mjs`, `node build/verify-build.mjs` and the relevant generated-syntax checks in a disposable checkout. Keep QA evidence outside the working tree.
+If authored inputs to `generated/runtime/` change, regenerate the bundles through `npm run build:runtime` and commit the resulting machine output; never edit those bundles by hand. If build inputs change, run `node build/build.mjs`, `node build/verify-build.mjs` and the relevant generated-syntax checks in a disposable checkout. Keep QA evidence outside the working tree.
 
 Change first-party code in `source`, `portable` or `rich-text`. Regenerate `generated/runtime/` bundles through their build scripts, and preserve reviewed dependency notices. `release.config.mjs` is the only release-identity source. The root `LICENSE` mirrors `source/legal/LICENSE.txt`; keep both texts identical when an authorised licence change is made.
 

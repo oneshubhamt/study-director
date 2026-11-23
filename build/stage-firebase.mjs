@@ -61,7 +61,7 @@ if(process.argv.includes('--minified')){
   // The minified deployment ships the lean rich-text build: the editor and only
   // the Wordgard code it reaches, in place of the two separate modules.
   // Only this step needs the npm build tools; plain staging works from source alone.
-  const {buildLeanRichText}=await import('./wordgard-bundle.mjs');
+  const {buildLeanRichText}=await import('./runtime-bundle.mjs');
   const lean=(await buildLeanRichText()).source.replaceAll('@@SD_RELEASE@@',releaseIdentity().release);
   if(lean.includes('@@SD_'))throw new Error('The lean rich-text build has an unrendered token.');
   const leanFile=path.join(root,'dist','rich-text.lean.js');write(leanFile,lean);

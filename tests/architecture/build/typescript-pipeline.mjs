@@ -6,6 +6,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {compileScript,readScript,eraseTypes} from '../../../build/source-script.mts';
 import {buildManifest,renderBuild,validateBuild} from '../../../build/build.mjs';
+import {generatedRuntimeDirectory} from '../../../build/generated-runtime-paths.mjs';
 
 // The exact erased program is consumed by both the build and VM harnesses.
 const build=renderBuild();
@@ -24,8 +25,8 @@ collectSourceJavaScript(path.join(process.cwd(),'source'));
 sourceJavaScript.sort();
 assert.deepEqual(sourceJavaScript,[],'canonical source must contain no JavaScript runtime artifacts');
 
-const generatedRuntimeDirectory=path.join(process.cwd(),'generated','runtime');
-const generatedRuntimeEntries=fs.readdirSync(generatedRuntimeDirectory,{withFileTypes:true});
+const generatedRuntimeRoot=generatedRuntimeDirectory(process.cwd());
+const generatedRuntimeEntries=fs.readdirSync(generatedRuntimeRoot,{withFileTypes:true});
 assert.ok(generatedRuntimeEntries.every(entry=>entry.isFile()&&entry.name.endsWith('.js')),'generated/runtime must contain only generated JavaScript files');
 const generatedRuntimeJavaScript=generatedRuntimeEntries.map(entry=>entry.name).sort();
 const expectedGeneratedRuntimeJavaScript=['attachment-worker.js','export-worker.js','image-worker.js','rich-text.js','search-worker.js','wordgard.js'].sort();

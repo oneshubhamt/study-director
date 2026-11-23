@@ -1,7 +1,7 @@
 /* Wordgard 0.6.2 · MIT · Marijn Haverbeke. Built for Study Director @@SD_RELEASE@@ from vendor/wordgard
  * (exact upstream source) with the build-time rewrites in build/wordgard-source-patches.mjs. Holds the parts of
  * each package that Study Director's editor uses, on globalThis.StudyDirectorWordgard. A new Wordgard replaces this
- * module: replace vendor/wordgard and run npm run build:richtext. */
+ * module: replace vendor/wordgard and run npm run build:runtime. */
 var StudyDirectorWordgard = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;

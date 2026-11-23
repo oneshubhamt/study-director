@@ -6,16 +6,17 @@ import * as esbuild from 'esbuild-wasm';
 import {minify} from 'terser';
 import {wordgardSourcePatchPlugin} from './wordgard-source-patches.mjs';
 import {WORDGARD_METADATA} from './wordgard-metadata.mjs';
+import {generatedRuntimeDirectory,generatedRuntimePath} from './generated-runtime-paths.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'..');
 const ENTRY=path.join(ROOT,'rich-text/editor.ts');
 const WORDGARD_ENTRY=path.join(ROOT,'rich-text/wordgard-module.ts');
 const SEARCH_ENTRY=path.join(ROOT,'rich-text/search-worker.ts');
-const GENERATED_RUNTIME=path.join(ROOT,'generated','runtime');
-const OUTPUT=path.join(GENERATED_RUNTIME,'rich-text.js');
-const WORDGARD_OUTPUT=path.join(GENERATED_RUNTIME,'wordgard.js');
-const SEARCH_OUTPUT=path.join(GENERATED_RUNTIME,'search-worker.js');
+const GENERATED_RUNTIME=generatedRuntimeDirectory(ROOT);
+const OUTPUT=generatedRuntimePath(ROOT,'rich-text.js');
+const WORDGARD_OUTPUT=generatedRuntimePath(ROOT,'wordgard.js');
+const SEARCH_OUTPUT=generatedRuntimePath(ROOT,'search-worker.js');
 const WORDGARD_FACADE=path.join(ROOT,'rich-text/wordgard-source');
 // Where each Wordgard package specifier comes from in vendor/wordgard (through
 // the build-only facades, which pick what Study Director reaches).
@@ -40,7 +41,7 @@ const HEADER=`/* Study Director @@SD_RELEASE@@ rich text editor. Wordgard ${WORD
 const WORDGARD_HEADER=`/* Wordgard ${WORDGARD_METADATA.version} · MIT · Marijn Haverbeke. Built for Study Director @@SD_RELEASE@@ from vendor/wordgard
  * (exact upstream source) with the build-time rewrites in build/wordgard-source-patches.mjs. Holds the parts of
  * each package that Study Director's editor uses, on globalThis.${WORDGARD_GLOBAL}. A new Wordgard replaces this
- * module: replace vendor/wordgard and run npm run build:richtext. */\n`;
+ * module: replace vendor/wordgard and run npm run build:runtime. */\n`;
 const LEAN_HEADER=`/* Study Director @@SD_RELEASE@@ rich text editor with Wordgard ${WORDGARD_METADATA.version} · MIT. */\n`;
 const SEARCH_HEADER='/* Study Director @@SD_RELEASE@@ transient notes search worker. */\n';
 
@@ -132,13 +133,13 @@ export async function buildExportWorkerBundle(){return buildBrowserBundle(path.j
 export async function buildImageWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'rich-text/image-worker.ts'),'/* Study Director @@SD_RELEASE@@ image preparation worker. */\n');}
 export async function buildAttachmentWorkerBundle(){return buildBrowserBundle(path.join(ROOT,'portable/attachment-worker.ts'),'/* Study Director @@SD_RELEASE@@ attachment ingest worker. */\n');}
 
-export async function writeWordgardBundle(){
+export async function writeRuntimeBundles(){
   const [wordgard,richText,searchWorker,exportWorker,imageWorker,attachmentWorker]=await Promise.all([buildWordgardModule(),buildRichTextModule(),buildSearchWorkerBundle(),buildExportWorkerBundle(),buildImageWorkerBundle(),buildAttachmentWorkerBundle()]);
   fs.rmSync(GENERATED_RUNTIME,{recursive:true,force:true});
   fs.mkdirSync(GENERATED_RUNTIME,{recursive:true});
-  fs.writeFileSync(path.join(GENERATED_RUNTIME,'export-worker.js'),exportWorker.source);
-  fs.writeFileSync(path.join(GENERATED_RUNTIME,'image-worker.js'),imageWorker.source);
-  fs.writeFileSync(path.join(GENERATED_RUNTIME,'attachment-worker.js'),attachmentWorker.source);
+  fs.writeFileSync(generatedRuntimePath(ROOT,'export-worker.js'),exportWorker.source);
+  fs.writeFileSync(generatedRuntimePath(ROOT,'image-worker.js'),imageWorker.source);
+  fs.writeFileSync(generatedRuntimePath(ROOT,'attachment-worker.js'),attachmentWorker.source);
   fs.writeFileSync(WORDGARD_OUTPUT,wordgard.source);
   fs.writeFileSync(OUTPUT,richText.source);
   fs.writeFileSync(SEARCH_OUTPUT,searchWorker.source);
@@ -149,7 +150,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   const write=process.argv.includes('--write');
   const summary=row=>({modules:row.inputs.length,...row.metrics});
   if(write){
-    const built=await writeWordgardBundle(),lean=await buildLeanRichText();
+    const built=await writeRuntimeBundles(),lean=await buildLeanRichText();
     console.error(JSON.stringify({status:'PASS',written:true,wordgard:summary(built.wordgard),richText:summary(built.richText),leanDeployment:summary(lean),searchWorker:summary(built.searchWorker)},null,2));
   }else{
     const lean=await buildLeanRichText();process.stdout.write(lean.source);
