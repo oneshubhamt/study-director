@@ -43,6 +43,13 @@ const fallbackId=fallback.identity.getId();
 assert.match(fallbackId,/^inst_android_chrome_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,'installation identity remains valid when Web Crypto is unavailable');
 assert.equal(fallback.backing.get('installation'),fallbackId);
 
+const competing=runtime();
+const firstCompetingId=competing.identity.getId();
+const durableWinner=firstCompetingId.replace(/_[a-f0-9]{8}$/u,'_deadbeef');
+assert.notEqual(durableWinner,firstCompetingId);
+competing.backing.set('installation',durableWinner);
+assert.equal(competing.identity.getId(),durableWinner,'a live tab converges on a different valid device-wide identity persisted by a competing first-start tab');
+
 // A browser-data clear removes the stored ID; the open tab writes it back,
 // and leaves alone an ID another tab has written since.
 fresh.backing.delete('installation');

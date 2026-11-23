@@ -96,9 +96,9 @@ registry.define('persistence',1,()=>{
     let cached='';
     function normalize(value:unknown){const match=INSTALLATION_ID.exec(String(value||''));return match&&DEVICE_TYPES[match[1]!]&&BROWSERS[match[2]!]?String(value):'';}
     function getId(){
-      if(cached)return cached;
       const current=normalize(LocalStorageContract.getText(key,''));
       if(current){cached=current;return current;}
+      if(cached)return cached;
       const kind=input.describe()||{},type=DEVICE_TYPES[kind.type||'']?kind.type:'device',browser=BROWSERS[kind.browser||'']?kind.browser:'browser';
       const id=`inst_${type}_${browser}_${Date.now().toString(36)}_${randomIdPart(4)}`;
       if(!LocalStorageContract.setText(key,id))throw LocalStorageContract.lastError||new Error('Installation identity could not be persisted.');
