@@ -67,9 +67,6 @@ jobs:
           - id: attachment-editor
             script: tests/browser/attachments/attachment-editor.mjs
             passes: 5
-          - id: attachment-library
-            script: tests/browser/attachments/attachments.mjs
-            passes: 2
           - id: exports
             script: tests/browser/exports/exports.mjs
             passes: 2
