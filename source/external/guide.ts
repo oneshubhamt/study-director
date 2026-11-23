@@ -2,6 +2,7 @@ import type {InsightsPreviewProvider} from '../core/insights-host.ts';
 import type {CompletionSource,TaskKind} from '../../types/domain.ts';
 import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,StudyRecord} from '../../types/record-models.ts';
 import type {NativeCapabilitiesStatus} from '../../types/native-capabilities.ts';
+import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts';
 
 /*
   Study Director Guide
@@ -27,7 +28,6 @@ import type {NativeCapabilitiesStatus} from '../../types/native-capabilities.ts'
   type WorkspaceRoute=Readonly<{kind:'legal';token:string;key:string}>;
   type WorkspaceHistoryPort=Readonly<{register:(kind:'legal',controller:Readonly<{current:()=>WorkspaceRoute|null;reconcile:(desired:unknown)=>Promise<WorkspaceRoute|null>}>)=>boolean;open:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;replace:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;close:(descriptor:WorkspaceRoute)=>unknown;closed:(descriptor:WorkspaceRoute,meta:Readonly<{fromHistory:boolean;historyPending:boolean}>)=>unknown}>;
   type GuideApi=Readonly<{capabilities:Readonly<Record<string,number>>;ui:Readonly<{registerTab:(definition:Readonly<{id:string;label:string;icon:string;render:(context:GuideRenderContext)=>void}>)=>boolean;goTab:(tab:string)=>unknown;workspaceHistory:WorkspaceHistoryPort}>;plan:Readonly<{loadDraft:(schedule:string,options:Readonly<{label:string}>)=>PromiseLike<Readonly<{ok?:boolean;error?:string}>>|Readonly<{ok?:boolean;error?:string}>}>;preview:Readonly<{useSample:(options:Readonly<{label:string;target:'insights'}>)=>PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;clear:(target:'insights')=>unknown}>;installation:Readonly<{status:()=>InstallStatus;prompt:()=>PromiseLike<unknown>|unknown;inspect:()=>PromiseLike<unknown>|unknown;showHelp:()=>unknown}>}>;
-  type PluginDescriptor=Readonly<{name:string;version:string;requires:Readonly<Record<string,number>>;previewProviders:Readonly<{insights:InsightsPreviewProvider}>;setup:(api:unknown)=>boolean}>;
   type LegalDocumentId='privacy'|'terms'|'security'|'license'|'notices';
   type LegalDocumentDefinition=Readonly<{id:LegalDocumentId;label:string;path:string;type:'html'|'text'}>;
   type LegalCloseMeta=Readonly<{fromHistory?:boolean;historyPending?:boolean}>;
@@ -35,7 +35,7 @@ import type {NativeCapabilitiesStatus} from '../../types/native-capabilities.ts'
   type TrustedHtmlPolicy=Readonly<{createHTML:(value:string)=>unknown}>;
   type TrustedTypesHtmlFactory=Readonly<{createPolicy:(name:string,rules:Readonly<{createHTML:(value:string)=>string}>)=>TrustedHtmlPolicy}>;
   type SampleRow=Readonly<{idx:number;start:string;dur:number;name:string;kind:TaskKind;area:string;measure:string;target:string}>;
-  type StudyDirectorWindow=Window&{StudyDirector?:unknown};
+  type StudyDirectorWindow=Window&{StudyDirector?:Readonly<{registerPlugin?:(descriptor:StudyDirectorPluginDescriptor)=>boolean}>};
 
   function isRecord(value:unknown):value is Record<string,unknown>{return typeof value==='object'&&value!==null&&!Array.isArray(value);}
   function errorMessage(value:unknown,fallback:string):string{return value instanceof Error&&value.message?value.message:fallback;}
@@ -1190,7 +1190,7 @@ import type {NativeCapabilitiesStatus} from '../../types/native-capabilities.ts'
     setupComplete=true;return true;
   }
   const PLUGIN_READY_EVENT='studydirector:ready';
-  const PLUGIN_DESCRIPTOR:PluginDescriptor=Object.freeze({name:'SD-guide',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,previewProviders:Object.freeze({insights:SampleDataEngine.records}),setup});
+  const PLUGIN_DESCRIPTOR=Object.freeze({name:'SD-guide',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,previewProviders:Object.freeze({insights:SampleDataEngine.records}),setup}) satisfies StudyDirectorPluginDescriptor;
   const MAX_REGISTRATION_ATTEMPTS=2;
   let registrationAttempts=0;
   let registrationComplete=false;
