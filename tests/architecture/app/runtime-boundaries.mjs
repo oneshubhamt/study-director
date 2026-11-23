@@ -91,7 +91,10 @@ assert.ok(dynamicBindings.some(row=>row.action==='sync-status-action')&&dynamicB
 assert.match(hostSource,/type DelegatedHostInput=Parameters<typeof FoundationHostModule\.createDelegated>\[0\];/u,'delegated handler maps must derive from the checked host contract');
 assert.doesNotMatch(hostSource,/function registerStudyDirectorPlugin\(/u,'dead public-plugin registration wrappers must not remain in the final host');
 assert.match(hostSource,/if\(!PluginRuntime\.registerPlaceholders\(\)\)throw new Error\('Study Director optional plugin tabs could not be registered\.'\);/u,'host startup must fail explicitly if required optional-tab placeholders cannot register');
-for(const action of ['backup-protection','remove-managed-version','review-kept-versions','rename-profile'])assert.match(hostSource,new RegExp(`OWNER_REQUIRED_CLICK_ACTIONS[\\s\\S]*['"]${action}['"]`,'u'),`owner-only action ${action} must remain inside the final host ownership projection`);
+const ownerClickStart=hostSource.indexOf('const OWNER_REQUIRED_CLICK_ACTIONS'),ownerClickEnd=hostSource.indexOf('const OWNER_REQUIRED_CHANGE_ACTIONS',ownerClickStart+1);
+assert.ok(ownerClickStart>=0&&ownerClickEnd>ownerClickStart,'final host owner-required click projection must remain explicit');
+const ownerClickActions=new Set([...hostSource.slice(ownerClickStart,ownerClickEnd).matchAll(/['"]([^'"]+)['"]/gu)].map(row=>row[1]));
+for(const action of ['backup-protection','remove-managed-version','review-kept-versions','rename-profile'])assert.ok(ownerClickActions.has(action),`owner-only action ${action} must remain inside the final host ownership projection`);
 assert.match(readScript('source/core/backup-provider.ts'),/runExclusive\('remove backup version',[\s\S]*controlChecked:true/u,'managed-version deletion must hold the canonical durable mutation lease across the remote destructive operation');
 for(const token of ['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','DEVICE_WIDE_LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','EXTERNAL_REPOSITORY_IDENTITIES']){
   assert.ok(hostSource.includes('@@SD_'+token+'_URI@@'),token+' host input must use a TypeScript-readable encoded token');
