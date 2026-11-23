@@ -39,9 +39,10 @@ try{
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#sched-list .si:not(.draft)').length===2`),{label:'Plan applied through delegated handler'});
   await page.click('[data-tab="execute"]');await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-execute'`),{label:'Execute navigation through tab handler'});
   await page.evaluate(`__PWA6.TimerEngine.startCur(2)`);await waitFor(()=>page.evaluate(`__PWA6.TimerState.snapshot().mode==='running'`),{label:'timer fixture running'});
+  const runningMode=await page.evaluate(`__PWA6.TimerState.snapshot().mode`);
   await page.click('#cd-card');await waitFor(()=>page.evaluate(`__PWA6.TimerState.snapshot().paused===true`),{label:'timer paused through delegated handler'});
-  const setup=await page.evaluate(`(()=>{const d=__PWA6;const result={applied:document.querySelectorAll('#sched-list .si:not(.draft)').length===2,running:d.TimerState.snapshot().mode==='paused'||d.TimerState.snapshot().mode==='running',paused:d.TimerState.snapshot().paused,date:d.todayISO()};d.TimerEngine.stopExecution();return result;})()`);
-  assert.equal(setup.applied,true);assert.equal(setup.running,true);assert.equal(setup.paused,true);result.checks.realDelegatedPlanAndTimerHandlers=true;
+  const setup=await page.evaluate(`(()=>{const d=__PWA6;const result={applied:document.querySelectorAll('#sched-list .si:not(.draft)').length===2,paused:d.TimerState.snapshot().paused,date:d.todayISO()};d.TimerEngine.stopExecution();return result;})()`);
+  assert.equal(setup.applied,true);assert.equal(runningMode,'running');assert.equal(setup.paused,true);result.checks.realDelegatedPlanAndTimerHandlers=true;
   const initial=await editReflection('CoreFlowQA durable reflection',4);assert.equal(initial.accepted,true);assert.equal(initial.review?.reflection,'CoreFlowQA durable reflection');assert.equal(initial.review?.studyQuality,4);
   const storage=await page.evaluate(`(async()=>({session:(await __PWA6.AppData.activeSession.load()).value,reflection:StudyDirectorRichText.toPlainText((await __PWA6.AppData.activeSession.load()).value.snapshot.review.reflection),records:(await __PWA6.AppData.dailyRecords.list()).length}))()`);
   assert.equal(storage.reflection,'CoreFlowQA durable reflection');assert.equal(storage.records,0);result.checks.planTimerReviewIndexedDb=true;
