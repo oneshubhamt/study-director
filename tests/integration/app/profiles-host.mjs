@@ -97,6 +97,27 @@ try{
     }
   }
 
+  // Drive binding may outlive the initiating click/account lookup. Local
+  // registry mutation must stop if this profile loses write authority meanwhile.
+  {
+    let authority=false,setAccounts=0,adopts=0,confirmResolve;
+    const confirmGate=new Promise(resolve=>{confirmResolve=resolve;});
+    const binding=Host.createDriveBinding(freeze({
+      profiles:freeze({...profiles,setAccount:()=>{setAccounts++;return profile;},adopt:()=>{adopts++;return true;}}),
+      appCanMutate:()=>authority,
+      interactions:freeze({confirm:async()=>await confirmGate,notify:()=>true}),
+      clearBaseline:async()=>true,renderProfile:()=>true,endConnectCard:()=>true,firstStartJoined:()=>true,capture:()=>{},
+      storageHealthTime:()=>'',now:()=>Date.now()
+    }));
+    assert.equal(await binding.bind({email:'qa@example.com',folder:'folder-1',mine:true}),'refuse');
+    assert.equal(setAccounts,0,'secondary Drive binding cannot update the device profile registry');
+    authority=true;binding.markRequested();
+    const pending=binding.bind({email:'qa@example.com',folder:'folder-2',found:'prof_remote_mve00000_abcdef12',mine:false,library:{notes:1,savedAt:'2026-11-23T00:00:00.000Z'}});
+    await Promise.resolve();authority=false;confirmResolve(true);
+    assert.equal(await pending,'refuse','a Drive-library decision cannot resume registry mutation after ownership changes');
+    assert.equal(adopts,0);assert.equal(setAccounts,0);
+  }
+
   let holdReleased=0,holdSettled=false,releaseHold,deletionAuthority=true,deletionSettlements=0,mutationRuns=0,authorityAssertions=0;
   const holdGate=new Promise(resolve=>{releaseHold=()=>{holdSettled=true;resolve();};});
   let backupDeletes=0,removes=0,captures=0,notices=0;
