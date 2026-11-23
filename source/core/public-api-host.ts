@@ -163,11 +163,26 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     const previous=fileState(descriptor.tabId),attempts=Math.max(0,Number(previous?.attempts)||0)+1;
     markFile(descriptor.tabId,'loading','',attempts);
     const promise=new Promise<boolean>(resolve=>{
-      const script=input.environment.document.createElement('script');
-      Reflect.set(script,'src',input.environment.trustedAssetURL(descriptor.src));script.async=false;script.dataset['studyDirectorPlugin']='optional';script.dataset['studyDirectorPluginTab']=descriptor.tabId;
-      script.onload=()=>{const latest=fileState(descriptor.tabId);if(latest?.state==='loading')markFile(descriptor.tabId,'loaded','Plugin file loaded but did not register.',attempts);renderIfActive(descriptor.tabId);resolve(fileState(descriptor.tabId)?.state==='registered');};
-      script.onerror=()=>{script.remove();markFile(descriptor.tabId,'missing',`Could not load ${descriptor.src}.`,attempts);renderIfActive(descriptor.tabId);resolve(false);};
-      input.environment.document.head.appendChild(script);
+      let script:HTMLScriptElement|null=null;
+      try{
+        script=input.environment.document.createElement('script');
+        if(!Reflect.set(script,'src',input.environment.trustedAssetURL(descriptor.src)))throw new TypeError('Optional plugin URL was rejected.');
+        script.async=false;script.dataset['studyDirectorPlugin']='optional';script.dataset['studyDirectorPluginTab']=descriptor.tabId;
+        script.onload=()=>{
+          const latest=fileState(descriptor.tabId);
+          if(latest?.state==='loading')markFile(descriptor.tabId,'loaded','Plugin file loaded but did not register.',attempts);
+          resolve(fileState(descriptor.tabId)?.state==='registered');renderIfActive(descriptor.tabId);
+        };
+        script.onerror=()=>{
+          script?.remove();markFile(descriptor.tabId,'missing',`Could not load ${descriptor.src}.`,attempts);
+          resolve(false);renderIfActive(descriptor.tabId);
+        };
+        input.environment.document.head.appendChild(script);
+      }catch{
+        script?.remove();
+        markFile(descriptor.tabId,'failed',`Could not prepare ${descriptor.src}.`,attempts);
+        resolve(false);renderIfActive(descriptor.tabId);
+      }
     });
     loadPromises.set(descriptor.tabId,promise);
     void promise.finally(()=>{if(loadPromises.get(descriptor.tabId)===promise)loadPromises.delete(descriptor.tabId);});
