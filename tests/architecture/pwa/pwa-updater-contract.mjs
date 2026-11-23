@@ -37,12 +37,12 @@ assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.rev
 assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerBackgroundBackupActive\(\)/u,'a running background backup must defer update activation');
 assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked update safety must own the pre-update backup wait policy');
 assert.doesNotMatch(app,/PWA_UPDATE_BACKUP_WAIT_MS|function backUpBeforeUpdate\b/u,'PWA-specific backup wait policy must not remain in unchecked main');
-assert.match(updater,/lifecycle\.reconcileFollowerRole\(state\.ownership\(\)\.state===configuration\.secondaryState\)/u,'ownership projection must continuously reconcile candidate follower evidence');
-assert.match(lifecycle,/function hasFollowerEvidence\(\).*followerIdentities\.size>0\|\|!!candidate&&followerWorkers\.has\(candidate\)/u,'exact follower evidence must survive a secondary-to-primary ownership handoff until controller reconciliation');
+assert.match(lifecycle,/const external=!!activated,context:PwaUpdateContext=freeze\(\{requestId:target\.requestId,releaseId:target\.releaseId,automatic:options\.automatic===true,external,follower:external/u,'an already-changed controller must classify every non-initiating window as a follower without consulting racy ownership state');
+assert.match(lifecycle,/return apply\(\{automatic:true\}\);/u,'external controller reconciliation must retain automatic edit-idle protection');
+assert.doesNotMatch(lifecycle,/captureFollower|followerWorkers|followerIdentities|rememberFollower|reconcileFollowerRole/u,'follower classification must not depend on candidate-message timing or ownership handoff hints');
+assert.match(updater,/const follower=current\.externalUpdate;/u,'host retry logic must preserve follower semantics after a secondary acquires primary ownership');
+assert.match(updater,/blockReason\(\{automatic:true,external:current\.externalUpdate,follower\}\)/u,'external automatic retries must preflight using the stable follower classification');
 assert.match(lifecycle,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
-assert.match(lifecycle,/followerIdentities\.has\(followerIdentity\(target\)\)/u,'external follower ownership must survive browser ServiceWorker wrapper replacement by verified full identity');
-assert.doesNotMatch(lifecycle,/captureWorkerRole\(source,String\(data\['releaseId'\]/u,'candidate hint release strings must not establish follower identity');
-assert.match(lifecycle,/rememberFollowerHint\(source,data\)/u,'candidate announcements may retain only a complete identity tuple for follower handoff');
 assert.match(sw,/SD_PWA_UPDATE_AVAILABLE',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'waiting-worker announcements must carry the immutable identity tuple');
 assert.match(sw,/SD_PWA_ACTIVATED',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'activation announcements must carry the immutable identity tuple');
 

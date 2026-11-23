@@ -18,8 +18,8 @@ function harness({controlled=true,supported=true}={}){
  const sw=emitter({controller:controlled?old:null,register:async(...args)=>{registerCalls++;behavior.registerArgs=args;await behavior.register();return registration;}});
  const win=emitter({crypto:{randomUUID:()=>`request-${next}`},sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},location:{reload(){reloads++;behavior.reload();}}});
  const doc=emitter({hidden:true});
- const behavior={prepare:async()=>({ok:true}),register:async()=>{},update:async()=>{},reload:()=>{},valid:true,ready:Promise.resolve(),follower:false};
- const api=module.createCoordinator(freeze({configuration:freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:freeze({trusted:'./sw.js'})}),environment:freeze({AbortController,MessageChannel:Channel,clearTimeout:id=>timers.delete(id),setTimeout:setTimer,document:doc,navigator:supported?{serviceWorker:sw}:{},window:win}),hooks:freeze({capture:(scope,error)=>captures.push({scope,error}),captureFollower:()=>behavior.follower,render:state=>renders.push(state),reserve:context=>{reserves++;held++;let released=false;return freeze({ready:behavior.ready,validate:()=>behavior.valid&&!context.signal.aborted,release:async()=>{if(!released){released=true;releases++;held--;}}});},prepare:async context=>{prepareCalls++;prepares.push(context);return behavior.prepare(context);}})}));
+ const behavior={prepare:async()=>({ok:true}),register:async()=>{},update:async()=>{},reload:()=>{},valid:true,ready:Promise.resolve()};
+ const api=module.createCoordinator(freeze({configuration:freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:freeze({trusted:'./sw.js'})}),environment:freeze({AbortController,MessageChannel:Channel,clearTimeout:id=>timers.delete(id),setTimeout:setTimer,document:doc,navigator:supported?{serviceWorker:sw}:{},window:win}),hooks:freeze({capture:(scope,error)=>captures.push({scope,error}),render:state=>renders.push(state),reserve:context=>{reserves++;held++;let released=false;return freeze({ready:behavior.ready,validate:()=>behavior.valid&&!context.signal.aborted,release:async()=>{if(!released){released=true;releases++;held--;}}});},prepare:async context=>{prepareCalls++;prepares.push(context);return behavior.prepare(context);}})}));
  const activate=async(worker=candidate,{control=true,state='activated'}={})=>{registration.waiting=null;registration.active=worker;worker.state=state;if(control)sw.controller=worker;worker.emit('statechange');if(control)sw.emit('controllerchange');await flush();};
  const message=(type,source=sw.controller,releaseId=source?.releaseId)=>sw.emit('message',{source,data:{type,releaseId,buildId:source?.buildId,assetId:source?.assetId}});
  return {api,sw,win,doc,old,candidate,registration,behavior,timers,channels,captures,renders,storage,prepares,advance,worker,activate,message,counts:()=>({reloads,registerCalls,checks,prepareCalls,reserves,releases,held})};
@@ -50,51 +50,26 @@ await test('first installation never reloads or prepares an interactive page',as
 await test('untrusted messages and release names never authorize reload',async()=>{
  const h=harness();await h.api.install();h.message('SD_PWA_ACTIVATED',{},'forged');h.message('SD_PWA_ACTIVATED',h.old,'forged');await flush();assert.equal(h.counts().reloads,0);assert.equal(h.counts().reserves,0);
 });
-await test('early candidate announcement binds follower role before registration waiting settles',async()=>{
- const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
- h.behavior.follower=true;h.candidate.state='installing';
- h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next'}});
- h.behavior.follower=false;h.registration.installing=h.candidate;h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
- assert.equal(h.api.status().waitingReleaseId,'next','candidate announcement must lead only to verified registration discovery');
- h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});h.registration.installing=null;await h.activate();
- assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'exact candidate must retain follower role captured before the primary unloads');
- h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(h.counts().reloads,1);h.win.emit('pagehide');
-});
-await test('captured follower identity survives ServiceWorker wrapper replacement after activation',async()=>{
- const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
- h.behavior.follower=true;h.candidate.state='installing';h.candidate.identityBlocked=true;
+await test('candidate announcement remains advisory until registration exposes a verified waiting worker',async()=>{
+ const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();h.candidate.state='installing';
  h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:h.candidate.buildId,assetId:h.candidate.assetId}});await flush();
- h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;
- assert.equal(h.api.reconcileFollowerRole(false),false,'controller change must preserve the synchronously announced follower identity through ownership handoff');
- h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'full candidate identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+ assert.equal(h.api.status().updateReady,false);assert.equal(h.counts().reserves,0);assert.equal(h.counts().reloads,0);
+ h.registration.installing=h.candidate;h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
+ assert.equal(h.api.status().waitingReleaseId,'next','candidate availability must still come from verified registration state and worker identity');
 });
-await test('ownership handoff before controllerchange retains exact waiting-candidate follower evidence',async()=>{
- const h=harness();await h.api.install();
- h.behavior.follower=true;h.message('SD_PWA_UPDATE_AVAILABLE',h.candidate);await flush();
- h.behavior.follower=false;assert.equal(h.registration.waiting,h.candidate);assert.equal(h.api.reconcileFollowerRole(false),false,'a secondary may win ownership before its delayed controllerchange; exact candidate evidence must survive that handoff');
- const activatedWrapper=h.worker('next','activated');h.registration.waiting=null;h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'the delayed controllerchange must retain the pre-handoff follower classification and reload read-only');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();
-});
-await test('retained follower evidence never downgrades a direct primary waiting-update apply',async()=>{
- const h=harness();await h.api.install();
- h.behavior.follower=true;h.message('SD_PWA_UPDATE_AVAILABLE',h.candidate);await flush();
- h.behavior.follower=false;assert.equal(h.api.reconcileFollowerRole(false),false);
- assert.equal(await h.api.apply(),true);
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false,'a tab that owns the waiting update must still take the normal persistence path');h.win.emit('pagehide');await flush();
-});
-await test('activation handoff preserves follower evidence after waiting pointer clears but before controllerchange',async()=>{
- const h=harness();await h.api.install();h.behavior.follower=true;h.message('SD_PWA_UPDATE_AVAILABLE',h.candidate);await flush();
- h.behavior.follower=false;h.registration.waiting=null;
- assert.equal(h.api.reconcileFollowerRole(false),false,'a cleared waiting pointer with captured identity is an activation handoff until controller reconciliation settles');
- const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].follower,true);h.win.emit('pagehide');await flush();
-});
-await test('candidate hint cannot transfer follower role through a forged release name',async()=>{
+await test('external controller handoff is follower-safe even when candidate announcements are missed',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
- h.behavior.follower=true;const rogue=h.worker('rogue','installing');h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:'rogue-build',assetId:'b'.repeat(24)}});await flush();
- h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].follower,false,'message release strings are hints and cannot confer follower authority on another worker');h.win.emit('pagehide');await flush();
+ const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'a controller changed without this window owning an activation attempt is necessarily a non-initiating handoff');assert.equal(h.prepares[0].automatic,true,'external handoff must retain automatic edit-idle safety');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+});
+await test('direct waiting-update apply remains a primary persistence path',async()=>{
+ const h=harness();await h.api.install();assert.equal(await h.api.apply(),true);
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false);assert.equal(h.prepares[0].automatic,false);assert.ok(h.candidate.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));h.win.emit('pagehide');await flush();
+});
+await test('forged candidate announcement cannot create update authority or authorize reload',async()=>{
+ const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();const rogue=h.worker('rogue','installing');
+ h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next',buildId:'rogue-build',assetId:'b'.repeat(24)}});await flush();
+ assert.equal(h.api.status().updateReady,false);assert.equal(await h.api.apply(),false);assert.equal(h.counts().reserves,0);assert.equal(h.counts().prepareCalls,0);assert.equal(h.counts().reloads,0);
 });
 await test('candidate replacement during preparation never gets stale release request',async()=>{
  const h=harness(),gate=deferred();await h.api.install();h.behavior.prepare=()=>gate.promise;const task=h.api.apply();await flush();const newer=h.worker('newer');h.registration.waiting=newer;h.message('SD_PWA_UPDATE_AVAILABLE',newer);await flush();gate.resolve({ok:true});assert.equal(await task,false);assert.equal(h.counts().held,0);assert.ok(!newer.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));assert.equal(h.api.status().waitingReleaseId,'newer');
