@@ -44,7 +44,7 @@ function makeRuntime(installationId,read){
         run:async(type,data)=>{if(type==='checksum')return sha256(data.value);if(type==='file.release')return true;throw new Error('Unexpected export operation '+type);}
       }),
       domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
-      ownership:freeze({canRunBackground:()=>true,canShare:()=>true,requireMutationControl:noop}),
+      ownership:freeze({canRunBackground:()=>true,canShare:()=>true,requireMutationControl:noop,runExclusive:async(_kind,operation)=>operation()}),
       environment:freeze({clearTimeout,setTimeout}),diagnostics:freeze({capture:noop,fail:noop,finish:noop,mark:noop,start:()=>''})
     })
   }));
