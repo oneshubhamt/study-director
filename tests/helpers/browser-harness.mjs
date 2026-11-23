@@ -300,8 +300,18 @@ export async function launchChromium(options={}){
   }
   async function closePage(page){
     try{await page.collectCoverage();}catch(error){if(process.env.SD_BROWSER_COVERAGE_DIR)console.warn(`[coverage] ${error.message}`);}
+    const targetId=page.targetId;
     try{await Promise.race([page.send('Page.close'),sleep(2000)]);}catch{}
     pages.delete(page);page.close();
+    await waitFor(async()=>{
+      if(processHandle.exitCode!==null)return true;
+      try{
+        const response=await fetch(`http://127.0.0.1:${port}/json/list`);
+        if(!response.ok)return false;
+        const targets=await response.json();
+        return !targets.some(target=>target.id===targetId);
+      }catch{return processHandle.exitCode!==null;}
+    },{timeout:10000,interval:50,label:'Chromium page close'});
   }
   async function close(){
     for(const page of [...pages]){try{await page.collectCoverage();}catch(error){if(process.env.SD_BROWSER_COVERAGE_DIR)console.warn(`[coverage] ${error.message}`);}}
