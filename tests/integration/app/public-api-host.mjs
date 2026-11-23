@@ -83,6 +83,8 @@ for(const plugin of [
   {name:'qa-bad-preview',previewProviders:{insights:'not-a-provider'},setup(){malformedSetup++;return true;}}
 ])assert.equal(publicApi.registerPlugin(plugin),false,'malformed public plugin descriptors must fail closed');
 assert.equal(malformedSetup,0,'malformed plugin descriptors must be rejected before setup');
+const hostileDescriptor={get name(){throw new Error('hostile descriptor getter');},setup(){return true;}};
+assert.equal(publicApi.registerPlugin(hostileDescriptor),false,'descriptor parsing failures must be contained at the public API boundary');
 let prototypeSetup=0;
 const prototypeRequirements=Object.fromEntries([['__proto__',1]]);
 assert.equal(publicApi.registerPlugin({name:'qa-prototype-requirement',requires:prototypeRequirements,setup(){prototypeSetup++;return true;}}),false,'prototype-like capability keys must not resolve through Object.prototype');
@@ -118,4 +120,4 @@ assert.equal(runtime.status().optionalFiles[0].state,'registered');
 assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1);
 assert.equal(runtime.requestTab('missing'),null);
 
-console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,frozenPublicApi:true}));
+console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,frozenPublicApi:true}));
