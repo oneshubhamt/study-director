@@ -41,6 +41,32 @@ assert.match(owner,/if\(unmet\.length\)[\s\S]{0,520}state:'incompatible'/u,'capa
 assert.match(owner,/if\(previous\?\.state==='registered'\)\{[\s\S]{0,260}return true;/u,'successful plugin registration is idempotent while refreshing the optional-tab state');
 const published=host.indexOf('HOST_WINDOW.StudyDirector=StudyDirectorPublicAPI;'),ready=host.indexOf('window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT'),invalidate=host.indexOf("SessionLifecycle.invalidate('app-restart'"),startup=host.indexOf('StartupLifecycle.start();'),pwa=host.indexOf('void PwaRuntime.install();');
 assert.ok(published>=0&&published<ready&&ready<invalidate&&invalidate<startup&&startup<pwa,'public API publication and ready event must remain before lifecycle startup and PWA install');
+assert.match(owner,/function normalizePluginDescriptor\(value:unknown\)/u,'public plugin entry validates untrusted descriptors before setup');
+assert.match(owner,/typeof minimum!==['"]number['"][\s\S]{0,120}!Number\.isFinite\(minimum\)[\s\S]{0,120}minimum<0/u,'public plugin capability requirements fail closed on malformed values');
+}
+
+{ // p5.13b-host-dispatch-and-build-token-closure
+const template=fs.readFileSync('source/app.html','utf8'),hostSource=fs.readFileSync('source/host/main.ts','utf8'),buildSource=fs.readFileSync('build/build.mjs','utf8');
+const dispatchMaps=[
+  ['data-action','CLICK_ACTIONS','CHANGE_ACTIONS'],
+  ['data-change','CHANGE_ACTIONS','INPUT_ACTIONS'],
+  ['data-input','INPUT_ACTIONS','BLUR_ACTIONS'],
+  ['data-blur','BLUR_ACTIONS','KEYDOWN_ACTIONS'],
+  ['data-keydown','KEYDOWN_ACTIONS','OWNER_REQUIRED_CLICK_ACTIONS']
+];
+for(const [attribute,mapName,nextName] of dispatchMaps){
+  const authored=[...new Set([...template.matchAll(new RegExp(attribute+'="([^"]+)"','gu'))].map(row=>row[1]))];
+  const start=hostSource.indexOf('const '+mapName+':'),end=hostSource.indexOf('const '+nextName,start+1);
+  assert.ok(start>=0&&end>start,mapName+' typed dispatch map must remain in the strict host');
+  const handlers=new Set([...hostSource.slice(start,end).matchAll(/^\s*'([^']+)'\s*:/gmu)].map(row=>row[1]));
+  for(const action of authored)assert.ok(handlers.has(action),attribute+'="'+action+'" must have a typed delegated host handler');
+}
+assert.match(hostSource,/type DelegatedHostInput=Parameters<typeof FoundationHostModule\.createDelegated>\[0\];/u,'delegated handler maps must derive from the checked host contract');
+for(const token of ['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','DEVICE_WIDE_LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','EXTERNAL_REPOSITORY_IDENTITIES']){
+  assert.ok(hostSource.includes('@@SD_'+token+'_URI@@'),token+' host input must use a TypeScript-readable encoded token');
+  assert.ok(buildSource.includes("encodeURIComponent(JSON.stringify("), 'build renderer must encode structured host tokens from authoritative contracts');
+}
+assert.doesNotMatch(hostSource,/decodeBuildJson\('@@SD_(?:PRODUCTION_LIMITS|SESSION_STORAGE_KEYS|APP_META_KEYS|APP_META_REGISTRY|RUNTIME_DATA_CONTRACT|INDEXED_DB_STORE_NAMES|EXTERNAL_REPOSITORY_IDENTITIES)@@/u,'strict host must not regress to bare structured build-token expressions');
 }
 
 { // p5.7a-backup-actions-host-boundary
