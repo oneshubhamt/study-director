@@ -56,7 +56,7 @@ interface ProfileViewsInput{
 }
 interface ProfileSettlementInput{
  AppOwnership:{canMutate():boolean};AppMutationCoordinator:{settled():PromiseLike<unknown>};appCanMutate():boolean;
- PlanDraftEditor:{flush(options:{strictDurability:true}):boolean|PromiseLike<boolean>};PlanData:{settled():PromiseLike<unknown>};
+ PlanDraftEditor:{flush(options:{strictDurability:true}):boolean|PromiseLike<boolean>};PlanData:{settled():PromiseLike<unknown>};flushPreferences():boolean|PromiseLike<boolean>;
  settleAttachmentWriters():PromiseLike<unknown>;deletionRecovery:{flush():PromiseLike<boolean>};
  AppDiagnostics:{capture(scope:string,error:unknown,level:'error'):unknown};setPlanStatus(message:string,ok:boolean):unknown;
 }
@@ -160,7 +160,7 @@ async function profileDriveAction(){return ports.driveStatus()?.connected?ports.
 return Object.freeze({profileDriveAction,normalizeStudentName,applyStudentName,getStudentNameFromDisplay,isDefaultStudentName,profileInitial,profileSince,profileLabel,renderProfileBadge,renderProfilePanel,renderProfile,reportProfileActionError});
 }
 function createSettlement(ports:Readonly<ProfileSettlementInput>){
-const {AppOwnership,AppMutationCoordinator,appCanMutate,PlanDraftEditor,PlanData,settleAttachmentWriters,deletionRecovery,AppDiagnostics,setPlanStatus}=ports;
+const {AppOwnership,AppMutationCoordinator,appCanMutate,PlanDraftEditor,PlanData,flushPreferences,settleAttachmentWriters,deletionRecovery,AppDiagnostics,setPlanStatus}=ports;
 async function settleCurrentProfileWriters(){
   if(!AppOwnership.canMutate())throw new Error('Study Director does not currently have write control.');
   // A mutation already owned by this tab is allowed to finish; only after it
@@ -169,6 +169,7 @@ async function settleCurrentProfileWriters(){
   if(!appCanMutate())throw new Error('Study Director could not reach a safe write state.');
   if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
   await PlanData.settled();
+  if(await Promise.resolve(flushPreferences())!==true)throw new Error('Personal profile settings could not be saved.');
   // This existing writer barrier closes/settles rich-text and Diary edits,
   // Notes, the current reflection and Active Session.
   await settleAttachmentWriters();
