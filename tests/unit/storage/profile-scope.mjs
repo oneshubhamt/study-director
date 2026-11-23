@@ -30,6 +30,16 @@ function run(value,existing=null){
   assert.equal(scope.scope,'__profile-registry-unreadable__');
 }
 {
+  const rows=Array.from({length:12},(_,index)=>({id:`prof_row${index}_mve00000_${String(index+1).padStart(8,'0')}`,scope:`prof_scope${index}_mve00000_${String(index+101).padStart(8,'0')}`}));
+  const lateId='prof_late_mve00000_0000abcd',lateScope='prof_latescope_mve00000_0000abce';
+  const currentLate=run({version:1,active:lateId,profiles:[...rows,{id:lateId,scope:lateScope}]});
+  assert.equal(currentLate.safe,false,'current-schema bootstrap cannot resolve an active profile outside the canonical 12-row registry window');
+  const newerLate=run({version:9,active:lateId,profiles:[...rows,{id:lateId,scope:lateScope}]});
+  assert.equal(newerLate.safe,true,'newer readable registries retain first-known fallback inside the canonical row window');
+  assert.equal(newerLate.id,rows[0].id);assert.equal(newerLate.scope,rows[0].scope);
+}
+
+{
   const duplicateScope=run({version:1,active:idA,profiles:[{id:idA,scope:''},{id:idB,scope:''}]});
   assert.equal(duplicateScope.safe,false,'two valid profiles cannot share the selected storage scope');
   assert.equal(duplicateScope.scope,'__profile-registry-unreadable__');

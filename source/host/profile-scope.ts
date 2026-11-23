@@ -19,7 +19,7 @@
       // A readable newer registry still identifies the current profile, but
       // later profile mutations remain blocked by Profiles.unsupported().
       const version=Number(list?.['version']);
-      const profiles=list&&Number.isInteger(version)&&version>=1&&Array.isArray(list['profiles'])?(list['profiles'].filter(valid) as Record<string,unknown>[]):[];
+      const profiles=list&&Number.isInteger(version)&&version>=1&&Array.isArray(list['profiles'])?(list['profiles'].slice(0,12).filter(valid) as Record<string,unknown>[]):[];
       const activeId=typeof list?.['active']==='string'?list['active']:'';
       const selected=profiles.find(entry=>entry['id']===activeId);
       const active=version===1?selected:(selected||profiles[0]);
