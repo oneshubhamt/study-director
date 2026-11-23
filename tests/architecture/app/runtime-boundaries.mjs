@@ -95,7 +95,7 @@ const ownerClickStart=hostSource.indexOf('const OWNER_REQUIRED_CLICK_ACTIONS'),o
 assert.ok(ownerClickStart>=0&&ownerClickEnd>ownerClickStart,'final host owner-required click projection must remain explicit');
 const ownerClickActions=new Set([...hostSource.slice(ownerClickStart,ownerClickEnd).matchAll(/['"]([^'"]+)['"]/gu)].map(row=>row[1]));
 for(const action of ['backup-protection','remove-managed-version','review-kept-versions','rename-profile'])assert.ok(ownerClickActions.has(action),`owner-only action ${action} must remain inside the final host ownership projection`);
-assert.match(readScript('source/core/backup-provider.ts'),/runExclusive\('remove backup version',[\s\S]*controlChecked:true/u,'managed-version deletion must hold the canonical durable mutation lease across the remote destructive operation');
+assert.match(readScript('source/core/backup-provider.ts'),/runExclusive\('remove backup version',\(\)=>removeProviderVersionUnderAuthority/u,'managed-version deletion must enter the authority-only helper through the canonical durable mutation lease');
 for(const token of ['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','DEVICE_WIDE_LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','EXTERNAL_REPOSITORY_IDENTITIES']){
   assert.ok(hostSource.includes('@@SD_'+token+'_URI@@'),token+' host input must use a TypeScript-readable encoded token');
   assert.ok(buildSource.includes("encodeURIComponent(JSON.stringify("), 'build renderer must encode structured host tokens from authoritative contracts');
