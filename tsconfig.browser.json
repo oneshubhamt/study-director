@@ -251,6 +251,7 @@
     "types/checks/plan.ts",
     "source/core/pwa-lifecycle.ts",
     "source/host/install-capture.ts",
+    "types/pwa-protocol.ts",
     "types/pwa-lifecycle.ts",
     "source/core/pwa-update-host.ts"
   ]

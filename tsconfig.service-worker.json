@@ -9,6 +9,7 @@
   },
   "files": [
     "source/platform/sw.ts",
+    "types/pwa-protocol.ts",
     "types/checks/service-worker.ts"
   ]
 }
