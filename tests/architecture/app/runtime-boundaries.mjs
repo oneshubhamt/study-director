@@ -43,6 +43,7 @@ const published=host.indexOf('HOST_WINDOW.StudyDirector=StudyDirectorPublicAPI;'
 assert.ok(published>=0&&published<ready&&ready<invalidate&&invalidate<startup&&startup<pwa,'public API publication and ready event must remain before lifecycle startup and PWA install');
 assert.match(owner,/function normalizePluginDescriptor\(value:unknown\)/u,'public plugin entry validates untrusted descriptors before setup');
 assert.match(owner,/typeof minimum!==['"]number['"][\s\S]{0,120}!Number\.isFinite\(minimum\)[\s\S]{0,120}minimum<0/u,'public plugin capability requirements fail closed on malformed values');
+assert.match(owner,/Object\.hasOwn\(input\.configuration\.capabilities,key\)/u,'plugin capability lookup must not inherit Object.prototype entries');
 }
 
 { // p5.13b-host-dispatch-and-build-token-closure
