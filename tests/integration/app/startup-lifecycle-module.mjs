@@ -181,6 +181,33 @@ for(const failed of ['plan','preferences','none']){
  assert.deepEqual(calls.slice(0,2),['plan','preferences']);
  assert.equal(calls.includes('fallback'),failed==='plan');assert.equal(calls.includes('library'),failed!=='plan');assert.equal(quote.value,failed==='preferences'?'':'Quote');
 }
+// Secondary startup is read-only: canonical epoch reseeding belongs only to
+// the tab that actually owns mutation authority. A secondary keeps the fast
+// fence disabled, which safely falls back to full snapshot fencing.
+{
+  let mutable=false,reseeded=0,fast=[],timeouts=0;
+  const no=()=>false,yes=()=>true,asyncYes=async()=>true;
+  const stageDocument={documentElement:{dataset:{}},getElementById:()=>null};
+  const stageWindow={dispatchEvent:()=>true};
+  const stageInput={
+    document:stageDocument,window:stageWindow,version:'qa',notices:{dismiss:()=>true},
+    stages:{},profileSafe:yes,census:asyncYes,preferencesHydrated:no,applyProtectedAppearance:yes,restoreTheme:yes,restorePresentation:yes,restoreFontScale:yes,
+    hydratePlan:asyncYes,readRestoreJournal:async()=>null,waitForClosedTabLease:asyncYes,recoverRestore:asyncYes,tickClock:yes,updateHeader:yes,setInterval:()=>1,setTimeout:fn=>{timeouts++;fn();return 1;},
+    hasTasks:no,showEmpty:yes,canMutate:()=>mutable,restoreSession:asyncYes,refreshBadge:asyncYes,inspectStorage:asyncYes,offerInstallNotice:asyncYes,topology:async()=>({usable:true}),
+    setFastFenceReady:value=>fast.push(value),reseedEpoch:async()=>{reseeded++;},capture:()=>{},reconcileChangeClock:asyncYes,resumeStorageReset:yes,
+    installBackground:yes,scheduleMaintenance:yes,wakeBackground:yes,installSessionWatch:yes,refreshKeptVersions:asyncYes,announceUnsupported:yes,renderUnsupported:yes,
+    collectProfiles:async()=>({error:null}),askProfilePassword:yes,collectFiles:asyncYes,preloadInsights:yes,confirmBoot:asyncYes,offerDeviceRecovery:asyncYes,
+    reportUnsupported:no,setPlanStatus:yes,noticeCanCompact:no,getReviewDate:()=> '2026-11-23',reconcileLifecycle:yes
+  };
+  const stages=StartupHost.createStages(stageInput);
+  await stages.markReady(Object.freeze({canonical:true}));
+  assert.equal(reseeded,0,'secondary startup must not write the canonical mutation epoch');
+  assert.deepEqual(fast,[false],'secondary startup keeps fast capture fencing disabled rather than trusting an unreseeded epoch');
+  mutable=true;fast=[];await stages.markReady(Object.freeze({canonical:true}));
+  assert.equal(reseeded,1);assert.deepEqual(fast,[false,true],'the writable owner reseeds before enabling the fast fence');
+  assert.ok(timeouts>=2);
+}
+
 const wakeCalls=[];let quiesced=true;
 const wake=StartupHost.createWake({quiesced:()=>quiesced,sync:()=>wakeCalls.push('sync')});
 assert.equal(wake(),false);quiesced=false;wake();assert.deepEqual(wakeCalls,['sync']);

@@ -204,7 +204,8 @@ function createStages(p:Readonly<StartupStagesInput>):StartupLifecycleInput['sta
   verifyReady:async()=>{if(!(await p.topology()).usable)throw new Error('Canonical database topology is unavailable.');return freeze({canonical:true});},
   markReady:async proof=>{
    if(!proof||typeof proof!=='object'||!('canonical' in proof)||proof.canonical!==true)throw new Error('Canonical startup proof is unavailable.');
-   p.setFastFenceReady(false);try{await p.reseedEpoch();p.setFastFenceReady(true);}catch(error){p.capture('startup.canonical-mutation-epoch',error,'warn');}
+   p.setFastFenceReady(false);
+   if(p.canMutate())try{await p.reseedEpoch();p.setFastFenceReady(true);}catch(error){p.capture('startup.canonical-mutation-epoch',error,'warn');}
    await p.reconcileChangeClock();p.resumeStorageReset();p.installBackground();p.scheduleMaintenance();p.wakeBackground('startup');p.installSessionWatch();void p.refreshKeptVersions();p.announceUnsupported();p.renderUnsupported();
    void Promise.resolve(p.collectProfiles()).then(result=>{if(result.error)p.capture('profiles.collect',result.error,'warn');});p.askProfilePassword();
    void p.collectFiles().catch(error=>p.capture('backup.file-cleanup',error,'warn'));
