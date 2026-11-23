@@ -70,7 +70,7 @@ export interface StudyDirectorPublicApi{
 export interface StudyDirectorPluginDescriptor{
  readonly name:string;readonly version?:string;readonly requires?:Readonly<Record<string,number>>;
  readonly previewProviders?:Readonly<Record<string,InsightsPreviewProvider>>;
- setup(api:StudyDirectorPublicApi):unknown;
+ readonly setup:(api:StudyDirectorPublicApi)=>unknown;
 }
 export interface PublicApiRuntimeInput{
  readonly configuration:Readonly<{capabilities:CapabilityMap;descriptors:readonly OptionalPluginDescriptor[]}>;
