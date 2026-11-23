@@ -330,8 +330,10 @@ function createLifecycle(ports:LifecycleInput){
   async function startProfile(){
     const name=ports.getStudentName(),named=!ports.isDefaultStudentName(name);let mine=ports.profiles.current();
     if(ports.appCanMutate()){
-      if(!mine)mine=ports.profiles.ensure(named?name:'',{fresh:!named&&await ports.canonicalLocalRecoveryEmpty()===true});
-      else if(named)ports.profiles.rename(name);
+      if(!mine){
+        const fresh=!named&&await ports.canonicalLocalRecoveryEmpty()===true;
+        if(ports.appCanMutate())mine=ports.profiles.ensure(named?name:'',{fresh});
+      }else if(named)ports.profiles.rename(name);
     }
     ports.renderProfile();if(mine?.fresh&&ports.appCanMutate())ports.firstStart.open();
   }

@@ -50,6 +50,20 @@ try{
   assert.equal(ensureCalls,0);
   lifecycleAuthority=true;
 
+  {
+    let emptyAuthority=true,releaseEmpty,emptyEnsureCalls=0;
+    const emptyGate=new Promise(resolve=>{releaseEmpty=resolve;});
+    const emptyLifecycle=Host.createLifecycle(freeze({
+      profiles:freeze({...profiles,current:()=>null,list:()=>[],ensure:()=>{emptyEnsureCalls++;return profile;}}),
+      firstStart:freeze({open:()=>true,close:()=>{},render:()=>{},connect:async()=>true,finish:async()=>true,skip:()=>true,confirmField:()=>{},key:()=>true,joined:()=>{},isOpen:()=>false}),
+      settleCurrentProfile:async()=>true,getStudentName:()=>'',isDefaultStudentName:()=>true,
+      canonicalLocalRecoveryEmpty:async()=>{await emptyGate;return true;},renderProfile:()=>true,appCanMutate:()=>emptyAuthority,reportError:()=>{},
+      backupProtection:freeze({ask:async()=>true}),setBackupProtectionSurfaceError:()=>{}
+    }));
+    const starting=emptyLifecycle.startProfile();await Promise.resolve();emptyAuthority=false;releaseEmpty();
+    await starting;assert.equal(emptyEnsureCalls,0,'startup cannot create a profile after ownership is lost while checking whether local recovery is empty');
+  }
+
   // First Start must re-check authority after asynchronous password setup.
   {
     const priorInput=globalThis.HTMLInputElement,priorDialog=globalThis.HTMLDialogElement;
