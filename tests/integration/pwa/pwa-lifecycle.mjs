@@ -69,12 +69,19 @@ await test('captured follower identity survives ServiceWorker wrapper replacemen
  h.sw.emit('controllerchange');await flush();
  assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'full candidate identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
 });
-await test('primary takeover before activation clears stale follower identity once waiting is verified',async()=>{
+await test('ownership handoff before controllerchange retains exact waiting-candidate follower evidence',async()=>{
  const h=harness();await h.api.install();
  h.behavior.follower=true;h.message('SD_PWA_UPDATE_AVAILABLE',h.candidate);await flush();
- h.behavior.follower=false;assert.equal(h.registration.waiting,h.candidate);assert.equal(h.api.reconcileFollowerRole(false),true,'primary ownership while the candidate is still waiting must revoke follower evidence');
+ h.behavior.follower=false;assert.equal(h.registration.waiting,h.candidate);assert.equal(h.api.reconcileFollowerRole(false),false,'a secondary may win ownership before its delayed controllerchange; exact candidate evidence must survive that handoff');
  const activatedWrapper=h.worker('next','activated');h.registration.waiting=null;h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,false,'a tab that became primary before activation must take the normal persistence path');h.win.emit('pagehide');await flush();
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'the delayed controllerchange must retain the pre-handoff follower classification and reload read-only');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();
+});
+await test('retained follower evidence never downgrades a direct primary waiting-update apply',async()=>{
+ const h=harness();await h.api.install();
+ h.behavior.follower=true;h.message('SD_PWA_UPDATE_AVAILABLE',h.candidate);await flush();
+ h.behavior.follower=false;assert.equal(h.api.reconcileFollowerRole(false),false);
+ assert.equal(await h.api.apply(),true);
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false,'a tab that owns the waiting update must still take the normal persistence path');h.win.emit('pagehide');await flush();
 });
 await test('activation handoff preserves follower evidence after waiting pointer clears but before controllerchange',async()=>{
  const h=harness();await h.api.install();h.behavior.follower=true;h.message('SD_PWA_UPDATE_AVAILABLE',h.candidate);await flush();

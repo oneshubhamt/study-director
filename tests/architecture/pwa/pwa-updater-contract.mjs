@@ -37,7 +37,8 @@ assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.rev
 assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerBackgroundBackupActive\(\)/u,'a running background backup must defer update activation');
 assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked update safety must own the pre-update backup wait policy');
 assert.doesNotMatch(app,/PWA_UPDATE_BACKUP_WAIT_MS|function backUpBeforeUpdate\b/u,'PWA-specific backup wait policy must not remain in unchecked main');
-assert.match(updater,/lifecycle\.reconcileFollowerRole\(state\.ownership\(\)\.state===configuration\.secondaryState\)/u,'ownership projection must clear stale follower evidence before a later controller change');
+assert.match(updater,/lifecycle\.reconcileFollowerRole\(state\.ownership\(\)\.state===configuration\.secondaryState\)/u,'ownership projection must continuously reconcile candidate follower evidence');
+assert.match(lifecycle,/function hasFollowerEvidence\(\).*followerIdentities\.size>0\|\|!!candidate&&followerWorkers\.has\(candidate\)/u,'exact follower evidence must survive a secondary-to-primary ownership handoff until controller reconciliation');
 assert.match(lifecycle,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
 assert.match(lifecycle,/followerIdentities\.has\(followerIdentity\(target\)\)/u,'external follower ownership must survive browser ServiceWorker wrapper replacement by verified full identity');
 assert.doesNotMatch(lifecycle,/captureWorkerRole\(source,String\(data\['releaseId'\]/u,'candidate hint release strings must not establish follower identity');
