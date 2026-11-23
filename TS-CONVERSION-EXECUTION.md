@@ -1,6 +1,14 @@
 # TypeScript conversion — execution record
 
 
+## P5.13 · SECOND DE NOVO SOURCE AUDIT — OPEN · 2026-11-23
+
+- **Baseline / canonical objective:** re-audit starts at `38ffbb201eb39feb79173451a444f11b97fffeee` against `AGENTS.md` and the complete P5.13a/P5.13b/final-handoff contract in `docs/typescript/PHASE-5.md`; prior P5.13 closure claims are treated as evidence to re-prove, not assumptions.
+- **Bounded findings to close in this pass:** (1) `StudyDirectorPluginDescriptor.setup` still uses method syntax, weakening strict provider-parameter variance; (2) `plugins.status()` exposes the mutable registration records retained by the runtime map; (3) the host keeps one dead `registerStudyDirectorPlugin` wrapper; (4) action-map closure checks only static `app.html` values even though checked features create delegated controls dynamically; (5) `core-flow` exercises several P5.13b cross-feature operations through instrumentation instead of their real delegated handlers.
+- **Invariants:** valid shipped Guide/Drive/Insights behavior and setup receiver semantics stay unchanged; malformed JS plugin input continues to fail closed; optional-load/retry/single-registration behavior stays unchanged; public API/ready/startup/PWA order and deferred provider order stay unchanged; no feature algorithm is moved merely to shrink `main.ts`.
+- **Verification objective:** strengthen direct architecture/integration/browser witnesses, recheck the complete shipping/runtime/compiler topology and pre-conversion behavior-sensitive paths, then trigger the dedicated P5.13 targeted gate. Full independent Phase-5 audit and Phase-7 certification remain separate.
+
+
 ## P5.13 · SOURCE-CORRECTED — TARGETED EXECUTION EVIDENCE PENDING · 2026-11-23 · DE NOVO WHOLE-PROGRAMME AUDIT
 
 - **Audit basis / source-test head:** challenged the prior P5.13 closure from live audit-entry head `fae2eb9fdf7e00c2aba48b8c82206940716b9ec4`, reread `AGENTS.md`, this execution record and the complete P5.13a/P5.13b/final-handoff acceptance text in `docs/typescript/PHASE-5.md`, and rebuilt the objective → owner → shipped output → witness map from current source. Corrected production/test head is `dace525350d8d63b6afd0f758c7b368340d8f345`.
