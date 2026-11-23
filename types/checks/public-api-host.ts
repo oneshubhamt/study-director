@@ -1,6 +1,6 @@
 import type {Candidate} from '../backup.ts';
 import type {BackupFile} from '../backup-models.ts';
-import type {StudyDirectorPublicApi} from '../public-api-host.ts';
+import type {StudyDirectorPluginDescriptor,StudyDirectorPublicApi} from '../public-api-host.ts';
 
 async function exerciseBackupPublicApi(api:StudyDirectorPublicApi,file:BackupFile,candidate:Candidate){
   await api.backup.createCheckpoint(
@@ -14,5 +14,11 @@ async function exerciseBackupPublicApi(api:StudyDirectorPublicApi,file:BackupFil
   await inspected.release();
   await api.backup.restore(candidate,{missingOnly:true,confirmed:true});
   await api.backup.downloadSafetyCopy({includeAssetBlobs:true,assumeFlushed:true});
+  const plugin:StudyDirectorPluginDescriptor={
+    name:'typed-plugin',
+    requires:{pluginApi:1},
+    setup(publicApi){void publicApi.version;return true;}
+  };
+  api.registerPlugin(plugin);
 }
 void exerciseBackupPublicApi;
