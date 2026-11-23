@@ -127,7 +127,10 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     });
   }
   function register(value:unknown){
-    const plugin=normalizePluginDescriptor(value);if(!plugin||!publicApi)return false;
+    if(!publicApi)return false;
+    let plugin:NormalizedPluginDescriptor|null=null;
+    try{plugin=normalizePluginDescriptor(value);}catch{return false;}
+    if(!plugin)return false;
     const {name}=plugin,descriptor=descriptorsByPlugin.get(name)||null,previous=registered.get(name);
     if(previous?.state==='registered'){
       if(descriptor){markFile(descriptor.tabId,'registered','',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return true;
