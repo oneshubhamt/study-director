@@ -138,8 +138,8 @@ await test('boot confirmation checks the actual page assets and worker before cl
 });
 await test('wrong loaded assets keep boot pending and advertise safe manual recovery',async()=>{
  const h=harness();h.registration.waiting=null;await h.api.install();h.old.assetId='b'.repeat(24);h.storage.set('reload',JSON.stringify({version:2,releaseId:'old',assetId:'b'.repeat(24)}));
- assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.api.status().phase,'boot-failed');assert.equal(h.api.status().updateReady,true);assert.equal(h.storage.has('reload'),true);assert.equal(h.counts().reloads,0);
- await h.api.apply();await flush();assert.equal(h.counts().reloads,1);assert.equal(JSON.parse(h.storage.get('reload')).assetId,'b'.repeat(24));h.win.emit('pagehide');
+ assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.api.status().phase,'boot-failed');assert.equal(h.api.status().updateReady,true);assert.equal(h.api.status().externalUpdate,false,'same-controller boot mismatch is a local recovery state, not an external activation');assert.equal(h.storage.has('reload'),true);assert.equal(h.counts().reloads,0);
+ await h.api.apply();await flush();assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false,'manual mismatch recovery must retain the full primary persistence path');assert.equal(h.counts().reloads,1);assert.equal(JSON.parse(h.storage.get('reload')).assetId,'b'.repeat(24));h.win.emit('pagehide');
 });
 await test('legacy markers confirm without suppressing retries; current boot without an update reports client generation',async()=>{
  const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');assert.equal(await h.api.confirmBoot(),true);assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);
