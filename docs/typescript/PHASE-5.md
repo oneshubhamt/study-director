@@ -10,7 +10,7 @@ The programme retains 14 top-level steps, P5.0–P5.13. Child IDs identify coher
 | --- | --- | --- |
 | P5.0 | VERIFIED — TARGETED | Five host scripts extracted mechanically; manifest/build/source-reader integration |
 | P5.1 | VERIFIED — TARGETED | Registry, interaction/navigation/overlay/notice/audio foundations and shared host helpers |
-| P5.2 | VERIFIED — TARGETED, audit corrected | Profiles, startup, native capabilities, bootstrap, identity and ownership integration |
+| P5.2 | CLOSED — AUDITED — TARGETED | Profiles, startup, native capabilities, bootstrap, identity and ownership integration |
 | P5.3 | VERIFIED — TARGETED, audit corrected | Plan authoring, saved/default plans, durability and actual schedule-provider contracts |
 | P5.4 | VERIFIED — TARGETED, audit corrected | Execution, timers, Active Session persistence, restoration, handoff and presentation |
 | P5.5 | CLOSED — AUDITED — TARGETED | Review/Diary, saved-day presentation/completion, editor and lifecycle wiring |
