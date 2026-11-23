@@ -55,12 +55,15 @@ registry.define('persistence',1,()=>{
     return freeze(api);
   }
   function randomIdPart(bytes:number=8){
+    const count=Math.max(0,Math.trunc(Number(bytes)||0));
     try{
-      const arr=new Uint8Array(bytes);
+      const arr=new Uint8Array(count);
       crypto.getRandomValues(arr);
       return [...arr].map(n=>n.toString(16).padStart(2,'0')).join('');
-    }catch(e){
-      return Math.random().toString(36).slice(2,12)+Date.now().toString(36);
+    }catch{
+      let value='';
+      while(value.length<count*2)value+=Math.floor(Math.random()*0x100000000).toString(16).padStart(8,'0');
+      return value.slice(0,count*2);
     }
   }
   // A device ID says what the device is, so any device can name any other

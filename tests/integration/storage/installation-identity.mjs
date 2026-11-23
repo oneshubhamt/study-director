@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-function runtime(seed={},kind={type:'iphone',browser:'safari'}){
+function runtime(seed={},kind={type:'iphone',browser:'safari'},cryptoValue=globalThis.crypto){
   const backing=new Map(Object.entries(seed));
   const localStorage={
     getItem:key=>backing.has(String(key))?backing.get(String(key)):null,
@@ -12,7 +12,7 @@ function runtime(seed={},kind={type:'iphone',browser:'safari'}){
   };
   const context=vm.createContext({
     console,Date,Math,JSON,RegExp,Error,TypeError,Object,Array,String,Number,Map,Set,Promise,Uint8Array,
-    crypto:globalThis.crypto,localStorage,globalThis:null
+    crypto:cryptoValue,localStorage,globalThis:null
   });
   context.globalThis=context;
   for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`source/core/${file}.ts`});
@@ -35,6 +35,13 @@ assert.match(generated,/^inst_android_chrome_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,'a ne
 assert.equal(fresh.backing.get('installation'),generated,'fresh current identity must be durable');
 assert.equal(fresh.identity.getId(),generated,'the ID is made once');
 assert.equal(fresh.backing.get('legacyDevice'),'dev_legacy_installation','historical identity must remain exclusively for the compatibility facade to migrate/retire');
+
+const fallback=runtime({}, {type:'android',browser:'chrome'},{getRandomValues(){throw new Error('Web Crypto unavailable');}});
+const fallbackRandom=fallback.persistence.randomIdPart(4);
+assert.match(fallbackRandom,/^[a-f0-9]{8}$/u,'the random-byte fallback preserves the hexadecimal identity contract');
+const fallbackId=fallback.identity.getId();
+assert.match(fallbackId,/^inst_android_chrome_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,'installation identity remains valid when Web Crypto is unavailable');
+assert.equal(fallback.backing.get('installation'),fallbackId);
 
 // A browser-data clear removes the stored ID; the open tab writes it back,
 // and leaves alone an ID another tab has written since.
