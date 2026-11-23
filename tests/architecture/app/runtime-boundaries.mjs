@@ -51,7 +51,7 @@ assert.match(owner,/Object\.hasOwn\(input\.configuration\.capabilities,key\)/u,'
 assert.match(owner,/try\{plugin=normalizePluginDescriptor\(value\);\}catch\{return false;\}/u,'descriptor parsing failures must remain contained at the public API boundary');
 assert.match(owner,/Reflect\.apply\(plugin\.setup,plugin\.source,\[publicApi\]\)/u,'valid plugin setup must preserve the original descriptor as its method receiver');
 assert.match(owner,/Object\.fromEntries\(requirementEntries\)/u,'untrusted capability dictionaries must be materialized without __proto__ setter semantics');
-assert.match(owner,/function status\(\):PluginRuntimeStatus\{return freeze\(\{/u,'public plugin status must publish a frozen snapshot');
+assert.match(owner,/function status\(\)\s*\{return freeze\(\{/u,'public plugin status must publish a frozen snapshot');
 }
 
 { // p5.13b-host-dispatch-and-build-token-closure
