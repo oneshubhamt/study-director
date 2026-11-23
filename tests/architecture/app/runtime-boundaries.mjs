@@ -99,6 +99,7 @@ const syncStatusOwner=readScript('source/core/sync-status-host.ts');
 assert.match(syncStatusOwner,/OWNER_REQUIRED_ACTIONS=freeze\(new Set\(\['sync-now','retry','sign-in','enter-password','unlock-sync','review-sync','review-kept','device-permission','continue-session'\]\)\)/u,'multiplexed sync-status actions must classify their mutating variants explicitly');
 assert.match(syncStatusOwner,/if\(ownerRequired\(kind\)&&!input\.canMutate\(\)\)return false/u,'sync-status owner must fail closed before mutating routes reach providers or recovery');
 assert.match(syncStatusOwner,/toggleAttribute\('data-owner-mutation',ownerRequired\(kind\)\)/u,'sync-status owner must project mutating variants into the secondary-tab UI fence');
+assert.match(syncStatusOwner,/button\.dataset\['syncAction'\]=item\.action;markOwnerRequirement\(button,item\.action\)/u,'status-list mutation buttons must join the same secondary-tab UI fence as primary and connect-card actions');
 assert.match(readScript('source/core/backup-provider.ts'),/runExclusive\('remove backup version',\(\)=>removeProviderVersionUnderAuthority/u,'managed-version deletion must enter the authority-only helper through the canonical durable mutation lease');
 for(const token of ['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','DEVICE_WIDE_LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','EXTERNAL_REPOSITORY_IDENTITIES']){
   assert.ok(hostSource.includes('@@SD_'+token+'_URI@@'),token+' host input must use a TypeScript-readable encoded token');
