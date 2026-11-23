@@ -61,6 +61,7 @@ jobs:
           tests/unit/storage/profile-scope.mjs
           tests/unit/storage/profiles.mjs
           tests/integration/storage/installation-identity.mjs
+          tests/integration/storage/canonical-mutation-epoch.mjs
           tests/integration/pwa/native-capabilities.mjs
           tests/integration/app/profiles-host.mjs
           tests/integration/app/startup-lifecycle-module.mjs

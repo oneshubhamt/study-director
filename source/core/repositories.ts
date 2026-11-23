@@ -200,10 +200,15 @@ const createModule=()=>{
     // A reseed invalidates capture fences without changing any data, so it
     // keeps the change time of the last real save.
     async function reseedCanonicalMutationEpoch(){
-      const previous=await readCanonicalMutationEpoch().catch(()=>null),kept=Number.isFinite(Date.parse(String(previous&&previous.committedAt||'')))?String(previous?.committedAt||''):'';
-      const value=kept?freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:kept}):newCanonicalMutationEpoch();
-      await Meta.write('canonicalMutationEpoch',value,{updatedAt:value.committedAt,strict:true,abortMessage:'canonical mutation epoch reseed aborted'});
-      return value;
+      const ownershipToken=issueWriteToken('reseeding the canonical mutation epoch'),finishWrite=beginAuthoritativeWrite();
+      try{
+        const previous=await readCanonicalMutationEpoch().catch(()=>null),kept=Number.isFinite(Date.parse(String(previous&&previous.committedAt||'')))?String(previous?.committedAt||''):'';
+        assertWriteToken(ownershipToken,'reseeding the canonical mutation epoch');
+        const value=kept?freeze({format:'study-director.canonical-mutation-epoch',version:1,token:randomCoordinationToken(),committedAt:kept}):newCanonicalMutationEpoch();
+        await Meta.write('canonicalMutationEpoch',value,{updatedAt:value.committedAt,strict:true,abortMessage:'canonical mutation epoch reseed aborted'});
+        assertWriteToken(ownershipToken,'completing the canonical mutation epoch reseed');
+        return value;
+      }finally{finishWrite();}
     }
     async function readCanonicalMutationEpoch(){return readMetadata('canonicalMutationEpoch');}
     // The last-save time kept in local storage is a fast copy of the change

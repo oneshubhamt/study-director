@@ -19,6 +19,20 @@ assert.equal((await epoch()).token,seeded.token);
 const reseeded=await app.mutationEpoch.reseed();
 assert.notEqual(reseeded.token,seeded.token,'Startup/restart reseeding must invalidate captures created against an earlier process baseline.');
 
+// Startup reseeding is an authoritative write: if control changes while its
+// preliminary read is in flight, the canonical epoch must not be rewritten by
+// the former owner.
+{
+  const authorityControls={clock,owned:true},authorityHarness=createHarness(new Map(),null,authorityControls);
+  await authorityHarness.app.mutationEpoch.reseed();
+  const before=await authorityHarness.app.mutationEpoch.read();
+  const pending=authorityHarness.app.mutationEpoch.reseed();
+  authorityControls.owned=false;
+  await assert.rejects(pending,/Ownership lost/u,'epoch reseed must reassert ownership after its asynchronous read');
+  authorityControls.owned=true;
+  assert.equal((await authorityHarness.app.mutationEpoch.read()).token,before.token,'lost ownership must leave the prior durable epoch intact');
+}
+
 // Two independent repository contexts share IndexedDB state in production. A
 // canonical write from either context must therefore invalidate a fence read by
 // the other without relying on a process-local counter or wall-clock ordering.
