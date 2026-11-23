@@ -173,15 +173,17 @@ try{
  await page.click('#pane-guide .ui-panel .mini-btn');
  await waitFor(()=>page.evaluate(`!!document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]")&&StudyDirector.plugins.status().optionalFiles.find(row=>row.tabId==='guide')?.state==='registered'`),{label:'Guide retry registration'});
  const pluginContract=await page.evaluate(`(()=>{
-   let incompatibleSetup=0,setup=0;
+   let malformedSetup=0,incompatibleSetup=0,setup=0;
+   const malformed={name:'qa-p513-malformed',version:'1',requires:{pluginApi:'1'},setup(){malformedSetup++;return true;}};
    const bad={name:'qa-p513-incompatible',version:'1',requires:{missingCapability:1},setup(){incompatibleSetup++;return true;}};
    const good={name:'qa-p513-single',version:'1',requires:{pluginApi:1,tabRegistry:1},setup(api){setup++;return api.ui.registerTab({id:'qa-p513-tab',label:'QA P5.13',icon:'Q',render(){}});}};
+   const malformedResult=StudyDirector.registerPlugin(malformed);
    const badFirst=StudyDirector.registerPlugin(bad),badSecond=StudyDirector.registerPlugin(bad);
    const goodFirst=StudyDirector.registerPlugin(good),goodSecond=StudyDirector.registerPlugin(good);
    const state=StudyDirector.plugins.status();
-   return {badFirst,badSecond,incompatibleSetup,goodFirst,goodSecond,setup,navs:document.querySelectorAll('[data-tab="qa-p513-tab"]').length,badState:state.registered.find(row=>row.name==='qa-p513-incompatible')?.state||'',goodState:state.registered.find(row=>row.name==='qa-p513-single')?.state||'',apiFrozen:Object.isFrozen(StudyDirector)&&Object.isFrozen(StudyDirector.backup)&&Object.isFrozen(StudyDirector.ui)};
+   return {malformedResult,malformedSetup,badFirst,badSecond,incompatibleSetup,goodFirst,goodSecond,setup,navs:document.querySelectorAll('[data-tab="qa-p513-tab"]').length,malformedState:state.registered.find(row=>row.name==='qa-p513-malformed')?.state||'',badState:state.registered.find(row=>row.name==='qa-p513-incompatible')?.state||'',goodState:state.registered.find(row=>row.name==='qa-p513-single')?.state||'',apiFrozen:Object.isFrozen(StudyDirector)&&Object.isFrozen(StudyDirector.backup)&&Object.isFrozen(StudyDirector.ui)};
  })()`);
- assert.deepEqual(pluginContract,{badFirst:false,badSecond:false,incompatibleSetup:0,goodFirst:true,goodSecond:true,setup:1,navs:1,badState:'incompatible',goodState:'registered',apiFrozen:true});
+ assert.deepEqual(pluginContract,{malformedResult:false,malformedSetup:0,badFirst:false,badSecond:false,incompatibleSetup:0,goodFirst:true,goodSecond:true,setup:1,navs:1,malformedState:'',badState:'incompatible',goodState:'registered',apiFrozen:true});
  await page.evaluate('delete window.__p513Optional');
 
  await page.evaluate(`__PWA6.goTab('guide')`);await waitFor(()=>page.evaluate('!!document.getElementById("pane-guide")'));
