@@ -11,6 +11,7 @@ import type {
 } from './insights-compute.ts';
 import type {InsightsRenderingRuntime} from './insights-rendering.ts';
 import type {InsightsHostBoundary} from '../core/insights-host.ts';
+import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts';
 
 type ModelRuntime=InsightsModelRuntime;
 type Rendering=InsightsRenderingRuntime;
@@ -47,12 +48,9 @@ interface InsightsPluginApi {
 interface InsightsRenderContext {readonly pane?:HTMLElement|null;readonly restoreScroll?:boolean}
 interface DeviceState{readInsightsWindow(fallback:string):unknown;writeInsightsWindow(value:string):unknown}
 interface RuntimeWindow extends Window {
-  StudyDirector?:InsightsPluginApi&Readonly<{registerPlugin?:(descriptor:InsightsPluginDescriptor)=>boolean;data?:Readonly<{deviceState?:Partial<DeviceState>}>}>;
+  StudyDirector?:InsightsPluginApi&Readonly<{registerPlugin?:(descriptor:StudyDirectorPluginDescriptor)=>boolean;data?:Readonly<{deviceState?:Partial<DeviceState>}>}>;
   __StudyDirectorInsightsPrefetch?:Readonly<Record<string,unknown>>;
   __StudyDirectorInsightsLastProfile?:InsightsProfile;
-}
-interface InsightsPluginDescriptor {
-  readonly name:string;readonly version:string;readonly requires:Capabilities;readonly setup:(api:InsightsPluginApi)=>boolean;
 }
 interface ProfileAccumulator {
   started:number;shellMs:number;revisionMs:number;recordLoadMs:number;evidencePreparationMs:number;modelComputeMs:number;workerRoundTripMs:number;
@@ -1362,7 +1360,7 @@ const supersededError=()=>{
     return true;
   }
   const PLUGIN_READY_EVENT='studydirector:ready';
-  const PLUGIN_DESCRIPTOR:InsightsPluginDescriptor=Object.freeze({name:'SD-insights',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,setup});
+  const PLUGIN_DESCRIPTOR=Object.freeze({name:'SD-insights',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,setup}) satisfies StudyDirectorPluginDescriptor;
   const MAX_REGISTRATION_ATTEMPTS=2;
   let registrationAttempts=0;
   let registrationComplete=false;
