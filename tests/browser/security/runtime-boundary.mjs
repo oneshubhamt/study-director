@@ -182,9 +182,9 @@ try{
    const badFirst=StudyDirector.registerPlugin(bad),badSecond=StudyDirector.registerPlugin(bad);
    const goodFirst=StudyDirector.registerPlugin(good),goodSecond=StudyDirector.registerPlugin(good);
    const state=StudyDirector.plugins.status();
-   return {malformedResult,malformedSetup,contextResult,contextPreserved,badFirst,badSecond,incompatibleSetup,goodFirst,goodSecond,setup,navs:document.querySelectorAll('[data-tab="qa-p513-tab"]').length,malformedState:state.registered.find(row=>row.name==='qa-p513-malformed')?.state||'',badState:state.registered.find(row=>row.name==='qa-p513-incompatible')?.state||'',goodState:state.registered.find(row=>row.name==='qa-p513-single')?.state||'',apiFrozen:Object.isFrozen(StudyDirector)&&Object.isFrozen(StudyDirector.backup)&&Object.isFrozen(StudyDirector.ui)};
+   return {malformedResult,malformedSetup,contextResult,contextPreserved,badFirst,badSecond,incompatibleSetup,goodFirst,goodSecond,setup,navs:document.querySelectorAll('[data-tab="qa-p513-tab"]').length,malformedState:state.registered.find(row=>row.name==='qa-p513-malformed')?.state||'',badState:state.registered.find(row=>row.name==='qa-p513-incompatible')?.state||'',goodState:state.registered.find(row=>row.name==='qa-p513-single')?.state||'',apiFrozen:Object.isFrozen(StudyDirector)&&Object.isFrozen(StudyDirector.backup)&&Object.isFrozen(StudyDirector.ui),statusFrozen:Object.isFrozen(state)&&Object.isFrozen(state.optionalFiles)&&Object.isFrozen(state.registered)&&state.registered.every(Object.isFrozen)};
  })()`);
- assert.deepEqual(pluginContract,{malformedResult:false,malformedSetup:0,contextResult:true,contextPreserved:true,badFirst:false,badSecond:false,incompatibleSetup:0,goodFirst:true,goodSecond:true,setup:1,navs:1,malformedState:'',badState:'incompatible',goodState:'registered',apiFrozen:true});
+ assert.deepEqual(pluginContract,{malformedResult:false,malformedSetup:0,contextResult:true,contextPreserved:true,badFirst:false,badSecond:false,incompatibleSetup:0,goodFirst:true,goodSecond:true,setup:1,navs:1,malformedState:'',badState:'incompatible',goodState:'registered',apiFrozen:true,statusFrozen:true});
  await page.evaluate('delete window.__p513Optional');
 
  await page.evaluate(`__PWA6.goTab('guide')`);await waitFor(()=>page.evaluate('!!document.getElementById("pane-guide")'));
