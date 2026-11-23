@@ -1,5 +1,16 @@
 # TypeScript conversion — execution record
 
+## Post-P5.13 Review-to-backup durability repair · VERIFIED — TARGETED · 2026-11-23
+
+- **Baseline / implementation head:** audited from `c9b3d97b60bee77f095e8a268b555d4f9352257f`; implementation is `1c00946070f5faaa9999091fa18d4e2638a9123d`.
+- **Finding:** ordinary checkpoint capture settled Notes, Active Session, deletion recovery and Personal Data before its source fence, but did not universally force the pending Review/Reflection lane to canonical storage first. A reflection-only Diary edit could therefore race an immediate standalone or managed backup.
+- **Repair:** `backup-capture` now owns one canonical pre-fence Review checkpoint through `checkpointPendingReview({backupCapture:true})`. Both full logical capture and managed Device/Drive preparation use it before reading their source fence; the host forwards the existing strict Review flush while preserving recovery-quiescence behavior.
+- **Failure semantics:** if the latest Review cannot reach canonical storage, backup preparation fails closed as `BACKUP_REVIEW_SETTLE_FAILED` / `checkpoint-review-settle`; it does not report a successful checkpoint containing the previous Reflection. `assumeFlushed` remains an explicit caller-owned precondition and does not duplicate this settlement.
+- **Regression witness:** `tests/integration/backup/capture-safety.mjs` proves the latest Reflection is committed before both full and managed fences, `backupCapture:true` propagates, failed Reflection settlement stops before the fence, and `assumeFlushed` skips the checkpoint as designed.
+- **Exact-head targeted evidence:** Repository Checks run `45121011770` passed strict TS/lint, the changed capture-safety witness, wider repository/backup safety contracts, build, generated verification and syntax. P5.8 Drive/status run `45121011712` passed provider/Drive contracts, build/verify and its browser journeys. P5.13 run `45121011704` passed contracts/build/provenance plus core-flow, optional-plugin and secondary-tab browser witnesses **5/5 each**. P5.12 run `45121011710` also passed.
+- **Outcome:** the identified Reflection-before-backup durability gap is **VERIFIED — TARGETED** at source and targeted-behavior level. Full whole-app/device/capacity QA remains intentionally skipped; the independent overall Phase-5 audit is still the next programme gate before Phase 6.
+
+
 ## Post-P5.13 generated-runtime topology + Pass B cleanup · VERIFIED — TARGETED · 2026-11-23
 
 - **Scope / final implementation head:** Pass B began from proven Pass-A head `fdc011f19e84d31df6e502ee3e00a6b9d9496402`; naming/path cleanup landed at `bf6318eebf4fedbeab1b83a67640430c05b8ce16`, diagnostic-label cleanup at `0965ed02f303e7da85dc6a3d7cc5c81619d3848d`, and the final test correction is `4546155fbb75a67f58e8c9aafeb85d2fb81c4eaa`.
