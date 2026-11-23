@@ -59,20 +59,21 @@ jobs:
     timeout-minutes: 50
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - id: notes
             script: tests/browser/library/notes-management.mjs
-            passes: 5
+            passes: 2
           - id: attachment-editor
             script: tests/browser/attachments/attachment-editor.mjs
-            passes: 5
+            passes: 2
           - id: exports
             script: tests/browser/exports/exports.mjs
             passes: 2
           - id: insights
             script: tests/browser/insights/insights-populated-ui.mjs
-            passes: 5
+            passes: 2
     steps:
       - uses: actions/checkout@v7.0.1
         with:
