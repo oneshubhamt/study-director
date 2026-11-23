@@ -108,17 +108,17 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     if(!isRecord(value)||!isPluginSetup(value['setup'])||typeof value['name']!=='string')return null;
     const name=input.clampText(value['name'],80).trim();if(!name)return null;
     let version='';if(value['version']!==undefined){if(typeof value['version']!=='string')return null;version=input.clampText(value['version'],40);}
-    const requirements:Record<string,number>={};
+    const requirementEntries:Array<[string,number]>=[];
     if(value['requires']!==undefined){
       if(!isRecord(value['requires']))return null;
-      for(const [key,minimum] of Object.entries(value['requires'])){if(!key||typeof minimum!=='number'||!Number.isFinite(minimum)||minimum<0)return null;requirements[key]=minimum;}
+      for(const [key,minimum] of Object.entries(value['requires'])){if(!key||typeof minimum!=='number'||!Number.isFinite(minimum)||minimum<0)return null;requirementEntries.push([key,minimum]);}
     }
-    const previewProviders:Record<string,InsightsPreviewProvider>={};
+    const previewEntries:Array<[string,InsightsPreviewProvider]>=[];
     if(value['previewProviders']!==undefined){
       if(!isRecord(value['previewProviders']))return null;
-      for(const [target,provider] of Object.entries(value['previewProviders'])){if(!target||!isPreviewProvider(provider))return null;previewProviders[target]=provider;}
+      for(const [target,provider] of Object.entries(value['previewProviders'])){if(!target||!isPreviewProvider(provider))return null;previewEntries.push([target,provider]);}
     }
-    return freeze({source:value,name,version,requires:freeze(requirements),previewProviders:freeze(previewProviders),setup:value['setup']});
+    return freeze({source:value,name,version,requires:freeze(Object.fromEntries(requirementEntries)),previewProviders:freeze(Object.fromEntries(previewEntries)),setup:value['setup']});
   }
   function unmetCapabilities(requirements:Readonly<Record<string,number>>):Array<[string,number]>{
     return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<minimum);
