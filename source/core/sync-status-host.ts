@@ -128,7 +128,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
         const row=document.createElement('li');row.className='profile-status-item';row.dataset['tone']=item.tone;row.dataset['item']=item.id;
         const mark=document.createElement('span');mark.className='profile-status-mark';mark.setAttribute('aria-hidden','true');
         const text=document.createElement('span');text.className='profile-status-text';text.textContent=item.text;
-        const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset['action']='sync-status-action';button.dataset['syncAction']=item.action;button.textContent=item.actionLabel;
+        const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset['action']='sync-status-action';button.dataset['syncAction']=item.action;markOwnerRequirement(button,item.action);button.textContent=item.actionLabel;
         row.append(mark,text,button);return row;
       }));
     }
