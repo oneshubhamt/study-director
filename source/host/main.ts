@@ -1871,9 +1871,6 @@ const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze<Pa
     :null,
   requestTab:()=>PluginRuntime.requestTab('insights')??Promise.resolve(false)
 }));
-function registerStudyDirectorPlugin(plugin:unknown){
-  return PluginRuntime.register(plugin);
-}
 if(location.protocol==='file:'){
   const notice=document.createElement('div');notice.className='ui-status err';notice.setAttribute('role','alert');
   notice.textContent='This copy was opened directly from index.html. Attachments and worker-based backups need the local launcher or hosted app. Close this copy and open Start-Study-Director in the deployment folder.';
@@ -4031,7 +4028,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze<Parameters<ty
   })
 }));
 /* PUBLIC PLUGIN API */
-PluginRuntime.registerPlaceholders();
+if(!PluginRuntime.registerPlaceholders())throw new Error('Study Director optional plugin tabs could not be registered.');
 type PublicApiInput=Parameters<typeof PluginRuntime.createPublicApi>[0];
 const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<PublicApiInput>({
   version:APP_VERSION,
