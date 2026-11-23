@@ -522,6 +522,12 @@ def write_deployment_identity(destination: Path, public: Path) -> None:
         r'<meta\s+name=["\']study-director-build["\']\s+content=["\']([^"\']+)["\'][^>]*>',
         index_source,
     )
+    asset_match = re.search(
+        r'<meta\s+name=["\']study-director-assets["\']\s+content=["\']([0-9a-f]{24})["\'][^>]*>',
+        index_source,
+    )
+    worker_build_match = re.search(r"\bBUILD_ID\s*=\s*['\"]([^'\"]+)['\"]", sw_source)
+    worker_asset_match = re.search(r"\bASSET_ID\s*=\s*['\"]([0-9a-f]{24})['\"]", sw_source)
     surface_match = re.search(r"const\s+APP_VERSION\s*=\s*['\"](SDV[A-Z][0-9]+[A-Za-z0-9]*)['\"]", index_source)
     title_release_match = re.search(r"<title>STUDY DIRECTOR · sd(v[a-z0-9]+)</title>", index_source, re.IGNORECASE)
     source_commit_match = re.search(
@@ -538,6 +544,9 @@ def write_deployment_identity(destination: Path, public: Path) -> None:
         for name, value in (
             ("service-worker release", release_match),
             ("build id", build_match),
+            ("page asset id", asset_match),
+            ("service-worker build id", worker_build_match),
+            ("service-worker asset id", worker_asset_match),
             ("surface release", surface_release),
             ("source commit", source_commit_match),
         )
@@ -545,12 +554,17 @@ def write_deployment_identity(destination: Path, public: Path) -> None:
     ]
     if missing:
         raise RuntimeError("Deployment identity could not be derived from the minified release: " + ", ".join(missing))
+    if worker_build_match.group(1) != build_match.group(1):
+        raise RuntimeError("Minified page and service-worker build identities do not match")
+    if worker_asset_match.group(1) != asset_match.group(1):
+        raise RuntimeError("Minified page and service-worker asset identities do not match")
     files = sorted(str(path.relative_to(public)).replace("\\", "/") for path in public.rglob("*") if path.is_file())
     identity = {
         "format": "study-director-deployment-identity",
         "version": 2,
         "surfaceRelease": surface_release,
         "buildId": build_match.group(1),
+        "assetId": asset_match.group(1),
         "sourceCommit": source_commit_match.group(1),
         "serviceWorkerReleaseId": release_match.group(1),
         "indexSha256": sha256_file(public / "index.html"),

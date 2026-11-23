@@ -73,6 +73,11 @@ assert.match(enforcementCsp,/trusted-types sd-inert-html sd-assets sd-legal-html
 for(const source of inline){const digest=crypto.createHash('sha256').update(source).digest('base64');assert.ok(csp.includes(`'sha256-${digest}'`),`CSP omitted inline hash ${digest}`);assert.ok(enforcementCsp.includes(`'sha256-${digest}'`),`Enforcement CSP omitted inline hash ${digest}`);}
 
 const sw=read(publicDir,'sw.js').toString('utf8');new vm.Script(sw,{filename:'sw.js'});
+const pageAssetId=index.match(/<meta name="study-director-assets" content="([0-9a-f]{24})">/)?.[1]||'';
+const workerBuildId=sw.match(/\bBUILD_ID=['"]([^'"]+)['"]/)?.[1]||'',workerAssetId=sw.match(/\bASSET_ID=['"]([0-9a-f]{24})['"]/)?.[1]||'';
+assert.match(pageAssetId,/^[0-9a-f]{24}$/u,'Minified index must carry a valid page asset identity.');
+assert.equal(workerBuildId,releaseConfig.buildId,'Minified page and Service Worker must retain the same build identity.');
+assert.equal(workerAssetId,pageAssetId,'Minified page and Service Worker must retain the same loaded-asset generation.');
 const manifest=JSON.parse(sw.match(/const PRECACHE=parsePrecache\('(.+?)'\)/)?.[1]||'[]');
 assert.ok(manifest.length>=34,'Precache inventory is unexpectedly small.');
 for(const asset of manifest){const name=asset.path.replace(/^\.\//,'');assert.ok(fs.existsSync(path.join(publicDir,name)),name);assert.equal(sha(read(publicDir,name)),asset.sha256,name);}
@@ -89,7 +94,7 @@ assert.match(sw,/SD_PWA_ACTIVATION_ACK/);
 assert.match(sw,/SD_PWA_ACTIVATED/);
 const identity=JSON.parse(read(minified,'DEPLOYMENT-IDENTITY.json')),sourceCommit=index.match(/<meta name="study-director-source-commit" content="([0-9a-f]{40})">/)?.[1]||'';
 assert.match(sourceCommit,/^[0-9a-f]{40}$/u,'Minified index must carry exact source commit provenance.');
-assert.equal(identity.version,2);assert.equal(identity.surfaceRelease,releaseConfig.release);assert.equal(identity.buildId,releaseConfig.buildId);assert.equal(identity.sourceCommit,sourceCommit);assert.equal(identity.serviceWorkerReleaseId,releaseId);
+assert.equal(identity.version,2);assert.equal(identity.surfaceRelease,releaseConfig.release);assert.equal(identity.buildId,releaseConfig.buildId);assert.equal(identity.assetId,pageAssetId);assert.equal(identity.sourceCommit,sourceCommit);assert.equal(identity.serviceWorkerReleaseId,releaseId);
 assert.equal(identity.indexSha256,sha(read(publicDir,'index.html')));assert.equal(identity.serviceWorkerSha256,sha(read(publicDir,'sw.js')));
 assert.equal(identity.publicFileCount,files.length);assert.deepEqual(identity.publicFiles,files);
 
