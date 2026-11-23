@@ -45,6 +45,41 @@ const rejectingRuntime=module.createRuntime(freeze({
 }));
 assert.equal(rejectingRuntime.registerPlaceholders(),false,'placeholder registration must surface a broken shell to host composition');
 
+const failureRuntimeInput=freeze({
+  configuration:freeze({
+    capabilities:freeze({pluginApi:1,tabRegistry:1,previewRecords:1}),
+    descriptors:freeze([freeze({tabId:'guide',label:'Guide',icon:'?',src:'guide.js',pluginName:'SD-guide'})])
+  }),
+  tabs:tabPort,
+  preview:freeze({registerProvider:()=>true}),
+  clampText:(value,max)=>String(value||'').slice(0,max)
+});
+const failureRuntimeWith=environment=>module.createRuntime(freeze({...failureRuntimeInput,environment:freeze(environment)}));
+let blockAssetUrl=true;
+const recoveredScripts=[];
+const blockedAssetRuntime=failureRuntimeWith({
+  document:{...document,head:{appendChild(node){recoveredScripts.push(node);return node;}}},
+  trustedAssetURL(value){if(blockAssetUrl)throw new TypeError('Trusted URL rejected');return value;}
+});
+assert.equal(await blockedAssetRuntime.requestTab('guide'),false,'a rejected asset URL must settle the optional-load request instead of rejecting it');
+assert.equal(blockedAssetRuntime.status().optionalFiles[0].state,'failed','URL-preparation failure must become retryable');
+assert.equal(blockedAssetRuntime.status().optionalFiles[0].attempts,1);
+blockAssetUrl=false;
+const recoveredRequest=blockedAssetRuntime.requestTab('guide',{retry:true});
+assert.equal(recoveredScripts.length,1,'a failed preflight must not append its script, and a retry must append once');
+recoveredScripts[0].onload?.call(recoveredScripts[0],new Event('load'));
+assert.equal(await recoveredRequest,false,'a successfully fetched script without plugin registration is still not registered');
+assert.equal(blockedAssetRuntime.status().optionalFiles[0].state,'loaded');
+assert.equal(blockedAssetRuntime.status().optionalFiles[0].attempts,2);
+
+const rejectedAppendRuntime=failureRuntimeWith({
+  document:{...document,head:{appendChild(){throw new Error('Script insertion refused');}}},
+  trustedAssetURL:value=>value
+});
+assert.equal(await rejectedAppendRuntime.requestTab('guide'),false,'DOM insertion failure must settle instead of leaving an unhandled rejected promise');
+assert.equal(rejectedAppendRuntime.status().optionalFiles[0].state,'failed','DOM insertion failure must be classified as retryable');
+assert.equal(rejectedAppendRuntime.status().optionalFiles[0].attempts,1);
+
 activeTab='guide';
 const first=runtime.requestTab('guide'),coalesced=runtime.requestTab('guide');
 assert.equal(first,coalesced,'pending optional loads must coalesce');
