@@ -121,7 +121,10 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     return freeze({source:value,name,version,requires:freeze(Object.fromEntries(requirementEntries)),previewProviders:freeze(Object.fromEntries(previewEntries)),setup:value['setup']});
   }
   function unmetCapabilities(requirements:Readonly<Record<string,number>>):Array<[string,number]>{
-    return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<minimum);
+    return Object.entries(requirements).filter(([key,minimum])=>{
+      const available=Object.hasOwn(input.configuration.capabilities,key)?input.configuration.capabilities[key]:0;
+      return (typeof available==='number'?available:0)<minimum;
+    });
   }
   function register(value:unknown){
     const plugin=normalizePluginDescriptor(value);if(!plugin||!publicApi)return false;
