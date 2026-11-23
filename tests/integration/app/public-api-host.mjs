@@ -89,7 +89,7 @@ assert.equal(await first,false);assert.equal(renders,rendersBeforeLateFailure,'l
 assert.equal(runtime.status().optionalFiles[0].state,'missing');
 
 const noop=()=>true;
-const publicApi=runtime.createPublicApi(freeze({
+const publicApiInput=freeze({
   version:'SDVQ1',
   data:freeze({contract:freeze({}),deviceState:freeze({readInsightsWindow:()=>'',writeInsightsWindow:noop})}),
   insights:freeze({notifications:freeze({}),dataSource:freeze({})}),
@@ -111,8 +111,24 @@ const publicApi=runtime.createPublicApi(freeze({
     registerTab:tabPort.registerTab,goTab:async()=>true,navigationStatus:()=>freeze({}),
     workspaceHistory:freeze({register:noop,open:noop,replace:noop,close:noop,closed:noop})
   })
-}));
+});
+const publicApi=runtime.createPublicApi(publicApiInput);
 assert.ok(Object.isFrozen(publicApi)&&Object.isFrozen(publicApi.backup)&&Object.isFrozen(publicApi.installation)&&Object.isFrozen(publicApi.appearance)&&Object.isFrozen(publicApi.ui),'public API and nested capability groups must be frozen');
+const budgetScripts=[];
+const budgetRuntime=failureRuntimeWith({
+  document:{...document,head:{appendChild(node){budgetScripts.push(node);return node;}}},trustedAssetURL:value=>value
+});
+const budgetApi=budgetRuntime.createPublicApi(publicApiInput),budgetLoad=budgetRuntime.requestTab('guide');
+assert.equal(budgetScripts.length,1);
+let exhaustedSetupCalls=0;
+const exhaustedPlugin={name:'SD-guide',version:'qa-exhausted',setup(){exhaustedSetupCalls++;return false;}};
+assert.equal(budgetApi.registerPlugin(exhaustedPlugin),false);assert.equal(budgetApi.registerPlugin(exhaustedPlugin),false);
+budgetScripts[0].onload?.call(budgetScripts[0],new Event('load'));
+assert.equal(await budgetLoad,false);assert.equal(exhaustedSetupCalls,2);assert.equal(budgetRuntime.status().registered.find(row=>row.name==='SD-guide')?.attempts,2);
+const scriptsBeforeExhaustedRetry=budgetScripts.length;
+assert.equal(await budgetRuntime.requestTab('guide',{retry:true}),false,'an exhausted registration budget must not offer another script-load attempt');
+assert.equal(budgetScripts.length,scriptsBeforeExhaustedRetry,'registration exhaustion must not append a futile retry script');
+
 assert.equal(runtime.createPublicApi(freeze({
   version:'ignored',data:publicApi.data,insights:publicApi.insights,logic:publicApi.logic,plan:publicApi.plan,preview:publicApi.preview,
   backup:freeze({createCheckpoint:noop,inspect:noop,releaseFile:noop,receiveStream:noop,checksum:noop,restore:noop,downloadSafetyCopy:noop,maxFileBytes:1,repositoryPolicy:freeze({}),device:()=>'',profile:freeze({id:()=>'',name:()=>'',bind:noop,deleted:noop,controls:noop}),providers:freeze({register:noop,list:()=>[]})}),
@@ -172,4 +188,4 @@ assert.throws(()=>{guideStatus.attempts=99;},TypeError);
 assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1,'mutating a returned status row must not corrupt internal plugin state');
 assert.equal(runtime.requestTab('missing'),null);
 
-console.log(JSON.stringify({status:'PASS',suite:'public-api-host',placeholderFailureSurfaced:true,coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,immutableStatus:true,frozenPublicApi:true}));
+console.log(JSON.stringify({status:'PASS',suite:'public-api-host',placeholderFailureSurfaced:true,coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,hostileDescriptorContained:true,prototypeSafeCapabilities:true,setupContextPreserved:true,capabilityGate:true,singleRegistration:true,registrationBudgetRetryFence:true,immutableStatus:true,frozenPublicApi:true}));

@@ -59,7 +59,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
   }
   function activeTabId(){return input.environment.document.querySelector<HTMLElement>('.nav-item.on[data-tab]')?.dataset['tab']||'';}
   function renderIfActive(tabId:string){if(activeTabId()===tabId)input.tabs.renderTab(tabId);}
-  function canRetry(record:PluginFileStatus|null){return !!record&&(['loaded','missing','failed'] as PluginFileState[]).includes(record.state)&&record.attempts<MAX_LOAD_ATTEMPTS;}
+  function canRetry(record:PluginFileStatus|null){const registration=record?registered.get(record.pluginName):null;return !!record&&(['loaded','missing','failed'] as PluginFileState[]).includes(record.state)&&record.attempts<MAX_LOAD_ATTEMPTS&&(!registration||registration.attempts<MAX_REGISTRATION_ATTEMPTS);}
   function placeholderMessage(record:PluginFileStatus){
     if(record.state==='loading')return `Loading ${record.label}…`;
     if(record.state==='missing')return `${record.label} could not be loaded. The core app remains available.`;
