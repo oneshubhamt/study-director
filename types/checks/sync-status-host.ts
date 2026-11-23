@@ -28,6 +28,7 @@ const input=Object.freeze({
   sessionElsewhere:()=> '',
   sessionReady:()=> '',
   unseen:()=>0,
+  canMutate:()=>true,
   actions:Object.freeze({
     closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,
     connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true
