@@ -75,6 +75,15 @@ assert.equal(runtime.createPublicApi(freeze({
   ui:publicApi.ui
 })),publicApi,'public API construction must be single-assignment');
 
+let malformedSetup=0;
+for(const plugin of [
+  {setup(){malformedSetup++;return true;}},
+  {name:'qa-bad-version',version:1,setup(){malformedSetup++;return true;}},
+  {name:'qa-bad-requirements',requires:{pluginApi:'1'},setup(){malformedSetup++;return true;}},
+  {name:'qa-bad-preview',previewProviders:{insights:'not-a-provider'},setup(){malformedSetup++;return true;}}
+])assert.equal(publicApi.registerPlugin(plugin),false,'malformed public plugin descriptors must fail closed');
+assert.equal(malformedSetup,0,'malformed plugin descriptors must be rejected before setup');
+
 let incompatibleSetup=0;
 assert.equal(publicApi.registerPlugin({name:'qa-incompatible',requires:{missingCapability:1},setup(){incompatibleSetup++;return true;}}),false);
 assert.equal(incompatibleSetup,0,'capability rejection must happen before plugin setup');
@@ -100,4 +109,4 @@ assert.equal(runtime.status().optionalFiles[0].state,'registered');
 assert.equal(runtime.status().registered.find(row=>row.name==='SD-guide')?.attempts,1);
 assert.equal(runtime.requestTab('missing'),null);
 
-console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,capabilityGate:true,singleRegistration:true,frozenPublicApi:true}));
+console.log(JSON.stringify({status:'PASS',suite:'public-api-host',coalesced:true,retry:true,inactiveRenderFence:true,descriptorValidation:true,capabilityGate:true,singleRegistration:true,frozenPublicApi:true}));
