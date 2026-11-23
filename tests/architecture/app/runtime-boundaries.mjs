@@ -29,7 +29,7 @@ assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note
 
 
 { // p5.13a-public-api-plugin-boundary
-const host=readHostHtml(),owner=readScript('source/core/public-api-host.ts');
+const host=readHostHtml(),owner=readScript('source/core/public-api-host.ts'),publicTypes=fs.readFileSync('types/public-api-host.ts','utf8');
 assert.match(host,/const PublicApiHostModule=INTERNAL_MODULES\.load\('public-api-host',1,'study-director\.public-api-host-module',1\)/u,'P5.13a host loads the checked public API owner');
 assert.match(host,/const PluginRuntime=PublicApiHostModule\.createRuntime\(Object\.freeze\s*\(\{/u,'optional-plugin runtime must cross the checked P5.13a boundary');
 assert.match(host,/const StudyDirectorPublicAPI=PluginRuntime\.createPublicApi\(Object\.freeze\s*\(\{/u,'public capability construction must cross the checked P5.13a boundary');
@@ -39,6 +39,10 @@ for(const required of ['MAX_LOAD_ATTEMPTS=2','MAX_REGISTRATION_ATTEMPTS=2','func
 assert.match(owner,/if\(activeTabId\(\)===tabId\)input\.tabs\.renderTab\(tabId\)/u,'optional plugin completion may rerender only its active tab');
 assert.match(owner,/if\(unmet\.length\)[\s\S]{0,520}state:'incompatible'/u,'capability rejection happens before plugin setup');
 assert.match(owner,/if\(previous\?\.state==='registered'\)\{[\s\S]{0,260}return true;/u,'successful plugin registration is idempotent while refreshing the optional-tab state');
+assert.match(publicTypes,/readonly setup:\(api:StudyDirectorPublicApi\)=>unknown;/u,'plugin setup must use a strict function-property contract rather than a bivariant method signature');
+assert.doesNotMatch(publicTypes,/\bsetup\(api:StudyDirectorPublicApi\)/u,'plugin setup must not regress to method bivariance');
+for(const file of ['source/external/guide.ts','source/external/drive.ts','source/external/insights-runtime.ts'])
+  assert.match(fs.readFileSync(file,'utf8'),/satisfies StudyDirectorPluginDescriptor/u,`${file} must compile against the canonical public plugin descriptor`);
 const published=host.indexOf('HOST_WINDOW.StudyDirector=StudyDirectorPublicAPI;'),ready=host.indexOf('window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT'),invalidate=host.indexOf("SessionLifecycle.invalidate('app-restart'"),startup=host.indexOf('StartupLifecycle.start();'),pwa=host.indexOf('void PwaRuntime.install();');
 assert.ok(published>=0&&published<ready&&ready<invalidate&&invalidate<startup&&startup<pwa,'public API publication and ready event must remain before lifecycle startup and PWA install');
 assert.match(owner,/function normalizePluginDescriptor\(value:unknown\)/u,'public plugin entry validates untrusted descriptors before setup');
@@ -47,6 +51,7 @@ assert.match(owner,/Object\.hasOwn\(input\.configuration\.capabilities,key\)/u,'
 assert.match(owner,/try\{plugin=normalizePluginDescriptor\(value\);\}catch\{return false;\}/u,'descriptor parsing failures must remain contained at the public API boundary');
 assert.match(owner,/Reflect\.apply\(plugin\.setup,plugin\.source,\[publicApi\]\)/u,'valid plugin setup must preserve the original descriptor as its method receiver');
 assert.match(owner,/Object\.fromEntries\(requirementEntries\)/u,'untrusted capability dictionaries must be materialized without __proto__ setter semantics');
+assert.match(owner,/function status\(\):PluginRuntimeStatus\{return freeze\(\{/u,'public plugin status must publish a frozen snapshot');
 }
 
 { // p5.13b-host-dispatch-and-build-token-closure
@@ -58,14 +63,34 @@ const dispatchMaps=[
   ['data-blur','BLUR_ACTIONS','KEYDOWN_ACTIONS'],
   ['data-keydown','KEYDOWN_ACTIONS','OWNER_REQUIRED_CLICK_ACTIONS']
 ];
+const handlersByAttribute=new Map();
 for(const [attribute,mapName,nextName] of dispatchMaps){
-  const authored=[...new Set([...template.matchAll(new RegExp(attribute+'="([^"]+)"','gu'))].map(row=>row[1]))];
   const start=hostSource.indexOf('const '+mapName+':'),end=hostSource.indexOf('const '+nextName,start+1);
   assert.ok(start>=0&&end>start,mapName+' typed dispatch map must remain in the strict host');
   const handlers=new Set([...hostSource.slice(start,end).matchAll(/^\s*'([^']+)'\s*:/gmu)].map(row=>row[1]));
+  handlersByAttribute.set(attribute,handlers);
+  const authored=[...new Set([...template.matchAll(new RegExp(attribute+'="([^"]+)"','gu'))].map(row=>row[1]))];
   for(const action of authored)assert.ok(handlers.has(action),attribute+'="'+action+'" must have a typed delegated host handler');
 }
+const browserConfig=JSON.parse(fs.readFileSync('tsconfig.browser.json','utf8'));
+const checkedBrowserSources=browserConfig.files.filter(file=>/^source\/.*\.ts$/u.test(file));
+const dynamicBindings=[];
+for(const file of checkedBrowserSources){
+  const source=fs.readFileSync(file,'utf8');
+  const patterns=[
+    {regex:/data-(action|change|input|blur|keydown)=["']([^"']+)["']/gu,read:match=>['data-'+match[1],match[2]]},
+    {regex:/setAttribute\(\s*["']data-(action|change|input|blur|keydown)["']\s*,\s*["']([^"']+)["']\s*\)/gu,read:match=>['data-'+match[1],match[2]]},
+    {regex:/dataset(?:\[['"](action|change|input|blur|keydown)['"]\]|\.(action|change|input|blur|keydown))\s*=\s*["']([^"']+)["']/gu,read:match=>['data-'+(match[1]||match[2]),match[3]]}
+  ];
+  for(const {regex,read} of patterns)for(const match of source.matchAll(regex)){
+    const [attribute,action]=read(match);dynamicBindings.push({file,attribute,action});
+    assert.ok(handlersByAttribute.get(attribute)?.has(action),`${file}: dynamic ${attribute}="${action}" must have a typed delegated host handler`);
+  }
+}
+assert.ok(dynamicBindings.some(row=>row.action==='sync-status-action')&&dynamicBindings.some(row=>row.action==='open-library-day')&&dynamicBindings.some(row=>row.action==='set-presentation'),'dynamic delegated-action scan must exercise checked feature-created controls');
 assert.match(hostSource,/type DelegatedHostInput=Parameters<typeof FoundationHostModule\.createDelegated>\[0\];/u,'delegated handler maps must derive from the checked host contract');
+assert.doesNotMatch(hostSource,/function registerStudyDirectorPlugin\(/u,'dead public-plugin registration wrappers must not remain in the final host');
+assert.match(hostSource,/if\(!PluginRuntime\.registerPlaceholders\(\)\)throw new Error\('Study Director optional plugin tabs could not be registered\.'\);/u,'host startup must fail explicitly if required optional-tab placeholders cannot register');
 for(const token of ['PRODUCTION_LIMITS','LOCAL_STORAGE_KEYS','DEVICE_WIDE_LOCAL_STORAGE_KEYS','SESSION_STORAGE_KEYS','APP_META_KEYS','APP_META_REGISTRY','RUNTIME_DATA_CONTRACT','INDEXED_DB_STORE_NAMES','EXTERNAL_REPOSITORY_IDENTITIES']){
   assert.ok(hostSource.includes('@@SD_'+token+'_URI@@'),token+' host input must use a TypeScript-readable encoded token');
   assert.ok(buildSource.includes("encodeURIComponent(JSON.stringify("), 'build renderer must encode structured host tokens from authoritative contracts');
