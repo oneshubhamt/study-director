@@ -14,11 +14,12 @@ async function exerciseBackupPublicApi(api:StudyDirectorPublicApi,file:BackupFil
   await inspected.release();
   await api.backup.restore(candidate,{missingOnly:true,confirmed:true});
   await api.backup.downloadSafetyCopy({includeAssetBlobs:true,assumeFlushed:true});
-  const plugin:StudyDirectorPluginDescriptor={
+  const setup:StudyDirectorPluginDescriptor['setup']=publicApi=>{void publicApi.version;return true;};
+  const plugin={
     name:'typed-plugin',
     requires:{pluginApi:1},
-    setup(publicApi){void publicApi.version;return true;}
-  };
+    setup
+  } satisfies StudyDirectorPluginDescriptor;
   api.registerPlugin(plugin);
 }
 void exerciseBackupPublicApi;
