@@ -93,6 +93,24 @@ function device(fault={}){
   assert.equal(second.adopt(libraryId),true,'adopting the id it has changes nothing');
 }
 {
+  // A random collision must never make the registry self-invalidating.
+  const d=device(),first=d.page(''),ana=first.ensure('Ana');
+  const originalId=ana.id,originalRandomTail=originalId.slice(-8);
+  let attempts=0;
+  const collisionPage=ProfilesModule.createController(freeze({ports:freeze({
+    scope:freeze({pattern,registryKey:REGISTRY,scope:'',separator:'~'}),
+    storage:freeze({keys:()=>[...d.store.keys()],read:()=>d.store.get(REGISTRY)??null,remove:key=>d.store.delete(key),write:text=>{d.store.set(REGISTRY,text);return true;}}),
+    names:freeze({database:'sdmLocalAppDB.v1',directories:freeze([]),keys:freeze([])}),
+    platform:freeze({deleteDatabase:async()=>true,listen:()=>()=>{},now:()=>Date.parse(ana.createdAt),random:()=>{attempts++;return attempts===1?originalRandomTail:'deadbeef';},reload:()=>{},removeDirectory:async()=>true}),
+    limits:freeze({maxName:60})
+  })}));
+  const renewed=collisionPage.renew();
+  assert.notEqual(renewed.id,originalId,'renew retries when its first generated identity collides with an existing profile');
+  assert.match(renewed.id,/_deadbeef$/u);assert.equal(attempts,2);
+  assert.equal(collisionPage.unsupported(),false,'collision recovery leaves the registry canonical');
+}
+
+{
   // At most twelve profiles on one device.
   const d=device(),first=d.page('');first.ensure('Ana');
   for(let index=1;index<12;index++){d.tick(1);first.add();}

@@ -88,9 +88,13 @@ const createModule=()=>{
       if(!storage.write(JSON.stringify(value)))throw new Error('The profile list on this device could not be saved.');
       return read();
     }
-    function newId(name:unknown){
-      const slug=cleanName(name).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/gu,'').slice(0,24)||'profile';
-      return `prof_${slug}_${Math.floor(platform.now()).toString(36)}_${String(platform.random(4))}`;
+    function newId(name:unknown,list:Readonly<ProfileListState>=read()){
+      const slug=cleanName(name).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/gu,'').slice(0,24)||'profile',used=new Set(list.profiles.map(row=>row.id));
+      for(let attempt=0;attempt<8;attempt++){
+        const candidate=`prof_${slug}_${Math.floor(platform.now()).toString(36)}_${String(platform.random(4))}`;
+        if(validId(candidate)&&!used.has(candidate))return candidate;
+      }
+      throw new Error('A unique profile identity could not be allocated.');
     }
     const current=(list:Readonly<ProfileListState>=read())=>list.profiles.find(row=>row.scope===pageScope)||null;
     function update(change:(mine:Readonly<ProfileEntry>,list:Readonly<ProfileListState>)=>Readonly<Partial<ProfileEntry>>|null):Readonly<ProfileEntry>|null{
@@ -109,7 +113,7 @@ const createModule=()=>{
     function ensure(name:string,{fresh=false}:Readonly<{fresh?:boolean}>={}):Readonly<ProfileEntry>|null{
       const list=read(),mine=current(list);if(mine||list.unsupported)return mine;
       if(list.profiles.length>=MAX_PROFILES)throw new Error('This device already holds the most profiles it can.');
-      const row=entry({id:newId(name),scope:pageScope,name,email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:fresh===true,from:null});
+      const row=entry({id:newId(name,list),scope:pageScope,name,email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:fresh===true,from:null});
       if(!row)throw new Error('A new profile could not be created.');
       const next=write({...list,profiles:[...list.profiles,row],active:list.profiles.some(other=>other.id===list.active&&other.scope!==pageScope)?list.active:row.id,removing:list.removing.filter(scope=>scope!==pageScope)});
       return current(next);
@@ -129,7 +133,7 @@ const createModule=()=>{
     function add(){
       const list=read(),mine=current(list);
       if(list.profiles.length>=MAX_PROFILES)throw new Error('This device already holds the most profiles it can.');
-      const id=newId('profile'),row=entry({id,scope:id,name:'',email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:true,from:mine?mine.scope:null});
+      const id=newId('profile',list),row=entry({id,scope:id,name:'',email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:true,from:mine?mine.scope:null});
       if(!row)throw new Error('A new profile could not be created.');
       return activate(id,write({...list,profiles:[...list.profiles,row]}));
     }
@@ -139,7 +143,7 @@ const createModule=()=>{
       if(!mine)return false;
       const removing=[...new Set([...list.removing,pageScope])];
       if(!others.length){
-        const id=newId('profile'),row=entry({id,scope:id,name:'',email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:true,from:null});
+        const id=newId('profile',list),row=entry({id,scope:id,name:'',email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:true,from:null});
         if(!row)throw new Error('A replacement profile could not be created.');
         write({...list,profiles:[row],active:id,removing});platform.reload();return true;
       }
@@ -147,7 +151,7 @@ const createModule=()=>{
       if(!next)return false;
       write({...list,profiles:others,active:next.id,removing});platform.reload();return true;
     }
-    const renew=()=>update(mine=>({id:newId(mine.name),email:'',folder:''}));
+    const renew=()=>update((mine,list)=>({id:newId(mine.name,list),email:'',folder:''}));
 
     async function collect(){
       if(read().unsupported)return freeze({removed:false,error:null});
