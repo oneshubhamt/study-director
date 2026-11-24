@@ -80,6 +80,8 @@ function loadDefaultPlan(){return loadScheduleIntoDraft(DefaultStore.active().sc
 function getPlanDraftText(){
   return String(fieldById('plan-input','textarea')?.value||'');
 }
+// Template confirmation, durable writes and editor actions share the same edit lifetime.
+let editEpoch=0;
 async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanLoadDraftOptions>={}){
   if(!ownership.requirePrimary(null,'load a plan template'))return {ok:false,error:'ownership_unavailable'};
   const text=String(scheduleText??'');
@@ -90,16 +92,19 @@ async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanL
   }
   const ta=fieldById('plan-input','textarea');
   if(!ta)return {ok:false,error:'missing_plan_input'};
-  const previous=ta.value;
+  const previous=ta.value,confirmedEpoch=editEpoch;
   if(previous&&previous!==text){
     const yes=await confirm({title:'Replace current draft?',message:'The current draft will be replaced with a working copy. Saved plans and the live timer are unchanged.',confirmLabel:'Load into draft',cancelLabel:'Keep current draft'});
     if(!yes)return {ok:false,error:'cancelled'};
-    if(ta.value!==previous)return {ok:false,error:'draft_changed'};
+    if(editEpoch!==confirmedEpoch||ta.value!==previous||fieldById('plan-input','textarea')!==ta)return {ok:false,error:'draft_changed'};
   }
   if(!ownership.requirePrimary(null,'load a plan'))return {ok:false,error:'ownership_unavailable'};
+  const revision=++editEpoch;
   ta.value=text;
   const saved=await PlanDraftEditor.save({strictDurability:true});
-  if(!saved){if(ta.value===text)ta.value=previous;PlanDraftEditor.preview({silent:true});return {ok:false,error:'storage_failed'};}
+  if(revision!==editEpoch||fieldById('plan-input','textarea')!==ta||ta.value!==text)return {ok:false,error:'draft_changed'};
+  if(!ownership.canMutate())return {ok:false,error:'ownership_unavailable'};
+  if(!saved){ta.value=previous;PlanDraftEditor.preview({silent:true});return {ok:false,error:'storage_failed'};}
   PlanDraftEditor.preview({source:'guide-template',enterDraft:true});
   setPlanStatus(opts.label?`${opts.label} loaded into Draft. Review, reorder, then Apply.`:'Template loaded into Draft. Review, reorder, then Apply.');
   return {ok:true};
@@ -615,7 +620,7 @@ const PlanDraftEditor=(()=>{
   let draftDragIndex:number|null=null;
   let draftSaveTimer:number|null=null;
   let draftPreviewTimer:number|null=null;
-  let editEpoch=0,openedEpoch=0;
+  let openedEpoch=0;
   let draftSaveWarningActive=false;
 
   function active(){return draftMode;}
@@ -640,6 +645,7 @@ const PlanDraftEditor=(()=>{
   }
   async function persistNow(options:Readonly<PlanDraftSaveOptions>={}){
     if(!ownership.canMutate())return false;
+    const revision=editEpoch;
     let ok=false,error=null;
     try{
       const input=boundDraftInput();
@@ -648,6 +654,7 @@ const PlanDraftEditor=(()=>{
       if(!ok)error=persistence.lastError()||new Error('Browser storage is unavailable.');
     }catch(e){error=e;ok=false;}
     persistence.reportDraftResult(ok,error);
+    if(revision!==editEpoch||!ownership.canMutate())return ok;
     if(!ok){
       draftSaveWarningActive=true;
       const message=error instanceof Error?error.message:'';

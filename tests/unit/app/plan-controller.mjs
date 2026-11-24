@@ -53,7 +53,7 @@ const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
 let breakActive=false,breakEnds=0;
 let blockedWrite=null,canonicalDraft=null;const saveOptions=[];
-const feedback=[];
+const feedback=[],draftResults=[];
 const timers=new Map();let nextTimer=0;
 const scheduleTimer=(callback,ms)=>{const id=++nextTimer;timers.set(id,{callback,ms});return id;};
 const clearScheduledTimer=id=>timers.delete(id);
@@ -113,7 +113,7 @@ const ports=Object.freeze({
       if(writeFailure)return false;
       canonicalDraft=value;return true;
     },
-    reportDraftResult:()=>{}
+    reportDraftResult:(ok,error)=>draftResults.push({ok,error})
   }),
   defaults:Object.freeze({
     active:()=>({scheduleText:'Default',studentName:'QA'}),
@@ -474,6 +474,39 @@ const goodLoad=await plan.loadDraft('Loaded template',{label:'Saved plan'});
 assert.equal(goodLoad.ok,true);assert.equal(canonicalDraft,'Loaded template');
 assert.equal(saveOptions.at(-1).strictDurability,true);
 
+// A later edit owns the Plan surface while an accepted Guide template is being saved.
+ids['plan-input'].value='';let releaseTemplate;
+blockedWrite=new Promise(resolve=>{releaseTemplate=resolve;});
+const loadingTemplate=plan.loadDraft('Earlier template',{label:'Guide'});
+assert.equal(ids['plan-input'].value,'Earlier template');
+ids['plan-input'].value='Newer working text';
+releaseTemplate();blockedWrite=null;
+const supersededTemplate=await loadingTemplate;
+assert.equal(supersededTemplate.ok,false);
+assert.equal(supersededTemplate.error,'draft_changed');
+assert.equal(ids['plan-input'].value,'Newer working text');
+assert.equal(canonicalDraft,'Earlier template','the acknowledged write is still durable');
+
+ids['plan-input'].value='';
+blockedWrite=new Promise(resolve=>{releaseTemplate=resolve;});
+const reeditedTemplate=plan.loadDraft('Same visible text',{label:'Guide'});
+plan.draft.composerInput();
+releaseTemplate();blockedWrite=null;
+assert.equal((await reeditedTemplate).error,'draft_changed','an editor action with the same text also owns its new draft');
+await plan.draft.flush();
+
+ids['plan-input'].value='';
+blockedWrite=new Promise(resolve=>{releaseTemplate=resolve;});
+const failingTemplate=plan.loadDraft('Superseded write',{label:'Guide'});
+ids['plan-input'].value='New working draft';plan.draft.composerInput();
+const feedbackBeforeFailure=feedback.length;
+writeFailure=true;releaseTemplate();blockedWrite=null;
+assert.equal((await failingTemplate).error,'draft_changed');
+assert.equal(draftResults.at(-1).ok,false,'the failed write still reaches diagnostics');
+assert.equal(feedback.length,feedbackBeforeFailure,'a superseded write cannot publish a failure against the new working draft');
+writeFailure=false;await plan.draft.flush();
+assert.equal(canonicalDraft,'New working draft');
+
 // Clear is also explicit authorship. A failed clear cannot leave the UI
 // pretending the old canonical draft disappeared.
 ids['plan-input'].value='Before clear';canonicalDraft='Before clear';plan.draft.preview({silent:true,enterDraft:true});
@@ -493,4 +526,4 @@ console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','clear-strict-rollback']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback']}));

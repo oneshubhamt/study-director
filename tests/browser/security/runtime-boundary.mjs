@@ -200,11 +200,24 @@ try{
  await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('.interaction-title')?.textContent==='Replace current draft?'`),{label:'Guide template replacement'});
  await page.evaluate(`document.querySelector('#sd-interaction-dialog .interaction-actions .primary').click()`);
  await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-plan'&&document.getElementById('plan-input')?.value.includes('Deep Study Block 1')`),{label:'Guide template accepted'});
- await page.evaluate(`(()=>{__PWA6.goTab('guide');document.getElementById('plan-input').value='06:45 | 35 | Keep this draft on cancel | work | Existing | block | 1';[...document.querySelectorAll('#pane-guide .guide-template .mini-btn')][1].click();})()`);
+ await page.evaluate(`__PWA6.goTab('guide')`);
+ await page.evaluate(`(()=>{document.getElementById('plan-input').value='06:45 | 35 | Keep this draft on cancel | work | Existing | block | 1';[...document.querySelectorAll('#pane-guide .guide-template .mini-btn')][1].click();})()`);
  await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('.interaction-title')?.textContent==='Replace current draft?'`),{label:'Guide template cancellation'});
  await page.evaluate(`document.querySelector('#sd-interaction-dialog [data-interaction-cancel]').click()`);
  await waitFor(()=>page.evaluate(`!document.getElementById('sd-interaction-dialog')?.open&&document.querySelector('#pane-guide .guide-status')?.textContent.trim()==='Current draft kept.'`),{label:'Guide template cancelled'});
  assert.equal(await page.evaluate(`document.getElementById('plan-input').value`),'06:45 | 35 | Keep this draft on cancel | work | Existing | block | 1');
+
+ // Loading into an empty draft starts the real storage write immediately and
+ // avoids a confirmation dialog's own Back navigation competing with the tab action.
+ assert.equal(await page.evaluate(`(async()=>{
+   document.getElementById('plan-input').value='';
+   document.querySelectorAll('#pane-guide .guide-template .mini-btn')[1].click();
+   return await __PWA6.goTab('review');
+ })()`),true,'the navigation to Review commits');
+ await waitFor(()=>page.evaluate(`__PWA6.AppData.planData.read().then(value=>value.draft?.includes('GS Static Study')&&value.draft===document.getElementById('plan-input').value)`),{label:'template saved after leaving Guide'});
+ await page.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+ assert.equal(await page.evaluate(`document.querySelector('.pane.on')?.id`),'pane-review','Guide completion must preserve a later navigation');
+ await page.evaluate(`__PWA6.goTab('guide')`);
 
  await page.evaluate(`(()=>{
    const originalFetch=window.fetch.bind(window),pending={};

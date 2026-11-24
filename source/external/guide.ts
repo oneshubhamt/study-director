@@ -22,7 +22,7 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
   type GuideSectionInput=Readonly<{label:string;title:string;purpose:readonly string[];actions:readonly string[];records:readonly string[];referenceTabs:readonly GuideReferenceDefinition[];saved:readonly string[];flow:readonly string[];remember:string}>;
   type GuideSection=GuideSectionInput;
   type GuideRenderContext=Readonly<{pane:HTMLElement}>;
-  type GuideState={step:GuideStep;status:string;ok:boolean;mapTabs:Record<string,string>;referenceOpen:Record<string,boolean>;installHelpOpen:boolean;context:GuideRenderContext|null};
+  type GuideState={templateRequest:number;step:GuideStep;status:string;ok:boolean;mapTabs:Record<string,string>;referenceOpen:Record<string,boolean>;installHelpOpen:boolean;context:GuideRenderContext|null};
   type QuickReferenceTab=Readonly<{id:string;label:string;render:()=>HTMLElement|null}>;
   type InstallStatus=Pick<NativeCapabilitiesStatus,'installationAction'|'installationState'|'installationLabel'|'installationSummary'|'installationContext'|'installationSteps'|'installationFallback'|'installInspecting'|'installHelpRequested'>;
   type WorkspaceRoute=Readonly<{kind:'legal';token:string;key:string}>;
@@ -1172,9 +1172,11 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
     status.textContent=state.status||'';
     status.classList.toggle('ok',state.ok);
   }
-  async function loadTemplate(api:GuideApi,state:GuideState,template:Template,context:GuideRenderContext|null):Promise<void>{
+  async function loadTemplate(api:GuideApi,state:GuideState,template:Template,context:GuideRenderContext):Promise<void>{
+    const request=++state.templateRequest;
     const result=await api.plan.loadDraft(template.schedule,{label:template.label});
-    state.status=result&&result.ok?`${template.label} loaded into Plan Draft.`:result?.error==='cancelled'?'Current draft kept.':'Template could not load.';
+    if(request!==state.templateRequest||state.context!==context||!context.pane.classList.contains('on'))return;
+    state.status=result&&result.ok?`${template.label} loaded into Plan Draft.`:result?.error==='cancelled'||result?.error==='draft_changed'?'Current draft kept.':'Template could not load.';
     state.ok=!!result?.ok;updateTemplateStatus(context,state);
     if(result?.ok&&api.ui?.goTab)api.ui.goTab('plan');
   }
@@ -1194,7 +1196,7 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
     if(!isGuideApi(value)||!supportsCapabilities(value,REQUIRED_CAPABILITIES))return false;
     const api=value;if(setupComplete)return guideApi===api;
     if(!LegalCenter.connect(api.ui.workspaceHistory))return false;
-    const state=guideState??(guideState={step:'plan',status:'',ok:false,mapTabs:{},referenceOpen:{},installHelpOpen:false,context:null});
+    const state=guideState??(guideState={templateRequest:0,step:'plan',status:'',ok:false,mapTabs:{},referenceOpen:{},installHelpOpen:false,context:null});
     const registered=api.ui.registerTab({id:TAB_ID,label:'Guide',icon:'?',render:context=>renderGuide(context,api,state)});
     if(registered!==true)return false;guideApi=api;
     if(!installListenerBound){window.addEventListener(INSTALL_STATE_EVENT,installStateChanged);installListenerBound=true;}
