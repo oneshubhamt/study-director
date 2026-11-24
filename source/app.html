@@ -5657,7 +5657,7 @@ if(!Object.isFrozen(AppData)||AppData.format!=='study-director.app-data'||AppDat
   throw new Error('Study Director AppData facade is unavailable or incompatible.');
 }
 NativeCapabilities=NativeCapabilitiesModule.createController(Object.freeze({
-  configuration:Object.freeze({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
+  configuration:Object.freeze({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake,platform:PlatformRuntime.kind}),
   environment:Object.freeze({document,navigator,window}),
   hooks:Object.freeze({
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),

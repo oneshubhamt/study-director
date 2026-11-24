@@ -23,7 +23,9 @@ registry.define('native-capabilities',1,()=>{
   function createController(input){
     if(!input||!Object.isFrozen(input))throw new TypeError('Native-capabilities input must be frozen.');
     exactObject(input,['configuration','environment','hooks'],'Native-capabilities input');
-    exactObject(input.configuration,['installNoticeKey','wakePreferenceKey'],'Native-capabilities configuration');
+    exactObject(input.configuration,['installNoticeKey','wakePreferenceKey','platform'],'Native-capabilities configuration');
+    if(!['web','tauri'].includes(input.configuration.platform))throw new TypeError('Unknown runtime platform.');
+    const nativeApp=input.configuration.platform==='tauri';
     exactObject(input.environment,['document','navigator','window'],'Native-capabilities environment');
     functions(input.hooks,['capture','isTimerRunning','readPreference','render','writePreference'],'Native-capabilities hooks');
     const {environment,hooks}=input;
@@ -33,7 +35,7 @@ registry.define('native-capabilities',1,()=>{
     const storageRequestSupported=!!(storageStatusSupported&&typeof storage.persist==='function');
     const wakeSupported=!!(nav&&nav.wakeLock&&typeof nav.wakeLock.request==='function');
     const badgeSupported=!!(nav&&typeof nav.setAppBadge==='function'&&typeof nav.clearAppBadge==='function');
-    const installedRelatedAppsSupported=!!(nav&&typeof nav.getInstalledRelatedApps==='function');
+    const installedRelatedAppsSupported=!nativeApp&&!!(nav&&typeof nav.getInstalledRelatedApps==='function');
     let installed=false,revision=0;
     let storageMode=storageStatusSupported?'checking':'unsupported',storageBusy=false,storageMessage='';
     let keepAwake=false,wakeSentinel=null,wakeRequest=null;
@@ -43,6 +45,7 @@ registry.define('native-capabilities',1,()=>{
 
     function capture(scope,error){try{hooks.capture(scope,error);}catch(reportingError){}}
     function isStandalone(){
+      if(nativeApp)return true;
       try{return !!(nav&&nav.standalone===true)||!!(win.matchMedia&&win.matchMedia('(display-mode: standalone)').matches);}
       catch(error){return false;}
     }
@@ -75,6 +78,7 @@ registry.define('native-capabilities',1,()=>{
       return 'This device';
     }
     function browserLabel(){
+      if(nativeApp)return 'Native app';
       const browser=browserName();
       return browser==='chrome'?'Chrome':browser==='edge'?'Edge':browser==='firefox'?'Firefox':browser==='safari'?'Safari':'Browser';
     }
@@ -352,9 +356,11 @@ registry.define('native-capabilities',1,()=>{
       if(installed)return snapshot();
       installed=true;standalone=isStandalone();keepAwake=wakeSupported&&readWakePreference();
       doc.addEventListener('visibilitychange',handleVisibility);
-      connectInstallCapture();
-      const displayMode=win.matchMedia&&win.matchMedia('(display-mode: standalone)');
-      if(displayMode&&typeof displayMode.addEventListener==='function')displayMode.addEventListener('change',publish);
+      if(!nativeApp){
+        connectInstallCapture();
+        const displayMode=win.matchMedia&&win.matchMedia('(display-mode: standalone)');
+        if(displayMode&&typeof displayMode.addEventListener==='function')displayMode.addEventListener('change',publish);
+      }
       publish();void inspectInstallation();void syncWake();return snapshot();
     }
     return freeze({

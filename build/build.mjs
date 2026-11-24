@@ -498,8 +498,8 @@ export function writeBuild(build=renderBuild()){
 // Native staging is an explicit, separate build operation. It never writes
 // development/deployment, Firebase staging or the web build manifest.
 export function writeNativeBuild(build=renderBuild({includeNative:true})){
+  invariant(Object.hasOwn(build,'native'),'Native frontend was not rendered.');
   validateBuild(build);
-  validateNativeTarget(build);
   const directory=path.join(DIST,'tauri');
   if(fs.existsSync(directory))fs.rmSync(directory,{recursive:true,force:true});
   fs.mkdirSync(directory,{recursive:true});

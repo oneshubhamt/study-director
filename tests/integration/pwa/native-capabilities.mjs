@@ -35,7 +35,7 @@ const navigator={
 };
 const preferences=new Map(),renders=[],captures=[];
 const controller=NativeModule.createController(Object.freeze({
-  configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake'}),
+  configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake',platform:'web'}),
   environment:Object.freeze({document,navigator,window}),
   hooks:Object.freeze({
     capture:(scope,error)=>captures.push({scope,error:String(error)}),
@@ -102,10 +102,10 @@ await controller.updateBadge(false);assert.equal(badge,0);
 assert.equal(captures.length,0);
 assert.ok(renders.some(state=>state.wakeAcquired));
 
-function storageOnlyController(navigatorValue){
+function storageOnlyController(navigatorValue,platform='web'){
   const documentValue=emitter({hidden:false}),windowValue=emitter({matchMedia:()=>({matches:false})});
   return NativeModule.createController(Object.freeze({
-    configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake'}),
+    configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake',platform}),
     environment:Object.freeze({document:documentValue,navigator:navigatorValue,window:windowValue}),
     hooks:Object.freeze({capture:()=>{},isTimerRunning:()=>false,readPreference:()=>false,writePreference:()=>true,render:()=>{}})
   }));
@@ -129,8 +129,23 @@ const unsupportedState=await unsupported.inspectStorage();
 assert.equal(unsupportedState.storageMode,'unsupported');
 assert.match(unsupportedState.storageMessage,/browser-managed/i);
 
+let relatedAppsReads=0;
+const native=storageOnlyController({userAgent:'Mozilla/5.0',getInstalledRelatedApps:async()=>{relatedAppsReads+=1;return [];}},'tauri');
+native.install();
+await native.inspectInstallation();
+await native.offerInstallNotice();
+assert.equal(native.status().installationState,'opened-as-app');
+assert.equal(native.status().standalone,true);
+assert.equal(native.status().installationAction,'none');
+assert.equal(native.status().installNoticeVisible,false);
+assert.equal(native.status().installAvailable,false);
+assert.equal(await native.promptInstall(),false);
+assert.equal(relatedAppsReads,0,'native installation cannot depend on browser installation discovery');
+assert.equal((await native.inspectStorage()).storageMode,'unsupported','native presentation must not invent a persistence grant');
+assert.throws(()=>storageOnlyController({},'unknown'),/Unknown runtime platform/);
+
 console.log(JSON.stringify({
-  status:'PASS',persistenceAutoRequested:true,persistenceRetryAvailable:true,wakeLifecycle:true,
+  status:'PASS',nativeInstallationIsolated:true,persistenceAutoRequested:true,persistenceRetryAvailable:true,wakeLifecycle:true,
   persistenceDenialSafe:true,persistenceUnsupportedSafe:true,
   installGuidance:true,installedTabRemainsBrowser:true,badgeBestEffort:true,wakeRequests,persistCalls
 },null,2));
