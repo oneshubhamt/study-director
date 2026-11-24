@@ -2681,7 +2681,7 @@ if(!Object.isFrozen(RetainedBackupFiles)||RetainedBackupFiles.format!=='study-di
 }
 type BackupFileStoreInput=Parameters<typeof ExportsModule.createFileStore>[0];
 const BackupFiles=ExportsModule.createFileStore(Object.freeze<BackupFileStoreInput>({
-  storage:Object.freeze<BackupFileStoreInput['storage']>({getDirectory:async()=>await navigator.storage.getDirectory() as unknown as Awaited<ReturnType<BackupFileStoreInput['storage']['getDirectory']>>}),
+  storage:Object.freeze<BackupFileStoreInput['storage']>({getDirectory:()=>navigator.storage.getDirectory()}),
   locks:navigator.locks,root:ProfileScope.scoped('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'),retained:()=>RetainedBackupFiles.names(),
   isAvailable:()=>upkeepBlocker()||(typeof Reflect.get(navigator.storage,'getDirectory')==='function'&&typeof Reflect.get(navigator,'locks')==='object'?true:'storage-unavailable'),
   onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')
@@ -3529,7 +3529,7 @@ function currentBackupDiagnosticStates(){
   sample('Note saving',()=>AppData.notes.failure(),value=>({job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}));
   sample('Write ownership',()=>({primary:appCanMutate(),...requireMutationCoordinator().status()}),value=>({job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}));
   sample('Backup controller',()=>BackupController.status(),value=>({job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}));
-  sample('Device backup',()=>requireDeviceBackup().status(),value=>({job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}));
+  sample('Device backup',()=>requireDeviceBackup().status(),value=>({job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalePermissionResponses:value.stalePermissionResponses,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}));
   sample('Provider operation',()=>BackupProviderRuntime.status(),value=>({job:'Provider operation',...OperationLifecycle.snapshot(value)}));
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
   sample('Backup encryption',()=>BackupProtection.status(),value=>({job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}));

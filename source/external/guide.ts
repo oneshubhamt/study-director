@@ -434,7 +434,11 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
       const layer=overlay;if(!layer||layer.hidden)return false;
       cancelCloseVisual();
       closing=false;layer.classList.remove('is-open','is-closing');layer.hidden=true;document.body.style.overflow=restoreOverflow;
-      const target=activeTrigger;activeTrigger=null;if(target?.isConnected)requestAnimationFrame(()=>target.focus({preventScroll:true}));
+      const target=activeTrigger,revision=loadRevision;
+      activeTrigger=null;
+      if(target)requestAnimationFrame(()=>{
+        if(revision===loadRevision&&layer.hidden&&target.isConnected)target.focus({preventScroll:true});
+      });
       resolveClose(true);return true;
     }
     function beginHide(meta:LegalCloseMeta={}):Promise<boolean>{
@@ -538,12 +542,19 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
       const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';const layer=ensure();
       const reopening=closing&&!layer.hidden,firstOpen=!visible()&&!reopening;
       if(reopening){cancelCloseVisual();closing=false;resolveClose(true);layer.classList.remove('is-closing');if(trigger?.isConnected)activeTrigger=trigger;}
-      if(firstOpen){activeTrigger=trigger?.isConnected?trigger:(document.activeElement instanceof HTMLElement?document.activeElement:null);restoreOverflow=document.body.style.overflow;document.body.style.overflow='hidden';layer.hidden=false;requestAnimationFrame(()=>layer.classList.add('is-open'));}
+      if(firstOpen){activeTrigger=trigger?.isConnected?trigger:(document.activeElement instanceof HTMLElement?document.activeElement:null);restoreOverflow=document.body.style.overflow;document.body.style.overflow='hidden';layer.hidden=false;}
       else layer.classList.add('is-open');
       activeId=key;
       if(options.fromHistory!==true&&routeHistory){const next=descriptor(key),historyOptions={url:historyUrl(key)};if(firstOpen)routeHistory.open(next,historyOptions);else routeHistory.replace(next,historyOptions);}
       void render(key);
-      requestAnimationFrame(()=>{const selected=navigation?.querySelector<HTMLElement>('[aria-selected="true"]')??null;const target=firstOpen?closeButton:selected??closeButton;target?.focus({preventScroll:true});});
+      const revision=loadRevision;
+      requestAnimationFrame(()=>{
+        if(revision!==loadRevision||activeId!==key||layer.hidden)return;
+        if(firstOpen)layer.classList.add('is-open');
+        const selected=navigation?.querySelector<HTMLElement>('[aria-selected="true"]')??null;
+        const target=firstOpen?closeButton:selected??closeButton;
+        target?.focus({preventScroll:true});
+      });
       return true;
     }
     function requestClose():boolean{

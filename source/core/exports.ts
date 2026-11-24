@@ -178,7 +178,10 @@ const createModule=(input:ExportsModuleInput)=>{
             check();if(signal?.aborted)throw cancelled();
             let timer:number|undefined;const next=await Promise.race([reader.read(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>{abort();reject(new Error('Backup download stopped making progress.'));},120000);})]).finally(()=>clearTimeout(timer));
             if(next.done)break;total+=next.value.byteLength;if(total>size)throw new Error('Backup download exceeded its verified size.');
-            await writer.write(next.value);const progress=Object.freeze({phase:'downloading',loaded:total,total:size});try{onProgress?.(progress);}catch{}phase='Downloading backup · '+Math.floor(total/size*100)+'%';publish();
+            const chunk=next.value,buffer=chunk.buffer;
+            const bytes=buffer instanceof ArrayBuffer?new Uint8Array(buffer,chunk.byteOffset,chunk.byteLength):new Uint8Array(chunk);
+            await writer.write(bytes);
+            const progress=Object.freeze({phase:'downloading',loaded:total,total:size});try{onProgress?.(progress);}catch{}phase='Downloading backup · '+Math.floor(total/size*100)+'%';publish();
           }
           check();if(signal?.aborted)throw cancelled();if(total!==size)throw new Error('Backup download was truncated.');
           await writer.close();writer=null;const file=await staged.handle.getFile();check();if(signal?.aborted)throw cancelled();return files!.bind(file,staged.name);

@@ -22,7 +22,9 @@ assert.doesNotMatch(drive,/www\.googleapis\.com\/auth\/drive(?!\.file)|emptyTras
 assert.equal((app.match(/import\s*\(/gu)||[]).length,0,'Runtime dynamic JavaScript imports are forbidden.');
 assert.deepEqual([...trustedExternalModuleIds],['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
 assert.deepEqual(externalModules.map(module=>module.id),[...trustedExternalModuleIds],'Only reviewed external runtime modules may be loadable.');
-assert.match(app,/script\.src=trustedAssetURL\(descriptor\.src\)/u,'On-demand scripts must cross the trusted-asset boundary.');
+const pluginLoader=readRuntimeSource('source/core/public-api-host.ts');
+assert.match(app,/environment:Object\.freeze\s*\(\{document,trustedAssetURL:value=>trustedAssetURL\(value\)\}\)/u,'the shipped host must supply its trusted URL policy to the optional loader');
+assert.match(pluginLoader,/Reflect\.set\(script,'src',input\.environment\.trustedAssetURL\(descriptor\.src\)\)/u,'On-demand scripts must cross the trusted-asset boundary.');
 
 for(const [name,source] of [['app',app],['review',review],['plan',plan],['timer',timer],['insights',insights],['drive',drive]]){
   assert.doesNotMatch(source,/\beval\s*\(|new Function\s*\(/u,`${name} must not use string-to-code execution.`);
@@ -31,7 +33,7 @@ for(const source of [app,review,plan,timer,insights]){
   assert.doesNotMatch(source,/querySelector(?:All)?\(`[^`]*\$\{/u,'Runtime values must not be interpolated into CSS selectors.');
 }
 assert.doesNotMatch(drive,/innerHTML\s*=.*file\.(?:name|modifiedTime|createdTime)/u,'Drive metadata must never be rendered as HTML.');
-assert.match(sw,/candidate\.origin===scope\.origin&&candidate\.pathname\.startsWith\(scope\.pathname\)/u,'Service-worker navigation fallback must remain same-origin and scope-confined.');
+assert.match(sw,/candidate\.origin===base\.origin&&candidate\.pathname\.startsWith\(base\.pathname\)/u,'Service-worker navigation fallback must remain same-origin and scope-confined.');
 
 // Rendered deployment policy is the authoritative CSP/header contract.
 const build=renderBuild();

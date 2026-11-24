@@ -29,8 +29,20 @@ Object.assign(context,{
   UnsupportedData:{held:()=>false,summary:()=>({total:1,held:1,protected:0,blocked:false,items:{days:0,notes:0,attachments:0,sessions:0,settings:0}})},
   navigator:{clipboard:{writeText:async value=>copied.push(value)}},NoticeCoordinator:{presentation:()=>({begin:()=>({finish:(...args)=>notices.push(args)})})},AppDiagnostics:{capture:(...args)=>errors.push(args)}
 });
+const integritySource=readCoreScript('backup-integrity-host');
+const rowsStart=integritySource.indexOf('function diagnosticRows()'),rowsEnd=integritySource.indexOf("return freeze({format:'study-director.backup-integrity-host'",rowsStart);
+assert.ok(rowsStart>=0&&rowsEnd>rowsStart);
+context.repositoryIntegrityView.locations['device-folder'].quarantinedObjectIds=[];
+const integrityRows=vm.runInContext('(function(attachmentView,attachmentJob,repositoryView,boundScopes){const freeze=Object.freeze;'+integritySource.slice(rowsStart,rowsEnd)+'return diagnosticRows();})',context);
+Object.assign(context,{
+ BackupIntegrity:{diagnosticRows:()=>integrityRows(context.attachmentIntegrityView,context.AttachmentIntegrityJob,context.repositoryIntegrityView,context.repositoryIntegrityBoundScopes)},
+ PwaRuntime:{diagnostics:()=>({nextCheckAt:context.pwaUpdateCheckDueAt,lastSuccessfulCheckAt:context.pwaLastUpdateCheckAt(),failureCount:context.pwaUpdateCheckFailureCount})},
+ requireMutationCoordinator:()=>context.AppMutationCoordinator,requireKeptVersions:()=>context.KeptVersions,
+ requireStorageHealthController:()=>context.StorageHealthController,requireDeviceBackup:()=>context.DeviceBackup
+});
+const field=source.match(/^function objectField\([^\n]+$/mu);assert.ok(field);vm.runInContext(field[0],context);
 const from=source.indexOf('function currentBackupDiagnosticStates(){'),to=source.indexOf('// App-specific DOM handlers',from);assert.ok(from>=0&&to>from);vm.runInContext(source.slice(from,to),context);
-assert.equal(await context.copyBackupDiagnostics(),true);const text=copied[0];
+assert.equal(await context.copyBackupDiagnostics(),true,errors.at(-1)?.[1]?.stack);const text=copied[0];
 assert.match(text,/Current Canonical maintenance: state=running/u);assert.match(text,/Current Attachment cleanup: state=scheduled/u);assert.match(text,/Current Backup scratch cleanup: state=paused/u);assert.match(text,/Current device-folder maintenance: state=running/u);assert.match(text,/Current App update: state=activating/u);assert.match(text,/google-drive integrity/u);assert.match(text,/lastOutcome=yielded/u);assert.doesNotMatch(text,/private editor text|PRIVATE DATA/u);assert.equal(notices.at(-1)[0],'succeeded');
 assert.match(text,/Current App update: state=activating[^\n]*scheduled=true · nextEligibleAt=2026-10-02T00:00:00\.000Z · completedAt=2026-10-01T00:00:00\.000Z · retryAttempt=2/u,'diagnostics show the next update check, the last one and failed attempts');assert.match(text,/coverage=presence-and-size/u);assert.match(text,/progressBytes=1048576/u);assert.match(text,/failedAt=2026-10-01/u);assert.match(text,/history=2026-10-01T00:00:00.000Z:yielded/u);
 for(const phase of ['checking','downloading']){
@@ -69,7 +81,12 @@ context.navigator.clipboard.writeText=async()=>{throw new Error('clipboard denie
 
 // Exercise the actual storage-health projection: issues are shown live and never stored.
 Object.assign(context,{STORAGE_KEYS:{storageHealth:'health'},APP_LIMITS:{maxStatusMessageChars:1000},clampText:(value,limit)=>value.slice(0,limit),emptyStorageHealth:()=>({version:2}),refreshStorageFallbackWarning:()=>{}});
-const start=source.indexOf('function createStorageHealthController(local){'),end=source.indexOf('StorageHealthController=createStorageHealthController',start);vm.runInContext(source.slice(start,end),context);
+vm.runInContext(readCoreScript('backup-readiness-host'),context);
+const readiness=registry.require('backup-readiness-host',1);
+context.createStorageHealthController=local=>readiness.createStorageHealth(Object.freeze({
+ local,key:'health',maxStatusMessageChars:1000,clampText:context.clampText,refreshWarning:()=>{},scheduleSyncStatus:()=>{},
+ document:{getElementById:()=>null},timeLabelFromIso:value=>value,renderCapabilities:()=>{}
+}));
 let stored;const health=context.createStorageHealthController({getJson:()=>null,setJson:(_,value)=>{stored=value;return true;}});
 let state=health.issue('repositoryIntegrity','Verification is unavailable. Previous findings are retained.',{level:'warn'});assert.equal(state.issues[0].label,'Backup verification');assert.equal(state.issues[0].level,'warn');
 health.issue('attachmentIntegrity','Attachment verification is unavailable.',{level:'warn'});assert.equal(stored,undefined,'an issue writes nothing to browser storage');

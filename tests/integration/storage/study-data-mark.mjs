@@ -1,7 +1,5 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
@@ -21,16 +19,16 @@ await app.personalPreferences.write({version:2,studentName:'QA',theme:null,prese
 assert.deepEqual(commits.map(event=>[event.entityType,event.startup,event.settingsOnly]),[['planData',false,false],['planData',true,true],['planData',false,true]],'the start-up write and settings alone are marked as such');
 
 // App: which commits record study data.
-const source=readHostHtml();
-const constant=source.match(/^const STUDY_DATA_COMMITS=.*;$/mu)?.[0];assert.ok(constant,'STUDY_DATA_COMMITS must exist');
-const start=source.indexOf('function handleCanonicalCommit(event){'),end=source.indexOf('\n}',start);assert.ok(start>0&&end>start);
-const writes=[];
-const context=vm.createContext({
-  writeStorageHealth:patch=>writes.push(patch),renderStorageHealth:()=>{},canonicalCommitChangesAttachmentReferences:()=>false,
-  NativeCapabilities:null,CapabilityBadge:null,ReviewDayState:{reminder:{date:''}},notifyBackupChange:()=>{},StartupLifecycle:{status:()=>({fullyInitialized:false})},richAssetReferenceRevision:0
-});
-vm.runInContext(`${constant}\n${source.slice(start,end+2)}\nglobalThis.commit=handleCanonicalCommit;`,context);
-const committedAt='2026-11-07T09:30:00.000Z',marked=event=>{writes.length=0;context.commit({committedAt,operation:'upsert',...event});return writes[0].lastStudyDataSaveAt===committedAt;};
+const writes=[],context=vm.createContext({Symbol,Object});
+for(const file of ['internal','backup-readiness-host'])vm.runInContext(readRuntimeSource('source/core/'+file+'.ts'),context);
+const readiness=context[Symbol.for('studyDirector.internalModules.v1')].require('backup-readiness-host',1);
+const noop=()=>{};
+const commitsHost=readiness.createCanonicalCommit(Object.freeze({
+  storage:{updateHistory:patch=>writes.push(patch),render:noop},scanAttachmentReferences:()=>({trusted:true,assetIds:[]}),
+  incrementReferenceRevision:noop,syncCapability:noop,notifyBackupChange:noop,scheduleAssetMaintenance:noop,
+  invalidateAttachmentLibrary:noop,fullyInitialized:()=>false,refreshKeptVersions:noop,reminderDate:()=>'',revalidateSaveReminder:noop,nowIso:()=>clock.now()
+}));
+const committedAt='2026-11-07T09:30:00.000Z',marked=event=>{writes.length=0;commitsHost.handle({committedAt,operation:'upsert',...event});return writes[0].lastStudyDataSaveAt===committedAt;};
 for(const entityType of ['note','dailyRecord','activeSession','planData','pendingReview'])
   assert.equal(marked({entityType}),true,`a ${entityType} save records study data`);
 assert.equal(marked({entityType:'planData',startup:true}),false,'settings rebuilt by the start-up step on a fresh install do not');

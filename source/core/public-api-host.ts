@@ -36,6 +36,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
   const files=new Map<string,PluginFileStatus>(descriptors.map(descriptor=>[descriptor.tabId,freeze({...descriptor,state:'not-requested' as PluginFileState,detail:'',attempts:0,updatedAt:null})]));
   const loadPromises=new Map<string,Promise<boolean>>();
   const registered=new Map<string,PluginRegistrationStatus>();
+  const registering=new Set<string>();
   let publicApi:StudyDirectorPublicApi|null=null;
   const nowStamp=()=>new Date().toISOString();
 
@@ -132,6 +133,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     try{plugin=normalizePluginDescriptor(value);}catch{return false;}
     if(!plugin)return false;
     const {name}=plugin,descriptor=descriptorsByPlugin.get(name)||null,previous=registered.get(name);
+    if(registering.has(name))return false;
     if(previous?.state==='registered'){
       if(descriptor){markFile(descriptor.tabId,'registered','',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return true;
     }
@@ -148,6 +150,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
       registered.set(name,freeze({name,version:plugin.version,state:'incompatible',attempts:nextAttempt,detail:input.clampText(detail,160),updatedAt:nowStamp()}));
       if(descriptor){markFile(descriptor.tabId,'incompatible',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
+    registering.add(name);
     try{
       const ok=Reflect.apply(plugin.setup,plugin.source,[publicApi])!==false,detail=ok?'':'Plugin setup did not activate.';
       if(ok)for(const [target,provider] of Object.entries(plugin.previewProviders))input.preview.registerProvider(target,provider);
@@ -157,7 +160,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
       const detail=input.clampText(isRecord(error)&&typeof error['message']==='string'&&error['message']||String(error),160);
       registered.set(name,freeze({name,version:plugin.version,state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()}));
       if(descriptor){markFile(descriptor.tabId,'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
-    }
+    }finally{registering.delete(name);}
   }
   function startLoad(descriptor:Readonly<OptionalPluginDescriptor>){
     const previous=fileState(descriptor.tabId),attempts=Math.max(0,Number(previous?.attempts)||0)+1;
@@ -174,7 +177,9 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
           resolve(fileState(descriptor.tabId)?.state==='registered');renderIfActive(descriptor.tabId);
         };
         script.onerror=()=>{
-          script?.remove();markFile(descriptor.tabId,'missing',`Could not load ${descriptor.src}.`,attempts);
+          script?.remove();
+          if(fileState(descriptor.tabId)?.state==='registered'){resolve(true);return;}
+          markFile(descriptor.tabId,'missing',`Could not load ${descriptor.src}.`,attempts);
           resolve(false);renderIfActive(descriptor.tabId);
         };
         input.environment.document.head.appendChild(script);

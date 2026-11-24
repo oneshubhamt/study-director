@@ -1,4 +1,5 @@
 import {readHostHtml} from '../../../build/host-source.mjs';
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
@@ -146,5 +147,34 @@ for(const retired of ['director-dark','director-light']){
 assert.equal(loadKernel().kernel.normalizeThemeId('director-sepia'),'dark','Unknown theme IDs still fall back to the default.');
 
 assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose snapshot-transition machinery to plugins; appearance transitions are host-owned.');
+
+{
+  const {kernel,root}=loadKernel();
+  const callbacks=[],writes=[];
+  let owner=true;
+  root.style={setProperty(){},removeProperty(){}};
+  root.setAttribute=()=>{};root.removeAttribute=()=>{};
+  const document={documentElement:root,visibilityState:'visible',getElementById:()=>null,
+    startViewTransition(change){callbacks.push(change);return {ready:Promise.resolve(),finished:Promise.resolve()};}};
+  const context=vm.createContext({console,Symbol,Object});
+  for(const path of ['source/core/internal.ts','source/core/presentation-host.ts'])vm.runInContext(readScript(path),context);
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('presentation-host',1);
+  const appearance=module.createController({kernel,document,window:{addEventListener(){},matchMedia:()=>({matches:false}),innerWidth:800,innerHeight:600},
+    preferences:{persist:value=>writes.push(value)},ownership:{require:()=>owner}});
+  appearance.setTheme('light');appearance.setTheme('dark');
+  appearance.setPresentation('aurora');appearance.setPresentation('glass');
+  callbacks.splice(0).forEach(change=>change());
+  assert.deepEqual([kernel.activeThemeId(),kernel.activePresentationId()],['dark','glass'],'delayed transitions must preserve the latest choice on each axis');
+  assert.deepEqual(writes.map(value=>value.theme||value.presentation),['dark','glass']);
+  appearance.setTheme('light');appearance.setPresentation('aurora');
+  callbacks.splice(0).reverse().forEach(change=>change());
+  assert.deepEqual([kernel.activeThemeId(),kernel.activePresentationId()],['light','aurora'],'theme and presentation are independent');
+  appearance.setTheme('dark');appearance.setPresentation('glass');
+  appearance.applyTheme('light');appearance.applyPresentation('director-current');
+  callbacks.splice(0).forEach(change=>change());
+  assert.deepEqual([kernel.activeThemeId(),kernel.activePresentationId()],['light','director-current'],'a canonical restore supersedes pending choices');
+  appearance.setTheme('dark');owner=false;callbacks.shift()();
+  assert.equal(kernel.activeThemeId(),'light','a queued change must recheck write ownership before applying');
+}
 
 console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','retired-theme-ids-fall-back','saved-aurora','profile-scoped-appearance','unregistered-fallback','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));

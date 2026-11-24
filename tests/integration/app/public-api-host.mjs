@@ -158,6 +158,25 @@ const contextPlugin={name:'qa-method-context',setup(){contextPreserved=this===co
 assert.equal(publicApi.registerPlugin(contextPlugin),true);
 assert.equal(contextPreserved,true,'plugin setup keeps the original descriptor as its method receiver');
 
+let setupEntries=0,nestedResult;
+const nestedPlugin={name:'qa-nested',setup(api){
+  if(++setupEntries===1)nestedResult=api.registerPlugin(nestedPlugin);
+  return true;
+}};
+assert.equal(publicApi.registerPlugin(nestedPlugin),true);
+assert.equal(setupEntries,1,'registering the same plugin during setup must not repeat its side effects');
+assert.equal(nestedResult,false,'the nested caller cannot claim setup completed before its owner');
+assert.equal(publicApi.registerPlugin(nestedPlugin),true);
+assert.equal(runtime.status().registered.find(row=>row.name===nestedPlugin.name).attempts,1);
+
+const late=failureRuntimeWith({document,trustedAssetURL:value=>value});
+const lateApi=late.createPublicApi(publicApiInput),pendingGuide=late.requestTab('guide');
+const lateScript=scripts.pop();
+assert.equal(lateApi.registerPlugin({name:'SD-guide',setup:()=>true}),true);
+lateScript.onerror();
+assert.equal(await pendingGuide,true,'a late file error must preserve already successful registration');
+assert.equal(late.status().optionalFiles[0].state,'registered');
+
 let incompatibleSetup=0;
 assert.equal(publicApi.registerPlugin({name:'qa-incompatible',requires:{missingCapability:1},setup(){incompatibleSetup++;return true;}}),false);
 assert.equal(incompatibleSetup,0,'capability rejection must happen before plugin setup');

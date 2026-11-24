@@ -20,7 +20,7 @@ export interface ExportProcessing{
  scope<T>(operation:()=>Promise<T>):Promise<T>;job<T>(operation:()=>Promise<T>,options?:{wait?:boolean;surface?:string}):Promise<T>;
  check():void;checkpoint?():()=>void;
 }
-export interface ScratchHandle{getFile():Promise<Blob>;createWritable(options:{keepExistingData:boolean}):Promise<{write(value:Blob|Uint8Array|ArrayBuffer):Promise<void>;close():Promise<void>;abort():Promise<void>}>}
+export interface ScratchHandle{getFile():Promise<Blob>;createWritable(options:{keepExistingData:boolean}):Promise<{write(value:Blob|Uint8Array<ArrayBuffer>|ArrayBuffer):Promise<void>;close():Promise<void>;abort():Promise<void>}>}
 export interface ScratchDirectory{getDirectoryHandle(name:string,options:{create:boolean}):Promise<ScratchDirectory>;getFileHandle(name:string,options?:{create:boolean}):Promise<ScratchHandle>;removeEntry(name:string):Promise<void>;entries():AsyncIterableIterator<[string,{kind:'file'|'directory'}]>}
 export type StagedFile={name:string;directory:string;handle:ScratchHandle};
 export type LeaseToken={name:string;unlock():void;active:boolean;pinCount:number;releaseRequested:boolean};

@@ -14,11 +14,13 @@ const identityBody=repository.slice(repository.indexOf('function repositoryLogic
 for(const excluded of ['checkpointId','installationId','sourceRevision','reconciliationBaseId','objectId','protectionId'])assert.equal(identityBody.includes(excluded),false,`provider/capture artifact must not enter logical-state identity: ${excluded}`);
 
 assert.match(app,/id="managed-version-history"[\s\S]*id="managed-version-history-title">Version History/u,'one Version History dialog for every location');
-assert.doesNotMatch(host,/input\.device\b/u,'the recovery host has no Device-only path');
+const historyOwner=host.slice(host.indexOf('function createHost('));
+assert.ok(historyOwner.includes('input.providers.history('));
+assert.doesNotMatch(historyOwner,/input\.device\b/u,'the recovery host has no Device-only path');
 // One list: each connected location's own history is read, then each
 // version shows once, read from the Device Folder when it holds it.
 assert.match(provider,/async function removeRepositoryProviderVersion/u);
-for(const forbidden of ['import-file','importLocal','.sdbackup','import-archive'])assert.equal(host.includes(forbidden),false,`standalone file backup/import must stay outside managed provider history: ${forbidden}`);
+for(const forbidden of ['import-file','importLocal','.sdbackup','import-archive'])assert.equal(historyOwner.includes(forbidden),false,`standalone file backup/import must stay outside managed provider history: ${forbidden}`);
 assert.doesNotMatch(drive,/DeviceBackup|device-backup|projectManagedRepositoryHistory|mergeManagedRepositoryHistory/u,'Google Drive transport must not know about Device Folder');
 assert.doesNotMatch(device,/google-drive|Google Drive|BackupProviderRuntime/u,'the Device Folder controller must not know about Drive; it reaches the engine only through its injected port');
 

@@ -1,5 +1,9 @@
 # TypeScript conversion — execution record
 
+## Independent audit of P5.10–P5.13 · verification in progress · 2026-11-24
+
+Starting head `01b6e1e7`. Compared the shipped Insights, Guide, presentation, PWA and host paths with the earlier JavaScript and checked their callers across backup, storage and navigation. The first full fast run failed 14 of 169 cases. Corrections and regression checks are in the accompanying code commit. Final verification and the audit disposition follow separately.
+
 ## P5.13 · FIFTH DE NOVO SOURCE AUDIT — CLOSED — CORRECTED — TARGETED · 2026-11-23
 
 - **Audit basis / final source-test head:** restarted from live head `d78f0dfd0b7e5433ccf74dde0d7dd7693e35ffdf`, reread `AGENTS.md` and the complete P5.13 contract in `docs/typescript/PHASE-5.md`, re-traced P5.13a/P5.13b owners, host composition, baseline ordering, shipping/compiler inventory and affected witnesses against `de4872a`. Final source/test head is `19dd7928bcabb374dd2913e48f2d186fd2d96196`.

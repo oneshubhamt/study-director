@@ -110,6 +110,11 @@ function protocolContext(extra={}){
   assert.equal(compute.warm(),false);
   const result=await compute.build(records,{records,revision:'no-worker'},{});
   assert.equal(result.mode,'main-thread-unavailable');
+  const cause=new Error('Model calculation failed.');
+  const broken=context.StudyDirectorInsightsComputeBridge.create({logic},{buildPrepared(){throw cause;}});
+  await assert.rejects(broken.build(records,{records,revision:'no-worker'},{}),
+    error=>error.code==='INSIGHTS_PROCESSING_FAILED'&&error.cause===cause,
+    'model failures on a device without a worker must reach the processing-error UI');
   assert.equal(result.model.recordCount,140);
 }
 {

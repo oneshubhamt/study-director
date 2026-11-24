@@ -127,6 +127,16 @@ function evaluateWorkerValidation({cacheJson=JSON.stringify(CACHE_STORAGE_IDENTI
 {
  const h=fixture({active:{}}),page=h.client('page');h.windows.push(page);h.seed(current,assetId);h.stores.set('study-director-shell-stopped',new Map([[scope+'index.html',new Response('<meta name="study-director-build" content="old-build">')]]));await h.report(page,assetId);assert.equal(h.stores.has('study-director-shell-stopped'),false,'a cache without release metadata and no install running is an install that stopped');cases.push('an install that stopped without release metadata is removed, whatever its page says');
 }
+// A window can close after matchAll. Another application can share this origin.
+for(const phase of ['install','activate']){
+ const h=fixture({active:{}}),live=h.client('live');
+ h.windows.push({...h.client('closed'),postMessage(){throw new Error('Window closed');}},
+   {...h.client('other'),url:'https://study.test/other/'},live);
+ await h.emit(phase);
+ const type=phase==='install'?'SD_PWA_UPDATE_AVAILABLE':'SD_PWA_ACTIVATED';
+ assert.deepEqual(h.messages.filter(message=>message.type===type).map(message=>message.id),['live']);
+}
+cases.push('install and activation survive disappearing clients and notify only app windows');
 // A system notification focuses an existing app, even when its URL differs
 // from the notification's root URL. No navigation/save-unaware reload is allowed.
 {

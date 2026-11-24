@@ -35,6 +35,19 @@ await test('trusted registration and coalesced checks',async()=>{
 await test('preparation rejection releases reservation without activation',async()=>{
  const h=harness();await h.api.install();h.behavior.prepare=async()=>({ok:false,reason:'Storage failed.'});assert.equal(await h.api.apply(),false);assert.equal(h.counts().held,0);assert.match(h.api.status().message,/Storage failed/);assert.ok(!h.candidate.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));
 });
+await test('a late identity reply for a postponed update preserves its successor status',async()=>{
+ const h=harness();await h.api.install();
+ h.behavior.prepare=async()=>{h.candidate.identityBlocked=true;return {ok:false,reason:'First attempt blocked.'};};
+ const first=h.api.apply();await flush();
+ assert.equal(h.api.status().applying,false);
+ const delayed=h.channels.at(-1).port2,preparation=deferred();
+ h.candidate.identityBlocked=false;h.behavior.prepare=()=>preparation.promise;
+ const successor=h.api.apply();await flush();assert.equal(h.api.status().phase,'preparing');
+ delayed.postMessage({type:'SD_PWA_IDENTITY',releaseId:'next',buildId:'qa-build',assetId:'a'.repeat(24)});
+ assert.equal(await first,false);
+ assert.equal(h.api.status().phase,'preparing','postponed attempt must not replace the live status');
+ preparation.resolve({ok:true});assert.equal(await successor,true);h.win.emit('pagehide');
+});
 await test('activating active pointer and ACK cannot trigger reload',async()=>{
  const h=harness();await h.api.install();assert.equal(await h.api.apply(),true);await h.activate(h.candidate,{control:false,state:'activating'});
  assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,1);h.message('SD_PWA_ACTIVATED',h.candidate);await flush();assert.equal(h.counts().reloads,0);

@@ -35,6 +35,7 @@ try{
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});
 
  const openDisplayTools=async()=>{
+   await waitFor(()=>page.evaluate(`!document.documentElement.hasAttribute('data-sd-appearance-reveal')`),{label:'appearance transition finished before physical click'});
    if(await page.evaluate(`document.getElementById('display-tools-menu').hidden`))await page.click('#display-tools-trigger');
    await waitFor(()=>page.evaluate(`!document.getElementById('display-tools-menu').hidden`),{label:'visible Display Tools'});
  };
@@ -240,6 +241,19 @@ try{
  await page.evaluate(`window.__guideLegalQA.resolve('security')`);await new Promise(resolve=>setTimeout(resolve,60));
  assert.deepEqual(await page.evaluate(`({hidden:document.querySelector('.legal-center-overlay')?.hidden===true,security:/SECURITY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||''),focused:document.activeElement?.textContent?.trim()||'',overflow:document.body.style.overflow})`),{hidden:true,security:false,focused:'Security',overflow:''});
  await page.evaluate(`window.__guideLegalQA.restore()`);
+ const rapidClose=await page.evaluate(`(async()=>{
+   const trigger=[...document.querySelectorAll('.guide-legal-links button')].find(control=>control.textContent.trim()==='Terms');
+   const media=window.matchMedia;
+   window.matchMedia=query=>query.includes('prefers-reduced-motion')?{matches:true}:media.call(window,query);
+   try{
+     trigger.click();document.querySelector('.legal-center-close').click();
+     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+     const layer=document.querySelector('.legal-center-overlay');
+     return {hidden:layer.hidden,open:layer.classList.contains('is-open'),focus:document.activeElement===trigger};
+   }finally{window.matchMedia=media;}
+ })()`);
+ assert.deepEqual(rapidClose,{hidden:true,open:false,focus:true},'a close before the first frame must retire the pending open and return focus');
+
  // Export worker construction is also a TrustedScriptURL sink.
  await page.evaluate('__PWA6.BackupController.createCheckpoint()');
  assert.equal(await page.evaluate('__PWA6.trustedTypeViolations.size'),0);

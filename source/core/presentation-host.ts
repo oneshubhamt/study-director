@@ -17,6 +17,8 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
   const root=document.documentElement;
   let appearanceShiftTimer:number|null=null,appearanceRevealRevision=0,displayToolsPopover:ReturnType<PresentationHostInput['popovers']['create']>|null=null;
 
+  let themeRevision=0,presentationRevision=0;
+
   function beginAppearanceShift():void{
     root.setAttribute('data-sd-appearance-shift','');
     if(appearanceShiftTimer!==null)window.clearTimeout(appearanceShiftTimer);
@@ -63,6 +65,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     controls.replaceChildren(label,...buttons);
   }
   function applyTheme(themeId:unknown,{persist=false,restoreFocus=false}:Readonly<{persist?:boolean;restoreFocus?:boolean}>={}):string{
+    themeRevision+=1;
     const clean=kernel.switchTheme(themeId,{persist:false});
     if(persist)preferences.persist({theme:clean});
     renderThemeControls();
@@ -73,7 +76,10 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     if(!ownership.require('change appearance settings'))return kernel.activeThemeId();
     const clean=kernel.normalizeThemeId(themeId);
     if(clean===kernel.activeThemeId())return applyTheme(clean,{persist:true,restoreFocus});
-    runAppearanceChange(origin,()=>{applyTheme(clean,{persist:true,restoreFocus});});
+    const revision=++themeRevision;
+    runAppearanceChange(origin,()=>{
+      if(revision===themeRevision&&ownership.require('change appearance settings'))applyTheme(clean,{persist:true,restoreFocus});
+    });
     return clean;
   }
   function handleThemeSelection(event:Event):void{
@@ -94,6 +100,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     controls.replaceChildren(label,...buttons);
   }
   function applyPresentation(presentationId:unknown,{persist=false,restoreFocus=false}:Readonly<{persist?:boolean;restoreFocus?:boolean}>={}):string{
+    presentationRevision+=1;
     const clean=kernel.switchPresentation(presentationId,{persist:false});
     kernel.synchronizeMetadata();
     if(persist)preferences.persist({presentation:clean});
@@ -105,7 +112,10 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     if(!ownership.require('change appearance settings'))return kernel.activePresentationId();
     const clean=kernel.normalizePresentationId(presentationId);
     if(clean===kernel.activePresentationId())return applyPresentation(clean,{persist:true,restoreFocus});
-    runAppearanceChange(origin,()=>{applyPresentation(clean,{persist:true,restoreFocus});});
+    const revision=++presentationRevision;
+    runAppearanceChange(origin,()=>{
+      if(revision===presentationRevision&&ownership.require('change appearance settings'))applyPresentation(clean,{persist:true,restoreFocus});
+    });
     return clean;
   }
   function registerPresentation(value:unknown):boolean{

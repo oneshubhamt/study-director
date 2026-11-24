@@ -12,8 +12,8 @@ const persistence=readScript('source/core/persistence.ts');
 const identitySource=persistence.slice(persistence.indexOf('function createInstallationIdentity'),persistence.indexOf('function normalizeTimestamp'));
 assert.doesNotMatch(identitySource,/legacyDeviceId|compatibilityDeviceId|retireLegacy|verifyRetired/u,'normal persistence identity capability must be current-only');
 
-const hydrateStart=app.indexOf('async function hydrateProtectedPreferences({force=false}={})');
-const hydrateEnd=app.indexOf('async function flushProtectedPreferences()',hydrateStart);
+const hydrateStart=app.indexOf('async function hydrateProtectedPreferences(');
+const hydrateEnd=app.indexOf('async function flushProtectedPreferences(',hydrateStart);
 const hydrateBlock=app.slice(hydrateStart,hydrateEnd);
 assert.match(hydrateBlock,/protectedPreferencesHydrated&&!force/u,'ordinary hydration may reuse current in-memory Preferences');
 assert.match(startupHost,/hydrateSavedDrafts\(freeze\(\{forcePreferences:true,failClosed:true\}\)\)/u,'ownership takeover must force a fresh canonical Preferences read before becoming writable');
@@ -23,29 +23,29 @@ assert.match(startupHost,/let planError[\s\S]*preferencesError[\s\S]*try\{await 
 assert.match(startupHost,/if\(planError\)p\.projectPlan\(\{fallback:true\}\);else\{p\.projectPlan\(\);p\.renderSavedPlans\(\);\}/u,'Preferences failure must not force Plan fallback');
 assert.match(app,/if\(!appCanMutate\(\)\|\|!protectedPreferencesHydrated\)return false;/u,'portable Preferences writes must be blocked when canonical Preferences are not hydrated');
 
-const themeStart=app.indexOf('function applyTheme('),themeEnd=app.indexOf('function setTheme(',themeStart);
-const presentationStart=app.indexOf('function applyPresentation('),presentationEnd=app.indexOf('function setPresentation(',presentationStart);
-const fontStart=app.indexOf('function setFontScale('),fontEnd=app.indexOf('function stepFontScale(',fontStart);
-assert.doesNotMatch(app.slice(themeStart,themeEnd),/AppData\.local\.setText/u,'theme mirror must not advance before canonical persistence succeeds');
-assert.doesNotMatch(app.slice(presentationStart,presentationEnd),/AppData\.local\.setText/u,'presentation mirror must not advance before canonical persistence succeeds');
-assert.doesNotMatch(app.slice(fontStart,fontEnd),/AppData\.local\.setText/u,'font mirror must not advance before canonical persistence succeeds');
+const appearance=readScript('source/core/presentation-host.ts');
+for(const [start,end] of [['applyTheme','setTheme'],['applyPresentation','setPresentation'],['setFontScale','stepFontScale']]){
+  const method=appearance.indexOf('function '+start+'('),next=appearance.indexOf('function '+end+'(',method);
+  assert.ok(method>=0&&next>method);
+  assert.doesNotMatch(appearance.slice(method,next),/(?:storage|AppData\.local)\.setText/u,'appearance mirrors wait for canonical persistence');
+}
 const flushStart=app.indexOf('async function flushProtectedPreferences('),flushEnd=app.indexOf('function scheduleProtectedPreferencesWrite()',flushStart);
 const flushBlock=app.slice(flushStart,flushEnd);
-assert.ok(flushBlock.indexOf('const saved=await run;')<flushBlock.indexOf('refreshAppearanceMirrors(saved)'),'appearance mirrors must refresh only after the canonical write resolves');
+const committed=flushBlock.indexOf('const saved=await run;');
+assert.ok(committed>=0&&committed<flushBlock.indexOf('refreshAppearanceMirrors(saved)'),'appearance mirrors must refresh only after the canonical write resolves');
 
 
-const maintenanceStart=app.indexOf('function scheduleDataMaintenance(delay=1200');
-const maintenanceEnd=app.indexOf('/* ONGOING SUBJECT NOTES */',maintenanceStart);
-const maintenanceBlock=app.slice(maintenanceStart,maintenanceEnd);
-assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before canonical startup verification completes');
-const maintenanceAdmission=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),maintenanceStart);
-assert.match(app,/function backgroundBlocker\([^)]*\)\{[^}]*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';/u,'the shared background gate rechecks startup');
+const maintenance=readScript('source/core/backup-maintenance-host.ts');
+assert.match(maintenance,/function schedule\([\s\S]*?if\(!authority\.fullyInitialized\(\)\)return false;/u);
+assert.match(maintenance,/function backgroundBlocker\([\s\S]*?if\(!authority\.fullyInitialized\(\)\)return 'startup';/u);
 assert.match(startupHost,/markReady:async proof=>\{[\s\S]*proof\.canonical!==true[\s\S]*p\.reseedEpoch\(\)[\s\S]*p\.scheduleMaintenance\(\);/u,'maintenance follows verified canonical startup');
 
 
-const applyPreferencesStart=app.indexOf('async function applyPreferences(raw)');
-const applyPreferencesEnd=app.indexOf('async function importData(value)',applyPreferencesStart);
-const applyPreferences=app.slice(applyPreferencesStart,applyPreferencesEnd);
+const plan=readScript('source/core/plan-host.ts');
+const importStart=plan.indexOf('async function importData('),importEnd=plan.indexOf('async function verify(',importStart);
+assert.ok(importStart>=0&&importEnd>importStart);
+const applyPreferences=plan.slice(importStart,importEnd);
+assert.match(applyPreferences,/preferences\.accept\(portable\)[\s\S]*?preferences\.applyRuntime\(portable\)/u);
 assert.doesNotMatch(applyPreferences,/keepScreenAwake|systemAlerts/u,'portable backup import must not touch destination device-local settings');
 
 console.log(JSON.stringify({status:'PASS',suite:'runtime-authority-contract',installationIdentityCurrentOnly:true,ownershipTakeoverFreshPreferences:true,mirrorCommitOrdering:true,canonicalOnly:true,deviceLocalImportPreserved:true,independentHydrationFailureDomains:true,startupMaintenanceGated:true},null,2));

@@ -37,7 +37,7 @@ assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.rev
 assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerBackgroundBackupActive\(\)/u,'a running background backup must defer update activation');
 assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked update safety must own the pre-update backup wait policy');
 assert.doesNotMatch(app,/PWA_UPDATE_BACKUP_WAIT_MS|function backUpBeforeUpdate\b/u,'PWA-specific backup wait policy must not remain in unchecked main');
-assert.match(lifecycle,/function externalController\(\).*worker!==baselineController/u,'external update state must mean a genuinely different controller rather than a same-controller boot mismatch');
+assert.match(lifecycle,/function externalController\(\)[\s\S]*?worker!==baselineController/u,'external update state must mean a genuinely different controller rather than a same-controller boot mismatch');
 assert.match(lifecycle,/const external=!!activated&&activated!==baselineController,context\s*=freeze\(\{requestId:target\.requestId,releaseId:target\.releaseId,automatic:options\.automatic===true,external,follower:external/u,'a genuinely changed controller must classify every non-initiating window as a follower without consulting racy ownership state');
 const messageStart=lifecycle.indexOf('function handleMessage('),messageEnd=lifecycle.indexOf('function reportClient(',messageStart);
 assert.ok(messageStart>=0&&messageEnd>messageStart,'checked PWA message handler must remain inspectable');
@@ -55,7 +55,7 @@ assert.match(sw,/SD_PWA_UPDATE_AVAILABLE',releaseId:RELEASE_ID,buildId:BUILD_ID,
 assert.match(sw,/SD_PWA_ACTIVATED',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'activation announcements must carry the immutable identity tuple');
 
 assert.match(sw,/\bPRECACHE_CONCURRENCY=8\b/u,'Service Worker precache concurrency must be explicitly bounded at eight');
-assert.match(sw,/const worker=async\(\)=>\{while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
+assert.match(sw,/const worker=async\(\)=>\{\s*while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
 assert.match(sw,/Promise\.all\(Array\.from\(\{length:Math\.min\(PRECACHE_CONCURRENCY,PRECACHE\.length\)\},\(\)=>worker\(\)\)\)/u,'precache worker count must be bounded by both the concurrency limit and asset count');
 assert.match(sw,/if\(failure\)throw failure;/u,'worker-queue failures must still fail installation before release metadata is committed');
 assert.match(sw,/parseCacheIdentities\(decodeURIComponent\('@@SD_CACHE_STORAGE_IDENTITIES_URI@@'\)\)/u,'cache identities must be safely quoted then validated');

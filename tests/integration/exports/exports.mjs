@@ -107,6 +107,25 @@ assert.equal(alive,0);scenarios.push('cancel, startup failure, runtime failure, 
   assert.equal(staged,1);assert.equal(released,1,'failed reader acquisition must release staged storage');
   owner.releaseLock();assert.equal(receiver.status().busy,false);
 }
+// Native file writers accept ordinary buffer views, including slices, but reject shared backing memory.
+{
+  const writableChunks=[];
+  const handle={
+    async createWritable(){return {async write(chunk){
+      assert.ok(chunk.buffer instanceof ArrayBuffer);
+      writableChunks.push(chunk);
+    },async close(){},async abort(){}};},
+    async getFile(){return new Blob(writableChunks);}
+  };
+  const files={stage:async()=>({name:'receive-view',handle}),bind:file=>file,release:async()=>{}};
+  const receiver=module.createCoordinator({createWorker,window:fakeWindow,document,files});
+  const regular=Uint8Array.of(0,1,2,0).subarray(1,3);
+  const shared=new Uint8Array(new SharedArrayBuffer(4));shared.set([0,3,4,0]);
+  const stream=new ReadableStream({start(controller){controller.enqueue(regular);controller.enqueue(shared.subarray(1,3));controller.close();}});
+  const received=await receiver.receiveStream(stream,4);
+  assert.deepEqual([...new Uint8Array(await received.arrayBuffer())],[1,2,3,4]);
+  assert.equal(writableChunks[0].buffer,regular.buffer,'ordinary download chunks retain their backing storage');
+}
 // An abort during asynchronous staging must not start copy/encryption work afterward.
 for(const type of ['file.copy','crypto.stream.encrypt']){
   const abort=new AbortController();let released=0,workerStarts=0;

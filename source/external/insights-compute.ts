@@ -148,8 +148,10 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
     return {...record,tasks,...(practiceSummary?{__sdPracticeSummary:practiceSummary}:{})};
   });
   const fallback=(records:readonly InsightRecord[],prepared:PreparedInsights,options:InsightsBuildOptions,started:number,mode:string):InsightsComputeResult=>{
-    const model=engine.buildPrepared(records,prepared,options);
-    return {model,mode,computeMs:performance.now()-started,roundTripMs:0};
+    try{
+      const model=engine.buildPrepared(records,prepared,options);
+      return {model,mode,computeMs:performance.now()-started,roundTripMs:0};
+    }catch(error){throw processingError(error);}
   };
   const windowOf=(records:readonly InsightRecord[],prepared:PreparedInsights):InsightsWindowRequest=>{
     if(records===prepared.records)return {all:true};
@@ -197,8 +199,7 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
     }catch(error){
       if(error instanceof Error&&error.name==='AbortError')throw error;
       if(currentWorker&&worker===currentWorker){workerDisabled=true;retireWorker(currentWorker);}
-      try{return fallback(records,prepared,options,started,'main-thread-worker-failure');}
-      catch(fallbackError){throw processingError(fallbackError);}
+      return fallback(records,prepared,options,started,'main-thread-worker-failure');
     }finally{
       if(timeout!==null)clearTimeout(timeout);
       if(active&&active.id===id)active=null;
