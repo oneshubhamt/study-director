@@ -12,7 +12,7 @@ const MANIFEST_VERSION=Number(readRuntimeSource(path.join(root,'source/core/mana
 const manifest=JSON.parse(readRuntimeSource(path.join(root,'dist/build-manifest.json')));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupProviderRuntime,BackupController,RepositoryCheckpointPipeline,BackupRecoveryHost,BackupOperationDiagnostics,AppMutationCoordinator,SessionLifecycle,ActiveSessionRuntime,ReviewEditor,ReviewSaveService,StartupLifecycle,TimerState,TIMER_MODES,AppData,pwaUpdateBlockReason,integrity:()=>BackupIntegrity?.repositoryState()?.locations?.['device-folder']||null});\n`;
+const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupProviderRuntime,BackupController,RepositoryCheckpointPipeline,BackupRecoveryHost,BackupOperationDiagnostics,AppMutationCoordinator,SessionLifecycle,ActiveSessionRuntime,ReviewEditor,ReviewSaveService,StartupLifecycle,TimerState,TIMER_MODES,AppData,integrity:()=>BackupIntegrity?.repositoryState()?.locations?.['device-folder']||null});\n`;
 let main=readRuntimeSource(path.join(deployment,manifest.main));
 if(!main.includes(marker))throw new Error('Device-backup browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);

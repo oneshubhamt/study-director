@@ -7,4 +7,11 @@ export function chooseIncomingBackup(options, overrides = {}) {
   }));
 }
 
-export const configureFixtureHook = 'configure:options=>window.restoreChoices?Promise.resolve(typeof window.restoreChoices===\'function\'?window.restoreChoices(options):window.restoreChoices):Interactions.configure(options)';
+// Keep the actual host argument conversion and pass ordinary dialogs through.
+export function withBackupFixtureChoices(html) {
+  const call = 'Interactions.configure(';
+  if (html.split(call).length !== 2) throw new Error('Expected one host backup configuration call.');
+  return html.replace(call, `(options => window.restoreChoices
+    ? Promise.resolve(typeof window.restoreChoices === 'function' ? window.restoreChoices(options) : window.restoreChoices)
+    : Interactions.configure(options))(`);
+}

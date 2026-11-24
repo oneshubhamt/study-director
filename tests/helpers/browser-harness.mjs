@@ -67,6 +67,18 @@ export function instrumentedHtml(kind='deployment',options={}){
   return html;
 }
 
+// Use the same test API with the staged assets and the actual minified host.
+export function instrumentedMinifiedHtml(server, directory, fixtureHtml) {
+  const exposure = fixtureHtml.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/);
+  const publication = 'HOST_WINDOW.StudyDirector=StudyDirectorPublicAPI;';
+  const html = fs.readFileSync(path.join(directory, 'index.html'), 'utf8');
+  if (!exposure || html.split(publication).length !== 2) throw new Error('Missing or ambiguous minified host instrumentation.');
+  for (const entry of fs.readdirSync(directory, {withFileTypes:true})) {
+    if (entry.isFile()) server.setOverride('deployment', entry.name, fs.readFileSync(path.join(directory, entry.name)));
+  }
+  return withoutPwaChecks(html.replace(publication, () => exposure[0] + publication));
+}
+
 export async function startReleaseServer(){
   const manifest=readBuildManifest();
   const overrides=new Map(),failures=new Map(),requests=[];let offline=false;

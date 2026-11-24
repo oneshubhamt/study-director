@@ -1,4 +1,4 @@
-import {chooseIncomingBackup,configureFixtureHook} from '../../helpers/backup-fixture-choices.mjs';
+import {chooseIncomingBackup,withBackupFixtureChoices} from '../../helpers/backup-fixture-choices.mjs';
 import assert from 'node:assert/strict';
 import {RUNTIME_DATA_CONTRACT as DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import {launchChromium,startReleaseServer,instrumentedHtml,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'qa-exports-'});
-server.setOverride('deployment','exports-fixture.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({Exports,NoteExporter,BackupCodec:RuntimeBackupCodec,StartupLifecycle,').replace('configure:options=>Interactions.configure(options)',configureFixtureHook));
+server.setOverride('deployment','exports-fixture.html',withBackupFixtureChoices(instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({Exports,NoteExporter,BackupCodec:RuntimeBackupCodec,StartupLifecycle,')));
 const preload=`window.chooseIncomingBackup=${chooseIncomingBackup.toString()};(()=>{
   const date=new Date(),today=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));
   const NativeWorker=Worker;window.workerCounts={started:0,live:0,messages:0};

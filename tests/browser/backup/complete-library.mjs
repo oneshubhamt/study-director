@@ -1,21 +1,19 @@
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
-import {chooseIncomingBackup,configureFixtureHook} from '../../helpers/backup-fixture-choices.mjs';
+import {chooseIncomingBackup,withBackupFixtureChoices} from '../../helpers/backup-fixture-choices.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import path from 'node:path';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import {createHash} from 'node:crypto';
-import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml} from '../../helpers/browser-harness.mjs';
+import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml,instrumentedMinifiedHtml} from '../../helpers/browser-harness.mjs';
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const fixtureMiB=Number(process.env.SD_LARGE_MIB||40);
 const server=await startReleaseServer(),browser=await launchChromium({executable:process.env.CHROMIUM_PATH,args:['--disable-gpu','--no-zygote'],profilePrefix:'sd74-complete-'});
-let html=instrumentedHtml().replace('void PwaLifecycle.install().then(()=>schedulePwaUpdateCheck(750));','/* PWA activation tested separately */').replace('Object.freeze({StartupLifecycle,','Object.freeze({Exports,BackupFiles,BackupProtection,AttachmentStorage,AttachmentLibrary,AttachmentIngest,RichTextApi,PlanData,prepareApplicationUpdate,pwaUpdateBlockReason,StartupLifecycle,').replace('configure:options=>Interactions.configure(options)',configureFixtureHook);
+let html=instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({Exports,BackupFiles,BackupProtection,AttachmentStorage,AttachmentLibrary,AttachmentIngest,RichTextApi,PlanData,PwaRuntime,StartupLifecycle,');
 if(process.env.SD_MINIFIED_TEST==='1'){
- const root=path.resolve('dist',deploymentDirectoryName,'public');
- for(const name of fs.readdirSync(root))if(fs.statSync(path.join(root,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(root,name)));
- const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
- html=readRuntimeSource(path.join(root,'index.html')).replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'').replace('configure:options=>Interactions.configure(options)',configureFixtureHook);
+ html=instrumentedMinifiedHtml(server,path.resolve('dist',deploymentDirectoryName,'public'),html);
 }
+
+html=withBackupFixtureChoices(html);
 // Use actual deployment policy with hashes recalculated solely for harness instrumentation.
 const headers=JSON.parse(readRuntimeSource(process.env.SD_MINIFIED_TEST==='1'?path.join('dist',deploymentDirectoryName,'firebase-hosting-headers.merge.json'):'dist/deployment/firebase-hosting-headers.merge.json'));
 let csp=headers.hosting.headers.find(r=>r.source==='/**').headers.find(h=>h.key==='Content-Security-Policy').value;
@@ -38,7 +36,7 @@ const restore=await page.evaluate(`(async()=>{const a=__PWA6;await a.AppData.not
 assert.equal(restore.note,restore.expectedNote);assert.deepEqual(restore.rows.map(({file,...r})=>r).sort((a,b)=>a.id.localeCompare(b.id)),catalogue.map(({file,...r})=>r).sort((a,b)=>a.id.localeCompare(b.id)));pass('coordinated restore preserves IDs, labels, library membership and all reference types');
 // Background cleanup is paused so only this step's collections take the attachment lock.
 const reader=await page.evaluate(`(async()=>{const a=__PWA6;return a.RecoveryAssetMaintenancePause.run(async()=>{const release=await a.AttachmentStorage.retain(),before=(await a.AttachmentStorage.list()).filter(r=>r.type==='application/pdf'),old=await a.AttachmentStorage.get(before[0].id);await a.AttachmentLibrary.add(new File([old],'third copy.pdf',{type:old.type}));const deferred=await a.AttachmentStorage.collect(gc=>gc.sweep());const stillReadable=await old.slice(0,8).text();await a.AttachmentStorage.removeMetadata([before[0].id]);const deleted=!(await a.AttachmentStorage.list()).some(r=>r.id===before[0].id);release();await new Promise(resolve=>setTimeout(resolve,50));const swept=await a.AttachmentStorage.collect(async gc=>({status:'completed',count:await gc.sweep()}));return {deferred,stillReadable,deleted,swept};});})()`);assert.equal(reader.deferred.status,'skipped');assert.equal(reader.stillReadable,'%PDF-1.7');assert.equal(reader.deleted,true);assert.equal(reader.swept.status,'completed');pass('real OPFS dedup reader survives; logical deletion does not wait for reader');
-await page.evaluate('window.busyController=new AbortController();window.uploading=__PWA6.AttachmentLibrary.upload([new File([new Uint8Array(64*1048576)],"bad.pdf")],{signal:busyController.signal}).catch(()=>{});window.updateReason=__PWA6.pwaUpdateBlockReason();',{awaitPromise:false});assert.match(await page.evaluate('updateReason'),/attachment/);await page.evaluate('uploading');pass('PWA guard sees independent uploads');
+await page.evaluate('window.busyController=new AbortController();window.uploading=__PWA6.AttachmentLibrary.upload([new File([new Uint8Array(64*1048576)],"bad.pdf")],{signal:busyController.signal}).catch(()=>{});window.updateReason=__PWA6.PwaRuntime.blockReason();',{awaitPromise:false});assert.match(await page.evaluate('updateReason'),/attachment/);await page.evaluate('uploading');pass('PWA guard sees independent uploads');
 // Independent recovery reader must outlive release of a producer or another reader.
 const leases=await page.evaluate(`(async()=>{const a=__PWA6,file=await a.Exports.run('file.copy',{file:new Blob(['lease fixture'])}),ref=await a.Exports.run('file.persist',{file}),one=await a.Exports.run('file.read',{ref}),two=await a.Exports.run('file.read',{ref});await a.Exports.run('file.release',{file});await a.Exports.run('file.release',{file:one});const surviving=await two.text();await a.Exports.run('file.release',{file:two});return surviving})()`);assert.equal(leases,'lease fixture');pass('independent backup-file reader leases protect the surviving reader');
 await page.evaluate(`window.holdDecrypt=true;window.lockedDecrypt=__PWA6.BackupController.inspect(complete.blob).then(()=>false,e=>e.name==='AbortError');`,{awaitPromise:false});await waitFor(()=>page.evaluate('window.decryptHeld===true'));await page.evaluate('__PWA6.BackupProtection.lock()');assert.equal(await page.evaluate('lockedDecrypt'),true);assert.equal(await page.evaluate('__PWA6.Exports.status().pending'),0);await page.evaluate('window.holdDecrypt=false');pass('locking terminates a pending large decrypt and releases processing');

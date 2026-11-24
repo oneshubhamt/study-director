@@ -1,18 +1,15 @@
-import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml,pasteInPage} from '../../helpers/browser-harness.mjs';
+import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml,instrumentedMinifiedHtml,pasteInPage} from '../../helpers/browser-harness.mjs';
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'qa-runtime-security-'});
 const policy="worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin";
 let html=instrumentedHtml();
 if(process.env.SD_MINIFIED_TEST==='1'){
- const root=path.resolve('dist',deploymentDirectoryName,'public');
- for(const name of fs.readdirSync(root))if(fs.statSync(path.join(root,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(root,name)));
- const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
- html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void (?:PwaRuntime|PwaLifecycle)\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
+ html=instrumentedMinifiedHtml(server,path.resolve('dist',deploymentDirectoryName,'public'),html);
 }
+
 server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({BackupProtectionStorage,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 let page;

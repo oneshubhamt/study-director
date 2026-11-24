@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
-import fs from 'node:fs';
 import path from 'node:path';
-import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml} from '../../helpers/browser-harness.mjs';
+import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumentedHtml,instrumentedMinifiedHtml} from '../../helpers/browser-harness.mjs';
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'sd72b-library-'});let page,fresh;
 let html=instrumentedHtml();
-if(process.env.SD_MINIFIED_TEST==='1'){const dir=path.resolve('dist',deploymentDirectoryName,'public'),expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];for(const name of fs.readdirSync(dir))if(fs.statSync(path.join(dir,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(dir,name)));html=fs.readFileSync(path.join(dir,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace('void PwaLifecycle.install();','');}
+if(process.env.SD_MINIFIED_TEST==='1'){
+ html=instrumentedMinifiedHtml(server,path.resolve('dist',deploymentDirectoryName,'public'),html);
+}
 html=html.replace('Object.freeze({StartupLifecycle,','Object.freeze({AttachmentStorage,AttachmentLibrary,AttachmentsModule,AttachmentReferences,Exports,RichTextApi,StartupLifecycle,').replace('processing:Exports,document,interactions:Interactions,','processing:Exports,document,interactions:{confirm:()=>Promise.resolve(true),choose:()=>Promise.resolve("review"),input:()=>Promise.resolve({value:"Renamed file"})},');
 const strictPolicy="require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin";
 const fixtureHtml=html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+strictPolicy+'">');
