@@ -40,6 +40,10 @@ The source inspection covers the host, all core modules, Drive, service worker, 
 
 The existing baseline CI and [documentation-only branch checkpoint CI](https://github.com/oneshubhamt/study-director/actions/runs/45320892852) both succeeded. The runtime source and build were identical between them. The terminal has Node but no Rust/Cargo and cannot resolve github.com; local baseline reproduction and native compilation are unavailable here. The Phase 0 source/design work is sufficient to prepare the bounded native asset target; independent reproduction and real Windows acceptance remain explicit open evidence, not implied by CI.
 
+## Native frontend staging
+
+`node build/stage-tauri.mjs` renders a third, explicit target under `dist/tauri` from the same canonical source, module manifest, workers and static assets. It is not a Firebase or PWA deployment. Native assets carry a separate page asset identity; the host composes the build-selected platform once, does not grant the PWA lifecycle coordinator a service-worker capability, and has no browser Google Drive plugin. Web targets keep their manifest, service worker and OAuth provider. Staging validates shared asset hashes and inventory and does not write either web target. The native target is local-only; it is not an authorized test against the owner's library. Native shell, WebView acceptance and native service adapters remain to be implemented and qualified.
+
 ## Critical risks and qualification gates
 
 1. **OAuth interoperability**: the web grant is drive.file and repository discovery depends on private appProperties. Before native creation/publication, confirm an installed-app OAuth client in the appropriate Google Cloud project and prove visibility of existing app-created files and appProperties with the narrow grant. Do not silently broaden permission or create a duplicate library when discovery fails. Test wrong account, rejected consent, callback state mismatch, refresh expiry/revocation and no-token leakage. Owner approval is required for external OAuth configuration. Distinguish local disconnect from account-wide revocation.

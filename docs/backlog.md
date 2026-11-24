@@ -4,7 +4,7 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
 
 ## Experimental native platform (tauri-spike only)
 
-Owner-authorized programme: see [native platform](areas/native-platform.md). Phase 0 source/design census and exact baseline CI evidence are recorded. Phase 0 independent local reproduction and Windows/WebView2 environment remain open; the bounded P1.A native asset preparation may proceed without claiming runtime qualification. Existing CI evidence is not native qualification. Phase 1 A–G and Phase 2 A–I remain open; no runtime changes or production configuration are part of the baseline checkpoint. The installed-app OAuth client/project and signed updater configuration need appropriate owner approval before external configuration changes. Use synthetic test libraries only.
+Owner-authorized programme: see [native platform](areas/native-platform.md). Phase 0 source/design census and exact baseline CI evidence are recorded. Phase 0 independent local reproduction and Windows/WebView2 environment remain open; the bounded P1.A native asset preparation may proceed without claiming runtime qualification. Existing CI evidence is not native qualification. Phase 1 A–G and Phase 2 A–I remain open. P1.A includes an initial native frontend asset target; its CI and actual WebView execution must be checked, and the Tauri shell and platform services remain outstanding. No production configuration is changed. The installed-app OAuth client/project and signed updater configuration need appropriate owner approval before external configuration changes. Use synthetic test libraries only.
 
 ## Bugs reported by the owner (2026-11-03)
 

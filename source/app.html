@@ -1557,6 +1557,9 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 // shell/public plugins -> DOM/startup. Private modules never resolve one another.
 /* CONFIG AND DATA CONTRACT */
 const APP_VERSION='@@SD_RELEASE@@';
+// Build-selected capabilities, composed once; never infer native authority from a user agent.
+const RUNTIME_PLATFORM='@@SD_RUNTIME_PLATFORM@@';
+const PlatformRuntime=Object.freeze({kind:RUNTIME_PLATFORM==='tauri'?'tauri':'web',pwaUpdates:RUNTIME_PLATFORM!=='tauri',webDrive:RUNTIME_PLATFORM!=='tauri'});
 const INTERNAL_MODULES=window[Symbol.for('studyDirector.internalModules.v1')];
 if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-registry'||INTERNAL_MODULES.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
@@ -7089,6 +7092,10 @@ const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
 // The indicator shows Connecting… from the click until the sign-in settles,
 // and the Connect card follows the first sync to its end.
 function connectDriveForProfile(){
+  if(!PlatformRuntime.webDrive){
+    Interactions.notify({key:'native-drive-unavailable',title:'Native Google Drive is not available yet',message:'This experimental build is local-only until native authentication is implemented.'});
+    return Promise.resolve(false);
+  }
   // A profile that already has its Drive library signs in again to it; only
   // a first connect follows the first sync on the card.
   driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard({reconnect:!!Profiles.current()?.folder});scheduleSyncStatus();
@@ -11495,7 +11502,7 @@ const PwaLifecycle=PwaLifecycleModule.createCoordinator(Object.freeze({
   environment:Object.freeze({
     AbortController,
     MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,
-    clearTimeout:timer=>clearTimeout(timer),document,navigator,
+    clearTimeout:timer=>clearTimeout(timer),document,navigator:PlatformRuntime.pwaUpdates?navigator:null,
     setTimeout:(callback,delay)=>setTimeout(callback,delay),window
   }),
   hooks:Object.freeze({

@@ -162,7 +162,7 @@ function assertCanonicalSource(){
   invariant(!/\b(?:document|localStorage|sessionStorage|requestAnimationFrame|Worker|querySelector|createElement)\b/u.test(insightsModel),'Insights model must remain independent of DOM, browser storage, animation, and worker APIs.');
 }
 
-export function renderBuild(){
+export function renderBuild({includeNative=false}={}){
   assertCanonicalSource();
   const identity=releaseIdentity();
   const privateSources=new Map(privateModules.map(module=>[
@@ -195,7 +195,14 @@ export function renderBuild(){
     deployment:new Map(externalModules.map(module=>[module.id,filename(module,externalSources.deployment.get(module.id))]))
   });
   const templateSource=sourceFile(htmlSource);
-  const template=target=>renderPlatformTokens(templateSource,identity,htmlSource,{
+  const withoutTag=(source,tag)=>{
+    invariant(source.split(tag).length===2,`Native build expected exactly one ${tag}.`);
+    return source.replace(tag,'');
+  };
+  const template=(target,platform='web')=>renderPlatformTokens(platform==='tauri'
+    ?withoutTag(withoutTag(templateSource,'<link rel="manifest" href="manifest.webmanifest">'),'<script src="@@SD_EXTERNAL_DRIVE_FILENAME@@" defer></script>')
+    :templateSource,identity,htmlSource,{
+    RUNTIME_PLATFORM:platform,
     EXTERNAL_GLASS_FILENAME:externalNames[target].get('glass'),
     EXTERNAL_AURORA_FILENAME:externalNames[target].get('aurora'),
     EXTERNAL_GUIDE_FILENAME:externalNames[target].get('guide'),
@@ -217,12 +224,15 @@ export function renderBuild(){
     asset.template?Buffer.from(renderTokens(sourceFile(asset.source),identity,asset.source),'utf8'):sourceBytes(asset.source)
   ]));
   const legalReaderSources=new Map(legalReaderAssets.map(reader=>[reader.output,legalReaderHtml(reader,sourceFile(reader.source))]));
-  const renderTarget=(target,html)=>{
+  const renderTarget=(target,html,platform='web')=>{
     const files=new Map([[identity.main,html]]);
     for(const module of privateModules)files.set(privateNames.get(module.id),privateSources.get(module.id));
-    for(const module of externalModules)files.set(externalNames[target].get(module.id),externalSources[target].get(module.id));
+    for(const module of externalModules){
+      if(platform==='tauri'&&module.id==='drive')continue;
+      files.set(externalNames[target].get(module.id),externalSources[target].get(module.id));
+    }
     for(const module of styleModules)files.set(styleNames.get(module.id),styleSources.get(module.id));
-    files.set(platformFiles.manifest.output,manifestSource);
+    if(platform==='web')files.set(platformFiles.manifest.output,manifestSource);
     for(const asset of staticAssets){
       if(asset.targets.includes(target))files.set(asset.output,staticSources.get(asset.source));
     }
@@ -231,6 +241,7 @@ export function renderBuild(){
     // Hash the fully rendered inventory before replacing this HTML sentinel.
     const assetId=sha256(JSON.stringify([...files].sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)]))).slice(0,24);
     html=html.replaceAll('__SD_PAGE_ASSET_ID__',assetId);files.set(identity.main,html);
+    if(platform==='tauri')return Object.freeze({files,assetId});
     if(target==='deployment'){
       const inlineScripts=[...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(match=>`'sha256-${sha256Base64(match[1])}'`);
       invariant(inlineScripts.length>0,'Deployment CSP has no inline application scripts to authorize.');
@@ -275,7 +286,9 @@ export function renderBuild(){
   };
   const developmentTarget=renderTarget('development',template('development').replace(privateModuleMarker,()=>developmentTags));
   const deploymentTarget=renderTarget('deployment',template('deployment').replace(privateModuleMarker,()=>deploymentTags));
+  const nativeTarget=includeNative?renderTarget('development',template('development','tauri').replace(privateModuleMarker,()=>developmentTags),'tauri'):null;
   return Object.freeze({
+    ...(nativeTarget?{native:nativeTarget.files,nativeAssetId:nativeTarget.assetId}:{}),
     identity,
     development:developmentTarget.files,
     deployment:deploymentTarget.files,
@@ -319,6 +332,27 @@ function verifyPwaTarget(files,pwa,label){
   const serviceWorker=files.get(platformFiles.serviceWorker.output);
   invariant(typeof serviceWorker==='string'&&serviceWorker.includes(`const RELEASE_ID='${pwa.releaseId}';`),`${label} service worker release identity drifted.`);
   invariant(serviceWorker.includes(`const PRECACHE=Object.freeze(JSON.parse('${JSON.stringify(pwa.precache)}'));`),`${label} service worker asset manifest drifted.`);
+}
+
+function validateNativeTarget(build){
+  const {native,nativeAssetId,development,identity,externalNames}=build;
+  invariant(native instanceof Map&&/^[a-f0-9]{24}$/u.test(nativeAssetId),'Native asset target or identity is missing.');
+  const excluded=new Set([platformFiles.manifest.output,platformFiles.serviceWorker.output,externalNames.development.get('drive')]);
+  const expected=[...development.keys()].filter(name=>!excluded.has(name)).sort();
+  invariant(JSON.stringify([...native.keys()].sort())===JSON.stringify(expected),'Native asset inventory differs from the shared frontend.');
+  for(const name of expected){
+    if(name===identity.main)continue;
+    invariant(sha256(native.get(name))===sha256(development.get(name)),`Native shared asset bytes drifted: ${name}.`);
+  }
+  const html=native.get(identity.main);
+  invariant(html.includes("const RUNTIME_PLATFORM='tauri';")&&development.get(identity.main).includes("const RUNTIME_PLATFORM='web';")&&build.deployment.get(identity.main).includes("const RUNTIME_PLATFORM='web';"),'Native and web runtime capabilities are not isolated.');
+  invariant(!/<link[^>]+rel="manifest"/iu.test(html)&&!html.includes(externalNames.development.get('drive')),'Native frontend includes browser installation or OAuth assets.');
+  invariant(html.includes(`<meta name="study-director-assets" content="${nativeAssetId}">`),'Native page asset identity drifted.');
+  const preIdentity=[...native].map(([name,value])=>[name,name===identity.main?value.replaceAll(nativeAssetId,'__SD_PAGE_ASSET_ID__'):value]);
+  const expectedId=sha256(JSON.stringify(preIdentity.sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)]))).slice(0,24);
+  invariant(nativeAssetId===expectedId,'Native page asset identity does not cover its inventory.');
+  validateReleaseIdentities(native,identity,'native');
+  return true;
 }
 
 export function validateBuild(build){
@@ -407,6 +441,7 @@ export function validateBuild(build){
   const securityHeaders=Object.fromEntries((securityRule&&securityRule.headers||[]).map(header=>[header.key,header.value]));
   invariant(securityHeaders['Content-Security-Policy']&&securityHeaders['Content-Security-Policy'].includes("frame-ancestors 'none'")&&securityHeaders['Content-Security-Policy'].includes('https://accounts.google.com')&&securityHeaders['Content-Security-Policy'].includes('https://www.googleapis.com'),'Deployment Content Security Policy is incomplete.');
   invariant(securityHeaders['X-Content-Type-Options']==='nosniff'&&securityHeaders['Referrer-Policy']==='no-referrer'&&securityHeaders['X-Frame-Options']==='DENY','Deployment security headers are incomplete.');
+  if(Object.hasOwn(build,'native'))validateNativeTarget(build);
   return true;
 }
 
@@ -458,6 +493,21 @@ export function writeBuild(build=renderBuild()){
   }
   fs.utimesSync(path.join(DIST,'build-manifest.json'),epoch,epoch);
   return manifest;
+}
+
+// Native staging is an explicit, separate build operation. It never writes
+// development/deployment, Firebase staging or the web build manifest.
+export function writeNativeBuild(build=renderBuild({includeNative:true})){
+  validateBuild(build);
+  validateNativeTarget(build);
+  const directory=path.join(DIST,'tauri');
+  if(fs.existsSync(directory))fs.rmSync(directory,{recursive:true,force:true});
+  fs.mkdirSync(directory,{recursive:true});
+  for(const [name,value] of build.native)writeFile(path.join(directory,name),value);
+  const epoch=new Date(releaseConfig.sourceDateEpoch);
+  for(const target of recursiveEntries(directory))fs.utimesSync(target,epoch,epoch);
+  fs.utimesSync(directory,epoch,epoch);
+  return Object.freeze({status:'PASS',platform:'tauri',release:build.identity.release,sourceCommit:build.identity.sourceCommit,assetId:build.nativeAssetId,files:build.native.size});
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -8,7 +8,20 @@ import {renderBuild,validateBuild} from '../../../build/build.mjs';
 const root=path.resolve(new URL('../../..',import.meta.url).pathname);
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const sourceCommit='a'.repeat(40),previousSourceCommit=process.env.SD_SOURCE_COMMIT;process.env.SD_SOURCE_COMMIT=sourceCommit;
-const build=renderBuild();assert.equal(validateBuild(build),true);assert.equal(build.identity.sourceCommit,sourceCommit);
+const webOnly=renderBuild(),build=renderBuild({includeNative:true});assert.equal(validateBuild(build),true);assert.equal(build.identity.sourceCommit,sourceCommit);
+assert.deepEqual(build.development,webOnly.development,'native generation must not change the web development target');
+assert.deepEqual(build.deployment,webOnly.deployment,'native generation must not change the PWA deployment target');
+assert.deepEqual(build.pwa,webOnly.pwa,'native generation must not change PWA identities');
+const nativeIndex=build.native.get(build.identity.main);
+assert.match(nativeIndex,/const RUNTIME_PLATFORM='tauri';/u);
+assert.match(nativeIndex,/navigator:PlatformRuntime\.pwaUpdates\?navigator:null/u,'native must not acquire the browser updater capability');
+assert.doesNotMatch(nativeIndex,/<link[^>]+rel="manifest"/iu);
+assert.equal(build.native.has('sw.js'),false);
+assert.equal(build.native.has('manifest.webmanifest'),false);
+assert.equal(build.native.has('firebase-hosting-headers.merge.json'),false);
+assert.equal(build.native.has(build.externalNames.development.get('drive')),false);
+assert.ok(![...build.native.values()].some(value=>typeof value==='string'&&value.includes('const GOOGLE_OAUTH_CLIENT_ID=')),'native assets must not contain the web OAuth provider');
+assert.notEqual(build.nativeAssetId,build.pwa.development.assetId);
 const manifest=JSON.parse(read('source/platform/manifest.webmanifest'));
 const merge=JSON.parse(read('source/platform/firebase-hosting-headers.merge.json'));
 
@@ -66,6 +79,14 @@ try{
   assert.match(enforcementHeaders.get('Content-Security-Policy')||'',/require-trusted-types-for 'script'/);
   assert.match(enforcementHeaders.get('Content-Security-Policy')||'',/trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin/);
   assert.deepEqual(listFiles(publicDir).sort(),[...build.deployment.keys()].filter(name=>name!=='firebase-hosting-headers.merge.json').sort(),'the staged public directory must contain only the current release inventory');
+  const webBefore=listFiles(publicDir).sort().map(name=>[name,fs.readFileSync(path.join(publicDir,name))]);
+  const nativeStage=path.join(isolatedRoot,'dist','tauri');
+  fs.mkdirSync(nativeStage,{recursive:true});fs.writeFileSync(path.join(nativeStage,'stale.js'),'stale');
+  const nativeResult=captureProcess(process.execPath,['build/stage-tauri.mjs'],{cwd:isolatedRoot,encoding:'utf8',env:{...process.env,SD_SOURCE_COMMIT:sourceCommit}});
+  assert.equal(nativeResult.status,0,nativeResult.stderr||nativeResult.stdout);
+  assert.deepEqual(listFiles(nativeStage).sort(),[...build.native.keys()].sort(),'native staging must replace stale assets and contain only the native inventory');
+  for(const [name,bytes] of build.native)assert.deepEqual(fs.readFileSync(path.join(nativeStage,name)),Buffer.from(bytes),`native staged bytes differ: ${name}`);
+  assert.deepEqual(listFiles(publicDir).sort().map(name=>[name,fs.readFileSync(path.join(publicDir,name))]),webBefore,'native staging must not alter Firebase staging');
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
   if(previousSourceCommit===undefined)delete process.env.SD_SOURCE_COMMIT;else process.env.SD_SOURCE_COMMIT=previousSourceCommit;
