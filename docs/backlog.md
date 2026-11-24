@@ -2,6 +2,10 @@
 
 Open work, decisions still to make, and what has not been checked yet. Nothing here is started without the owner's go-ahead. When an item is done, remove it and record any lasting decision in its area's doc.
 
+## Experimental native platform (tauri-spike only)
+
+Owner-authorized programme: see [native platform](areas/native-platform.md). Phase 0 remains open: complete the source/platform dependency census, independently reproduce the baseline build/test suites, and establish a Windows/WebView2 execution environment. Existing CI evidence is not native qualification. Phase 1 A–G and Phase 2 A–I remain open; no runtime changes or production configuration are part of the baseline checkpoint. The installed-app OAuth client/project and signed updater configuration need appropriate owner approval before external configuration changes. Use synthetic test libraries only.
+
 ## Bugs reported by the owner (2026-11-03)
 
 **Bugs come first** (owner, 2026-11-03): every bug here before new features, performance work or other improvements, except the test programme. A fix in a sensitive area (sync, storage, sessions, timer) comes with a test; a small fix elsewhere needs none ([workflow.md](workflow.md#choosing-tests)). Item numbers are kept from the owner's reports, so references in code and docs still hold.

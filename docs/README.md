@@ -22,6 +22,7 @@ Start here. Read the page for the area you are changing; the code is the final a
 | [Status indicator](areas/status-indicator.md) | The sync and background ring and badge, the profile panel's Sync & backups section, the Connect card |
 | [Background jobs](areas/background-jobs.md) | Every job that runs on its own, the standard each meets, limits, diagnostics and data-safety boundaries |
 | [App updates](areas/app-updates.md) | The service worker, safe update and caches |
+| [Experimental native platform](areas/native-platform.md) | Tauri spike architecture, shared protocol invariants and qualification gates (experimental branch only) |
 | [Interface](areas/ui.md) | Themes and skins, typography, motion, the Library's layout |
 
 Also: [AGENTS.md](../AGENTS.md) (rules for every AI agent), [CONTRIBUTING.md](../CONTRIBUTING.md), [tests/README.md](../tests/README.md) (test layers and rules), the project [README](../README.md) (building and running).
