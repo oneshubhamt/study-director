@@ -73,11 +73,11 @@ The portable hashing/file-output/encryption/integrity/processing/ZIP implementat
 
 Classic build/VM loading still uses `compileScript`/`readScript`, which reject runtime module syntax. Coverage uses the shared offset-preserving `eraseTypes` primitive for both classic scripts and portable ESM; Node executes the portable `.ts` imports directly. Dynamic core-test loaders resolve source filenames from the production manifest. Type-only contracts live under `types/`, outside runtime coverage inventory. No coverage thresholds were reduced.
 
-Record/backup codecs are now checked together with their persistence/session dependencies. The registry implementation is checked; remaining JavaScript host composition and external features are Phase 5 boundaries. Whole-application type safety is not yet established.
+Record and backup codecs are checked together with their persistence and session dependencies. The registry is also checked. Phase 5 extended strict checking through the host composition and external features.
 
 
-## Phase 4 boundary and remaining runtime work
+## Runtime and tooling boundaries
 
 Persistence, canonical record/backup codecs, repositories, ownership/mutation, sessions/timers, attachments, export, provider orchestration and recovery implementations are now admitted to strict checking. The final `backup.ts` and `backup-provider.ts` expose actual checked construction/output contracts; reduced retention proofs are distinct from restore manifests and pending review subjects determine their payloads. Phase 4's exact validation evidence is in the [history archive](typescript/HISTORY-PREPARATION-PHASE-4.md).
 
-The remaining host scripts, UI/feature modules, authored external integrations and service worker remain Phase 5 work. Generated runtime JS is expected; it must map to checked authored entry points. Phase 6 owns remaining first-party build/contracts/tests and transitional-bridge retirement. Do not infer whole-app strictness from the zero unchecked-*existing-TS* count while authored JavaScript still remains.
+The five inline host scripts, UI modules, external integrations and service worker have TypeScript entry points. Verify coverage by reconciling the shipping manifest, generated bundle producers and compiler projects as well as the unchecked-TypeScript count. Phase 6 owns remaining first-party build tooling, contracts, tests and retirement of transitional source readers. The [execution record](../TS-CONVERSION-EXECUTION.md) holds the dated audit evidence.
