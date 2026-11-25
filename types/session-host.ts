@@ -10,6 +10,7 @@ import type {PracticePause} from './practice-pacer.ts';
 type TimerStateController=ReturnType<TimerStateModule['createStateController']>;
 
 export interface SessionCodecPort{
+  canonicalize(value:unknown):ActiveSession|null;
   sanitizeCurrent(value:unknown):ActiveSession|null;
   sanitizeSessionSnapshot(value:unknown,date:string,fingerprint:string,revision:number):SessionSnapshot|null;
 }

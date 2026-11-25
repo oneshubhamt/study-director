@@ -2580,7 +2580,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
     completionNone:COMPLETION_SOURCES.NONE,
     practicePauseCauses:Object.freeze({session:PRACTICE_PAUSE_CAUSES.SESSION,gap:PRACTICE_PAUSE_CAUSES.GAP,main:PRACTICE_PAUSE_CAUSES.MAIN})
   }),
-  codec:Object.freeze<SessionHostInput['codec']>({sanitizeCurrent:value=>ActiveSessionCodec.sanitizeCurrent(value),sanitizeSessionSnapshot:(value,date,fingerprint,revision)=>ActiveSessionCodec.sanitizeSessionSnapshot(value,date,fingerprint,revision)}),
+  codec:Object.freeze<SessionHostInput['codec']>({canonicalize:value=>ActiveSessionCodec.canonicalize(value),sanitizeCurrent:value=>ActiveSessionCodec.sanitizeCurrent(value),sanitizeSessionSnapshot:(value,date,fingerprint,revision)=>ActiveSessionCodec.sanitizeSessionSnapshot(value,date,fingerprint,revision)}),
   repository:Object.freeze<SessionHostInput['repository']>({
     save:(value,options)=>AppData.activeSession.save(value,options),load:(retry,options)=>AppData.activeSession.load(retry,options),
     clear:options=>AppData.activeSession.clear(options),readLocal:()=>AppData.activeSession.readLocal(),

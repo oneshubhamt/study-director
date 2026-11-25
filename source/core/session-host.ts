@@ -28,7 +28,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   exactObject(input,['configuration','codec','repository','canonical','snapshot','domain','persistence','lifecycle','apply','reset','installation','clock','environment'],'Session host input');
   const {configuration,codec,repository,canonical,snapshot,domain,persistence,lifecycle,apply,reset,installation,clock,environment}=input;
   exactObject(configuration,['activeSessionId','activeSessionVersion','sessionSnapshotVersion','maxCarryForwardChars','maxScheduleChars','maxTasksPerDay','debounceMs','timerSnapshotIntervalMs','completionNone','practicePauseCauses'],'Session host configuration');
-  functions(codec,['sanitizeCurrent','sanitizeSessionSnapshot'],'Session codec port');
+  functions(codec,['canonicalize','sanitizeCurrent','sanitizeSessionSnapshot'],'Session codec port');
   functions(repository,['save','load','clear','readLocal','nextRevision','settled'],'Session repository port');
   functions(canonical,['same'],'Session canonical comparison port');
   functions(snapshot,['tasks','ensureTaskIds','captureEvidence','timerPayload','reviewSnapshot','practiceSnapshot','practiceRestore','getReviewDate','scheduleFingerprint','sessionFingerprint','appliedScheduleText','getCarryForward','setCarryForward','clearProgress','sanitizeAdjustedSchedule','invalidateScheduleDerived','setCurrentTask','timerRestoreValid'],'Session snapshot port');
@@ -135,7 +135,9 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     const tasks=snapshot.tasks(),scheduleText=domain.clampText(snapshot.appliedScheduleText(),configuration.maxScheduleChars);if(!tasks.length||!scheduleText||!value)return null;
     const status=options.status==='suspended'?'suspended':'active',now=clock.nowIso();
     const raw:ActiveSession={id:configuration.activeSessionId,type:'activeSession',version:configuration.activeSessionVersion,revision:repository.nextRevision(Number(options.revision)||0),date:value.date,status,runningOn:installation.id(),scheduleText,snapshot:value,suspendedAt:status==='suspended'?(options.suspendedAt||now):null,updatedAt:now};
-    return codec.sanitizeCurrent(raw);
+    // Captured live evidence is a producer value, not an already stored record.
+    // Normalize it once; imported/read-back records still require exact validation.
+    return codec.canonicalize(raw);
   }
   async function load(options:Readonly<{strict?:boolean}>={}):Promise<SessionResult>{
     return repository.load(0,{strict:options.strict===true});
@@ -156,7 +158,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     catch(error){const failed:SessionResult={ok:false,value:session,error,storage:{local:false,idb:false}};report(failed,'save');return failed;}
   }
   type TransitionAuthority={owner:number;life:number};
-  type LocalTransition={authority:TransitionAuthority;before:ActiveSession|null;rollback:SessionSnapshot|null;attempted:ActiveSession|null|undefined;runtimeChanged:boolean};
+  type LocalTransition={authority:TransitionAuthority;before:ActiveSession|null;rollback:ActiveSession|null;attempted:ActiveSession|null|undefined;runtimeChanged:boolean};
   const authorityCurrent=(authority:TransitionAuthority)=>persistence.ownsSession()&&persistence.ownershipRevision()===authority.owner&&lifecycle.revision()===authority.life;
   function assertTransition(authority:TransitionAuthority){
     if(!authorityCurrent(authority))throw new Error('The Active Session transition was superseded; newer progress was preserved.');
@@ -185,17 +187,18 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
       throw new Error('The canonical session advanced; its successor was preserved.');
     }
     if(!rollback)return;
-    const intended=payload(rollback);if(!intended)throw new Error('The pre-transition Active Session snapshot is invalid.');
+    const intended=codec.sanitizeCurrent({...rollback,revision:repository.nextRevision(Math.max(before?.revision||0,attempted?.revision||0,rollback.revision)),updatedAt:clock.nowIso()});
+    if(!intended)throw new Error('The pre-transition Active Session snapshot is invalid.');
     const saved=await repository.save(intended,{strictDurability:true,expectedCanonical:latest,recoveryFallback:true});
     assertTransition(authority);
     report(saved,'save');
     const recovered=saved.value?sessionSnapshot(saved.value):null;
-    if(!saved.ok||!recovered||!canonical.same(recovered,rollback))throw saved.error||new Error('The pre-transition recovery snapshot was not preserved.');
+    if(!saved.ok||!recovered||!canonical.same(recovered,intended.snapshot))throw saved.error||new Error('The pre-transition recovery snapshot was not preserved.');
     if(saved.storage.idb)await requireCanonicalWrite(saved,intended,source);
     else if(!saved.storage.local||!canonical.same(repository.readLocal(),intended))throw saved.error||new Error('The emergency recovery snapshot could not be verified.');
     assertTransition(authority);
     if(runtimeChanged){
-      const restored=await withPersistenceSuppressed(()=>applyStoredSession(intended,rollback,{source,lifecycleManaged:true}));
+      const restored=await withPersistenceSuppressed(()=>applyStoredSession(intended,intended.snapshot,{source,lifecycleManaged:true}));
       assertTransition(authority);
       if(restored===false)throw new Error('The pre-transition Active Session runtime could not be restored.');
     }
@@ -215,7 +218,9 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
           blockConflictedRuntime(authority);
           throw new Error('The canonical session differs from this runtime; its successor was preserved.');
         }
-        const transition:LocalTransition={authority,before,rollback,attempted:undefined,runtimeChanged:false};
+        const recovery=rollback?payload(rollback):null;
+        if(rollback&&!recovery)throw new Error('The pre-transition Active Session snapshot is invalid.');
+        const transition:LocalTransition={authority,before,rollback:recovery,attempted:undefined,runtimeChanged:false};
         try{
           const value=await operation(transition);assertTransition(authority);return value;
         }catch(error){

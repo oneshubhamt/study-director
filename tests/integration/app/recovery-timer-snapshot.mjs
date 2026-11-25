@@ -35,7 +35,7 @@ let appliedText='08:00 | 60 | A | work | X | pages | 10\n09:00 | 30 | B | suppor
 let planDraft='independent draft';let studyDate='2026-11-10';let carry='carry';let practice={active:null,runs:[]};let review={reflection:'r',studyQuality:4};let resetCount=0,applyCount=0,marked=0,warnings=[],recovery=false,blocked=false,recoveryWork=false,canMutate=true,timerEligible=true;
 const input={
  configuration:{activeSessionId:'active',activeSessionVersion:6,sessionSnapshotVersion:6,maxCarryForwardChars:100,maxScheduleChars:5000,maxTasksPerDay:200,debounceMs:1000,timerSnapshotIntervalMs:60000,completionNone:'none',practicePauseCauses:{session:'session',gap:'gap',main:'main'}},
- codec:{sanitizeCurrent(v){return v&&v.id==='active'&&v.snapshot?structuredClone(v):null},sanitizeSessionSnapshot(v,date,fingerprint,rev){return v&&v.date===date&&v.fingerprint===fingerprint?structuredClone(v):null}},
+ codec:{canonicalize(v){if(!v||v.id!=='active'||!v.snapshot)return null;const clean=structuredClone(v);delete clean.snapshot.fixtureLiveOnly;return clean},sanitizeCurrent(v){return v&&v.id==='active'&&v.snapshot&&!v.snapshot.fixtureLiveOnly?structuredClone(v):null},sanitizeSessionSnapshot(v,date,fingerprint,rev){return v&&v.date===date&&v.fingerprint===fingerprint?structuredClone(v):null}},
  repository:repo,canonical:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
  snapshot:{tasks:()=>tasks,ensureTaskIds(){},taskIdentity:{idAt:i=>tasks[i]?.id||null,indexMap:()=>new Map(tasks.map((t,i)=>[t.id,i])),indexForId:(id,map)=>map?.get(String(id))??null},taskState,timerState,captureEvidence:()=>({actualTime:{'0':42},actualRecords:{},taskEvidence:{}}),timerPayload:()=>null,reviewSnapshot:()=>review,practiceSnapshot:()=>practice,practiceRestore:v=>{practice=v||{active:null,runs:[]}},getReviewDate:()=>studyDate,scheduleFingerprint:()=>`fp:${appliedText}`,sessionFingerprint:s=>`fp:${s.scheduleText}`,appliedScheduleText:()=>appliedText,getCarryForward:()=>carry,setCarryForward:v=>{carry=v},clearProgress:()=>taskState.clear(),sanitizeAdjustedSchedule:v=>v,invalidateScheduleDerived(){},setCurrentTask:i=>{timerState.currentIndex=i},timerRestoreValid:()=>false},
  domain:{normalizeCompletionSource:v=>['manual','time','units','skipped'].includes(v)?v:'none',clampCompletion:v=>Math.max(0,Math.min(100,Number(v)||0)),cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),clampText:(v,max)=>String(v??'').slice(0,max),isCanonicalScheduleText:v=>String(v).trim().length>0,isValidIsoDate:v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v)),todayISO:()=>studyDate},
@@ -48,6 +48,10 @@ const input={
 const controller=module.createController(input);
 fields.set('0:completion',75);fields.set('0:completionSource','manual');resolved.set(1,'skipped');
 const snap=controller.captureSnapshot();assert.equal(snap.taskState.a.completion,75);assert.equal(snap.taskState.b.resolvedState,'skipped');assert.equal(snap.taskState.a.actual.seconds,42);
+// Live evidence can need normalization before exact stored-record validation.
+const liveOnly={...snap,fixtureLiveOnly:true};
+assert.equal(controller.payload(liveOnly).snapshot.fixtureLiveOnly,undefined);
+assert.equal(input.codec.sanitizeCurrent({...controller.payload(snap),snapshot:liveOnly}),null);
 // Plan draft is independent of the canonical session schedule.
 const canonical=controller.payload(snap);planDraft='different draft';await controller.applyStoredSession(canonical,canonical.snapshot,{lifecycleManaged:true});assert.equal(planDraft,'different draft');assert.equal(appliedText,canonical.scheduleText);
 // Canonical takeover hydration projects runtime without enabling writes.

@@ -261,7 +261,7 @@ assert.match(transitionOwner,/rollback=persistence\.snapshotForWrite\(\)[\s\S]*a
 const finishOwner=section(sessionHost,'async function finishLocal(', 'async function restoreSuspendedLocal(');
 assert.match(finishOwner,/runLocalTransition\('session-finish'[\s\S]*prepare\(\)[\s\S]*saveCanonicalSession\(session,'finishing today’s session',\{expectedCanonical:transition\.before\}/u,'finish strictly saves against the original canonical record');
 const rollbackOwner=section(sessionHost,'async function rollbackLocalTransition(', 'async function runLocalTransition');
-assert.match(rollbackOwner,/canonical\.same\(latest,before\)[\s\S]*canonical\.same\(latest,attempted\)[\s\S]*expectedCanonical:latest[\s\S]*applyStoredSession\(intended,rollback/u,'rollback fences the canonical successor before any runtime reprojection');
+assert.match(rollbackOwner,/canonical\.same\(latest,before\)[\s\S]*canonical\.same\(latest,attempted\)[\s\S]*expectedCanonical:latest[\s\S]*applyStoredSession\(intended,intended\.snapshot/u,'rollback fences the canonical successor before any runtime reprojection');
 assert.doesNotMatch(finishTransition,/withPersistenceSuppressed|applyStoredSession\(rollbackSession|writeSnapshot\(rollbackSnapshot/u,'finish host wiring must not duplicate the local-session rollback state machine');
 
 const restoreTimer=section(execution,'function deriveRestoredTimerState(', 'function createScheduleGateway(');
