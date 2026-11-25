@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createDriveHarness,repositoryDigest} from '../../helpers/drive-harness.mjs';
+import {createDriveHarness,repositoryDigest,QA_PROFILE_ID} from '../../helpers/drive-harness.mjs';
 
 const file=async(kind,id,text)=>{const blob=new Blob([text]);return Object.freeze({kind,id,blob,size:blob.size,digest:await repositoryDigest(blob)});};
 const cp='cp_'+'a'.repeat(32),obj='obj_'+'b'.repeat(32);
@@ -83,5 +83,48 @@ async function seed(){
   native=await connect(createDriveHarness({native:true,remoteState:web.state,bind:async()=>{native.state.replaceNativeConnection();return 'continue';}}));
   await assert.rejects(native.provider.verifyAccount(),/authorization changed|abort|cancel/i);
   assert.equal(mutationCount(native.state),0);
+}
+// A still-visible folder for a remotely deleted portable profile must not be adopted.
+{
+  const web=await seed(),other='prof_ana_mvd00000_0000abcd';
+  web.state.folderProperties.set(web.state.folders[0],{studyDirectorProfile:other});
+  web.state.deletionMarkers.push({id:'marker-remote',profile:other});
+  let current=QA_PROFILE_ID;
+  const native=await connect(createDriveHarness({native:true,remoteState:web.state,profileId:()=>current,bind:async info=>{current=info.found;return 'adopt';}}));
+  await assert.rejects(native.provider.verifyAccount(),/library was deleted/);
+  assert.equal(current,QA_PROFILE_ID);assert.equal(native.state.binds.length,0);
+  assert.equal(mutationCount(native.state),0);assert.equal(native.state.deletedSignals.length,0);
+}
+// Deletion arriving during a binding decision must block publication after adoption.
+{
+  const web=await seed(),other='prof_ana_mvd00000_0000abcd';
+  web.state.folderProperties.set(web.state.folders[0],{studyDirectorProfile:other});
+  let current=QA_PROFILE_ID;
+  const native=await connect(createDriveHarness({native:true,remoteState:web.state,profileId:()=>current,bind:async info=>{
+    current=info.found;web.state.deletionMarkers.push({id:'marker-late',profile:other});return 'adopt';
+  }}));
+  await assert.rejects(native.provider.verifyAccount(),/library was deleted/);
+  assert.equal(native.state.binds.length,1);assert.equal(mutationCount(native.state),0);
+  assert.equal(native.state.deletedSignals.length,0);
+}
+// Unknown remote deletion status is not a proof of absence.
+for(const payload of [{files:[],incompleteSearch:null},{files:[],nextPageToken:'next'},{files:[],nextPageToken:0}]){
+  const web=await seed(),other='prof_ana_mvd00000_0000abcd';
+  web.state.folderProperties.set(web.state.folders[0],{studyDirectorProfile:other});
+  const native=await connect(createDriveHarness({native:true,remoteState:web.state,bind:async()=>{throw new Error('must not bind');}}));
+  native.state.deletionListFault={profile:other,payload};
+  await assert.rejects(native.provider.verifyAccount(),/verify profile deletion status/);
+  assert.equal(native.state.binds.length,0);assert.equal(mutationCount(native.state),0);
+}
+// Adoption of a live remote ID still succeeds and preserves the single folder.
+{
+  const web=await seed(),other='prof_ana_mvd00000_0000abcd';
+  web.state.folderProperties.set(web.state.folders[0],{studyDirectorProfile:other});
+  let current=QA_PROFILE_ID;
+  const native=await connect(createDriveHarness({native:true,remoteState:web.state,profileId:()=>current,bind:async info=>{current=info.found;return 'adopt';}}));
+  assert.equal(await native.provider.verifyAccount(),web.state.folders[0]);
+  assert.equal(current,other);assert.equal(mutationCount(native.state),0);
+  await native.provider.repository.beginPublication();
+  assert.equal(web.state.folders.length,1);
 }
 console.log(JSON.stringify({status:'PASS',suite:'native-drive-admission',hermetic:true,noCreationOnAbsence:true,verifiedExistingBytes:true,sharedRepository:true,staleCleanupFenced:true,wrongAccountAndFolderRefused:true,refusalAndCorruptionFailClosed:true}));

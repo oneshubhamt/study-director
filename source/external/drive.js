@@ -376,18 +376,32 @@
       scheduleConnectionRefusal(context);
       throw noRetry(Object.assign(new Error(message),{studyDirectorProfileRefused:true}));
     }
+    async function checkNativeDeletion(){
+      const deleted=await deletionMarker(found,context);
+      await assertDriveOperationCurrent(context);checkProof();
+      if(deleted)refuse('The existing Study Director library was deleted on another device. Drive was not used.');
+    }
     checkProof();
     if(!found)refuse('The Study Director folder on this Google account has no valid profile identity. Drive was not used.');
     if(mine&&boundFolder===`${id}\n${expected}`&&(!native||nativeAdmission?.authIdentity===context.authIdentity))return;
     const [email,library]=await Promise.all([requireProfileAccount(context),mine?null:latestLibrary(id,context)]);
     if(native){
-      await assertDriveOperationCurrent(context);checkProof();
+      // The local profile can have a different portable ID before adoption.
+      // A deletion marker for the remote ID still takes precedence over its folder.
+      await checkNativeDeletion();
       if(expectedProfile()!==expected)throw noRetry(new Error('The local profile changed before Google Drive binding.'));
     }
     const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
     if(native){await assertDriveOperationCurrent(context);checkProof();}
     if(!(mine&&decision==='continue'&&(!native||expectedProfile()===expected)||!mine&&decision==='adopt'&&expectedProfile()===found)){
       refuse('This Google account holds the library of another profile. Drive was not used.');
+    }
+    if(native){
+      // A remote deletion can race the awaited local binding decision.
+      // Do not admit writes until the adopted identity is checked again.
+      await checkNativeDeletion();
+      if(expectedProfile()!==found)throw noRetry(new Error('The local profile changed after Google Drive binding.'));
+      deletionChecked=found;
     }
     boundFolder=`${id}\n${expectedProfile()}`;
     if(native)nativeAdmission=Object.freeze({folder:String(id),profile:expectedProfile(),authIdentity:context.authIdentity,epoch:folderEpoch});
@@ -405,11 +419,12 @@
   // device checks for before it uses or makes that profile's library.
   async function deletionMarker(profile,context=EMPTY_DRIVE_OPERATION){
     const q=driveQuery([`mimeType='${FOLDER_MIME}'`,`appProperties has { key='${DELETED_MARKER}' and value='${profile}' }`,'trashed=false']);
-    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',fields:'incompleteSearch,files(id,mimeType,ownedByMe,shared,trashed,appProperties)'});
+    const fields='incompleteSearch,files(id,mimeType,ownedByMe,shared,trashed,appProperties)';
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',fields:native?`nextPageToken,${fields}`:fields});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
     if(!response.ok)throw await apiError(response,'Could not check whether this profile was deleted.');
     const payload=await jsonResponse(response);
-    if(!Array.isArray(payload?.files)||payload.incompleteSearch)throw noRetry(new Error('Google Drive could not verify profile deletion status.'));
+    if(!Array.isArray(payload?.files)||payload.incompleteSearch||native&&(payload.incompleteSearch!==undefined&&typeof payload.incompleteSearch!=='boolean'||payload.nextPageToken!==undefined&&(typeof payload.nextPageToken!=='string'||!!payload.nextPageToken)))throw noRetry(new Error('Google Drive could not verify profile deletion status.'));
     const marker=payload.files[0];
     if(!marker&&payload.files.length===0)return false;
     if(!marker?.id||marker.mimeType!==FOLDER_MIME||marker.ownedByMe!==true||marker.shared!==false||marker.trashed!==false||

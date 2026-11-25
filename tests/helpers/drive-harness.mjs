@@ -68,7 +68,11 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     if(url.pathname==='/drive/v3/files'&&method==='GET'){
       const q=url.searchParams.get('q')||'';
       const deleted=q.match(/key='studyDirectorDeletedProfile' and value='([^']+)'/u);
-      if(deleted)return json({files:state.deletionMarkers.filter(row=>row.profile===deleted[1]).map(row=>({id:row.id,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:false,trashed:false,appProperties:{studyDirectorDeletedProfile:row.profile},...row.metadata}))});
+      if(deleted){
+        const fault=state.deletionListFault;
+        if(fault?.profile===deleted[1])return json(fault.payload);
+        return json({files:state.deletionMarkers.filter(row=>row.profile===deleted[1]).map(row=>({id:row.id,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:false,trashed:false,appProperties:{studyDirectorDeletedProfile:row.profile},...row.metadata}))});
+      }
       if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({incompleteSearch:!!state.folderListIncomplete,files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
       let rows=[...state.files.values()].filter(file=>!file.trashed);
       const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
