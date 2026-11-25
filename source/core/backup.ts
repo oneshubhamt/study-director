@@ -166,7 +166,13 @@ let checkpointPromise:Promise<CheckpointFile>|null=null,localExportPromise:Promi
 function importAbortError(reason:string='Backup import was cancelled.'){
   const error=new Error(reason);fields(error)['name']='AbortError';fields(error)['code']='STUDY_DIRECTOR_IMPORT_CANCELLED';return error;
 }
-function throwIfImportCancelled(signal:Signal){if(signal&&signal.aborted)throw importAbortError(String(signal.reason&&fields(signal.reason)['message']||signal.reason||'Backup import was cancelled.'));}
+function throwIfImportCancelled(signal:Signal){
+  const operation=activeImportOperation;
+  if(signal&&operation?.signal===signal&&!signal.aborted&&operation.assertOrigin){
+    try{operation.assertOrigin();}catch{operation.cancel('Study control changed after this backup import was requested. Open the backup again.');}
+  }
+  if(signal&&signal.aborted)throw importAbortError(String(signal.reason&&fields(signal.reason)['message']||signal.reason||'Backup import was cancelled.'));
+}
 function throwIfImportAborted(signal:Signal,authorityOptions:AuthorityOptions|null=null){assertAuthority(authorityOptions||undefined);throwIfImportCancelled(signal);}
 
 // The app draws the file backup row and the import Cancel from status() and
@@ -174,10 +180,10 @@ function throwIfImportAborted(signal:Signal,authorityOptions:AuthorityOptions|nu
 const statusListeners=new Set<()=>void>();
 function subscribeStatus(listener:()=>void){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
 function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup.status-listener',error,'warn');}}
-function beginImport({backgroundPreemptible=false}={}){
+function beginImport({backgroundPreemptible=false,assertOrigin}:{backgroundPreemptible?:boolean;assertOrigin?:()=>void}={}){
   if(activeImportOperation)return activeImportOperation;
   const controller=new AbortController(),id=++importSequence;
-  activeImportOperation=freeze({id,backgroundPreemptible:backgroundPreemptible===true,signal:controller.signal,cancel:(reason:string)=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
+  activeImportOperation=freeze({id,backgroundPreemptible:backgroundPreemptible===true,signal:controller.signal,...(assertOrigin?{assertOrigin}:{}),cancel:(reason:string)=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
   notifyStatus();return activeImportOperation;
 }
 function cancelImport(reason:string='Backup import was cancelled by the user.',options:{announce?:boolean}={}){
@@ -522,21 +528,22 @@ async function readCanonicalActiveSession(){
   return loaded;
 }
 async function flushRestorePreflightState(signal:Signal){
+  const stage=<T>(name:string,code:string,message:string,work:()=>Promise<T>)=>runRestorePreflightStage(name,code,message,async()=>{throwIfImportCancelled(signal);const result=await work();throwIfImportCancelled(signal);return result;});
   throwIfImportCancelled(signal);
-  await runRestorePreflightStage('ownership','RESTORE_PREFLIGHT_OWNERSHIP_LOST','Study Director write control is unavailable before restore reconciliation.',async()=>{
+  await stage('ownership','RESTORE_PREFLIGHT_OWNERSHIP_LOST','Study Director write control is unavailable before restore reconciliation.',async()=>{
     assertAuthority();
     requireBackupMutationControl('preparing restore reconciliation');
     return true;
   });
-  await runRestorePreflightStage('notes','RESTORE_PREFLIGHT_NOTES_FAILED','Notes could not be safely saved before comparing backup differences.',async()=>{
+  await stage('notes','RESTORE_PREFLIGHT_NOTES_FAILED','Notes could not be safely saved before comparing backup differences.',async()=>{
     await AppData.notes.flush({strict:true});
     const noteFailure=AppData.notes.failure();
     if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Notes are not safely stored yet.');
     return true;
   });
-  await runRestorePreflightStage('deletions','RESTORE_PREFLIGHT_DELETION_FAILED','Deletion recovery state could not be safely saved before comparing backup differences.',async()=>{if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletion recovery remains incomplete.');return true;});
-  await runRestorePreflightStage('personal','RESTORE_PREFLIGHT_PERSONAL_FAILED','Plan and preference data could not be safely settled before comparing backup differences.',()=>personalSettle());
-  await runRestorePreflightStage('session-save','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED','The active session could not be safely saved before comparing backup differences.',async()=>{
+  await stage('deletions','RESTORE_PREFLIGHT_DELETION_FAILED','Deletion recovery state could not be safely saved before comparing backup differences.',async()=>{if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletion recovery remains incomplete.');return true;});
+  await stage('personal','RESTORE_PREFLIGHT_PERSONAL_FAILED','Plan and preference data could not be safely settled before comparing backup differences.',()=>personalSettle());
+  await stage('session-save','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED','The active session could not be safely saved before comparing backup differences.',async()=>{
     if(!(appCanMutate()&&TASKS.length))return false;
     cancelLiveDraftSave();
     const snapshot=captureSessionSnapshot(),candidate=snapshot?activeSessionPayload(snapshot):null;
@@ -550,8 +557,8 @@ async function flushRestorePreflightState(signal:Signal){
       throw new Error('Active Session reconciliation did not read back the exact committed state.');
     return true;
   });
-  await runRestorePreflightStage('session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED','The active session could not finish settling before reconciliation.',()=>AppData.activeSession.settled());
-  await runRestorePreflightStage('session-read','RESTORE_PREFLIGHT_SESSION_READ_FAILED','The active session could not be read safely before reconciliation.',async()=>{
+  await stage('session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED','The active session could not finish settling before reconciliation.',()=>AppData.activeSession.settled());
+  await stage('session-read','RESTORE_PREFLIGHT_SESSION_READ_FAILED','The active session could not be read safely before reconciliation.',async()=>{
     const loaded=await readCanonicalActiveSession();
     return loaded;
   });
@@ -2338,7 +2345,7 @@ async function captureLocalSafetyCopy(_stored:StoredCandidate|null|undefined,{af
     return freeze({safetyFile,rollbackJournal});
   }catch(error){await Exports.run('file.release',{file:safetyFile.blob}).catch(()=>{});throw error;}
 }
-async function runRestoreMutation(stored:StoredCandidate,kind:string,operation:()=>Promise<RecoveryOutcome>){
+async function runRestoreMutation(stored:StoredCandidate,kind:string,signal:Signal,operation:()=>Promise<RecoveryOutcome>){
   if(typeof operation!=='function')throw new TypeError('Restore mutation operation is required.');
   const snapshot=candidateSnapshotState(stored),managed=snapshot&&snapshot.provenance&&typeof snapshot.provenance.managedRecovery==='function'?snapshot.provenance.managedRecovery:null;
   // Recovery deliberately suppresses ordinary Active Session persistence while
@@ -2347,11 +2354,14 @@ async function runRestoreMutation(stored:StoredCandidate,kind:string,operation:(
   // callback only after its rich-text quiescence has flushed the live editor,
   // so the proof also covers the last keystrokes before reconciliation.
   const apply=async()=>{
+    throwIfImportAborted(signal);
     if(await checkpointPendingReview()!==true)throw new Error('The pending Review could not be safely checkpointed before recovery mutation.');
+    throwIfImportAborted(signal);
     recoverySessionCheckpointDepth+=1;
     try{return await withPersistenceSuppressed(operation);}
     finally{recoverySessionCheckpointDepth=Math.max(0,recoverySessionCheckpointDepth-1);}
   };
+  throwIfImportCancelled(signal);
   if(managed)return managed(freeze({kind,apply}));
   return runExclusive(kind,apply);
 }
@@ -2529,7 +2539,7 @@ async function restoreBackupAttemptWithOperation(candidate:Candidate,operation:I
   await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   // Taking in Drive's newest version makes it what both sides last shared.
   const sharedBase=!note&&!missingOnly&&snapshot!.provenance&&snapshot!.provenance.sharedHead===true?await sharedBaseUpdate(parsed):null;
-  return runRestoreMutation(stored!,'restore-backup',async()=>{
+  return runRestoreMutation(stored!,'restore-backup',signal,async()=>{
   OperationDiagnostics.mark('local-restore-mutation-enter');
   await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   await ensureRestoreCapacity(parsed,preview);
@@ -2541,6 +2551,7 @@ async function restoreBackupAttemptWithOperation(candidate:Candidate,operation:I
   let rollbackDeletionState=null,committedDescription='',journalPrepared=false;
   try{
     rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
+    throwIfImportAborted(signal);
     OperationDiagnostics.mark('restore-journal-prepare-start');
     await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
@@ -2832,7 +2843,7 @@ async function restoreExactVersionWithOperation(candidate:Candidate|null,operati
   if(!reviewed)return cancelled;
   const {notes,retired}=replacementNotes(plan,reviewed,keepExtras),removed=freeze({notes:retired,days:keepExtras?freeze([]):plan.extras.days});
   throwIfImportAborted(signal);
-  return runRestoreMutation(stored!,requireManaged?'restore-managed-version':'restore-file-version',async()=>{
+  return runRestoreMutation(stored!,requireManaged?'restore-managed-version':'restore-file-version',signal,async()=>{
     OperationDiagnostics.mark('local-restore-mutation-enter');
     await ensureRestoreCapacity(parsed,preview);
     OperationDiagnostics.mark('restore-capacity-verified');
@@ -2844,7 +2855,8 @@ async function restoreExactVersionWithOperation(candidate:Candidate|null,operati
     let rollbackDeletionState=null,journalPrepared=false,committedDescription='';
     try{
       rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
-      OperationDiagnostics.mark('restore-journal-prepare-start');
+      throwIfImportAborted(signal);
+    OperationDiagnostics.mark('restore-journal-prepare-start');
       await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
       const target=replacementSnapshot(parsed,rollbackJournal,plan,notes,keepExtras),targetDeletionState=replacementDeletions(parsed,rollbackDeletionState,target,removed);
@@ -2942,14 +2954,15 @@ async function restoreBackup(candidate:Candidate,options:RestoreOptions={}){
   try{return await restoreBackupWithOperation(candidate,operation,options);}
   finally{try{await candidate!.release();}catch(error){AppDiagnostics.capture('backup.candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
-async function importPortableBackup(ev:{target:{files:ArrayLike<Blob&{readonly name?:string}>|null;value:string}}){
-  if(activeImportOperation||localExportPromise||localExportRequest)return freeze({cancelled:true,reason:'busy'});
+async function importPortableBackup(ev:{target:{files:ArrayLike<Blob&{readonly name?:string}>|null;value:string}},assertOrigin:()=>void){
+  if(activeImportOperation||localExportPromise||localExportRequest){ev.target.value='';return freeze({cancelled:true,reason:'busy'});}
+  try{assertOrigin();}catch{ev.target.value='';return freeze({cancelled:true,reason:'ownership-changed'});}
   if(!appCanMutate()){setLocalExportStatus('Study control is in another tab. Take control here before importing.',false);return;}
   const f=ev.target.files&&ev.target.files[0];if(!f)return;
-  const traceId=OperationDiagnostics.start('standalone-import','Standalone backup'),operation=beginImport();let candidate=null,consumed=false;
+  const traceId=OperationDiagnostics.start('standalone-import','Standalone backup'),operation=beginImport({assertOrigin});let candidate=null,consumed=false;
   portablePresentation=presentation.begin('file','import',{label:'File backup',message:'Reading and verifying backup…'});
   try{
-    OperationDiagnostics.mark('standalone-inspection-start',{bytes:Number(f.size)||0},traceId);candidate=await inspectBackup(f,{filename:f.name||'',signal:operation.signal});OperationDiagnostics.mark('standalone-inspection-complete',{},traceId);
+    OperationDiagnostics.mark('standalone-inspection-start',{bytes:Number(f.size)||0},traceId);candidate=await inspectBackup(f,{filename:f.name||'',signal:operation.signal});throwIfImportCancelled(operation.signal);OperationDiagnostics.mark('standalone-inspection-complete',{},traceId);
     const preview=candidate!.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
     if(!parsed)throw new Error('The selected backup is not a current verified Study Director backup.');
     const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest&&BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable,rescuePartial=captureAuthority==='rescue-partial';
@@ -2957,7 +2970,7 @@ async function importPortableBackup(ev:{target:{files:ArrayLike<Blob&{readonly n
     const missingBinary=!BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable;
     const decisionDetails=[exactCapable?'Choose how this backup should be applied.':missingBinary?'This backup is missing attachment bytes. You can combine or add its available data, but exact replacement is unsafe.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup does not establish complete canonical capture authority. You can combine or add its available data.',BackupCodec.missingAttachmentWarning(parsed.assetDescriptors||[]),...[presentation.reach?.()||''].filter(Boolean)].filter(Boolean);
     OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString()}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});
-    OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
+    throwIfImportCancelled(operation.signal);OperationDiagnostics.mark('standalone-decision-complete',{mode:mode||'keep-current'},traceId);if(!mode){finishPortablePresentation({message:'Backup import cancelled.',lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,stage:'decision'},traceId);return freeze({cancelled:true});}
     consumed=true;OperationDiagnostics.mark('standalone-apply-start',{mode},traceId);
     const result=mode==='replace'?await restoreStandaloneVersion(candidate,{confirmed:true}):await restoreBackup(candidate,{missingOnly:mode==='missing'});OperationDiagnostics.mark('standalone-apply-complete',{mode,cancelled:result&&result.cancelled===true},traceId);
     if(result&&result.reason==='needs-decision'){finishPortablePresentation({message:presentation.restoreChoices.needsDecision,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,mode},traceId);return result;}

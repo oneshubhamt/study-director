@@ -93,8 +93,9 @@ const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingRevi
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec
 }));
-let backupCodecInspectCalls=0;
-const runtimeCodec=freeze({...codec,inspect:(file,options)=>{backupCodecInspectCalls++;return codec.inspectCurrent(file,options);}});
+let backupCodecInspectCalls=0,importBoundary='',importOwnerRevision=1,importDecision=null,journalPrepares=0,importExclusiveEntries=0;
+const changeImportOwner=stage=>{if(importBoundary===stage){importBoundary='';importOwnerRevision+=2;}};
+const runtimeCodec=freeze({...codec,inspect:async(file,options)=>{backupCodecInspectCalls++;const parsed=await codec.inspectCurrent(file,options);changeImportOwner('inspection');return parsed;}});
 
 const notes=freeze({
   Ethics:freeze({version:2,key:'Ethics',label:'Ethics',text:'shared text',updatedAt:'2026-08-05T01:00:00.000Z'}),
@@ -167,9 +168,9 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
       if(corruptAfterImportOnce){corruptAfterImportOnce=false;corruptPostCommitReadOnce=true;}
       return {batches:values.length?1:0};
     },dailyRecordRemove:async date=>{for(let index=importedDailyRecords.length-1;index>=0;index--)if(importedDailyRecords[index].date===date)importedDailyRecords.splice(index,1);return true;},dailyRecordTimestamp:value=>Date.parse(value?.savedAt||value?.updatedAt||'')||0,
-    notesExportPayload:()=>currentNotes,notesReadFreshPayload:async()=>currentNotes,notesReadFreshItems:async keys=>(keys||[]).map(key=>currentNotes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)),
+    notesExportPayload:()=>currentNotes,notesReadFreshPayload:async()=>currentNotes,notesReadFreshItems:async keys=>(keys||[]).map(key=>currentNotes[key]||null),notesFlush:async()=>{changeImportOwner('preflight');return true;},notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)),
     notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>noteFailure,
-    restoreJournalPrepare:async value=>{restoreJournal={state:{id:value.id},payload:value};return restoreJournal;},
+    restoreJournalPrepare:async value=>{journalPrepares++;restoreJournal={state:{id:value.id},payload:value};return restoreJournal;},
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
@@ -198,9 +199,9 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreSessionState:async()=>{events.push('restore-session-state');if(failStartupRollbackOnce){failStartupRollbackOnce=false;throw new Error('injected startup rollback interruption');}return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
-  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>operation()}),
+  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>{importExclusiveEntries++;changeImportOwner('lease');return operation();}}),
   interactions:freeze({
-    choose:async()=>null,
+    choose:async()=>{changeImportOwner('decision');return importDecision;},
     configure:async config=>{
       confirmations.push(config);
       const selected={};
@@ -444,6 +445,25 @@ const dailyRescueCheckpoint=await runtime.controller.createCheckpoint();
 assert.match(dailyRescueCheckpoint.warning,/emergency fallback records/i,'standalone backup must preserve a visible warning when only rescue Saved Days are available');
 await dailyRescueCheckpoint.release();
 dailyRecordCanonical=true;
+
+// The actual standalone import controller must not convert a former owner's
+// selected file into a fresh operation after the owner loses/reacquires control.
+for(const boundary of ['queued','inspection','decision','preflight','lease','normal','cancel']){
+  const previous=importOwnerRevision,assertOrigin=()=>{if(previous!==importOwnerRevision)throw new Error('owner changed');},before=JSON.stringify({notes:currentNotes,days:importedDailyRecords}),prepares=journalPrepares,entries=importExclusiveEntries;
+  const target={files:[created.blob],value:'selected'};
+  importBoundary=boundary;importDecision=boundary==='cancel'?null:'missing';
+  if(boundary==='queued')importOwnerRevision+=2;
+  const result=await runtime.controller.importLocal({target},assertOrigin);
+  assert.equal(target.value,'',boundary+' clears file input');assert.equal(runtime.controller.status().importActive,false,boundary+' releases import operation');
+  if(boundary==='normal'){assert.equal(result?.verified,true,'ordinary standalone import remains verified');}
+  else{
+    assert.equal(journalPrepares,prepares,boundary+' cannot prepare a mutation journal');
+    assert.equal(JSON.stringify({notes:currentNotes,days:importedDailyRecords}),before,boundary+' cannot change canonical fixture data');
+    if(boundary!=='lease')assert.equal(importExclusiveEntries,entries,boundary+' cannot enter exclusive mutation');
+  }
+  importBoundary='';importDecision=null;
+}
+console.log('PASS: actual standalone import controller — origin fences at file job, inspection, decision, preflight and exclusive entry; normal and cancelled paths');
 
 // Imported conflict clocks are normalized at runtime; future metadata cannot win by claiming a far-future timestamp.
 const fixedClock=createFakeClock('2026-09-13T06:00:00.000Z');

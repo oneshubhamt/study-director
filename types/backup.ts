@@ -55,7 +55,7 @@ export type PortableParsed=Awaited<ReturnType<BackupCodec['inspect']>>;
 export type Parsed=Omit<PortableParsed,'records'|'data'|'manifest'|'report'|'assetDescriptors'|'protectedCheckpointManifest'>&{noteScope?:string;records:readonly DailyRecord[];data:{notes:Readonly<Record<string,NoteRecord>>;exportedAt?:string;appVersion?:string};manifest:PortableParsed['manifest'];report:{sourceVersion:unknown;warnings:readonly string[]};assetDescriptors:PortableParsed['assetDescriptors'];protectedCheckpointManifest:ProtectedManifest};
 export type Preview={filename:string;exportedAt:string|null;appVersion:string|null;formatVersion:number;counts:Readonly<Record<string,number>>;assets:{total:number;library:number;missing:number};dateRange:{first:string|undefined;last:string|undefined}|null;checksumAlgorithm:string|null;authenticated:boolean;encrypted:boolean;checkpoint:{checkpointId:string;createdAt:string;originInstallationId:string}|null;captureAuthority:string;size:number};
 export type Candidate={kind:'study-director.backup-candidate';release():Promise<boolean>;preview:Preview};
-export type ImportOperation={id:number;signal:AbortSignal;backgroundPreemptible:boolean;cancel(reason?:string):void};
+export type ImportOperation={id:number;signal:AbortSignal;backgroundPreemptible:boolean;assertOrigin?:()=>void;cancel(reason?:string):void};
 export type Signal=AbortSignal|null|undefined;
 export type Provenance={kind:string;repositoryManifest?:Manifest;repositoryCommitted?:boolean;sharedHead?:boolean;managedRecovery?:((transaction:ManagedTransaction&{kind?:string})=>Promise<RecoveryOutcome>)|null;managedProgress?:((value:Progress)=>void)|null;encrypted?:boolean};
 export type VerifiedSnapshot={format:'study-director.verified-portable-snapshot';version:1};

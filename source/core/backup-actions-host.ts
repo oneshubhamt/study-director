@@ -101,10 +101,12 @@ function createProtectionHost<Token>(input:Readonly<BackupProtectionHostInput<To
 }
 
 function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupControls>{
-  exactObject(input,['document','controller','processing','protection','device','providers','presentation','verifiedAt','timeLabel','capture','resolveFileOpen','foregroundChanged','scheduleSyncStatus','renderProfile','firstStartOpen','renderFirstStart','scheduleUpdate','connectDevice','connectDrive','openHistory'],'Backup controls input');
+  exactObject(input,['document','controller','processing','protection','device','providers','presentation','verifiedAt','timeLabel','capture','captureImportAuthority','resolveFileOpen','foregroundChanged','scheduleSyncStatus','renderProfile','firstStartOpen','renderFirstStart','scheduleUpdate','connectDevice','connectDrive','openHistory'],'Backup controls input');
   if(!Object.isFrozen(input.controller)||!Object.isFrozen(input.processing)||!Object.isFrozen(input.protection)||!Object.isFrozen(input.providers)||!Object.isFrozen(input.presentation))throw new TypeError('Backup controls providers must be frozen.');
   const {document,controller,processing,protection,providers,presentation}=input;
   let installed=false,fileWorkHold:ReturnType<typeof providers.suspendBackground>|null=null;
+  let pickerRevision=0,fallback:Readonly<{node:HTMLInputElement;assertOrigin:()=>void}>|null=null;
+  const current=(assertOrigin:()=>void)=>{try{assertOrigin();return true;}catch{return false;}};
   const button=(id:string)=>{const node=document.getElementById(id);return node instanceof HTMLButtonElement?node:null;};
   const element=(id:string)=>{const node=document.getElementById(id);return node instanceof HTMLElement?node:null;};
 
@@ -193,6 +195,7 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
     if(installed)return false;installed=true;
     controller.subscribeStatus(()=>{renderFile();syncFileHold();});
     presentation.subscribe(renderPresentation);
+    document.getElementById('import-file')?.addEventListener('cancel',()=>{fallback=null;});
     renderFile();return true;
   }
   function withPassword<T>(open:()=>T|PromiseLike<T>):Promise<Awaited<T>>{return protection.withPassword(open);}
@@ -201,15 +204,30 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
   const exportLocal=()=>controller.exportLocal();
   function importLocal(event:Event){
     if(!(event.target instanceof HTMLInputElement))return false;
-    return controller.importLocal({target:event.target});
+    const ticket=fallback;if(!ticket||ticket.node!==event.target){event.target.value='';return false;}
+    fallback=null;
+    if(!current(ticket.assertOrigin)){event.target.value='';return false;}
+    return controller.importLocal({target:event.target},ticket.assertOrigin);
   }
   async function pickImportFile(){
     const inputNode=document.getElementById('import-file');
     if(!(inputNode instanceof HTMLInputElement)){presentation.condition('file','file-open','Could not open backup: the file input is unavailable.');return false;}
-    try{const file=await processing.open(inputNode);if(!file)return false;input.resolveFileOpen();await controller.importLocal({target:{files:[file],value:''}});return true;}
-    catch(error){if(error&&typeof error==='object'&&(error as {name?:unknown}).name==='AbortError')return false;const fields=error&&typeof error==='object'?error as {message?:unknown}:null;presentation.condition('file','file-open','Could not open backup: '+String(fields?.message||error));return false;}
+    const revision=++pickerRevision;fallback=null;
+    let assertOrigin:()=>void;
+    try{assertOrigin=input.captureImportAuthority();}catch{return false;}
+    const stillCurrent=()=>revision===pickerRevision&&current(assertOrigin);
+    try{
+      // Exports invokes click only for the fallback picker. Its later change
+      // event must consume this exact ticket, not acquire a new owner token.
+      const file=await processing.open({click:()=>{if(stillCurrent()){fallback=freeze({node:inputNode,assertOrigin});inputNode.click();}}});
+      if(!file||!stillCurrent())return false;
+      input.resolveFileOpen();await controller.importLocal({target:{files:[file],value:''}},assertOrigin);return true;
+    }catch(error){
+      if(!stillCurrent()||(error as {name?:unknown}|null)?.name==='AbortError')return false;
+      const fields=error&&typeof error==='object'?error as {message?:unknown}:null;presentation.condition('file','file-open','Could not open backup: '+String(fields?.message||error));return false;
+    }
   }
-  const cancelStandalone=(reason?:string)=>controller.cancelStandalone(reason);
+  const cancelStandalone=(reason?:string)=>{pickerRevision++;fallback=null;return controller.cancelStandalone(reason);};
   const connectDevice=()=>input.connectDevice();
   const cancelDevice=(reason?:string)=>input.device()?.cancelForeground(reason)??false;
   const disconnectDevice=()=>input.device()?.disconnect()??false;

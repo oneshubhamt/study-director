@@ -1,9 +1,10 @@
 # TypeScript conversion — execution record
 
-## REVIEW-P5 · Stage 1 standalone import authority — ACTIVE · 2026-11-25
+## REVIEW-P5 · Stage 1 standalone import authority — IMPLEMENTED / VERIFICATION OPEN · 2026-11-25
 
 - Start `eab6b9d6a3ac0fb2db64a91c869d848f902fc330`; prior [audit](https://github.com/oneshubhamt/study-director/actions/runs/45572922884) all eight jobs SUCCESS including merge and handoff. Source comparison: last pre-extraction host `95d77830971efdb338acd2cad87c4284f961b983`, old pick-import-file and current native/fallback picker await without original owner fence; standalone controller checks only current owner before awaiting inspection/decision/exclusive lease. Scope this pass: standalone file only; preserve original write token across native/fallback selection, queued file-job, inspection and decisions, preflight stages and actual exclusive mutation entry. Retire stale picker completion, preserve candidate/temporary-file cleanup and existing rollback under durable protection. No schema/vendor/promotion/Phase 6 changes.
 - Plan: trace actual checked controls, runtime and host composition; use existing write-token authority, not current-owner reacquisition; test actual picker (native/fallback) and standalone import with deferred inspection/decision/lease and ordinary cancellation/restore. Run pinned targeted QA and full fast audit already authorized; distinguish simulated providers from actual browser. Managed Drive, durable bulk clear journal and remaining semantic reconciliation explicitly stay open.
+- Implemented: checked host captures original AppOwnership write token; native picker generation and hidden input single-use fallback ticket; runtime carries assertion on standalone import operation, checks at inspection/decision, between preflight stages, before and after exclusive acquisition/checkpoint and before journal preparation. Existing managed import and durable rollback topology retained. Actual controls and actual runtime/codec regression fixtures added; hosted verification pending.
 
 ## REVIEW-P5 · Stage 1 attachment compensation — CORRECTED / TARGETED VERIFIED (STAGE 1 OPEN) · 2026-11-25
 
