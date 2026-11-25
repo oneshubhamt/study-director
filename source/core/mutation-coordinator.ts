@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {AuthorityError,AuthorityOptions,MutationAuthority,MutationState,MutationOrigin,LocalLease,MutationInput} from '../../types/mutation-coordinator.ts';
+import type {AuthorityError,AuthorityOptions,MutationAuthority,MutationState,MutationOrigin,LocalLease,MutationInput,JournalFence} from '../../types/mutation-coordinator.ts';
 const sdMutationCoordinatorFactory=(()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'mutation-coordinator','study-director.mutation-coordinator-module'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -25,7 +25,11 @@ const createModule=()=>{
     functions(input.identity,['canMutate','status'],'Mutation coordinator identity port');
     functions(input.local,['getJson','remove','setJson'],'Mutation coordinator local lease port');
     const LEASE_MS=Math.max(5000,Number(configuration.leaseMs)||20000),HEARTBEAT_MS=Math.max(1000,Number(configuration.heartbeatMs)||5000),LOCK_NAME=String(configuration.lockName||''),STORAGE_KEY=String(configuration.storageKey||'');
-    let active:MutationState|null=null,activePromise:Promise<unknown>=Promise.resolve(),sequence=0,recoveryFault='',recoveryKind='';
+    let active:MutationState|null=null,activePromise:Promise<unknown>=Promise.resolve(),sequence=0;
+    const faults=new Map<string,string>();
+    const firstFault=()=>faults.entries().next().value;
+    const recoveryFamily=(kind:string)=>kind==='library-clear-recovery'?'library-clear':kind==='restore-recovery'?'restore':'';
+    const blockingFault=(kind:string)=>[...faults].find(([key])=>key!==recoveryFamily(kind))?.[1]||'';
     const isRecoveryKind=(kind:string)=>kind==='restore-recovery'||kind==='library-clear-recovery';
     const nowMs=()=>{const value=Number(input.environment.now());return Number.isFinite(value)?value:Date.now();};
     function identity():MutationOrigin{const status=input.identity.status();return freeze({tabId:String(status.tabId||''),pageId:String(status.pageId||''),claimId:String(status.claimId||''),revision:status.revision});}
@@ -43,7 +47,7 @@ const createModule=()=>{
       foreignExpiry=input.environment.setTimeout(()=>{foreignExpiry=null;if(foreignActive())return;refreshUi();input.hooks.foreignReleased();},Math.max(50,Number(value.expiresAt)-nowMs()+50));
     }
     function foreignActive(){const value=lease(),foreign=!!(value&&!sameOwner(value,identity())&&Number(value.expiresAt)>nowMs());if(foreign)watchForeignExpiry(value);return foreign;}
-    function writesBlocked(){return foreignActive()||!!(recoveryFault&&!(active?.phase==='active'&&isRecoveryKind(active.kind)));}
+    function writesBlocked(){return foreignActive()||!!blockingFault(active?.phase==='active'?active.kind:'');}
     function writeLease(state:MutationState){
       assertOrigin(state);
       const {tabId,pageId,claimId}=state.origin,value={version:1,tabId,pageId,claimId,kind:state.kind,id:state.id,expiresAt:state.expiresAt};
@@ -53,7 +57,7 @@ const createModule=()=>{
     }
     function clearLease(state:MutationState){const value=lease();if(sameOwner(value,state.origin)&&value?.id===state.id)input.local.remove(STORAGE_KEY);}
     function refreshUi(){input.hooks.refreshUi();}
-    function blocksUi(){return !!active||foreignActive()||!!recoveryFault;}
+    function blocksUi(){return !!active||foreignActive()||faults.size>0;}
     async function durableAcquire(state:MutationState,renew=false){
       assertOrigin(state);
       const expiresAt=nowMs()+LEASE_MS;
@@ -79,7 +83,7 @@ const createModule=()=>{
       state.authorityError=reason;
       // A mirror-only failure permits rollback under the same unexpired
       // durable lease and original app owner, never a successor claim.
-      if(!durableProtected){recoveryFault=reason.message;recoveryKind=state.kind;}
+      if(!durableProtected)faults.set(state.kind,reason.message);
       if(!state.controller.signal.aborted)state.controller.abort(reason);
       refreshUi();return true;
     }
@@ -134,13 +138,13 @@ const createModule=()=>{
         // Even an ambiguous acquisition may have committed. Release only
         // this attempt's durable and local identities, not the live owner.
         try{await input.durable.release(state.id,state.owner);}
-        catch(error){recoveryFault=`The durable mutation lock could not be released safely: ${error instanceof Error?error.message:String(error)}`;recoveryKind=state.kind;}
+        catch(error){faults.set(state.kind,`The durable mutation lock could not be released safely: ${error instanceof Error?error.message:String(error)}`);}
         clearLease(state);
       }
     }
     async function runExclusive<T>(kind:unknown,operation:(authority:MutationAuthority)=>T|PromiseLike<T>):Promise<T>{
       if(typeof operation!=='function')throw new TypeError('Mutation operation is required.');if(active)throw new Error(`Another ${active.kind} operation is already running.`);
-      const operationKind=String(kind||'mutation');if(recoveryFault&&!isRecoveryKind(operationKind))throw new Error(recoveryFault);if(!input.identity.canMutate())throw new Error('Study control is required before changing stored data.');if(foreignActive()&&!isRecoveryKind(operationKind))throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');
+      const operationKind=String(kind||'mutation');const blocked=blockingFault(operationKind);if(blocked)throw new Error(blocked);if(!input.identity.canMutate())throw new Error('Study control is required before changing stored data.');if(foreignActive()&&!isRecoveryKind(operationKind))throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');
       const origin=identity();if(!origin.claimId||!Number.isSafeInteger(origin.revision))throw authorityError('Study control could not be verified.');
       const state:MutationState={kind:operationKind,id:`mutation_${nowMs().toString(36)}_${input.environment.randomIdPart(10)}_${(++sequence).toString(36)}`,origin,owner:ownerIdentity(origin),phase:'pending',expiresAt:0,controller:new input.environment.AbortController(),authorityError:null};
       active=state;
@@ -155,10 +159,15 @@ const createModule=()=>{
       });
       activePromise=task.catch(()=>{});refreshUi();return task;
     }
-    function failClosed(message:unknown,kind='restore'){recoveryFault=String(message||'Interrupted recovery must finish before data can be changed.');recoveryKind=String(kind||'data');refreshUi();return false;}
-    function clearFault(){recoveryFault='';recoveryKind='';refreshUi();return true;}
+    function journalFence(options:AuthorityOptions={}):JournalFence{
+      const state=active;if(!state)throw authorityError('Journal mutation requires an active protected data operation.');
+      assertOperation(state,options);const rollback=options.allowDurableProtected===true;
+      return freeze({id:state.id,owner:state.owner,assert:()=>assertOperation(state,{allowDurableProtected:rollback})});
+    }
+    function failClosed(message:unknown,kind='restore'){faults.set(String(kind||'data'),String(message||'Interrupted recovery must finish before data can be changed.'));refreshUi();return false;}
+    function clearFault(kind='restore'){faults.delete(kind);refreshUi();return true;}
     input.environment.addStorageListener(event=>{if(event&&event.key===STORAGE_KEY)refreshUi();});
-    return freeze({format:'study-director.mutation-coordinator',contractVersion:1,runExclusive,assertAuthority,signal:()=>active?.phase==='active'?active.controller.signal:null,settled:()=>activePromise,foreignActive,writesBlocked,blocksUi,failClosed,clearFault,status:()=>freeze({active:active&&active.kind||'',foreign:foreignActive(),recoveryFault,recoveryKind,authorityHealthy:!(active&&active.authorityError),authorityDurableProtected:active&&active.authorityError?active.authorityError.durableProtected===true:true})});
+    return freeze({format:'study-director.mutation-coordinator',contractVersion:1,runExclusive,assertAuthority,signal:()=>active?.phase==='active'?active.controller.signal:null,settled:()=>activePromise,foreignActive,writesBlocked,blocksUi,failClosed,clearFault,journalFence,status:()=>freeze({active:active&&active.kind||'',foreign:foreignActive(),recoveryFault:firstFault()?.[1]||'',recoveryKind:firstFault()?.[0]||'',authorityHealthy:!(active&&active.authorityError),authorityDurableProtected:active&&active.authorityError?active.authorityError.durableProtected===true:true})});
   }
   return freeze({format:'study-director.mutation-coordinator-module',contractVersion:1,createCoordinator});
 };

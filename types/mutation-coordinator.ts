@@ -1,5 +1,7 @@
 export type AuthorityError=Error&{code:'STUDY_DIRECTOR_MUTATION_AUTHORITY_LOST';durableProtected:boolean};
 export type AuthorityOptions={allowDurableProtected?:boolean};
+/** Ephemeral operation identity; never serialized into journal records. */
+export type JournalFence=Readonly<{id:string;owner:string;assert():true}>;
 export type MutationAuthority=Readonly<{signal:AbortSignal;assert(options?:AuthorityOptions):true;status():Readonly<{healthy:boolean;durableProtected:boolean}>}>;
 export type MutationOrigin=Readonly<{tabId:string;pageId:string;claimId:string;revision:number}>;
 export type MutationState={kind:string;id:string;origin:MutationOrigin;owner:string;phase:'pending'|'active'|'retired';expiresAt:number;controller:AbortController;authorityError:AuthorityError|null};

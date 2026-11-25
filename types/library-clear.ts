@@ -25,7 +25,7 @@ export interface LibraryStatePorts{
  attachments:{inventory():Promise<readonly AssetRow[]>;verifyMetadata(rows:readonly AssetRow[]):Promise<unknown>;restoreMetadata(rows:readonly unknown[]):Promise<unknown>};
  review:{hydrate(input:{date:string;snapshotReview:SessionSnapshot['review']}):unknown;invalidateBindings():void};
 }
-export type ClearJournal={state:{id:string};payload:unknown};
+export type ClearJournal={state:{id:string;phase?:string};payload:unknown};
 export type Trace={mark(name:string,details?:DiagnosticInput):unknown};
 export type TraceOutcome={status?:string;pending?:boolean;recovered?:boolean;savedDays?:number;notes?:number;attachmentsRemoved?:number;sweepPending?:boolean};
 export type ClearRecorder=Pick<ReturnType<BackupDiagnosticsModule['createRecorder']>,'start'|'mark'|'finish'|'fail'>;
@@ -37,5 +37,5 @@ export interface LibraryCoordinatorPorts{
  deleteNotes():Promise<{count:number}>;deleteSavedDays():Promise<{count:number}>;removeReferences(targets:readonly RewriteTarget[]):Promise<unknown>;
  verifyLogical(plan:LibraryPlan,policy:LibraryPolicy):Promise<unknown>;removeAttachmentMetadata(ids:readonly string[]):Promise<{removed:number}>;verifyFinal(plan:LibraryPlan,policy:LibraryPolicy):Promise<unknown>;
  restore(payload:unknown):Promise<unknown>;verifyRestore(payload:unknown):Promise<unknown>;sweep():Promise<number>;failClosed(message:string):void;clearFault():void;
- journal:{prepare(input:{id:string;signature:string;payload:object}):Promise<ClearJournal>;read():Promise<ClearJournal|null>;mark(id:string,phase:string):Promise<unknown>;clear(id:string):Promise<unknown>};diagnostics?:Partial<ClearRecorder>;
+ journal:{prepare(input:{id:string;signature:string;payload:object}):Promise<ClearJournal>;read():Promise<ClearJournal|null>;mark(id:string,phase:string,options?:AuthorityOptions):Promise<unknown>;clear(id:string,options?:AuthorityOptions):Promise<unknown>};diagnostics?:Partial<ClearRecorder>;
 }

@@ -203,7 +203,7 @@ const createModule=()=>{
   }
 
   function createRuntime<Token>(input:Readonly<BackupRuntimeHostInput<Token>>):Readonly<BackupRuntimeHostController>{
-    exactObject(input,['module','configuration','appData','storageHealthKey','storageHealth','storageGeneration','personal','files','processing','protection','backgroundAvailable','assets','referenceRevision','mutationGeneration','baseline','codecs','reconciliation','noteReconciliation','recoveryNotes','session','domain','view','events','verifiedRecovery','interactions','operations','environment','diagnostics'],'Backup runtime host input');
+    exactObject(input,['module','configuration','appData','journalFence','storageHealthKey','storageHealth','storageGeneration','personal','files','processing','protection','backgroundAvailable','assets','referenceRevision','mutationGeneration','baseline','codecs','reconciliation','noteReconciliation','recoveryNotes','session','domain','view','events','verifiedRecovery','interactions','operations','environment','diagnostics'],'Backup runtime host input');
     if(!Object.isFrozen(input.module)||input.module.format!=='study-director.backup-module'||input.module.contractVersion!==1)throw new TypeError('Backup runtime module is unavailable or incompatible.');
     const revisionFence=createRevisionFence(freeze({
       local:input.appData.local,storageHealthKey:input.storageHealthKey,storageHealth:freeze({lastLocalSaveAt:()=>input.storageHealth.snapshot().lastLocalSaveAt}),
@@ -243,8 +243,8 @@ const createModule=()=>{
       notesTrashKey:key=>input.codecs.dailyRecord.noteKeys.trash(key),notesFailure:()=>input.appData.notes.failure(),
       restoreJournalPrepare:async value=>{
         if(!(value.blob instanceof Blob))throw new TypeError('Restore rollback bytes are unavailable.');
-        const backupFile=await input.processing.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
-        try{await input.appData.restoreJournal.prepare({...metadata,backupFile});}
+        const fence=input.journalFence(),backupFile=await input.processing.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
+        try{fence.assert();await input.appData.restoreJournal.prepare({...metadata,backupFile},fence);}
         catch(error){
           try{
             const raw:unknown=await input.appData.restoreJournal.read(),row=raw&&typeof raw==='object'?raw as Record<string,unknown>:null,payload=row?.['payload'],payloadRow=payload&&typeof payload==='object'?payload as Record<string,unknown>:null,ref=payloadRow?.['backupFile'],refRow=ref&&typeof ref==='object'?ref as Record<string,unknown>:null;
@@ -271,9 +271,12 @@ const createModule=()=>{
         const attachmentDeletions:AttachmentDeletion[]=rows(payloadRow['attachmentDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,assetId=String(item?.['assetId']||''),deletedAt=String(item?.['deletedAt']||'');return assetId&&deletedAt?[{assetId,deletedAt}]:[];});
         return {state,payload:{blob,filename:String(payloadRow['filename']||''),savedDayDeletions,noteDeletions,attachmentDeletions}};
       },
-      restoreJournalMark:async(id,phase)=>{const marked=await input.appData.restoreJournal.mark(id,phase);if(phase==='verified')input.events.settleStorageReset();return marked;},
-      restoreJournalClear:async id=>{
-        const raw:unknown=await input.appData.restoreJournal.read();await input.appData.restoreJournal.clear(id);
+      restoreJournalMark:async(id,phase,options)=>{const fence=input.journalFence(options),marked=await input.appData.restoreJournal.mark(id,phase,fence);fence.assert();if(phase==='verified')input.events.settleStorageReset();return marked;},
+      restoreJournalClear:async(id,options)=>{
+        const fence=input.journalFence(options),raw=await input.appData.restoreJournal.read();
+        if(!raw||raw.state.id!==id)throw new Error('Restore journal identity changed before retirement.');
+        try{await input.appData.restoreJournal.clear(id,fence);}catch(error){if(await input.appData.restoreJournal.read()!==null)throw error;}
+        fence.assert();
         const row=raw&&typeof raw==='object'?raw as Record<string,unknown>:null,payload=row?.['payload'],payloadRow=payload&&typeof payload==='object'?payload as Record<string,unknown>:null,ref=payloadRow?.['backupFile'],refRow=ref&&typeof ref==='object'?ref as Record<string,unknown>:null,name=String(refRow?.['name']||'');
         if(name)try{await input.files.release(name);}catch(error){input.diagnostics.capture('backup.restore-journal-file-release',error,'warn');}
       },

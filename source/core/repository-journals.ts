@@ -1,5 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {MetaContext} from '../../types/app-meta.ts';
+import type {JournalFence} from '../../types/mutation-coordinator.ts';
+import type {MetaContext,MetaOperation,MetaWriteOptions} from '../../types/app-meta.ts';
 import type {Limits} from '../../types/record-models.ts';
 import type {LibraryJournalState,RestoreJournalState,AcquiredLease,JournalInput,JournalFields,LibraryPreparation,RestorePreparation,MutationRequest} from '../../types/repository-journals.ts';
 const sdRepositoryJournalsFactory=(()=>{
@@ -42,29 +43,55 @@ const createModule=()=>{
     if(input.appMeta.format!=='study-director.app-meta-owner'||input.appMeta.contractVersion!==1||input.appMeta.owner!=='repository-journals')throw new TypeError('Repository journal appMeta capability is invalid.');
     functions(input.helpers,['clampText'],'Repository journal helper contract');functions(input.clock,['nowMs'],'Repository journal clock');
     const APP_LIMITS=input.limits,Meta=input.appMeta,clampText=input.helpers.clampText,decisionNowMs=input.clock.nowMs;
+    // The journal and lease occupy the same metadata store. Check the original
+    // durable identity inside the write transaction, then reassert the captured
+    // app authority at the actual put/remove boundary (after asynchronous reads).
+    function journalWrite<T>(fence:JournalFence|undefined,operation:MetaOperation<T>,options:MetaWriteOptions){
+      return Meta.transaction<T>('readwrite',(meta,tx,finish)=>{
+        if(!fence){operation(meta,tx,finish);return;}
+        const fail=(error:unknown)=>{try{tx.abort();}catch{}finish(false,error);};
+        const handle=meta.get('mutationLease');handle.request.onerror=()=>fail(handle.request.error||new Error('Journal mutation lease read failed.'));
+        handle.request.onsuccess=()=>{try{
+          fence.assert();const held=fields(handle.value());
+          if(!held||held.id!==fence.id||held.owner!==fence.owner||Number(held.expiresAt)<=decisionNowMs())throw new Error('The original durable mutation lease is unavailable. Recovery evidence was preserved.');
+          operation(meta,tx,finish);
+        }catch(error){fail(error);}};
+      },options);
+    }
     const LIBRARY_CLEAR_JOURNAL_FORMAT='study-director.library-clear-journal',LIBRARY_CLEAR_JOURNAL_CHUNK_BYTES=512*1024;
     function validLibraryClearJournalId(value:unknown){return /^libraryclear_[a-z0-9_-]{8,96}$/u.test(String(value||''));}
     function libraryChunkSuffix(id:unknown,index:unknown){return `${String(id)}:${String(index).padStart(8,'0')}`;}
     function libraryClearDigest(bytes:Uint8Array<ArrayBuffer>){if(!globalThis.crypto?.subtle)throw new Error('Library-clear journal integrity verification is unavailable.');return globalThis.crypto.subtle.digest('SHA-256',bytes).then(buffer=>Array.from(new Uint8Array(buffer),value=>value.toString(16).padStart(2,'0')).join(''));}
-    async function prepareLibraryClearJournal(value:LibraryPreparation={}){
+    async function prepareLibraryClearJournal(value:LibraryPreparation={},fence?:JournalFence){
       const id=String(value.id||'');if(!validLibraryClearJournalId(id)||!value.payload||typeof value.payload!=='object')throw new Error('Library-clear rollback journal input is invalid. No Library data was changed.');
       let bytes;try{bytes=new TextEncoder().encode(JSON.stringify(value.payload));}catch{throw new Error('Library-clear rollback journal could not serialize its safety snapshot. No Library data was changed.');}
       if(!bytes.byteLength)throw new Error('Library-clear rollback journal payload is empty. No Library data was changed.');
       const chunks:Uint8Array<ArrayBuffer>[]=[];for(let offset=0;offset<bytes.byteLength;offset+=LIBRARY_CLEAR_JOURNAL_CHUNK_BYTES)chunks.push(bytes.slice(offset,Math.min(bytes.byteLength,offset+LIBRARY_CLEAR_JOURNAL_CHUNK_BYTES)));
       const [sha256,signatureHash]=await Promise.all([libraryClearDigest(bytes),libraryClearDigest(new TextEncoder().encode(String(value.signature||'')))]),now=new Date().toISOString();
       const state={format:LIBRARY_CLEAR_JOURNAL_FORMAT,version:1,id,phase:'prepared',chunkCount:chunks.length,byteLength:bytes.byteLength,sha256,signatureHash,createdAt:now,updatedAt:now};
-      return Meta.transaction<Readonly<{state:Readonly<LibraryJournalState>;payload:object}>>('readwrite',(meta,tx,finish)=>{
+      return journalWrite<Readonly<{state:Readonly<LibraryJournalState>;payload:object}>>(fence,(meta,tx,finish)=>{
         const stateHandle=meta.get('libraryClearJournalState');stateHandle.request.onerror=()=>finish(false,stateHandle.request.error||new Error('Library-clear journal state read failed'));
         stateHandle.request.onsuccess=()=>{
           let existing;try{existing=stateHandle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(existing){try{tx.abort();}catch{}finish(false,new Error('An interrupted Library clear still requires recovery. No new Library clear was started.'));return;}
           const chunksHandle=meta.getAll('libraryClearJournalPayloadPrefix');chunksHandle.request.onerror=()=>finish(false,chunksHandle.request.error||new Error('Library-clear journal chunk cleanup failed'));
-          chunksHandle.request.onsuccess=()=>{let entries;try{entries=chunksHandle.entries();}catch(error){finish(false,error);return;}for(const entry of entries)meta.remove('libraryClearJournalPayloadPrefix',entry!.suffix);meta.put('libraryClearJournalState',state,{updatedAt:now});chunks.forEach((chunk,index)=>meta.put('libraryClearJournalPayloadPrefix',{format:LIBRARY_CLEAR_JOURNAL_FORMAT,version:1,id,index,bytes:chunk},{suffix:libraryChunkSuffix(id,index),updatedAt:now}));tx.oncomplete=()=>finish(true,freeze({state:freeze({...state}),payload:value.payload!}));};
+          chunksHandle.request.onsuccess=()=>{try{const entries=chunksHandle.entries();if(entries.length)throw new Error('Orphaned Library-clear journal chunks require recovery.');fence?.assert();meta.put('libraryClearJournalState',state,{updatedAt:now});chunks.forEach((chunk,index)=>meta.put('libraryClearJournalPayloadPrefix',{format:LIBRARY_CLEAR_JOURNAL_FORMAT,version:1,id,index,bytes:chunk},{suffix:libraryChunkSuffix(id,index),updatedAt:now}));tx.oncomplete=()=>finish(true,freeze({state:freeze({...state}),payload:value.payload!}));}catch(error){try{tx.abort();}catch{}finish(false,error);}};
         };
       },{strict:true,abortMessage:'Library-clear journal preparation aborted'});
     }
     async function readLibraryClearJournal(){
-      const state=await Meta.read('libraryClearJournalState') as JournalFields|null;if(!state)return null;
-      const rows=(await Meta.list('libraryClearJournalPayloadPrefix')).filter(entry=>entry!.suffix.startsWith(`${state.id}:`)).sort((a,b)=>Number((a!.value as JournalFields).index)-Number((b!.value as JournalFields).index));
+      const {state,entries}=await Meta.transaction<{state:JournalFields|null;entries:readonly (import('../../types/app-meta.ts').MetaEntry|null)[]}>('readonly',(meta,tx,finish)=>{
+        const header=meta.get('libraryClearJournalState'),chunks=meta.getAll('libraryClearJournalPayloadPrefix');let read=0;
+        const fail=(error:unknown)=>finish(false,error),check=()=>{if(++read!==2)return;try{
+          const state=fields(header.value()),entries=chunks.entries();
+          if((!state&&entries.length)||entries.some(entry=>!entry||!entry.suffix.startsWith(`${state?.id}:`)))throw new Error('The interrupted Library-clear journal contains orphaned payload chunks. Preserve browser storage.');
+          tx.oncomplete=()=>finish(true,{state,entries});
+        }catch(error){fail(error);}};
+        header.request.onsuccess=check;chunks.request.onsuccess=check;
+        header.request.onerror=()=>fail(header.request.error||new Error('Library-clear journal state read failed.'));
+        chunks.request.onerror=()=>fail(chunks.request.error||new Error('Library-clear journal chunks read failed.'));
+      },{abortMessage:'Library-clear journal read aborted'});
+      if(!state)return null;
+      const rows=[...entries].sort((a,b)=>Number((a!.value as JournalFields).index)-Number((b!.value as JournalFields).index));
       if(rows.length!==state.chunkCount)throw new Error('The interrupted Library-clear journal is incomplete. Preserve browser storage and restore from an external backup before making changes.');
       let length=0;const chunks:Uint8Array[]=[];for(let index=0;index<rows.length;index++){const value=rows[index]!!.value as JournalFields,raw=value.bytes,chunk=raw instanceof Uint8Array?raw:new Uint8Array(raw as ArrayBuffer);if(value.id!==state.id||value.index!==index)throw new Error('The interrupted Library-clear journal contains invalid payload chunks. Preserve browser storage and restore from an external backup before making changes.');chunks.push(chunk);length+=chunk.byteLength;}
       if(length!==state.byteLength)throw new Error('The interrupted Library-clear journal payload length does not verify. Preserve browser storage and restore from an external backup before making changes.');
@@ -73,12 +100,12 @@ const createModule=()=>{
       if(await libraryClearDigest(new TextEncoder().encode(String((payload as {planSignature?:unknown}|null)?.planSignature||'')))!==state.signatureHash)throw new Error('The interrupted Library-clear journal plan signature does not verify. Preserve browser storage and restore from an external backup before making changes.');
       return freeze({state:freeze({...state}),payload});
     }
-    async function markLibraryClearJournal(id:unknown,phase:unknown){
+    async function markLibraryClearJournal(id:unknown,phase:unknown,fence?:JournalFence){
       const journalId=String(id||''),cleanPhase=String(phase||'').trim();if(!validLibraryClearJournalId(journalId)||!/^[a-z][a-z0-9-]{1,48}$/u.test(cleanPhase))throw new Error('Library-clear journal phase is invalid.');
-      return Meta.transaction<Readonly<JournalFields&{phase:string;updatedAt:string}>>('readwrite',(meta,tx,finish)=>{const handle=meta.get('libraryClearJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('Library-clear journal phase read failed'));handle.request.onsuccess=()=>{let current;try{current=handle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(!current||current.id!==journalId){finish(false,new Error('Library-clear journal identity changed unexpectedly.'));return;}const updated={...current,phase:cleanPhase,updatedAt:new Date().toISOString()};meta.put('libraryClearJournalState',updated,{updatedAt:updated.updatedAt});tx.oncomplete=()=>finish(true,freeze(updated));};},{strict:true,abortMessage:'Library-clear journal phase update aborted'});
+      return journalWrite<Readonly<JournalFields&{phase:string;updatedAt:string}>>(fence,(meta,tx,finish)=>{const handle=meta.get('libraryClearJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('Library-clear journal phase read failed'));handle.request.onsuccess=()=>{let current;try{current=handle.value() as JournalFields|null;fence?.assert();}catch(error){try{tx.abort();}catch{}finish(false,error);return;}if(!current||current.id!==journalId){finish(false,new Error('Library-clear journal identity changed unexpectedly.'));return;}const updated={...current,phase:cleanPhase,updatedAt:new Date().toISOString()};meta.put('libraryClearJournalState',updated,{updatedAt:updated.updatedAt});tx.oncomplete=()=>finish(true,freeze(updated));};},{strict:true,abortMessage:'Library-clear journal phase update aborted'});
     }
-    async function clearLibraryClearJournal(id=''){
-      const expected=String(id||'');return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{const stateHandle=meta.get('libraryClearJournalState');stateHandle.request.onerror=()=>finish(false,stateHandle.request.error||new Error('Library-clear journal cleanup read failed'));stateHandle.request.onsuccess=()=>{let current;try{current=stateHandle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(expected&&current&&current.id!==expected){finish(false,new Error('Library-clear journal identity changed before cleanup.'));return;}const target=current&&current.id||expected,chunksHandle=meta.getAll('libraryClearJournalPayloadPrefix');chunksHandle.request.onerror=()=>finish(false,chunksHandle.request.error||new Error('Library-clear journal chunk cleanup failed'));chunksHandle.request.onsuccess=()=>{let entries;try{entries=chunksHandle.entries();}catch(error){finish(false,error);return;}for(const entry of entries)if(!target||entry!.suffix.startsWith(`${target}:`))meta.remove('libraryClearJournalPayloadPrefix',entry!.suffix);meta.remove('libraryClearJournalState');tx.oncomplete=()=>finish(true,undefined);};};},{strict:true,abortMessage:'Library-clear journal cleanup aborted'});
+    async function clearLibraryClearJournal(id='',fence?:JournalFence){
+      const expected=String(id||'');return journalWrite<void>(fence,(meta,tx,finish)=>{const stateHandle=meta.get('libraryClearJournalState');stateHandle.request.onerror=()=>finish(false,stateHandle.request.error||new Error('Library-clear journal cleanup read failed'));stateHandle.request.onsuccess=()=>{let current;try{current=stateHandle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(expected&&(!current||current.id!==expected)){finish(false,new Error('Library-clear journal identity changed before cleanup.'));return;}const target=current&&current.id||expected,chunksHandle=meta.getAll('libraryClearJournalPayloadPrefix');chunksHandle.request.onerror=()=>finish(false,chunksHandle.request.error||new Error('Library-clear journal chunk cleanup failed'));chunksHandle.request.onsuccess=()=>{let entries;try{entries=chunksHandle.entries();if(entries.some(entry=>!entry||!target||!entry.suffix.startsWith(`${target}:`)))throw new Error('Library-clear journal contains unmatched recovery evidence.');fence?.assert();}catch(error){try{tx.abort();}catch{}finish(false,error);return;}for(const entry of entries)meta.remove('libraryClearJournalPayloadPrefix',entry!.suffix);meta.remove('libraryClearJournalState');tx.oncomplete=()=>finish(true,undefined);};};},{strict:true,abortMessage:'Library-clear journal cleanup aborted'});
     }
     const RESTORE_JOURNAL_FORMAT='study-director.restore-journal',MUTATION_LEASE_FORMAT='study-director.mutation-lease';
     function validRestoreJournalId(value:unknown){return /^restore_[a-z0-9_-]{8,96}$/u.test(String(value||''));}
@@ -90,10 +117,10 @@ const createModule=()=>{
     async function releaseMutationLease(id:unknown,owner:unknown){const expected=String(id||''),expectedOwner=String(owner||'');if(!/^mutation_[a-z0-9_-]{8,96}$/u.test(expected)||!/^tab_[a-z0-9_-]{8,160}$/u.test(expectedOwner))return false;return Meta.transaction<boolean>('readwrite',(meta,tx,finish)=>{let removed=false;const handle=meta.get('mutationLease');handle.request.onerror=()=>finish(false,handle.request.error||new Error('durable mutation lock release read failed'));handle.request.onsuccess=()=>{let current;try{current=handle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(current&&current.id===expected&&current.owner===expectedOwner){meta.remove('mutationLease');removed=true;}tx.oncomplete=()=>finish(true,removed);};},{abortMessage:'durable mutation lock release aborted'});}
     function cleanSavedDayDeletions(values:unknown){const source=values===undefined?[]:values;if(!Array.isArray(source)||source.length>APP_LIMITS.maxImportRecords)throw new Error('Restore rollback deletion ledger is invalid.');const byDate=new Map<string,{date:string;deletedAt:string}>();for(const value of source as (JournalFields|null)[]){const date=String(value&&value.date||''),deletedAt=String(value&&value.deletedAt||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date)||!Number.isFinite(Date.parse(deletedAt)))throw new Error('Restore rollback deletion ledger is invalid.');const previous=byDate.get(date);if(!previous||Date.parse(deletedAt)>Date.parse(previous.deletedAt))byDate.set(date,{date,deletedAt:new Date(Date.parse(deletedAt)).toISOString()});}return freeze([...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date)).map(value=>freeze(value)));}
     function cleanKeyedDeletions(values:unknown,{kind='entry',keyName='key',limit=10000}:{kind?:string;keyName?:string;limit?:number}={}){const source=values===undefined?[]:values;if(!Array.isArray(source)||source.length>limit)throw new Error(`Restore rollback ${kind} deletion ledger is invalid.`);const byKey=new Map<string,{[key:string]:string;deletedAt:string}>();for(const value of source as ({[key:string]:unknown;deletedAt?:unknown}|null)[]){const key=String(value&&value[keyName]||'').trim(),deletedAt=String(value&&value.deletedAt||'');if(!key||!Number.isFinite(Date.parse(deletedAt)))throw new Error(`Restore rollback ${kind} deletion ledger is invalid.`);const previous=byKey.get(key),clean={[keyName]:key,deletedAt:new Date(Date.parse(deletedAt)).toISOString()};if(!previous||Date.parse(clean.deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,clean);}return freeze([...byKey.values()].sort((a,b)=>String(a[keyName]).localeCompare(String(b[keyName]))).map(value=>freeze(value)));}
-    async function prepareRestoreJournal(value:RestorePreparation={}){
+    async function prepareRestoreJournal(value:RestorePreparation={},fence?:JournalFence){
       const id=String(value.id||''),blob=value.blob,backupFile=value.backupFile,fileValid=backupFile&&/^backup-[a-f0-9-]{36}$/u.test(backupFile.name)&&Number.isSafeInteger(backupFile.size)&&backupFile.size>0&&/^[a-f0-9]{64}$/u.test(backupFile.hash);if(!validRestoreJournalId(id)||(!fileValid&&(!blob||typeof blob.arrayBuffer!=='function'||!Number.isFinite(Number(blob.size))||Number(blob.size)>(APP_LIMITS.backupMaxFileBytes||APP_LIMITS.backupMaxCompressedBytes))))throw new Error('Restore rollback journal input is invalid. No restore changes were made.');
       const savedDayDeletions=cleanSavedDayDeletions(value.savedDayDeletions),noteDeletions=cleanKeyedDeletions(value.noteDeletions,{kind:'Note',keyName:'key',limit:APP_LIMITS.maxNotes}),attachmentDeletions=cleanKeyedDeletions(value.attachmentDeletions,{kind:'Attachment',keyName:'assetId',limit:50000}),now=new Date().toISOString(),state={format:RESTORE_JOURNAL_FORMAT,version:1,id,phase:'prepared',createdAt:now,updatedAt:now},payload={format:RESTORE_JOURNAL_FORMAT,version:RESTORE_JOURNAL_VERSION,id,...(fileValid?{backupFile}:{blob}),filename:clampText(value.filename||'safety-copy.sdbackup',APP_LIMITS.maxBackupFilenameChars),savedDayDeletions,noteDeletions,attachmentDeletions};
-      return Meta.transaction('readwrite',(meta,tx,finish)=>{
+      return journalWrite(fence,(meta,tx,finish)=>{
         // Both halves are checked inside the same durable transaction. Even an
         // orphaned half must stop preparation: it may be the only recovery proof.
         const header=meta.get('restoreJournalState'),body=meta.get('restoreJournalPayload');
@@ -105,7 +132,7 @@ const createModule=()=>{
           try{currentHeader=header.value();currentBody=body.value();}catch(error){fail(error);return;}
           if(currentHeader||currentBody){fail(new Error('An interrupted restore still requires recovery. No new restore journal was started.'));return;}
           try{
-            meta.put('restoreJournalState',state,{updatedAt:now});
+            fence?.assert();meta.put('restoreJournalState',state,{updatedAt:now});
             meta.put('restoreJournalPayload',payload,{updatedAt:now});
             tx.oncomplete=()=>finish(true,freeze({state,payload}));
           }catch(error){fail(error);}
@@ -136,10 +163,10 @@ const createModule=()=>{
         body.request.onerror=()=>fail(body.request.error||new Error('Restore journal payload read failed.'));
       },{abortMessage:'Restore journal read aborted'});
     }
-    async function markRestoreJournal(id:unknown,phase:unknown){const journalId=String(id||''),cleanPhase=String(phase||'').trim();if(!validRestoreJournalId(journalId)||!/^[a-z][a-z0-9-]{1,48}$/u.test(cleanPhase))throw new Error('Restore journal phase is invalid.');return Meta.transaction('readwrite',(meta,tx,finish)=>{const handle=meta.get('restoreJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('restore journal phase read failed'));handle.request.onsuccess=()=>{let current;try{current=fields(handle.value());}catch(error){finish(false,error);return;}if(!current||current.id!==journalId){finish(false,new Error('Restore journal identity changed unexpectedly.'));return;}const updated={...current,phase:cleanPhase,updatedAt:new Date().toISOString()};meta.put('restoreJournalState',updated,{updatedAt:updated.updatedAt});tx.oncomplete=()=>finish(true,freeze(updated));};},{strict:true,abortMessage:'restore journal phase update aborted'});}
-    async function clearRestoreJournal(id=''){
+    async function markRestoreJournal(id:unknown,phase:unknown,fence?:JournalFence){const journalId=String(id||''),cleanPhase=String(phase||'').trim();if(!validRestoreJournalId(journalId)||!/^[a-z][a-z0-9-]{1,48}$/u.test(cleanPhase))throw new Error('Restore journal phase is invalid.');return journalWrite(fence,(meta,tx,finish)=>{const handle=meta.get('restoreJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('restore journal phase read failed'));handle.request.onsuccess=()=>{let current;try{current=fields(handle.value());fence?.assert();}catch(error){try{tx.abort();}catch{}finish(false,error);return;}if(!current||current.id!==journalId){finish(false,new Error('Restore journal identity changed unexpectedly.'));return;}const updated={...current,phase:cleanPhase,updatedAt:new Date().toISOString()};meta.put('restoreJournalState',updated,{updatedAt:updated.updatedAt});tx.oncomplete=()=>finish(true,freeze(updated));};},{strict:true,abortMessage:'restore journal phase update aborted'});}
+    async function clearRestoreJournal(id='',fence?:JournalFence){
       const expected=String(id||'');
-      return Meta.transaction('readwrite',(meta,tx,finish)=>{
+      return journalWrite(fence,(meta,tx,finish)=>{
         const header=meta.get('restoreJournalState'),body=meta.get('restoreJournalPayload');
         let read=0;
         const fail=(error:unknown)=>{try{tx.abort();}catch{}finish(false,error);};
@@ -151,7 +178,7 @@ const createModule=()=>{
           if(expected&&!state){fail(new Error('Restore journal disappeared before cleanup. Recovery status is uncertain.'));return;}
           if(expected&&state?.id!==expected){fail(new Error('Restore journal identity changed before cleanup.'));return;}
           try{
-            if(state){meta.remove('restoreJournalState');meta.remove('restoreJournalPayload');}
+            fence?.assert();if(state){meta.remove('restoreJournalState');meta.remove('restoreJournalPayload');}
             tx.oncomplete=()=>finish(true,true);
           }catch(error){fail(error);}
         };

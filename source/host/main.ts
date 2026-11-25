@@ -2859,11 +2859,11 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
   },capture:LibraryClearState.capture,
   deleteNotes:()=>AppData.notes.clearAll(),deleteSavedDays:()=>AppData.dailyRecords.clearAll(),removeReferences:LibraryClearState.rewriteReferences,verifyLogical:LibraryClearState.verifyLogical,
   removeAttachmentMetadata:ids=>requireAttachmentLibrary().removeMetadata(ids),verifyFinal:LibraryClearState.verifyFinal,restore:LibraryClearState.restore,verifyRestore:LibraryClearState.verifyRestore,sweep:()=>requireAttachmentLibrary().sweepOrphans(),
-  failClosed:message=>AppMutationCoordinator.failClosed(message,'library-clear'),clearFault:()=>AppMutationCoordinator.clearFault(),
+  failClosed:message=>AppMutationCoordinator.failClosed(message,'library-clear'),clearFault:()=>AppMutationCoordinator.clearFault('library-clear'),
   journal:Object.freeze<LibraryClearCoordinatorInput['journal']>({
-    prepare:async value=>{const raw=await AppData.libraryClearJournal.prepare(value);const state=raw&&typeof raw==='object'?Reflect.get(raw,'state'):null,id=state&&typeof state==='object'?String(Reflect.get(state,'id')||''):'';if(!id)throw new Error('Library clear journal preparation did not return an identity.');return {state:{id},payload:raw&&typeof raw==='object'?Reflect.get(raw,'payload'):null};},
-    read:async()=>{const raw=await AppData.libraryClearJournal.read();const state=raw&&typeof raw==='object'?Reflect.get(raw,'state'):null,id=state&&typeof state==='object'?String(Reflect.get(state,'id')||''):'';return id?{state:{id},payload:raw&&typeof raw==='object'?Reflect.get(raw,'payload'):null}:null;},
-    mark:(id,phase)=>AppData.libraryClearJournal.mark(id,phase),clear:id=>AppData.libraryClearJournal.clear(id)
+    prepare:async value=>{const raw=await AppData.libraryClearJournal.prepare(value,requireMutationCoordinator().journalFence());return {state:{id:raw.state.id,phase:raw.state.phase},payload:raw.payload};},
+    read:async()=>{const raw=await AppData.libraryClearJournal.read();if(raw===null)return null;const id=raw.state.id,phase=raw.state.phase;if(typeof id!=='string'||typeof phase!=='string')throw new Error('Library-clear journal identity is unavailable.');return {state:{id,phase},payload:raw.payload};},
+    mark:(id,phase,options)=>AppData.libraryClearJournal.mark(id,phase,requireMutationCoordinator().journalFence(options)),clear:(id,options)=>AppData.libraryClearJournal.clear(id,requireMutationCoordinator().journalFence(options))
   })
 }));
 // P5.7B owns kept-version refresh/review state in the checked recovery host.
@@ -3047,7 +3047,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
     appVersion:APP_VERSION,backupVersion:DATA_CONTRACT.schemas.Backup.version,starterSchedule:FACTORY_DEFAULTS.scheduleText,
     limits:APP_LIMITS
   }),
-  appData:AppData,storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze<BackupRuntimeHostInput['storageHealth']>({snapshot:()=>requireStorageHealthController().snapshot(),markOk:(source,key)=>requireStorageHealthController().markOk(source,key)}),
+  appData:AppData,journalFence:options=>requireMutationCoordinator().journalFence(options),storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze<BackupRuntimeHostInput['storageHealth']>({snapshot:()=>requireStorageHealthController().snapshot(),markOk:(source,key)=>requireStorageHealthController().markOk(source,key)}),
   storageGeneration:()=>IndexedDb.lifecycle().resets,
   personal:Object.freeze<BackupRuntimeHostInput['personal']>({draft:PlanDraftEditor,data:PlanData,inputValue:()=>{const field=document.getElementById('plan-input');return field instanceof HTMLTextAreaElement||field instanceof HTMLInputElement?field.value:null;},canMutate:()=>appCanMutate()}),
   files:BackupFiles,processing:Exports,protection:BackupProtection,backgroundAvailable:backupBackgroundAvailability,
@@ -3083,7 +3083,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Bac
     configure:async options=>await Interactions.configure(compactInteractionOptions(options)),
     notify:async options=>Interactions.notify(options)
   }),
-  operations:Object.freeze<BackupRuntimeHostInput['operations']>({assertAuthority:options=>requireMutationCoordinator().assertAuthority(options),canShare:()=>UnsupportedData.held()?'unsupported-data':true,clearFault:()=>requireMutationCoordinator().clearFault(),failClosed:message=>requireMutationCoordinator().failClosed(message),runExclusive:(kind,operation)=>requireMutationCoordinator().runExclusive(kind,operation)}),
+  operations:Object.freeze<BackupRuntimeHostInput['operations']>({assertAuthority:options=>requireMutationCoordinator().assertAuthority(options),canShare:()=>UnsupportedData.held()?'unsupported-data':true,clearFault:()=>requireMutationCoordinator().clearFault('restore'),failClosed:message=>requireMutationCoordinator().failClosed(message,'restore'),runExclusive:(kind,operation)=>requireMutationCoordinator().runExclusive(kind,operation)}),
   environment:Object.freeze<BackupRuntimeHostInput['environment']>({AbortController,yieldTask:options=>BackgroundTasks.yieldTask(options?.signal?{signal:options.signal,...(options.priority?{priority:options.priority}:{})}:options?.priority?{priority:options.priority}:undefined),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay)}),
   diagnostics:Object.freeze<BackupRuntimeHostInput['diagnostics']>({capture:AppDiagnostics.capture,start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail})
 }));

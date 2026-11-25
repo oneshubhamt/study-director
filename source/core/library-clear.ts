@@ -1,3 +1,4 @@
+import type {AuthorityOptions} from '../../types/mutation-coordinator.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {LibraryStatePorts,LibrarySelection,ReferenceSource,ProtectedReference,RewriteTarget,ReferenceRewriteOperation,LibraryPlan,LibraryPolicy,ScopedSnapshot,RollbackShape,LibraryRawRow,LibraryCoordinatorPorts,ClearJournal,Trace,TraceOutcome,ClearRecorder} from '../../types/library-clear.ts';
 import type {NoteRecord} from '../../types/record-models.ts';
@@ -376,18 +377,30 @@ const createModule=()=>{
       return createPlan({selection,attachments:snapshot.attachments,sources:snapshot.sources});
     }
     async function preflight(selection:Partial<LibrarySelection>){return freshPlan(selection);}
+    const recoveryMessage='Library data recovery required. Reload to complete recovery. Do not clear site data.';
+    async function prepareJournal(value:Parameters<LibraryCoordinatorPorts['journal']['prepare']>[0]){
+      try{const journal=await ports.journal.prepare(value);if(journal.state.id!==value.id)throw new Error('Library-clear journal preparation returned a different identity.');return journal;}
+      catch(error){try{if(await ports.journal.read()!==null)ports.failClosed(recoveryMessage);}catch{ports.failClosed(recoveryMessage);}throw error;}
+    }
+    async function retireJournal(id:string,options:AuthorityOptions={}){
+      ports.assertAuthority(options);
+      try{await ports.journal.clear(id,options);}catch(error){
+        try{if(await ports.journal.read()!==null)throw error;ports.assertAuthority(options);}
+        catch{ports.failClosed(recoveryMessage);throw error;}
+      }
+      ports.assertAuthority(options);ports.clearFault();
+    }
     async function rollbackJournal(journal:ClearJournal,error:unknown,{startup=false,trace}:{startup?:boolean;trace?:Trace}={}){
       try{
         trace?.mark('clear-rollback-start');ports.assertAuthority({allowDurableProtected:true});
-        await ports.journal.mark(journal.state.id,startup?'startup-rolling-back':'rolling-back');
+        await ports.journal.mark(journal.state.id,startup?'startup-rolling-back':'rolling-back',{allowDurableProtected:true});
         ports.assertAuthority({allowDurableProtected:true});
         await ports.restore(journal.payload);
         ports.assertAuthority({allowDurableProtected:true});
         await ports.verifyRestore(journal.payload);
         ports.assertAuthority({allowDurableProtected:true});
-        await ports.journal.mark(journal.state.id,startup?'startup-rolled-back':'rolled-back');
-        await ports.journal.clear(journal.state.id);
-        ports.clearFault();trace?.mark('clear-rollback-complete');
+        await ports.journal.mark(journal.state.id,startup?'startup-rolled-back':'rolled-back',{allowDurableProtected:true});
+        await retireJournal(journal.state.id,{allowDurableProtected:true});trace?.mark('clear-rollback-complete');
         return true;
       }catch(rollbackError){
         trace?.mark('clear-rollback-failed');const message='Library data recovery required. Study Director retained the Library-clear journal. Reload to complete recovery. Do not clear site data.';
@@ -410,10 +423,10 @@ const createModule=()=>{
         const safety=await ports.createProtectedSafety('before-clear-library');trace.mark('clear-safety-verified',{available:safety?.verified===true});
         ports.assertAuthority();
         const payload=await ports.capture(plan,policy),id=makeId();
-        let journal:ClearJournal|null=null,logicalCommitted=false,savedDays=0,notes=0,attachmentsRemoved=0;
+        let journal:ClearJournal|null=null,retiring=false,savedDays=0,notes=0,attachmentsRemoved=0;
         try{
           ports.assertAuthority();
-          journal=await ports.journal.prepare({id,signature:plan.signature,payload});trace.mark('clear-journal-prepared');
+          journal=await prepareJournal({id,signature:plan.signature,payload});trace.mark('clear-journal-prepared');
           ports.assertAuthority();
           await ports.journal.mark(id,'deleting-records');
           if(selection.notes){ports.assertAuthority();const result=await ports.deleteNotes();notes=Math.max(0,Number(result?.count)||0);}
@@ -436,10 +449,11 @@ const createModule=()=>{
           ports.assertAuthority();
           await ports.journal.mark(id,'verified');
           ports.assertAuthority();
-          await ports.journal.clear(id);
-          journal=null;logicalCommitted=true;ports.clearFault();trace.mark('clear-journal-retired');
+          retiring=true;await retireJournal(id);
+          journal=null;trace.mark('clear-journal-retired');
         }catch(error){
-          if(journal&&!logicalCommitted){await rollbackJournal(journal,error,{trace});}
+          if(journal&&!retiring){await rollbackJournal(journal,error,{trace});}
+          else if(retiring)ports.failClosed(recoveryMessage);
           throw error;
         }
         let swept=0,sweepPending=false;
@@ -454,14 +468,20 @@ const createModule=()=>{
         const message='Library data recovery required. The Library-clear journal could not be verified. Preserve browser storage and restore from an external backup before making changes.';
         ports.failClosed(message);throw new Error(message+' '+((error as {message?:unknown}|null|undefined)?.message||error));
       }
-      if(!journal?.state)return freeze({recovered:false,pending:false});
+      if(!journal?.state){ports.clearFault();return freeze({recovered:false,pending:false});}
       if(!ports.canMutate()){
         ports.failClosed('Library data recovery required. Study Director retained the Library-clear journal. Reload in the primary tab to complete recovery. Do not clear site data.');
         return freeze({recovered:false,pending:true});
       }
       return ports.runExclusive('library-clear-recovery',async()=>{
         ports.assertAuthority();
-        await rollbackJournal(journal,new Error('Interrupted Library clear'),{startup:true,trace});
+        try{
+          const current=await ports.journal.read();ports.assertAuthority();
+          if(!current){ports.clearFault();return freeze({recovered:false,pending:false});}
+          if(current.state.id!==journal.state.id)throw new Error('Library-clear recovery journal changed before recovery.');
+          if(['verified','rolled-back','startup-rolled-back'].includes(current.state.phase||''))await retireJournal(current.state.id);
+          else await rollbackJournal(current,new Error('Interrupted Library clear'),{startup:true,trace});
+        }catch(error){ports.failClosed(recoveryMessage);throw error;}
         return freeze({recovered:true,pending:false});
       });
     });}

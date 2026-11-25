@@ -1,3 +1,4 @@
+import type {JournalFence,AuthorityOptions} from './mutation-coordinator.ts';
 import type {BackupModule} from '../source/core/backup.ts';
 import type {AttachmentsModule} from '../source/core/attachments.ts';
 import type {ExportsModule} from '../source/core/exports.ts';
@@ -40,6 +41,7 @@ export interface BackupRuntimeHostInput<Token>{
   readonly module:BackupModule;
   readonly configuration:BackupRuntimeInput['ports']['configuration'];
   readonly appData:AppData;
+  journalFence(options?:AuthorityOptions):JournalFence;
   readonly storageHealthKey:string;
   readonly storageHealth:Pick<StorageHealthController,'snapshot'|'markOk'>;
   readonly storageGeneration:()=>number;
