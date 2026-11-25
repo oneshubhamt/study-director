@@ -13,6 +13,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  baseline-diagnostic:
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Retrieve exact previously resolved lockfile
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 45559611341
+          name: tauri-spike-cargo-lock-693d2fc5a481f01281a3ec8be349414e7316d1ca
+          path: ${{ runner.temp }}/tauri-lock
+      - name: Verify lock bytes for branch commit
+        shell: pwsh
+        run: |
+          $lock = Join-Path $env:RUNNER_TEMP 'tauri-lock/Cargo.lock'
+          if ((Get-FileHash $lock -Algorithm SHA256).Hash -ne '5E906D2393B65F3129977FAB33584B529803D9884A79B8C116E55E5A325E9787') { throw 'Unexpected Cargo.lock hash' }
+          $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes($lock))
+          for ($i = 0; $i -lt $encoded.Length; $i += 1024) { Write-Output ('LOCK64:' + $encoded.Substring($i,[Math]::Min(1024,$encoded.Length-$i))) }
+      - name: Retrieve previously compiled executable for diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 45559611341
+          name: tauri-spike-unqualified-exe-693d2fc5a481f01281a3ec8be349414e7316d1ca
+          path: src-tauri/target/release
+      - name: Retry runtime witness against known compiled baseline
+        env:
+          SD_TAURI_EXPECTED_SHA: 693d2fc5a481f01281a3ec8be349414e7316d1ca
+        run: node tests/helpers/tauri-smoke.mjs
   windows:
     if: github.ref == 'refs/heads/tauri-spike'
     runs-on: windows-2025
