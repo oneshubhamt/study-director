@@ -853,7 +853,7 @@ async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipTo
 }
 function assertExpectedSessionRecovery(expected:ActiveSession|null){
   const local=readLocalRecoverySession();
-  if(local&&!sameDataValue(local,expected))throw Object.assign(new Error('Active Session recovery changed before this mutation.'),{code:'ACTIVE_SESSION_CHANGED'});
+  if(local&&!sameDataValue(local,expected)&&(!expected||local.revision>=expected.revision))throw Object.assign(new Error('Active Session recovery changed before this mutation.'),{code:'ACTIVE_SESSION_CHANGED'});
 }
 function assertExpectedSessionRecord(raw:unknown,expected:ActiveSession|null){
   const present=raw==null?null:ActiveSessionCodec.sanitizeCurrent(raw);
@@ -939,7 +939,7 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
       // strict disk-commit semantics. Periodic timer snapshots stay default.
       await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected);idbSaved=true;
       assertWriteToken(ownershipToken,'completing the active-session save');
-      clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
+      if(writeEpoch===activeSessionMutationEpoch)clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
       if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:idbSaved}};
@@ -1032,7 +1032,7 @@ async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:
   let ownershipToken:WriteToken;
   try{ownershipToken=issueWriteToken('clearing the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
-  activeSessionMutationEpoch++;
+  const writeEpoch=++activeSessionMutationEpoch;
   const finishWrite=beginAuthoritativeWrite();
   const writing=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-clear',error,'error');}).then(async()=>{
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID);
@@ -1049,8 +1049,10 @@ async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:
       await idbDeleteActiveSession(ownershipToken,expected);idbCleared=true;
       assertWriteToken(ownershipToken,'completing the active-session deletion');
       if(expected!==undefined){
-        // Conditional deletion must not stage a marker or remove a recovery
-        // copy until the exact canonical record has been deleted.
+        // A queued emergency save may have produced a successor while the
+        // transaction was committing. Preserve that copy and its marker.
+        if(writeEpoch!==activeSessionMutationEpoch)throw Object.assign(new Error('Active Session advanced during deletion.'),{code:'ACTIVE_SESSION_CHANGED'});
+        assertExpectedSessionRecovery(expected);
         localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
         if(!localCleared)staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
         if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('Active Session recovery cleanup failed.');

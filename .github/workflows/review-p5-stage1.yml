@@ -43,17 +43,23 @@ jobs:
         run: npm run test:release:types
       - name: Complete fast correctness suite
         run: npm run test:fast
-      - name: Authored syntax, dependencies and deployment contracts
-        run: |
-          npm run test:release:syntax
-          npm run test:release:dependencies
-          npm run test:release:deployment
+      - name: Authored syntax
+        if: ${{ !cancelled() }}
+        run: npm run test:release:syntax
+      - name: Dependency assurance
+        if: ${{ !cancelled() }}
+        run: npm run test:release:dependencies
       - name: Source build and generated verification
+        if: ${{ !cancelled() }}
         run: |
           npm run build
           npm run verify
           npm run test:release:generated-syntax
+      - name: Deployment contract
+        if: ${{ !cancelled() }}
+        run: npm run test:release:deployment
       - name: Minified deployment verification (no deployment)
+        if: ${{ !cancelled() }}
         run: |
           npm run stage:firebase:minified
           npm run test:release:minified
@@ -61,6 +67,15 @@ jobs:
     if: github.ref == 'refs/heads/ts-exp'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        file:
+          - tests/browser/app/session-draft-edit.mjs
+          - tests/browser/app/session-merge-timer.mjs
+          - tests/browser/backup/restore-session-safety.mjs
+          - tests/browser/backup/session-handoff-journeys.mjs
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -76,8 +91,6 @@ jobs:
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Isolated session transition and recovery journeys
-        run: |
-          for file in tests/browser/app/session-draft-edit.mjs tests/browser/app/session-merge-timer.mjs tests/browser/backup/restore-session-safety.mjs tests/browser/backup/session-handoff-journeys.mjs; do
-            echo "=== $file ==="
-            node "$file"
-          done
+        env:
+          TEST_FILE: ${{ matrix.file }}
+        run: node "$TEST_FILE"

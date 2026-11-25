@@ -75,7 +75,7 @@ export interface SessionApplyPorts{
   writePlanDraft(value:string):unknown;
   previewPlanDraft():unknown;
   setStudyDate(date:string,automatic:boolean):unknown;
-  applySessionSchedule(input:Readonly<{source:string;studyDate:string;reviewOnly:boolean;snapshot:SessionSnapshot;scheduleText:string}>):unknown;
+  applySessionSchedule(input:Readonly<{source:string;studyDate:string;reviewOnly:boolean;snapshot:SessionSnapshot;scheduleText:string;current:()=>boolean}>):unknown;
 }
 export interface SessionResetPorts{
   stopTimerPresentation():unknown;

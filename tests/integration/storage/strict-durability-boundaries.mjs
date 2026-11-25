@@ -197,6 +197,31 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   assert.equal(events.length,before,'former owner must not publish a canonical completion notification');
 }
 
+// Explicit absence is a real CAS precondition. A successor in canonical or
+// emergency storage cannot be removed or replaced by an older operation.
+{
+  const session={id:'active',version:1,revision:1,date:'2026-09-15',status:'active',scheduleText:'',snapshot:{date:'2026-09-15',elapsedMs:1},updatedAt:'2026-09-15T12:00:00.000Z'};
+  const authority={},owned=createHarness(new Map(),null,authority);
+  assert.equal((await owned.app.activeSession.save(session,{expectedCanonical:null})).ok,true);
+  const before=structuredClone(owned.stores.session.get('active'));
+  const stale=await owned.app.activeSession.save({...before,revision:2},{expectedCanonical:null,recoveryFallback:true});
+  assert.equal(stale.ok,false);assert.equal(stale.error?.code,'ACTIVE_SESSION_CHANGED');
+  assert.equal((await owned.app.activeSession.clear({expectedCanonical:null})).ok,false);
+  assert.deepEqual(owned.stores.session.get('active'),before);
+  assert.equal(owned.sharedLocal.has('deletionRecovery'),false);
+  let successorSave;
+  authority.onTransactionComplete=({stores,mode})=>{
+    if(mode!=='readwrite'||!stores.includes('session'))return;
+    delete authority.onTransactionComplete;
+    successorSave=owned.app.activeSession.save({...before,revision:3},{emergency:true});
+  };
+  const cleared=await owned.app.activeSession.clear({expectedCanonical:before});
+  assert.equal(cleared.ok,false,'a committed deletion must not acknowledge a superseded clear');
+  assert.equal(cleared.error?.code,'ACTIVE_SESSION_CHANGED');
+  assert.equal((await successorSave).ok,true);
+  assert.equal(owned.stores.session.get('active').revision,3);
+}
+
 const beforePlanDraftStrict=strictCount();
 await app.planData.writeDraft('temporary draft');
 assert.equal(strictCount(),beforePlanDraftStrict,'high-frequency Plan draft persistence must remain normal/default durability');

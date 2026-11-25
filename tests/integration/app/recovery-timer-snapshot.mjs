@@ -49,7 +49,7 @@ const controller=module.createController(input);
 fields.set('0:completion',75);fields.set('0:completionSource','manual');resolved.set(1,'skipped');
 const snap=controller.captureSnapshot();assert.equal(snap.taskState.a.completion,75);assert.equal(snap.taskState.b.resolvedState,'skipped');assert.equal(snap.taskState.a.actual.seconds,42);
 // Plan draft is independent of the canonical session schedule.
-const canonical=controller.payload(snap);planDraft='different draft';controller.applyStoredSession(canonical,canonical.snapshot,{lifecycleManaged:true});assert.equal(planDraft,'different draft');assert.equal(appliedText,canonical.scheduleText);
+const canonical=controller.payload(snap);planDraft='different draft';await controller.applyStoredSession(canonical,canonical.snapshot,{lifecycleManaged:true});assert.equal(planDraft,'different draft');assert.equal(appliedText,canonical.scheduleText);
 // Reload-style local recovery must reconstruct task state without replacing the independently edited Plan draft.
 fields.clear();resolved.clear();carry='';repoValue=structuredClone(canonical);planDraft='draft survives reload';
 assert.equal(controller.restoreLocalRecovery(),true);assert.equal(fields.get('0:completion'),75);assert.equal(resolved.get(1),'skipped');assert.equal(carry,'carry');assert.equal(planDraft,'draft survives reload');
@@ -107,6 +107,9 @@ for(const action of ['suspend','yield','finish','reset']){
   assert.equal(applyCount,beforeApply,action+' does not restore obsolete runtime');
   assert.equal(resetCount,beforeReset,action+' does not reset successor runtime');
   assert.equal(await controller.writeNow(),null,action+' blocks blind follow-up checkpoints');
+  lifeRevision++;
+  assert.equal(await controller.writeNow(),null,action+' unrelated lifecycle advance does not reauthorize obsolete runtime');
+  await controller.applyStoredSession(repoValue,repoValue.snapshot,{lifecycleManaged:true});
 }
 for(const action of ['suspend','finish']){
   repoValue=controller.payload(controller.captureSnapshot());const beforeApply=applyCount,beforeReset=resetCount;

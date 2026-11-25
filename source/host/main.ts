@@ -2612,7 +2612,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
     writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input instanceof HTMLTextAreaElement||input instanceof HTMLInputElement)input.value=value;},
     previewPlanDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
     setStudyDate:(date,automatic)=>{const dd=document.getElementById('day-date');if(dd instanceof HTMLInputElement){dd.value=date;dd.dataset['autoDate']=automatic?'1':'0';}},
-    applySessionSchedule:async input=>(await applySchedule({source:input.source,skipNotify:true,studyDate:input.studyDate,reviewOnly:input.reviewOnly,forceReload:true,sessionSnapshot:input.snapshot,lifecycleManaged:true,scheduleText:input.scheduleText,persistDraft:false}))!==false
+    applySessionSchedule:async input=>(await applySchedule({source:input.source,skipNotify:true,studyDate:input.studyDate,reviewOnly:input.reviewOnly,forceReload:true,sessionSnapshot:input.snapshot,lifecycleManaged:true,scheduleText:input.scheduleText,persistDraft:false,currentEditor:input.current}))!==false
   }),
   reset:Object.freeze<SessionHostInput['reset']>({
     stopTimerPresentation:()=>TimerPresentation.stop(),

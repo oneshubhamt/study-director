@@ -280,15 +280,18 @@ function refreshPlanAfterSessionReset(emptyMessage='',emptyTitle=''){
   void goTab('plan',{source:'session-reset'});
 }
 async function suspendTodaySession(){
+  const owner=ports.ownershipRevision(),life=ports.SessionLifecycle.revision;
+  const current=(advance=0)=>appCanMutate()&&ports.ownershipRevision()===owner&&ports.SessionLifecycle.revision===life+advance;
   const ok=await ports.Interactions.confirm({
     title:'Suspend today’s session?',
     message:'The live timer will stop and today’s session will no longer restore automatically.',
     details:['The live draft is kept; Restore Session can continue it without re-applying the schedule.','You can also open Review and save the suspended progress to Library. Saved Library Study Days and notes are unchanged.'],
     confirmLabel:'Suspend session',cancelLabel:'Keep session active'
   });
-  if(!ok||!appCanMutate())return false;
+  if(!ok||!current())return false;
   try{
     const session=await ports.ActiveSessionRuntime.suspendLocal();
+    if(!current(1))return false;
     setSessionPanelMode('suspended',session);
     refreshPlanAfterSessionReset();
     setTimerMode(TIMER_MODES.SUSPENDED,'session-suspend');
@@ -299,7 +302,7 @@ async function suspendTodaySession(){
     notifyBackupChange({urgent:true,reason:'session-suspend'});
     return true;
   }catch(e){
-    setPlanStatus('Could not suspend today’s session: '+(errorMessage(e)),false);
+    if(current()||current(1))setPlanStatus('Could not suspend today’s session: '+(errorMessage(e)),false);
     return false;
   }
 }
@@ -438,15 +441,15 @@ async function restoreSuspendedTodaySession():Promise<boolean>{
 async function finishTodaySession(){
   if(!appCanMutate())return false;
   if(!TASKS.some(isTrackableBlock)){setPlanStatus('No active study plan is available to finish.',false);return false;}
+  const owner=ports.ownershipRevision(),life=ports.SessionLifecycle.revision;
+  const current=(advance=0)=>appCanMutate()&&ports.ownershipRevision()===owner&&ports.SessionLifecycle.revision===life+advance;
   const accepted=await ports.Interactions.confirm({
     title:'Finish today and open Review?',
     message:'The live timer will stop and your current progress will be kept for Review.',
     details:['The current block is recorded as partial if it is still running.','Untouched future blocks remain unattempted; they are not marked skipped.','Nothing is added to Library until you choose Save Today to Library in Review.'],
     confirmLabel:'Finish today',cancelLabel:'Keep studying'
   });
-  if(!accepted||!appCanMutate())return false;
-  const owner=ports.ownershipRevision(),life=ports.SessionLifecycle.revision;
-  const current=()=>appCanMutate()&&ports.ownershipRevision()===owner&&ports.SessionLifecycle.revision===life+1;
+  if(!accepted||!current())return false;
   let completionNotice:ReturnType<typeof ports.NoticeCoordinator.begin>|null=null;
   try{
     await ports.ActiveSessionRuntime.finishLocal(()=>{
@@ -467,10 +470,10 @@ async function finishTodaySession(){
     resetBreakState();
     refreshCoreUi();
     });
-    if(!current())return false;
+    if(!current(1))return false;
     setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
-    if(!current())return false;
+    if(!current(1))return false;
     ports.ReviewView.refresh({force:true});
     const notice=completionNotice as ReturnType<typeof ports.NoticeCoordinator.begin>|null;
     notice?.update({lifecycle:'succeeded',cue:'day-complete',occurrence:notice.operationId});
@@ -479,29 +482,32 @@ async function finishTodaySession(){
   }catch(error){
     const notice=completionNotice as ReturnType<typeof ports.NoticeCoordinator.begin>|null;
     notice?.update({lifecycle:'cancelled'});
-    if(!current())return false;
+    if(!current()&&!current(1))return false;
     refreshCoreUi();
     setPlanStatus('Could not finish today safely: '+errorMessage(error),false);
     return false;
   }
 }
 async function resetTodaySession(){
+  const owner=ports.ownershipRevision(),life=ports.SessionLifecycle.revision;
+  const current=(advance=0)=>appCanMutate()&&ports.ownershipRevision()===owner&&ports.SessionLifecycle.revision===life+advance;
   const ok=await ports.Interactions.confirm({
     title:'Reset today’s active session?',danger:true,
     message:'This clears today’s loaded Plan progress and live recovery state.',
     details:['Timer audit, skips, completion marks and the live draft will be removed.','Saved Library Study Days and notes are unchanged.'],
     confirmLabel:'Reset today',cancelLabel:'Keep current session'
   });
-  if(!ok||!appCanMutate())return false;
+  if(!ok||!current())return false;
   try{
     await ports.ActiveSessionRuntime.resetLocal();
+    if(!current(1))return false;
     setSessionPanelMode('none');
     refreshPlanAfterSessionReset();
     setPlanStatus('Today’s active session was reset. Paste, edit, or apply a schedule when ready.');
     ports.Interactions.notify({source:'session',kind:'success',key:'session-reset',title:'Today reset',message:'The active session was cleared; saved days and notes were kept.'});
     return true;
   }catch(e){
-    setPlanStatus('Could not reset today’s session: '+(errorMessage(e)),false);
+    if(current()||current(1))setPlanStatus('Could not reset today’s session: '+(errorMessage(e)),false);
     return false;
   }
 }

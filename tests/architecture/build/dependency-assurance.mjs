@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import releaseConfig from '../../../release.config.mjs';
-import {buildLeanRichText} from '../../../build/wordgard-bundle.mjs';
+import {buildLeanRichText} from '../../../build/runtime-bundle.mjs';
 import {DEPENDENCY_AUDIT_POLICY,DEPENDENCY_INVENTORY,VENDORED_DEPENDENCIES} from '../../../contracts/dependency-inventory.mjs';
 
 const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));
