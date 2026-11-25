@@ -21,7 +21,15 @@
 <link rel="preload" as="script" href="@@SD_RICH_TEXT_FILENAME@@">
 <title>STUDY DIRECTOR · sd@@SD_RELEASE_ID@@</title>
 <script>
+// Build-selected capabilities, composed once before any platform-specific work.
+const RUNTIME_PLATFORM='@@SD_RUNTIME_PLATFORM@@';
+const PlatformRuntime=(()=>{
+  if(RUNTIME_PLATFORM!=='web'&&RUNTIME_PLATFORM!=='tauri')throw new Error('Unknown Study Director runtime platform.');
+  const web=RUNTIME_PLATFORM==='web';
+  return Object.freeze({kind:RUNTIME_PLATFORM,pwaUpdates:web,webDrive:web,browserDeviceFolder:web,browserNotifications:web,browserPdfWindow:web});
+})();
 (()=>{
+  if(!PlatformRuntime.pwaUpdates)return;
   const key=Symbol.for('studyDirector.installCapture.v1');
   if(window[key])return;
   let prompt=null,installed=false;
@@ -1557,9 +1565,6 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 // shell/public plugins -> DOM/startup. Private modules never resolve one another.
 /* CONFIG AND DATA CONTRACT */
 const APP_VERSION='@@SD_RELEASE@@';
-// Build-selected capabilities, composed once; never infer native authority from a user agent.
-const RUNTIME_PLATFORM='@@SD_RUNTIME_PLATFORM@@';
-const PlatformRuntime=Object.freeze({kind:RUNTIME_PLATFORM==='tauri'?'tauri':'web',pwaUpdates:RUNTIME_PLATFORM!=='tauri',webDrive:RUNTIME_PLATFORM!=='tauri'});
 const INTERNAL_MODULES=window[Symbol.for('studyDirector.internalModules.v1')];
 if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-registry'||INTERNAL_MODULES.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
@@ -2166,7 +2171,7 @@ async function showBackupPresentation(source,kind){
 async function openBackupRestore(){
   return showBackupPresentation('restore',DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive')?'history':'status');
 }
-function backupRestoreChoices(){return DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
+function backupRestoreChoices(){return !PlatformRuntime.webDrive?'a backup file':DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
 function renderNotificationSurfaces(state){
   const latest=new Map();
   for(const event of state.events)if(event.surfaceId&&(!latest.has(event.surfaceId)||event.surfaceRevision>latest.get(event.surfaceId).surfaceRevision))latest.set(event.surfaceId,event);
@@ -2209,7 +2214,7 @@ if(!Object.isFrozen(WorkspaceOverlay)||WorkspaceOverlay.format!=='study-director
   throw new Error('Study Director workspace overlay controller is unavailable or incompatible.');
 }
 const RichTextWorkspaceOverlay=Object.freeze({open:options=>WorkspaceOverlay.open(options)});
-function prefersNativePdfNavigation(){return !!(window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches);}
+function prefersNativePdfNavigation(){return PlatformRuntime.browserPdfWindow&&!!(window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches);}
 function prepareNativePdfWindow(){
   if(!prefersNativePdfNavigation())return null;
   try{const opened=window.open('about:blank','_blank');if(opened)opened.opener=null;return opened||null;}catch{return null;}
@@ -2306,7 +2311,7 @@ function openPdfWorkspace(row,file,reservedWindow=null,releaseReader=()=>{},repl
 }
 const SystemNotifications=(()=>{
   let installed=false;
-  function supported(){return 'Notification' in window&&!!window.Notification;}
+  function supported(){return PlatformRuntime.browserNotifications&&'Notification' in window&&!!window.Notification;}
   function permission(){return supported()?String(Notification.permission||'default'):'unsupported';}
   function preference(){return AppData.local.getJson(STORAGE_KEYS.systemAlerts,false)===true;}
   function enabled(){return preference()&&permission()==='granted';}
@@ -2321,7 +2326,7 @@ const SystemNotifications=(()=>{
     }
     if(note){
       note.textContent=!state.supported
-        ? 'This browser does not support system notifications. In-app cues and sounds still work.'
+        ? (PlatformRuntime.browserNotifications?'This browser does not support system notifications. In-app cues and sounds still work.':'Native system notifications are not available in this experimental build. In-app cues and sounds still work.')
         : state.permission==='denied'
         ? 'Blocked in browser settings. Allow notifications for this site, then return to Study Director.'
         : state.enabled
@@ -3377,7 +3382,14 @@ function toggleBackupSettings(kind){
 // Google Drive's row, drawn from the engine's status like the Device Folder row.
 // Before the Drive integration registers, the row keeps its static "Not connected".
 function renderDriveBackup(){
-  const state=BackupProviderRuntime.locationStatus('google-drive');if(!state)return;
+  const state=BackupProviderRuntime.locationStatus('google-drive');
+  if(!state){
+    if(!PlatformRuntime.webDrive){
+      const status=document.getElementById('backup-provider-row-status-google-drive');if(status)status.textContent='Unavailable';
+      const button=document.getElementById('connect-drive-backup');if(button){button.hidden=true;button.disabled=true;}
+    }
+    return;
+  }
   const node=id=>document.getElementById(id),status=node('backup-provider-row-status-google-drive'),connect=node('connect-drive-backup'),cancel=node('cancel-drive-backup'),settings=node('drive-backup-settings'),panel=node('drive-backup-settings-panel'),last=node('drive-backup-settings-last'),disconnect=node('disconnect-drive-backup');
   const connected=state.connected,working=state.busy||state.backingUp;
   if(status){status.textContent=BackupPresentation.locationLabel('google-drive',state);status.classList.toggle('protected',connected&&!working);status.classList.toggle('standard',!connected||working);}
@@ -3448,7 +3460,7 @@ function renderDeviceBackup(state){
   if(settingsLast)settingsLast.textContent=last?`Last backup ${last}`:'No backup yet';
   if(disconnect){disconnect.hidden=!connected;disconnect.disabled=operationBusy;}
   if(note){
-    const fallback=state.mode==='unsupported'?'Automatic folder backup is unavailable in this browser. Portable and Google Drive backups still work.':
+    const fallback=state.mode==='unsupported'?(PlatformRuntime.browserDeviceFolder?'Automatic folder backup is unavailable in this browser. Portable and Google Drive backups still work.':'Native automatic folder backup is not available yet. Export a portable backup for safekeeping.'):
       connected?(state.pending?'Changes wait for the next automatic backup.':'Your automatic backup is up to date.') : '';
     // Messages and progress show in the row's inline note; this note only says how the folder is doing.
     const message=state.hasNote?'':fallback;
@@ -6936,9 +6948,9 @@ function renderProfilePanel(){
   // Sync state is the Sync & backups section's; the subtitle names the account.
   const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
-  if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
+  if(driveValue)driveValue.textContent=!PlatformRuntime.webDrive?'Unavailable in this build':drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
   // Signed in, Disconnect is the quieter button beside Sync now.
-  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.classList.toggle('profile-act-muted',!!drive?.connected);driveAction.disabled=!!drive?.engineBusy;}
+  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.classList.toggle('profile-act-muted',!!drive?.connected);driveAction.disabled=!PlatformRuntime.webDrive||!!drive?.engineBusy;}
   const passwordValue=document.getElementById('profile-password-value'),passwordAction=document.getElementById('profile-password-action');
   if(passwordValue)passwordValue.textContent=protection.enabled?(protection.unlocked?'On':'On · Not entered on this device yet'):'Off';
   if(passwordAction)passwordAction.textContent=protection.enabled?(protection.unlocked?'Change…':'Enter…'):'Set…';
@@ -7226,11 +7238,11 @@ const FirstStart=(()=>{
     const mine=Profiles.current(),adding=!!(mine&&mine.from!==null);
     node('first-start-eyebrow').textContent=adding?'New profile':'Welcome';
     node('first-start-title').textContent=adding?'Add a profile':'Personalise Study Director';
-    node('first-start-note').textContent=adding?'A profile has its own notes, days, plans and backups on this device. Add a password to encrypt its backups, and Google Drive to sync it across devices.':'Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.';
+    node('first-start-note').textContent=!PlatformRuntime.webDrive?'Your notes, days and plans stay on this device. Add a password to encrypt portable backups.':adding?'A profile has its own notes, days, plans and backups on this device. Add a password to encrypt its backups, and Google Drive to sync it across devices.':'Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.';
     node('first-start-skip').textContent=adding?'Cancel':'Skip';
     const drive=BackupProviderRuntime.locationStatus('google-drive'),button=node('first-start-drive'),note=node('first-start-drive-note');
-    if(button){button.textContent=drive?.connected?'Google Drive connected':'Connect Google Drive';button.disabled=!!drive?.connected||!!drive?.engineBusy;button.classList.toggle('connected',!!drive?.connected);}
-    if(note)note.textContent=drive?.connected?(joined?'Your library is coming to this device.':Profiles.current()?.email||'Synced through your Google account.'):'Keeps your devices in sync. You can connect later.';
+    if(button){button.textContent=drive?.connected?'Google Drive connected':'Connect Google Drive';button.disabled=!PlatformRuntime.webDrive||!!drive?.connected||!!drive?.engineBusy;button.classList.toggle('connected',!!drive?.connected);}
+    if(note)note.textContent=!PlatformRuntime.webDrive?'Native Google Drive connection is not available yet.':drive?.connected?(joined?'Your library is coming to this device.':Profiles.current()?.email||'Synced through your Google account.'):'Keeps your devices in sync. You can connect later.';
   }
   function open(){
     const dialog=node('first-start-dialog');if(!dialog||dialog.open)return false;
@@ -7240,6 +7252,7 @@ const FirstStart=(()=>{
   }
   function close(){const dialog=node('first-start-dialog');if(dialog?.open)dialog.close();}
   async function connect(){
+    if(!PlatformRuntime.webDrive)return connectDriveForProfile();
     error('');if(!await applyPassword())return false;
     // The id follows the name until a Drive library knows it.
     const raw=String(node('first-start-name')?.value||'').trim();if(raw)Profiles.rename(raw);
@@ -10211,6 +10224,7 @@ function renderUnsupportedData(){
 }
 // Update app: look for the newer version; say so when there is none yet.
 async function checkUnsupportedUpdate(){
+  if(!PlatformRuntime.pwaUpdates){Interactions.notify({source:'unsupported-data',key:'native-update-unavailable',title:'Native update checks unavailable',message:'This experimental build cannot check for native updates yet. Data from other versions remains held.'});return false;}
   try{
     await PwaLifecycle.checkForUpdate();
     if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
@@ -10999,7 +11013,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   engine:Object.freeze({backup:id=>BackupProviderRuntime.backup(id),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),disconnect:id=>BackupProviderRuntime.disconnect(id),forget:id=>BackupProviderRuntime.forget(id),locationStatus:id=>BackupProviderRuntime.locationStatus(id),register:config=>BackupProviderRuntime.register(config),subscribeStatus:listener=>BackupProviderRuntime.subscribeStatus(listener)}),
   environment:Object.freeze({
     backgroundBlocker:()=>backgroundBlocker(),canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
-    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):null,
+    showDirectoryPicker:PlatformRuntime.browserDeviceFolder&&typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):null,
     withLock:work=>navigator.locks?.request?navigator.locks.request(ProfileScope.scoped('study-director-device-folder-prepare'),{mode:'exclusive'},()=>work()):Promise.resolve().then(work)
   }),
   hooks:Object.freeze({

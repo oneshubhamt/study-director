@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import vm from 'node:vm';
 import {captureProcess} from '../../helpers/subprocess.mjs';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 
@@ -22,6 +23,37 @@ assert.equal(build.native.has('firebase-hosting-headers.merge.json'),false);
 assert.equal(build.native.has(build.externalNames.development.get('drive')),false);
 assert.ok(![...build.native.values()].some(value=>typeof value==='string'&&value.includes('const GOOGLE_OAUTH_CLIENT_ID=')),'native assets must not contain the web OAuth provider');
 assert.notEqual(build.nativeAssetId,build.pwa.development.assetId);
+// Execute the actual early platform composition and install capture, not a
+// copy of the policy. A malformed target must never fall back to web.
+const platformScript=html=>[...html.matchAll(/<script>([\s\S]*?)<\/script>/gu)].find(match=>match[1].includes('const RUNTIME_PLATFORM='))[1];
+function platformWitness(script){
+  const events=[],window={addEventListener:name=>events.push(name)};
+  const capabilities=vm.runInNewContext(script+'\nPlatformRuntime;', {window});
+  return {capabilities,events,installCapture:!!window[Symbol.for('studyDirector.installCapture.v1')]};
+}
+for(const [html,kind,web] of [[nativeIndex,'tauri',false],[build.development.get(build.identity.main),'web',true],[build.deployment.get(build.identity.main),'web',true]]){
+  const {capabilities,events,installCapture}=platformWitness(platformScript(html));
+  assert.equal(capabilities.kind,kind);
+  assert.equal(Object.isFrozen(capabilities),true);
+  for(const key of ['pwaUpdates','webDrive','browserDeviceFolder','browserNotifications','browserPdfWindow'])assert.equal(capabilities[key],web,key);
+  assert.deepEqual(events,web?['beforeinstallprompt','appinstalled']:[]);
+  assert.equal(installCapture,web);
+}
+assert.throws(()=>platformWitness(platformScript(nativeIndex).replace("RUNTIME_PLATFORM='tauri'","RUNTIME_PLATFORM='invalid'")),/Unknown Study Director runtime platform/);
+assert.match(nativeIndex,/showDirectoryPicker:PlatformRuntime\.browserDeviceFolder&&typeof window\.showDirectoryPicker/);
+assert.match(nativeIndex,/function supported\(\)\{return PlatformRuntime\.browserNotifications&&'Notification' in window/);
+const platform=platformWitness(platformScript(nativeIndex)).capabilities;
+const firstStartConnect=nativeIndex.slice(nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.webDrive)"),nativeIndex.indexOf("  async function finish(){",nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.webDrive)")));
+assert.ok(firstStartConnect.includes('applyPassword()'),'witness must cover the actual first-start action');
+let calls=0;
+const result=await vm.runInNewContext(firstStartConnect+'\nconnect();',{PlatformRuntime:platform,connectDriveForProfile:()=>{calls++;return false;}});
+assert.equal(result,false);assert.equal(calls,1,'native unavailable action must return before changing name or password');
+const restoreChoices=nativeIndex.match(/function backupRestoreChoices\(\)\{[^\n]+\}/u)[0];
+assert.equal(vm.runInNewContext(restoreChoices+'\nbackupRestoreChoices();',{PlatformRuntime:platform}),'a backup file');
+// Parse every staged native inline script; the web generated-syntax suite
+// does not exercise the native target.
+for(const match of nativeIndex.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/giu))new vm.Script(match[1]);
+
 const tauri=JSON.parse(read('src-tauri/tauri.conf.json'));
 assert.equal(tauri.identifier,'app.studydirector.taurispike');
 assert.equal(tauri.build.frontendDist,'../dist/tauri');
