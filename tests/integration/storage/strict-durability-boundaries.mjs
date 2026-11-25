@@ -247,7 +247,7 @@ const beforeLease=strictCount();
 await app.mutationLease.acquire(Object.freeze({id:'mutation_durability-boundary-0001',owner:'tab_durability-boundary-owner-0001',kind:'restore',expiresAt:clock.now()+60_000}));
 assert.ok(strictCount()>beforeLease,'durable mutation-lease acquisition must use strict durability');
 const beforeLeaseRelease=strictCount();
-await app.mutationLease.release('mutation_durability-boundary-0001');
+assert.equal(await app.mutationLease.release('mutation_durability-boundary-0001','tab_durability-boundary-owner-0001'),true,'normal lease release must actually remove the original lease');
 assert.equal(strictCount(),beforeLeaseRelease,'mutation-lease release may remain normal because a stale lease expires fail-safe');
 
 const libraryClearId='libraryclear_durability-boundary-0001';

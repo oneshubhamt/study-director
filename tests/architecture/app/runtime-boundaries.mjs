@@ -224,7 +224,10 @@ assert.match(libraryClear,/revision:data\.activeSession\.nextRevision\(\),update
 assert.match(host,/MutationCoordinatorModule\.createCoordinator\(Object\.freeze\s*\(\{[\s\S]*now:DecisionClock\.nowMs/u,'the extracted mutation coordinator receives the shared DecisionClock as its lease-decision clock');
 assert.match(mutation,/const nowMs=\(\)=>\{const value=Number\(input\.environment\.now\(\)\)/u,'mutation lease decisions use the injected decision clock');
 assert.match(mutation,/Number\(value\.expiresAt\)>nowMs\(\)/,'foreign mutation-lease expiry uses the injected decision clock');
-assert.equal((mutation.match(/nowMs\(\)\+LEASE_MS/g)||[]).length,3,'local and durable lease acquisition/refresh expiry use the injected decision clock');
+assert.match(mutation,/const expiresAt=nowMs\(\)\+LEASE_MS;[\s\S]*?input\.durable\.acquire\(\{kind:state\.kind,id:state\.id,owner:state\.owner,expiresAt/u,'one injected-clock expiry is proposed to durable acquisition and renewal');
+assert.match(mutation,/value=\{version:1,tabId,pageId,claimId,kind:state\.kind,id:state\.id,expiresAt:state\.expiresAt\}/u,'local mirror uses the acknowledged durable expiry, not a later fresh TTL');
+assert.match(mutation,/state\.expiresAt=proof\.expiresAt;writeLease\(state\)/u,'initial acquisition mirrors the durable proof');
+assert.match(mutation,/async function refreshAuthority[\s\S]*?state\.expiresAt=proof\.expiresAt;[\s\S]*?writeLease\(state\)/u,'renewal mirrors the renewed durable proof');
 assert.match(mutation,/Number\(result\.holder&&result\.holder\.expiresAt\)-nowMs\(\)\+50/,'recovery lease wait uses the injected decision clock');
 assert.match(mutation,/const id=`mutation_\$\{nowMs\(\)\.toString\(36\)\}_/,'mutation identifiers use the same injected decision clock');
 assert.match(mutation,/startedAt:new Date\(\)\.toISOString\(\)/,'human/audit mutation start time remains informational wall clock');

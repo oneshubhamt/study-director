@@ -53,7 +53,28 @@ try{
       const recovered=await open();await waitFor(()=>recovered.evaluate('__PWA6.AppOwnership.canMutate()'),{label:kind+' recovered primary'});
       const proof=await recovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal;return {journal:await journal.read(),note:(await data.notes.readFreshPayload())[${JSON.stringify(original.key)}]?.text,owner:d.AppOwnership.canMutate()};})()`);
       assert.deepEqual(proof,{journal:null,note:'original journal recovery note',owner:true},kind+' fresh startup must verify the preimage and retire the journal');
-      results.push({kind,denied:true,journalRetained:true,recovered:true});await browser.closePage(recovered);
+      // Real host composition: keep an authority past retirement, then lose
+      // AppOwnership during a second mutation. No fake storage or lease port.
+      if(kind==='library-clear'){
+        const witness=await recovered.evaluate(`(async()=>{
+          const d=__PWA6,c=d.AppMutationCoordinator;let old,retired=false,borrowed=false,rollbackDenied=false,aborted=false,operationRejected=false;
+          const code=error=>error?.code==='STUDY_DIRECTOR_MUTATION_AUTHORITY_LOST';
+          await c.runExclusive('clear-library',authority=>{old=authority;authority.assert();});
+          try{old.assert();}catch(error){retired=code(error);}
+          try{await c.runExclusive('clear-library',authority=>{
+            try{old.assert({allowDurableProtected:true});}catch(error){borrowed=code(error);}
+            authority.assert();
+            d.AppOwnership.release();d.AppOwnership.setPrimary(false);
+            try{authority.assert({allowDurableProtected:true});}catch(error){rollbackDenied=code(error);}
+            aborted=authority.signal.aborted;
+          });}catch(error){operationRejected=code(error);}
+          const request={id:'mutation_takeover_probe_12345',owner:'tab_takeover_probe_owner',kind:'restore',expiresAt:Date.now()+60000},lease=await d.AppData.mutationLease.acquire(request);
+          const released=lease.acquired&&await d.AppData.mutationLease.release(request.id,request.owner);
+          return {retired,borrowed,rollbackDenied,aborted,operationRejected,released,active:c.status().active,fault:!!c.status().recoveryFault};
+        })()`);
+        assert.deepEqual(witness,{retired:true,borrowed:true,rollbackDenied:true,aborted:true,operationRejected:true,released:true,active:'',fault:true},'real host must retire old authorities, reject rollback after ownership loss and release the original durable lease');
+      }
+      results.push({kind,denied:true,journalRetained:true,recovered:true,mutationLifetime:kind==='library-clear'});await browser.closePage(recovered);
     }finally{await browser.close();}
   }
   console.log(JSON.stringify({status:'PASS',suite:'recovery-takeover',results}));
