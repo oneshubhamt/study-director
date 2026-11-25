@@ -19,6 +19,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
   ]),
   feature:Object.freeze([
     test('library-selection','tests/browser/library/library-selection.mjs',['library','selection']),
+    test('note-picker-authority','tests/browser/library/note-picker-authority.mjs',['library','notes','ownership','lifecycle']),
     test('app-sounds','tests/browser/ui/app-sounds.mjs',['sound','audio','notifications']),
     test('complete-encrypted-library','tests/browser/backup/complete-library.mjs',['encryption','attachments','opfs','recovery','trusted-types','pwa']),
     test('backup-encryption','tests/browser/backup/encryption.mjs',['encryption','password','files','cancellation','recovery','worker'],0,{alone:'Not yet diagnosed: under concurrent load the password dialog did not open in time.'}),

@@ -728,14 +728,14 @@ const repository=(()=>{
   // Settlement can await storage. A later ownership claim is not authority
   // for the original operation, nor is a newly changed note its original target.
   const currentOwner=(owner:number)=>appCanMutate()&&hooks.ownershipRevision()===owner;
-  function assertNoteOperation(owner:number,key:string,expected:string){
+  function assertNoteOperation(owner:number,key:string,expected:string,operation='the pending operation'){
     if(!currentOwner(owner))throw new Error('Note operation was superseded by an ownership change.');
-    if(!notes[key]||revision(notes[key])!==expected)throw new Error('The note changed while waiting for storage; its successor was preserved.');
+    if(!notes[key]||revision(notes[key])!==expected)throw new Error(`The note changed before ${operation}; its successor was preserved.`);
   }
   async function removeKey(key:string,options:Readonly<{expectedRevision?:string}>={}){
     if(!appCanMutate()||!key||!notes[key])return false;
     const owner=hooks.ownershipRevision(),expected=options.expectedRevision??revision(notes[key]);
-    await settle([key]);assertNoteOperation(owner,key,expected);
+    await settle([key]);assertNoteOperation(owner,key,expected,'deletion');
     const current=notes[key]!;
     dropNote(key);touchSnapshot();markDirty(key,revision(current));
     await settle([key]);return currentOwner(owner)&&!notes[key];
