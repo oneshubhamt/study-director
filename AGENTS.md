@@ -10,6 +10,12 @@ Use one coherent, end-to-end outcome per bounded pass, including owned callers a
 
 After P5.13, reconcile all Phase 5 objectives and leave a concise audit handoff in the execution record: baseline and final commit, intentional behavior changes, verification and unresolved limits. Pause before Phase 6 for the owner's independent-audit request. `VERIFIED — TARGETED` means implementor verification, not independent audit or full certification.
 
+## Executor judgment across phases
+
+Start with the user outcome, the failure that would invalidate it and the evidence that can distinguish success from failure. Preserve explicit owner decisions, data integrity, strictness, approved budgets and phase exit criteria. Within the authorized pass the executor chooses file boundaries, order of independent tasks, test layer, fixtures and tooling. Fold related checks together, split work around a genuine dependency, or substitute stronger evidence when this improves fidelity or cost. Respect an explicit instruction to stop after one pass.
+
+Use the least expensive check that can actually expose the failure. A hand-calculated timeline can verify timer arithmetic. A restart is needed to verify recovery across a restart. One end-to-end run may support several objectives when each has a distinct observable result. Reuse evidence with its SHA, inputs and applicability. Record a consequential adaptation and its effect in the existing execution record. Routine implementation choices need no new approval. Bring material changes to product behavior, accepted risk, scope or release criteria to the owner with the competing outcomes.
+
 ## Priorities and boundaries
 
 1. **Complete strict TypeScript conversion**, including callers and host wiring. Code must be clear, lean, efficient and reliable. Prefer simple explicit designs; no renamed-only implementations, permissive facades, casual `any`, blanket casts/suppressions or weakened gates.

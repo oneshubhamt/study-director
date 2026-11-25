@@ -2,6 +2,8 @@
 
 **Planned. Start after REVIEW-P5 closes.** Convert remaining first-party tooling and tests and improve the tests as each owner is converted. The actual Phase 5 exit SHA is the baseline. Full application and device certification follows in Phase 7. F33 product behavior, deployed-data compatibility and SDVC1 are Phase 8 work.
 
+Choose the test layer and grouping by the failure each case must expose. One provider integration case may replace several text checks when it demonstrates every protected behavior. Preserve an isolated browser case when shared setup could mask the failure. Apply the [shared executor guidance](../../AGENTS.md#executor-judgment-across-phases) throughout.
+
 ## Intake and design review
 
 F33's backlog says steps 1–3 shipped and step 4 paused at 4a. Its detailed plan also marks historical-format test retirement (C3) complete in F30 and Insights timing work (D7) done. These are statements about F33. On the planning TS head `f415f0a9`, the generated-case helper, timer and retention tests, coverage floors, mutation runner and browser isolation registry already exist. The push workflow still selects targeted tests. F33's description of a whole-fast-suite push workflow cannot establish TS coverage. [F33 backlog](https://github.com/oneshubhamt/study-director/blob/d69f2053/docs/backlog.md#test-suite-programme-approved-by-the-owner-on-2026-11-02) · [Original objectives, ground rules and step 4 register](https://github.com/oneshubhamt/study-director/blob/d69f2053/docs/test-programme.md)

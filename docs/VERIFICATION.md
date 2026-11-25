@@ -53,6 +53,8 @@ Before full-app browser QA, rebuild the current source and verify the generated 
 
 ## Final certification
 
+The [Phase 7 executor handoff](typescript/PHASE-7.md) applies these gates to the completed typed application and preserves its reference build for Phase 8.
+
 `npm run qa:promotion` runs the repository's complete promotion chain. `npm run test:release` is the non-browser release chain; browser tiers and built-runtime coverage are separate documented commands. Source reconciliation across the whole application remains required in Phase 7 alongside those automated gates, including behavior not adequately covered by prior fixtures.
 
 The push/PR [Repository checks workflow](../.github/workflows/qa-fast.yml) installs dependencies, runs strict compiler/lint, selected safety/governance tests and build/generated checks. [Promotion QA](../.github/workflows/qa-promotion.yml) is manually dispatched and adds full correctness, risk/branch coverage, mutations and release checks; its complete browser run is selected separately by input. Neither workflow deploys. These descriptions come from workflow source, not a claim about a particular CI run.
