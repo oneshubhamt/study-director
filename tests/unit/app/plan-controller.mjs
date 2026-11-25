@@ -52,7 +52,7 @@ const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
 let breakActive=false,breakEnds=0;
-let blockedWrite=null,canonicalDraft=null;const saveOptions=[];
+let blockedWrite=null,canonicalDraft=null,canWrite=true;const saveOptions=[];
 const feedback=[],draftResults=[];
 const timers=new Map();let nextTimer=0;
 const scheduleTimer=(callback,ms)=>{const id=++nextTimer;timers.set(id,{callback,ms});return id;};
@@ -130,7 +130,7 @@ const ports=Object.freeze({
     updateRealTimeAwareness:viewFunctions.updateRealTimeAwareness,
     window:{matchMedia:()=>({matches:false})}}),
   scheduleGateway:mk(Object.keys(gateway),gateway),
-  ownership:Object.freeze({canMutate:()=>true,requirePrimary:()=>true}),
+  ownership:Object.freeze({canMutate:()=>canWrite,requirePrimary:()=>canWrite}),
   interactions:Object.freeze({
     confirm:()=>{confirmRequested=true;return confirmGate||Promise.resolve(true);},
     input:async()=>({value:'Plan'})
@@ -520,10 +520,41 @@ assert.equal(await plan.draft.clear(),true);
 assert.equal(ids['plan-input'].value,'');assert.equal(canonicalDraft,'');
 assert.equal(saveOptions.at(-1).strictDurability,true);
 
+// Clear must keep the same revision/field/ownership fence as Load.
+// A same-text Composer edit is still a newer operation, on either outcome.
+for(const failed of [true,false]){
+  ids['plan-input'].value='Before delayed clear';canonicalDraft='Before delayed clear';
+  plan.draft.preview({silent:true,enterDraft:true});
+  blockedWrite=new Promise(resolve=>{releaseTemplate=resolve;});
+  const clearing=plan.draft.clear();
+  assert.equal(ids['plan-input'].value,'');
+  plan.draft.composerInput();
+  const beforeClearFeedback=feedback.length;
+  writeFailure=failed;releaseTemplate();blockedWrite=null;
+  assert.equal(await clearing,false,'a superseded Clear cannot complete the newer editor action');
+  assert.equal(ids['plan-input'].value,'','failed Clear must not restore older text over the newer empty draft');
+  assert.equal(feedback.length,beforeClearFeedback,'stale Clear must not publish completion or failure feedback');
+  assert.equal(draftResults.at(-1).ok,!failed,'storage outcome still reaches diagnostics');
+  assert.equal(canonicalDraft,failed?'Before delayed clear':'','only the acknowledged original write reaches storage');
+  writeFailure=false;await plan.draft.flush();
+  assert.equal(canonicalDraft,'','the newer empty draft still saves normally');
+}
+ids['plan-input'].value='Before ownership loss';canonicalDraft='Before ownership loss';
+plan.draft.preview({silent:true,enterDraft:true});
+blockedWrite=new Promise(resolve=>{releaseTemplate=resolve;});
+const lostClear=plan.draft.clear();
+const beforeLostFeedback=feedback.length;
+canWrite=false;writeFailure=true;releaseTemplate();blockedWrite=null;
+assert.equal(await lostClear,false);
+assert.equal(ids['plan-input'].value,'','a Clear that loses write ownership cannot restore the old field value');
+assert.equal(canonicalDraft,'Before ownership loss');
+assert.equal(feedback.length,beforeLostFeedback,'a former owner cannot publish stale Clear feedback');
+canWrite=true;writeFailure=false;
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership']}));

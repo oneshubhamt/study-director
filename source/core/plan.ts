@@ -1099,13 +1099,17 @@ const PlanDraftEditor=(()=>{
   }
   async function clear(){
     if(!ownership.requirePrimary(null,'clear the plan draft'))return false;
-    const previous=getPlanDraftText();
+    const input=fieldById('plan-input','textarea');
+    if(!input)return false;
+    const previous=input.value;
     clearTimer('save');clearTimer('preview');clearDragState();
-    editEpoch++;const input=fieldById('plan-input','textarea');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
+    const revision=++editEpoch;
+    input.value='';lastParsed=[];draftMode=true;renderSched();
     const ok=await save({strictDurability:true});
-    if(ok&&input?.value===''){setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return true;}
-    if(!ok&&input&&input.value===''){input.value=previous;preview({silent:true});}
-    return ok;
+    if(revision!==editEpoch||fieldById('plan-input','textarea')!==input||input.value!==''||!ownership.canMutate())return false;
+    if(ok){setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return true;}
+    input.value=previous;preview({silent:true});
+    return false;
   }
   function reset(){
     deactivate();
