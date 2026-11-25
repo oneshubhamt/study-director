@@ -1708,7 +1708,7 @@ const createModule=(input:ProviderModuleInput)=>{
     const foreground=beginForeground(selected);if(!foreground)return freeze({removed:false,reason:'busy'});busy=true;
     try{
       await foreground.settled;if(selected.prepare)await selected.prepare();await authorize(selected,'remove-version');
-      return await runExclusive('remove backup version',()=>removeProviderVersionUnderAuthority(selected,checkpointId,{signal:foreground.signal}));
+      return await runExclusive('remove-backup-version',()=>removeProviderVersionUnderAuthority(selected,checkpointId,{signal:foreground.signal}));
     }catch(error){await providerMaintenanceScheduler(selected)?.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'});throw error;}
     finally{await release(selected,'remove-version');busy=false;foreground.release();}
   }
