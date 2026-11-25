@@ -54,7 +54,7 @@ assert.match(repositories,/const Meta=input\.appMeta/,'AppData must consume owne
 assert.match(journals,/const APP_LIMITS=input\.limits,Meta=input\.appMeta/,'repository journals must consume their owner-scoped appMeta capability');
 assert.match(appMeta,/function family\(name\s*,owner\s*\)/,'appMeta gateway must enforce family ownership');
 assert.match(persistence,/n>Number\(nowMs\)\+IMPORTED_TIME_AHEAD_MS/,'import timestamp acceptance must use an explicit caller-supplied decision time');
-assert.match(journals,/Number\(current\.expiresAt\)>decisionNowMs\(\)/,'durable mutation lease expiry must use the injected decision clock');
+assert.match(journals,/const now=decisionNowMs\(\),matches=[\s\S]*?live=!!current&&Number\(current\.expiresAt\)>now;if\(requested\.expiresAt<=now/u,'durable lease acquisition and renewal evaluate current and requested expiry against the same injected decision clock');
 assert.match(repositories,/decisionNowMs\(\)-lastRun<DATA_MAINTENANCE_INTERVAL_MS/,'repository maintenance recency must use the injected decision clock');
 assert.match(repositories,/NotesRepositoryModule\.create/,'AppData facade must compose the extracted notes repository through an injected module contract');
 assert.match(repositories,/Math\.floor\(Number\(seed\)\|\|0\),lastSessionRevision,decisionNowMs\(\)/,'session revision ordering must use the injected decision clock');
