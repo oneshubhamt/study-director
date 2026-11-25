@@ -36,7 +36,12 @@ try{
   await page.click('#pane-plan > details.plan-composer:not(#saved-plans-panel) > summary');
   await waitFor(()=>page.evaluate(`document.querySelector('#pane-plan > details.plan-composer:not(#saved-plans-panel)')?.open===true`),{label:'Plan Composer opened through native disclosure'});
   await page.evaluate(`(()=>{const now=new Date(),m=now.getHours()*60+now.getMinutes()-1,fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0'),field=document.getElementById('plan-input');field.value=[fmt(m)+' | 20 | CoreFlowQA Core Block | work | Medicine | pages | 12',fmt(m+20)+' | 10 | CoreFlowQA Review | support | Planning | block | 1'].join('\\n');field.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText'}));})()`);
-  await waitFor(()=>page.evaluate(`document.querySelector('[data-action="apply-schedule"]')?.disabled===false`),{label:'Plan Apply delegated control enabled'});
+  // The debounced preview replaces the old rows and moves the Apply button.
+  await waitFor(()=>page.evaluate(`(() => {
+    const fields=document.querySelectorAll('#sched-list .si.draft [data-draft-field="name"]');
+    return fields.length===2 && fields[0].value==='CoreFlowQA Core Block' && fields[1].value==='CoreFlowQA Review'
+      && document.querySelector('[data-action="apply-schedule"]')?.disabled===false;
+  })()`),{label:'authored rows rendered and Plan Apply enabled'});
   await waitFor(()=>page.evaluate(`(()=>{const element=document.querySelector('[data-action="apply-schedule"]');if(!element)return false;element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const rect=element.getBoundingClientRect(),hit=document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2);return hit===element||element.contains(hit);})()`),{label:'Plan Apply physically reachable'});
   await page.click('[data-action="apply-schedule"]');
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#sched-list .si:not(.draft)').length===2`),{label:'Plan applied through delegated handler'});
