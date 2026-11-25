@@ -13,7 +13,7 @@ const createStudyDirectorDriveConnection=ports=>{
   const invoke=available?window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__):null;
   const MAX_CHUNK=2*1024*1024,MAX_REPLY=8*1024*1024,MAX_READ=256*1024;
   const listeners=new Set();
-  let session=null,opening=null,auth=null,admitted=false,previous=false,flight=null,epoch=0,expiresAt=0;
+  let session=null,opening=null,auth=null,admitted=false,previous=false,flight=null,retiring=null,epoch=0,expiresAt=0;
   const identity=()=>auth;
   const notify=()=>{for(const listener of [...listeners])try{listener();}catch{}};
   const changed=()=>new Error('Google Drive authorization changed. Start a new operation.');
@@ -57,14 +57,15 @@ const createStudyDirectorDriveConnection=ports=>{
     return Promise.race([work,stop]).finally(()=>signal.removeEventListener('abort',listener));
   }
   async function authorize({operation='connect',signal=null,restore=false}={}){
+    if(retiring)await retiring;
     if(signal?.aborted)throw aborted(signal);
     if(auth)return auth;
     const interactive=operation==='connect'&&!restore;
     if(!interactive&&!restore)throw new Error('Connect Google Drive first.');
     if(flight){
       try{await flight;}catch(error){if(!interactive)throw error;}
-      if(auth)return auth;
       if(signal?.aborted)throw aborted(signal);
+      if(auth)return auth;
     }
     const started=epoch;
     const work=(async()=>{
@@ -89,7 +90,7 @@ const createStudyDirectorDriveConnection=ports=>{
   async function restoreSession(){
     // Never let background restoration choose/adopt a foreign library.
     if(!available||!profileEmail()||!profileFolder())return false;
-    try{await authorize({operation:'restore',restore:true});return true;}catch{return false;}
+    try{return await authorize({operation:'restore',restore:true});}catch{return false;}
   }
   async function admit(expected,folder,profile,signal){
     check(expected,signal);
@@ -102,17 +103,23 @@ const createStudyDirectorDriveConnection=ports=>{
   }
   async function invalidate(expected){
     if(!expected||expected!==auth)return false;
+    const work=call({op:'invalidate',session:expected.session,generation:expected.generation}).catch(()=>{});
+    retiring=work;
     clear(expected);
-    try{await call({op:'invalidate',session:expected.session,generation:expected.generation});}catch{}
+    try{await work;}finally{if(retiring===work)retiring=null;}
     return true;
   }
   async function disconnect(expected){
     if(expected&&expected!==auth)return false;
     if(!session&&!previous)return true;
+    const original=auth,started=epoch;
+    if(retiring)await retiring;
     const owner=await prepare(),generation=expected?.generation??await call({op:'generation',session:owner});
-    if(expected&&expected!==auth)throw changed();
-    clear(expected);previous=false;
-    await call({op:'disconnect',session:owner,generation});return true;
+    if(started!==epoch||original!==auth)throw changed();
+    const work=call({op:'disconnect',session:owner,generation});
+    retiring=work;
+    clear(original);previous=false;
+    try{await work;return true;}finally{if(retiring===work)retiring=null;}
   }
   function encode(bytes){
     if(bytes.byteLength>MAX_CHUNK)throw new Error('Native Google Drive upload chunk is too large.');

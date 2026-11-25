@@ -731,7 +731,12 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         Ok(lock(&self.state)?.generation)
     }
 
-    fn begin(&self, expected_generation: u64, new_identity: bool, cancel: Arc<AtomicBool>) -> Result<Operation<'_>> {
+    fn begin(
+        &self,
+        expected_generation: u64,
+        new_identity: bool,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Operation<'_>> {
         let mut state = lock(&self.state)?;
         if state.generation != expected_generation {
             return Err(AuthError::CredentialChanged);
@@ -868,7 +873,11 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         self.authorize_with(expected_generation, Arc::new(AtomicBool::new(false)))
     }
 
-    fn authorize_with(&self, expected_generation: u64, cancel: Arc<AtomicBool>) -> Result<AuthorizedAccount> {
+    fn authorize_with(
+        &self,
+        expected_generation: u64,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<AuthorizedAccount> {
         let _serial = lock(&self.serial)?;
         let op = self.begin(expected_generation, true, cancel)?;
         let prior = self.read_record()?;
@@ -908,7 +917,11 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         self.refresh_with(expected_generation, Arc::new(AtomicBool::new(false)))
     }
 
-    fn refresh_with(&self, expected_generation: u64, cancel: Arc<AtomicBool>) -> Result<AuthorizedAccount> {
+    fn refresh_with(
+        &self,
+        expected_generation: u64,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<AuthorizedAccount> {
         let _serial = lock(&self.serial)?;
         let op = self.begin(expected_generation, false, cancel)?;
         let prior = match self.read_record() {

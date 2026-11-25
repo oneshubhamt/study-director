@@ -1224,7 +1224,10 @@
       release:connection.release,
       repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,now:driveNow,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),listSessionWatch:opts=>listSessionWatch(opts),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
-    if(native&&registered)void Promise.resolve(connection.restoreSession()).then(restored=>restored?verifyNativeAccount():null).catch(()=>{const original=nativeIdentity();if(original)void connection.invalidate(original);});
+    if(native&&registered)void Promise.resolve(connection.restoreSession()).then(async original=>{
+      if(!original||original!==nativeIdentity())return;
+      try{await verifyNativeAccount();}catch{if(original===nativeIdentity())await connection.invalidate(original);}
+    }).catch(()=>{});
     return registered;
   }
 

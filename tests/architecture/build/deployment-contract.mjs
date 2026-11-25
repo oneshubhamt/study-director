@@ -107,7 +107,7 @@ assert.match(shell,/\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)/u);
 assert.match(shell,/invoke_handler\(tauri::generate_handler!\[drive_ipc::native_drive\]\)/u);
 assert.doesNotMatch(shell,/\.plugin\(/u);
 const ipc=read('src-tauri/src/drive_ipc.rs');
-assert.match(ipc,/window\.label\(\)!="main"\|\|!super::packaged_origin/u);
+assert.match(ipc,/window\.label\(\)\s*!=\s*"main"\s*\|\|\s*!super::packaged_origin/u);
 assert.match(read('src-tauri/build.rs'),/AppManifest::new\(\)\.commands\(&\["native_drive"\]\)/u);
 const manifest=JSON.parse(read('source/platform/manifest.webmanifest'));
 const merge=JSON.parse(read('source/platform/firebase-hosting-headers.merge.json'));
