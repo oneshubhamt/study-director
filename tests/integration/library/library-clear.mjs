@@ -385,6 +385,30 @@ for(const fault of ['', 'verify-logical', 'restore']){
 }
 {const events=[],t=fixture({recoveryJournal:{state:{id:'interrupted',phase:'deleting-records'},payload:{}},diagnostics:{start:kind=>{events.push(kind);return 'trace';},mark:phase=>events.push(phase),finish:()=>events.push('finish'),fail:()=>events.push('fail')}});assert.equal((await t.coordinator.recoverInterrupted()).recovered,true);assert.ok(events.includes('library-clear-recovery'));assert.ok(events.includes('clear-rollback-complete'));assert.equal(events.at(-1),'finish');}
 {const fail=()=>{throw new Error('diagnostic storage unavailable');},t=fixture({diagnostics:{start:fail,mark:fail,finish:fail,fail}});assert.equal((await t.coordinator.execute({selection:{savedDays:true}})).status,'completed');assert.equal(t.state().journal,null);}
+
+{
+  const t=fixture({failAt:'prepare-ack'}),selection={notes:true};
+  await assert.rejects(t.coordinator.execute({selection}),/injected prepare-ack/u);
+  assert.equal(t.state().journal?.state.phase,'prepared');assert.match(t.state().fault,/Library data recovery required/u);
+  assert.equal(t.state().restored,0);assert.ok(!t.order.includes('delete:notes'));
+  assert.equal((await t.coordinator.recoverInterrupted()).recovered,true);
+  assert.equal(t.state().restored,0,'prepared-only recovery must not replay a stale preimage');assert.equal(t.state().journal,null);
+}
+for(const phase of ['verified','rolled-back','startup-rolled-back']){
+  const t=fixture({recoveryJournal:{state:{id:'libraryclear_terminal_12345',phase},payload:{}}});
+  assert.equal((await t.coordinator.recoverInterrupted()).recovered,true);assert.equal(t.state().restored,0,phase+' recovery must not rewrite records');assert.equal(t.state().journal,null);
+}
+{
+  const t=fixture({failAt:'clear-ack'});
+  const result=await t.coordinator.execute({selection:{notes:true}});
+  assert.equal(result.status,'completed');assert.equal(t.state().journal,null);assert.equal(t.state().restored,0);assert.equal(t.state().fault,'');
+}
+{
+  const t=fixture({failAt:'verified'});
+  await assert.rejects(t.coordinator.execute({selection:{notes:true}}),/injected verified/u);
+  assert.equal(t.state().restored,0,'uncertain final marker must leave recovery to durable phase proof');assert.ok(t.state().journal);assert.match(t.state().fault,/Library data recovery required/u);
+}
+console.log('PASS: Library journal prepare/retirement acknowledgement and terminal phases');
 console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faultInjection:true}));
 }
 
@@ -506,27 +530,3 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
   }
   console.log(JSON.stringify({status:'PASS',suite:'library-clear-storage-contract',cases},null,2));
 }
-
-{
-  const t=fixture({failAt:'prepare-ack'}),selection={notes:true};
-  await assert.rejects(t.coordinator.execute({selection}),/injected prepare-ack/u);
-  assert.equal(t.state().journal?.state.phase,'prepared');assert.match(t.state().fault,/Library data recovery required/u);
-  assert.equal(t.state().restored,0);assert.ok(!t.order.includes('delete:notes'));
-  assert.equal((await t.coordinator.recoverInterrupted()).recovered,true);
-  assert.equal(t.state().restored,0,'prepared-only recovery must not replay a stale preimage');assert.equal(t.state().journal,null);
-}
-for(const phase of ['verified','rolled-back','startup-rolled-back']){
-  const t=fixture({recoveryJournal:{state:{id:'libraryclear_terminal_12345',phase},payload:{}}});
-  assert.equal((await t.coordinator.recoverInterrupted()).recovered,true);assert.equal(t.state().restored,0,phase+' recovery must not rewrite records');assert.equal(t.state().journal,null);
-}
-{
-  const t=fixture({failAt:'clear-ack'});
-  const result=await t.coordinator.execute({selection:{notes:true}});
-  assert.equal(result.status,'completed');assert.equal(t.state().journal,null);assert.equal(t.state().restored,0);assert.equal(t.state().fault,'');
-}
-{
-  const t=fixture({failAt:'verified'});
-  await assert.rejects(t.coordinator.execute({selection:{notes:true}}),/injected verified/u);
-  assert.equal(t.state().restored,0,'uncertain final marker must leave recovery to durable phase proof');assert.ok(t.state().journal);assert.match(t.state().fault,/Library data recovery required/u);
-}
-console.log('PASS: Library journal prepare/retirement acknowledgement and terminal phases');
