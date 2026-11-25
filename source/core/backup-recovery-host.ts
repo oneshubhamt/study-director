@@ -565,7 +565,7 @@ const createModule=()=>{
     functions(input.interactions,['choose'],'Backup recovery host interactions port');
     functions(input.lifecycle,['activeSessionIssue','activeSessionLoad','activeSessionSettled','attachmentBusy','canonicalPlanDraft','deletionRecoveryFlush','flushNotes','flushPlanDraft','hasTasks','noteFailure','planDraft','planInputValue','quiesce','savePlanDraft','settleAttachmentWriters','settlePlan','writeLiveDraft'],'Backup recovery host lifecycle port');
     functions(input.managedRecovery,['createCoordinator'],'Backup recovery host managed-recovery port');
-    functions(input.mutation,['run'],'Backup recovery host mutation port');
+    functions(input.mutation,['run','captureOrigin'],'Backup recovery host mutation port');
     functions(input.providers,['bringInRepositoryProvider','cancelForeground','configureManagedRecovery','configurePendingBackupRetry','history','list','noteVersions','removeRepositoryProviderVersion','restoreRepositoryProviderVersion','suspendBackground'],'Backup recovery host provider port');
     functions(input.session,['hasBlocking'],'Backup recovery host session port');
     if(typeof input.sourceRevision!=='function')throw new TypeError('Backup recovery host sourceRevision port is invalid.');
@@ -924,13 +924,17 @@ const createModule=()=>{
       const sourceId=String(button.dataset['versionHistorySource']||''),checkpointId=String(button.dataset['versionHistoryCheckpoint']||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location;
       if(!location||!['before-restore','unreadable'].includes(location.tier||''))return false;
       const safety=location.tier==='before-restore',what=safety?'safety version':'version';
+      let assertOrigin:()=>void;try{assertOrigin=input.mutation.captureOrigin('removing a backup version');}catch(error){input.diagnostics.capture('backup.version-history-remove',error,'warn');return false;}
       activeSourceId=location.sourceId;activeSourceLabel=location.sourceLabel;
       const choice=await input.interactions.choose(safety
         ?{title:'Remove safety version?',message:`Remove the temporary Before restore safety version from ${location.sourceLabel}?`,details:['This does not change your current Study Director data.','After removal, this safety version can no longer be used to undo that recovery.'],cancelLabel:'Keep safety version',choices:[{value:'remove',label:'Remove safety version',kind:'danger',description:'Delete this temporary safety version from this backup location.'}]}
         :{title:'Remove this version?',message:`The version from ${dateLabel(location.exportedAt)} in ${location.sourceLabel} can’t be read by this app.`,details:['If another device runs a newer Study Director, it may still use this version. Update this app first to keep it.','Otherwise the file is damaged and can’t be restored.','Removing it does not change your current Study Director data.'],cancelLabel:'Keep version',choices:[{value:'remove',label:'Remove version',kind:'danger',description:'Delete this version from this backup location.'}]});
-      if(choice!=='remove')return false;setOperationBusy(true,null,'remove-version');setHistoryStatus(`Removing ${what} from ${location.sourceLabel}…`);
+      if(choice!=='remove'||busy||!elements().dialog?.open||selectedEntry(sourceId,checkpointId)!==entry)return false;
+      try{assertOrigin();}catch(error){input.diagnostics.capture('backup.version-history-remove',error,'warn');return false;}
+      setOperationBusy(true,null,'remove-version');setHistoryStatus(`Removing ${what} from ${location.sourceLabel}…`);
       try{
-        const result=await input.providers.removeRepositoryProviderVersion(sourceId,checkpointId);
+        const result=await input.providers.removeRepositoryProviderVersion(sourceId,checkpointId,assertOrigin);
+        assertOrigin();
         if(!result||result.removed!==true){setHistoryStatus(userMessage(result&&result.error,`The ${what} could not be removed safely.`),false);return false;}
         lastEntries=freeze(lastEntries.filter(item=>!(item.location.sourceId===sourceId&&item.location.checkpointId===location.checkpointId)));render();
         const removed=safety?'Safety version removed.':'Version removed.';setHistoryStatus(result.warning?`${removed} Unused backup storage will be cleaned up later.`:removed);return true;

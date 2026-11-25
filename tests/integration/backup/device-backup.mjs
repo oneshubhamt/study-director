@@ -54,6 +54,8 @@ await test('critical Device Folder scans distrust same-size and same-time cached
   assert.notEqual(critical.digest,before.digest,'critical scan must hash current on-disk bytes');
   assert.equal(critical.unreadable,true,'a changed manifest cannot keep its former verified summary');
   await assert.rejects(()=>storage.delete(before),/changed checksum before deletion/u,'stale digest must never authorize deletion');
+  let checks=0;const protectedStorage=storage.beginOperation({checkProtection:async()=>{if(++checks===2)throw new Error('QA authority lost before deletion');}});
+  await assert.rejects(()=>protectedStorage.delete(critical),/QA authority lost before deletion/u);assert.equal((await storage.list({kind:'checkpoint',freshDigests:true})).items.some(item=>item.id===checkpointId),true,'loss after the file proof must leave the verified file intact');
 });
 
 await test('a browser without folder access never registers a location and every backup path stays quiet',async()=>{
@@ -225,7 +227,7 @@ await test('a protected safety version is written in the foreground, listed, and
   const safety=await w.runtime.createProtectedSafety('device-folder','before-clear-library');assert.equal(safety.verified,true);assert.equal(w.published.at(-1).role,'before-restore');
   const history=await w.runtime.history('device-folder',{interactive:false});assert.equal(history.available,true);
   const tiers=history.entries.map(entry=>entry.location.tier);assert.ok(tiers.includes('before-restore'));assert.ok(tiers.includes('latest'));
-  const removed=await w.runtime.removeRepositoryProviderVersion('device-folder',safety.checkpointId);assert.equal(removed.removed,true);
+  const removed=await w.runtime.removeRepositoryProviderVersion('device-folder',safety.checkpointId,w.captureOrigin());assert.equal(removed.removed,true);
   assert.ok(!(await w.commits(folder)).includes(safety.checkpointId+'.sdcommit'));
   // Forty days of daily backups keep at most 15 ordinary versions once cleanup runs.
   for(let day=0;day<40;day++){await w.tick(DAY);w.change(true);await w.tick(10*1000);}
@@ -258,8 +260,8 @@ await test('a version this app cannot read is listed with Remove, cleanup goes o
   const formats=()=>w.runtime.diagnosticConnections().find(row=>row.id==='device-folder')?.formats;
   assert.equal(formats()?.unreadable,1,'diagnostics count the unreadable version');
   // Remove works only for it; a readable version is refused.
-  await assert.rejects(()=>w.runtime.removeRepositoryProviderVersion('device-folder',w.published.at(-1).checkpointId),/no longer this device's safety version or unreadable/u);
-  const removed=await w.runtime.removeRepositoryProviderVersion('device-folder',newer);assert.equal(removed.removed,true);assert.equal(removed.kind,'unreadable');
+  await assert.rejects(()=>w.runtime.removeRepositoryProviderVersion('device-folder',w.published.at(-1).checkpointId,w.captureOrigin()),/no longer this device's safety version or unreadable/u);
+  const removed=await w.runtime.removeRepositoryProviderVersion('device-folder',newer,w.captureOrigin());assert.equal(removed.removed,true);assert.equal(removed.kind,'unreadable');
   assert.ok(!(await w.commits(folder)).includes(newer+'.sdcommit'),'its commit is gone');assert.equal(formats()?.unreadable,0);
   const after=await w.runtime.history('device-folder',{interactive:false});assert.ok(after.entries.every(entry=>entry.location.tier!=='unreadable'));
   assert.deepEqual(await w.locks(folder),[],'no lock files remain');

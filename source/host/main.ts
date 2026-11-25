@@ -3378,11 +3378,11 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze<RecoveryHos
     savePlanDraft:async options=>await PlanDraftEditor.save(options?.force?{strictDurability:true}:undefined),settleAttachmentWriters:options=>settleAttachmentWriters(options),settlePlan:()=>PlanData.settled(),writeLiveDraft:async()=>{const result=await writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true});if(!result)throw new Error('Recovery session write did not return a canonical result.');return result;}
   }),
   managedRecovery:Object.freeze<RecoveryHostInput['managedRecovery']>({createCoordinator:ManagedRecoveryModule.createCoordinator}),
-  mutation:Object.freeze<RecoveryHostInput['mutation']>({run:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
+  mutation:Object.freeze<RecoveryHostInput['mutation']>({run:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation),captureOrigin:reason=>{if(!appCanMutate())throw new Error('Study control is required before '+reason+'.');const token=AppOwnership.issueWriteToken(reason);return ()=>{AppOwnership.assertWriteToken(token,reason);};}}),
   providers:Object.freeze<RecoveryHostInput['providers']>({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
-    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeRepositoryProviderVersion:(id,checkpointId)=>BackupProviderRuntime.removeRepositoryProviderVersion(id,checkpointId),
+    history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeRepositoryProviderVersion:(id,checkpointId,assertOrigin)=>BackupProviderRuntime.removeRepositoryProviderVersion(id,checkpointId,assertOrigin),
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:(reason,options)=>BackupProviderRuntime.suspendBackground(reason,options)
   }),
   session:Object.freeze<RecoveryHostInput['session']>({hasBlocking:()=>hasBlockingActiveSession()}),

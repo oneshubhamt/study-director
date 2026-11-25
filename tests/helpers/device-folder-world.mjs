@@ -31,7 +31,8 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const worldNumber=++worlds;
   let owner=freeze({profile,scope:'',device,name}),repositoryChoice=rows=>rows[0].name;const repositoryChoices=[];
   const clock=createFakeClock(start),clockNow=()=>clock.now(),notices=[],published=[],verified=new Map(),settingsStore=new Map(),rendered=[],captures=[];
-  let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null,registeredProvider=null;
+  const captureOrigin=()=>{const revision=ownerRevision;return ()=>{if(!canMutate||ownerRevision!==revision)throw new Error('QA removal origin changed');};};
+  let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,ownerRevision=0,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null,registeredProvider=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,File,Promise,Map,Set,WeakMap,TextEncoder,Uint8Array,JSON,Math,Number,String,Array,console,crypto:webcrypto,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,DOMException};
   context.globalThis=context;vm.createContext(context);
   for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','managed-repository','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation','device-folder-storage','device-backup','backup-actions-host','host-metadata'])vm.runInContext(readCoreScript(name),context,{filename:coreScriptPath(name)});
@@ -79,7 +80,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const noop=()=>{};
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:policy})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
     configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,protect:async file=>{const value=typeof file==='function'?await file():file;return freeze({...value,encrypted:false,protectionId:'',checkProtection:async()=>{}});},unprotect:async blob=>freeze({blob,encrypted:false}),run:async(type,data)=>{assert.equal(type,'checksum');return sha256(data.value);}}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),
-    ownership:freeze({canShare:()=>true,canRunBackground:()=>!canMutate?'awaiting-control':protection&&protection.status().enabled&&!protection.status().unlocked?'locked':true,requireMutationControl:()=>{if(!canMutate)throw new Error('Take control first.');},runExclusive:async(_kind,operation)=>operation()}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),
+    ownership:freeze({canShare:()=>true,canRunBackground:()=>!canMutate?'awaiting-control':protection&&protection.status().enabled&&!protection.status().unlocked?'locked':true,requireMutationControl:()=>{if(!canMutate)throw new Error('Take control first.');},runExclusive:async(_kind,operation)=>operation({assert:captureOrigin()})}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),
     diagnostics:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),start:()=>'trace',mark:noop,finish:noop,fail:noop})
   })}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durablePending,write:async value=>{durablePending=value;},remove:async()=>{durablePending=null;}})}));
@@ -151,7 +152,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     nextObjectName:async()=>'obj_'+(await sha256(new Blob([current]))).slice(0,32)+'.sdobject',
     choose:value=>{pickerResult=value;value?.useClock?.(clockNow);},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
-    setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{canMutate=value;},
+    setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{if(canMutate!==value)ownerRevision++;canMutate=value;},captureOrigin,
     store:(handle,baseline='')=>settingsStore.set('deviceFolder',{format:'study-director.device-folder-settings',version:4,directoryHandle:handle,baseline}),
     // The message the Device Folder row's inline note shows.
     note:()=>presentation.current('device-folder')?.message||'',

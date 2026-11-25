@@ -195,7 +195,7 @@ const createModule=()=>{
       // The read-back checksum is the folder's receipt, as Drive's server checksum is.
       return freeze({...await describe(file.kind,file.id,name,written,await scope(),null),serverDigest:actual});
     }
-    async function remove(item:StorageIdentity){
+    async function remove(item:StorageIdentity,check?:()=>Promise<void>){
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
       const dirs=await directories(),name=item.id+spec.suffix,directory=dirs[spec.directory];
       if(item.remoteVersion||item.digest){
@@ -206,6 +206,7 @@ const createModule=()=>{
           if(!/^[a-f0-9]{64}$/u.test(expected)||await input.checksum(current,{})!==expected)throw new Error('A Study Director backup file changed checksum before deletion. Nothing was removed.');
         }
       }
+      if(check)await check();
       try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&errorFields(error)['name']==='NotFoundError')return false;throw error;}
     }
     // Locks are marker files; their age comes from the file's modified time.
@@ -264,7 +265,7 @@ const createModule=()=>{
       return freeze({
         list:async(options:{kind:StorageKind}&SignalOptions)=>{await guard();return list({...options,signal:options?.signal||signal});},
         download:guardedDownload,
-        delete:async(item:StorageIdentity)=>{await guard();return remove(item);},
+        delete:async(item:StorageIdentity)=>{await guard();return remove(item,guard);},
         upload:async(file:StorageUpload)=>{await guard();return upload(file);},
         scope,historyReadConcurrency:8,
         beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:(lease:LockLease)=>assertLock('publication',lease),renewPublication:(lease:LockLease)=>renewLock('publication',lease),endPublication:(lease:LockLease)=>endLock('publication',lease),

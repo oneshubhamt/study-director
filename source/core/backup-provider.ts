@@ -281,8 +281,9 @@ const createModule=(input:ProviderModuleInput)=>{
     finally{if(timer!==null)clearTimeout(timer);}
   }
 
-  async function authorize(selected:Provider,operation:string){
+  async function authorize(selected:Provider,operation:string,assertCurrent?:()=>void){
     if(selected.authorize)await selected.authorize(Object.freeze({operation}));
+    assertCurrent?.();
     presentation.condition(selected.id,'permission','');if(presentation.read(selected.id)?.lifecycle==='failed')presentation.resolve(selected.id);notifyStatus();
   }
   function repositoryProviderItem(value:unknown,kind:RepositoryKind):ProviderItem{
@@ -976,25 +977,27 @@ const createModule=(input:ProviderModuleInput)=>{
   // version this build cannot read. A fresh scan under the maintenance lease
   // confirms which it is first; any other version is kept. The commit goes
   // first, so an interrupted removal leaves only an unfinished leftover.
-  async function removeProviderVersionUnderAuthority(selected:Provider,checkpointId:string,{signal=null}:ExportOptions={}){
-    selected=repositoryOperationSelected(selected,{signal});
+  async function removeProviderVersionUnderAuthority(selected:Provider,checkpointId:string,{signal=null,assertCurrent}:ExportOptions&{assertCurrent:()=>void}){
+    assertCurrent();selected=repositoryOperationSelected(selected,{signal,checkProtection:async()=>assertCurrent()});
     const requested=String(checkpointId||'');let maintenanceLease=null;
     if(repositoryCoordinationCapable(selected)){
       maintenanceLease=await beginRepositoryMaintenance(selected);
       if(!maintenanceLease)throw new Error(`Removing the version from ${selected.label} was deferred because another backup or maintenance operation is active.`);
     }
     try{
-      await assertRepositoryMaintenance(selected,maintenanceLease);
+      const checkLease=async()=>{assertCurrent();await assertRepositoryMaintenance(selected,maintenanceLease);assertCurrent();};
+      await checkLease();
       const state=await repositoryProviderState(selected,{interactive:false,signal}),active=activeProtectedProviderRow(state,requested),safety=!!active&&active.item.id===requested,unreadable=state.unreadable.find(row=>row.id===requested);
       const files=safety?[active.commitItem,active.item].filter(item=>!!item):unreadable?[...unreadable.items]:null;
       if(!files||!files.length)throw new Error(`The selected version in ${selected.label} is no longer this device's safety version or unreadable, so it was kept.`);
-      for(const file of files){await assertRepositoryMaintenance(selected,maintenanceLease);await selected.repository.delete(file);}
-      await assertRepositoryMaintenance(selected,maintenanceLease);
-      const servicedPending=await maintenanceState(selected,{throwOnError:true}),after=await repositoryProviderState(selected,{interactive:false,signal}),cleanup=await cleanupRepositoryProviderState(selected,after,{maintenanceLease});
-      await providerMaintenanceScheduler(selected)?.adopt(cleanup,{trigger:'safety-removal',pending:servicedPending});
+      for(const file of files){await checkLease();await selected.repository.delete(file);}
+      await checkLease();
+      const servicedPending=await maintenanceState(selected,{throwOnError:true}),after=await repositoryProviderState(selected,{interactive:false,signal});
+      await checkLease();const cleanup=await cleanupRepositoryProviderState(selected,after,{maintenanceLease,checkMaintenance:checkLease});
+      assertCurrent();await providerMaintenanceScheduler(selected)?.adopt(cleanup,{trigger:'safety-removal',pending:servicedPending});
       const retained:readonly {id:string;manifest:Manifest}[]=Array.isArray(cleanup.retained)?cleanup.retained:after.rows.map(row=>Object.freeze({id:row.item.id,ref:Object.freeze({checkpoint:row.item,commit:row.commitItem}),manifest:row.manifest}));
       const quarantinedObjectIds=integrityScrubHooks?await integrityScrubHooks!.quarantine(selected.id):[],entries=RepositoryCheckpointPipeline.projectHistory(Object.freeze(retained.map(row=>Object.freeze({id:row.id,manifest:row.manifest}))),Object.freeze({id:selected.id,label:selected.label}),{quarantinedObjectIds});
-      clearRecentHistory(selected);
+      assertCurrent();clearRecentHistory(selected);
       // The version sync waited on is gone: sync looks again at once.
       if(selected.shared&&syncState(selected).newer===requested){newerVersionGone(selected);syncState(selected).behind=true;schedulePendingProviderBackup(selected,1000,{trigger:'newer-version-removed'});}
       return freeze({removed:true,checkpointId:requested,kind:safety?'safety':'unreadable',gcRemoved:Number(cleanup.gcRemoved)||0,warning:String(cleanup.warning||''),entries});
@@ -1701,15 +1704,16 @@ const createModule=(input:ProviderModuleInput)=>{
       return freeze({verified:true,checkpointId:saved.checkpointId,protectedUntil:new Date(protectedUntil).toISOString(),sourceRevision:String(saved.sourceRevision||''),source:selected.id,purpose:String(purpose)});
     }finally{busy=false;foreground.release();}
   }
-  async function removeRepositoryProviderVersion(id:string,checkpointId:string){
+  async function removeRepositoryProviderVersion(id:string,checkpointId:string,assertOrigin:()=>void){
     if(busy)return freeze({removed:false,reason:'busy'});
     const selected=providers.get(safeId(id));if(!selected||!selected.repository)throw new Error('Backup location is unavailable.');
-    requireBackupMutationControl('removing a version from '+selected.label);
+    requireBackupMutationControl('removing a version from '+selected.label);assertOrigin();
     const foreground=beginForeground(selected);if(!foreground)return freeze({removed:false,reason:'busy'});busy=true;
+    const assertRequest=()=>{assertOrigin();foreground.signal.throwIfAborted();};
     try{
-      await foreground.settled;if(selected.prepare)await selected.prepare();await authorize(selected,'remove-version');
-      return await runExclusive('remove-backup-version',()=>removeProviderVersionUnderAuthority(selected,checkpointId,{signal:foreground.signal}));
-    }catch(error){await providerMaintenanceScheduler(selected)?.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'});throw error;}
+      await foreground.settled;assertRequest();if(selected.prepare)await selected.prepare();assertRequest();await authorize(selected,'remove-version',assertRequest);
+      return await runExclusive('remove-backup-version',authority=>removeProviderVersionUnderAuthority(selected,checkpointId,{signal:foreground.signal,assertCurrent:()=>{assertRequest();authority.assert();}}));
+    }catch(error){try{assertRequest();await providerMaintenanceScheduler(selected)?.request('error',MAINTENANCE_POLICY.errorMs,{mode:'replace'});}catch(retryError){AppDiagnostics.capture('backup-provider.remove-version-retry',retryError,'warn');}throw error;}
     finally{await release(selected,'remove-version');busy=false;foreground.release();}
   }
 

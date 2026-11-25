@@ -10,7 +10,7 @@ import type {ExportsModule} from '../source/core/exports.ts';
 import type {BackupCaptureInput,FullLogicalCapture} from './backup-capture.ts';
 import type {RecordCodecsModule} from '../source/core/record-codecs.ts';
 import type {ReconciliationBaselineModule} from '../source/core/reconciliation-baseline.ts';
-import type {AuthorityOptions} from './mutation-coordinator.ts';
+import type {AuthorityOptions,MutationAuthority} from './mutation-coordinator.ts';
 import type {AssetRow} from './asset-storage.ts';
 import type {ImportedAsset,BackupFile,SavedDayDeletion,NoteDeletion,AttachmentDeletion,ProtectedManifest} from './backup-models.ts';
 import type {ExportProcessing,ProtectionOptions} from './exports.ts';
@@ -44,7 +44,7 @@ export interface BackupRuntimeInput{ports:{
  domain:Pick<BackupCaptureInput['domain'],'getStudentName'>&{clampText(value:unknown,max:number):string;filenameSafeStudentName(value:string):string;materializeDailyRecordView:ReturnType<RecordCodecsModule['createDailyRecordCodec']>['materializeDailyRecordView'];sanitizeCurrentDailyRecord(value:unknown):DailyRecord|null;todayISO():string};
  view:{deviceName(id:string,devices?:readonly string[]):string;presentation:ProviderPresentation;refreshPnote():void;refreshReview():void;renderSchedule():void};
  events:{libraryChanged():void;backupCompleted(context:Completion):void;reconcileNotes(value:Readonly<Record<string,NoteRecord>>,deletions:readonly NoteDeletion[]):Promise<unknown>;restoreNotesSnapshot(value:Readonly<Record<string,NoteRecord>>,deletions?:readonly NoteDeletion[]):Promise<unknown>;restoreSessionState(value:ActiveSession|null,options?:{keepRunning?:boolean;recoverySessionCheckpointed?:boolean}):Promise<unknown>;verifyActiveSessionRuntime(value:ActiveSession|null|undefined,scheduleText?:string):Promise<unknown>;restoredFromFile():boolean};
- operations:{assertAuthority(options?:AuthorityOptions):unknown;canShare():boolean|string;clearFault():void;failClosed(message:string):void;runExclusive<T>(kind:string,operation:()=>Promise<T>):Promise<T>};
+ operations:{assertAuthority(options?:AuthorityOptions):unknown;canShare():boolean|string;clearFault():void;failClosed(message:string):void;runExclusive<T>(kind:string,operation:(authority:MutationAuthority)=>Promise<T>):Promise<T>};
  interactions:{choose(options:{title:string;message:string;details?:readonly string[];choices:readonly Choice[];cancelLabel?:string}):Promise<string|null>;configure(options:{title:string;message:string;details?:readonly string[];groups:readonly DecisionGroup[];confirmLabel:string;cancelLabel?:string;caution?:boolean;signal?:Signal;checkboxes?:readonly {id:string;label:string;description:string;defaultChecked:boolean}[];toggles?:readonly {id:string;label:string;checked?:boolean;description?:string}[]}):Promise<Decisions|null>;notify(options:{title:string;message:string;details?:readonly string[];confirmLabel?:string}):Promise<unknown>};
  environment:{AbortController:typeof AbortController;clearTimeout(handle:number):void;setTimeout(callback:()=>void,ms:number):number;yieldTask(options?:{signal?:AbortSignal|null|undefined;priority?:'background'}):Promise<unknown>};
  diagnostics:Pick<Diagnostics,'start'|'mark'|'finish'|'fail'>&{capture(scope:string,error:unknown,level:'warn'|'error'):void};

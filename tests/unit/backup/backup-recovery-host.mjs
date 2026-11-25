@@ -18,7 +18,7 @@ let attachmentsBusy=false,notesFailure=null,backgroundSettled=null;
 const attachmentSettlementOptions=[];
 let providerRestoreImpl=async()=>freeze({ok:true});
 let driveConnected=false,noteVersionsImpl=async()=>freeze({available:true,entries:freeze([])}),lastProviderBringIn=null;
-let deviceRestoreFailure=null;const removedVersions=[];
+let deviceRestoreFailure=null,removalOriginRevision=0,changeRemovalOrigin=false;const removedVersions=[];
 let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',lastUseBackupOptions=null,deviceCombineResult=freeze({ok:true}),lastDeviceCombine=null,deviceConnected=true,sessionBlocking=false;
 const providerHooks={recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,note:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
@@ -39,7 +39,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   interactions:freeze({choose:async options=>{
     events.push(`choose:${options.title}`);
     if(options.title==='Use this version'){lastUseBackupOptions=options;return chooseMode;}
-    if(options.title==='Remove safety version?'||options.title==='Remove this version?')return 'remove';
+    if(options.title==='Remove safety version?'||options.title==='Remove this version?'){if(changeRemovalOrigin)removalOriginRevision++;return 'remove';}
     return null;
   }}),
   lifecycle:freeze({
@@ -51,7 +51,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async options=>{attachmentSettlementOptions.push(options);events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>{session.writes+=1;session.revision+=1;session.source=new Date(Date.parse('2026-09-20T12:00:00.000Z')+session.revision*1000).toISOString();return freeze({ok:true,value:freeze({revision:session.revision}),storage:freeze({idb:true})});}
   }),
   managedRecovery:freeze({createCoordinator:input=>ManagedRecovery.createCoordinator(input)}),
-  mutation:freeze({run:async(kind,operation)=>{events.push(`mutation:${kind}`);return operation();}}),
+  mutation:freeze({run:async(kind,operation)=>{events.push(`mutation:${kind}`);return operation();},captureOrigin:()=>{const revision=removalOriginRevision;return ()=>{if(revision!==removalOriginRevision)throw new Error('QA removal origin changed');};}}),
   // Every location, the Device Folder included, is reached through the engine.
   providers:freeze({
     bringInRepositoryProvider:async(id,options)=>{
@@ -64,7 +64,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     history:async id=>{if(id==='device-folder'){deviceHistoryReads+=1;return deviceHistory;}providerHistoryReads+=1;assert.equal(id,'google-drive');return driveHistoryNow;},
     list:()=>freeze([freeze({id:'google-drive',label:'Google Drive',shared:true,connected:driveConnected}),freeze({id:'device-folder',label:'Device Folder',connected:deviceConnected})]),
     noteVersions:(id,noteId,options)=>noteVersionsImpl(id,noteId,options),
-    removeRepositoryProviderVersion:async(id,checkpointId)=>{removedVersions.push([id,checkpointId]);return freeze({removed:true,entries:freeze([])});},
+    removeRepositoryProviderVersion:async(id,checkpointId,assertOrigin)=>{assertOrigin();removedVersions.push([id,checkpointId]);return freeze({removed:true,entries:freeze([])});},
     restoreRepositoryProviderVersion:async(id,options)=>{
       if(id==='device-folder'&&deviceRestoreFailure){const error=deviceRestoreFailure;deviceRestoreFailure=null;throw error;}
       if(id==='device-folder'){restoredCheckpoint=options.checkpointId;restoredConfirmed=options.confirmed===true;events.push(`restore:${restoredCheckpoint}`);return freeze({ok:true});}
@@ -338,6 +338,8 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(await host.history.recover({target:{closest:()=>nodes.get('managed-version-history-list').children[2].children[1].children[1].children[0]}}),false);assert.equal(driveRestored,'');
   // Remove asks first, then removes it from the list.
   await host.history.open();await new Promise(resolve=>setImmediate(resolve));
+  changeRemovalOrigin=true;const removalsBefore=removedVersions.length;
+  assert.equal(await host.history.removeVersion({target:{closest:()=>nodes.get('managed-version-history-list').children[0].children[1].children[1].children[1]}}),false,'a confirmed choice must not inherit successor ownership');assert.equal(removedVersions.length,removalsBefore);changeRemovalOrigin=false;
   assert.equal(await host.history.removeVersion({target:{closest:()=>nodes.get('managed-version-history-list').children[0].children[1].children[1].children[1]}}),true);
   assert.deepEqual(removedVersions.at(-1),['device-folder',CHECKPOINT('u')]);assert.ok(host.history.status().entries.every(item=>item.location.tier!=='unreadable'));assert.equal(nodes.get('managed-version-history-status').textContent,'Version removed.');
   providerRestoreImpl=async()=>freeze({ok:true});deviceHistory=previous;driveHistoryNow=driveHistory;driveConnected=false;host.history.close();
