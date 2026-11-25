@@ -13,6 +13,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pwa-regression:
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Generate PWA assets
+        run: node build/build.mjs
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Shared core and PWA regression
+        run: |
+          node tests/browser/app/core-flow.mjs
+          node tests/browser/library/notes-management.mjs
+          node tests/browser/pwa/pwa-offline.mjs
+          node tests/browser/pwa/pwa-update.mjs
   baseline-diagnostic:
     if: github.ref == 'refs/heads/tauri-spike'
     runs-on: windows-2025

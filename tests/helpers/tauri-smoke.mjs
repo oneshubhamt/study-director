@@ -4,7 +4,7 @@ import {spawn,execFileSync} from 'node:child_process';
 import {once} from 'node:events';
 import {createServer} from 'node:net';
 import path from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {CdpPage,waitFor,waitForStudyDirector} from './browser-harness.mjs';
 
 assert.equal(process.platform,'win32');
@@ -117,10 +117,10 @@ async function storage(write){
   }.toString()+')('+JSON.stringify({write,dbName,filename,sentinel})+')');
 }
 function verify(row){assert.equal(row.record,sentinel);assert.equal(row.file,sentinel);assert.ok(row.profile,'profile registry persisted');}
-async function profile(){
+async function profile(name='Tauri QA'){
   await waitFor(()=>page.evaluate('document.getElementById("first-start-dialog")?.open'),{label:'first-start dialog'});
-  await page.evaluate('document.getElementById("first-start-name").value="Tauri QA";document.getElementById("first-start-continue").click();');
-  await waitFor(()=>page.evaluate('(()=>{const d=document.getElementById("first-start-dialog");const list=JSON.parse(localStorage.getItem("studyDirector.profiles.v1")||"null");return !d.open&&list?.profiles?.some(row=>row.name==="Tauri QA"&&!row.fresh);})()'),{label:'disposable profile committed'});
+  await page.evaluate('document.getElementById("first-start-name").value='+JSON.stringify(name)+';document.getElementById("first-start-continue").click();');
+  await waitFor(()=>page.evaluate('(()=>{const d=document.getElementById("first-start-dialog");const list=JSON.parse(localStorage.getItem("studyDirector.profiles.v1")||"null");return !d.open&&list?.profiles?.some(row=>row.id===list.active&&row.name==='+JSON.stringify(name)+'&&!row.fresh);})()'),{label:'disposable profile committed'});
 }
 
 // CDP exposes the same real closure as the existing browser harness, without
@@ -176,33 +176,88 @@ async function appWrite(){
     const saved=d.ReviewEditor.saveReview({strict:true});
     await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();
     const active=(await d.AppData.activeSession.load()).value;
-    const upload=await d.Exports.job(()=>d.AttachmentLibrary.upload([new File([pdfText],'Native QA.pdf',{type:'application/pdf'})]));
+    const modes=[];
+    await d.Exports.job(()=>d.AttachmentLibrary.upload([new File([pdfText],'Native QA.pdf',{type:'application/pdf'})],{onProgress:progress=>{if(progress.mode)modes.push(progress.mode);}}));
     const rows=await d.AttachmentStorage.list(),asset=rows.find(row=>row.name==='Native QA.pdf');
     const file=asset&&await d.AttachmentStorage.get(asset.id);
     const backup=await d.BackupController.createCheckpoint();
     const candidate=await d.BackupController.inspect(backup.blob,{filename:backup.filename});
-    return {applied,running,paused,saved:!!saved,review:active?.snapshot?.review?.reflection,note:d.AppData.notes.get(noteKey)?.text,assetId:asset?.id,assetText:file&&await file.text(),backupBytes:backup.blob.size,preview:!!candidate.preview};
+    try{return {applied,running,paused,saved:!!saved,review:active?.snapshot?.review?.reflection,note:d.AppData.notes.get(noteKey)?.text,assetId:asset?.id,assetHash:asset?.hash,assetText:file&&await file.text(),modes,backupBytes:backup.blob.size,preview:!!candidate.preview};}
+    finally{await candidate.release();await backup.release();}
   }.toString()+')('+JSON.stringify({noteKey,noteText,reflection,pdfText})+')');
   console.log('Application write witness:',JSON.stringify(created));
   assert.equal(created.applied,true);assert.equal(created.running,'running');assert.equal(created.paused,true);assert.equal(created.saved,true);
   assert.equal(created.review,reflection);assert.equal(created.note,noteText);assert.equal(created.assetText,pdfText);
   assert.ok(created.assetId&&created.backupBytes>0&&created.preview);
+  assert.equal(created.assetHash,createHash('sha256').update(pdfText).digest('hex'));
+  assert.ok(created.modes.includes('sync'),'attachment worker must witness synchronous OPFS access');
   return created.assetId;
 }
-async function appRead(assetId){
+async function appRead(assetId,canonical){
   const row=await page.evaluate('('+async function({assetId,noteKey}){
     const d=__nativeQA,active=(await d.AppData.activeSession.load()).value;
     const file=await d.AttachmentStorage.get(assetId);
     return {note:d.AppData.notes.get(noteKey)?.text,review:active?.snapshot?.review?.reflection,plan:active?.scheduleText,asset:file&&await file.text(),catalogue:(await d.AttachmentStorage.list()).some(row=>row.id===assetId)};
   }.toString()+')('+JSON.stringify({assetId,noteKey})+')');
-  assert.equal(row.note,noteText);assert.equal(row.review,reflection);assert.ok(row.plan?.includes('Native QA study'));assert.equal(row.asset,pdfText);assert.equal(row.catalogue,true);
+  assert.equal(row.note,noteText);assert.equal(row.review,canonical);assert.ok(row.plan?.includes('Native QA study'));assert.equal(row.asset,pdfText);assert.equal(row.catalogue,true);
   console.log('Canonical note, review, plan and attachment restart read verified');
 }
 async function editor(){
   await page.evaluate('__nativeQA.goTab("review")');
-  await waitFor(()=>page.evaluate('!!document.querySelector(".sd-rte[data-sd-rich-surface=reflection]")'),{label:'Wordgard reflection mounted'});
-  assert.equal(await page.evaluate('!!window.StudyDirectorRichText'),true);
+  await waitFor(()=>page.evaluate('!!document.querySelector(".sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger")'),{label:'Wordgard reflection mounted'});
+  await page.evaluate('document.querySelector(".sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger").click()');
+  const selector='.workspace-overlay-rich-text .sd-rte-editor';
+  await waitFor(()=>page.evaluate('!!document.querySelector('+JSON.stringify(selector)+')'),{label:'Wordgard focus editor'});
+  await page.evaluate('(()=>{const editor=document.querySelector('+JSON.stringify(selector)+');editor.focus();const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);})()');
+  await page.send('Input.insertText',{text:' via Wordgard'});
+  const expected=reflection+' via Wordgard';
+  await waitFor(()=>page.evaluate('document.querySelector('+JSON.stringify(selector)+')?.textContent.includes('+JSON.stringify(expected)+')'),{label:'Wordgard keyboard insertion'});
+  await page.evaluate('document.querySelector(".workspace-overlay-rich-text .workspace-overlay-close").click()');
+  await waitFor(()=>page.evaluate('!document.querySelector("dialog.workspace-overlay-rich-text[open]")'),{label:'Wordgard focus close'});
+  const row=await page.evaluate('(async()=>{const d=__nativeQA;d.RichTextRuntime.flushEditors();d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const value=(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection;return {value,rich:StudyDirectorRichText.isRichTextValue(value),plain:StudyDirectorRichText.toPlainText(value)};})()');
+  assert.equal(row.rich,true);assert.equal(row.plain.trim(),expected);
   await page.evaluate('__nativeQA.goTab("plan")');
+  console.log('Wordgard keyboard edit and canonical save verified');
+  return row.value;
+}
+async function checkpoint(){
+  return page.evaluate('(async()=>{const backup=await __nativeQA.BackupController.createCheckpoint();try{return {filename:backup.filename,bytes:Array.from(new Uint8Array(await backup.blob.arrayBuffer()))};}finally{await backup.release();}})()');
+}
+async function reloadThrough(action){
+  const old=await page.evaluate('performance.timeOrigin');
+  await page.evaluate('setTimeout(()=>{'+action+'},0);true');
+  await waitFor(()=>page.evaluate('performance.timeOrigin!=='+old+'&&document.readyState==="complete"'),{label:'profile reload'});
+  await waitForStudyDirector(page);
+  await exposeApplication();
+}
+async function profilesAndImport(bootProfile,assetId,canonical){
+  const backup=await checkpoint();
+  await reloadThrough('__nativeQA.Profiles.add()');
+  await profile('Tauri QA second');
+  const second=await page.evaluate('(async()=>({id:StudyDirector.backup.profile.id(),note:__nativeQA.AppData.notes.get('+JSON.stringify(noteKey)+')||null,assets:(await __nativeQA.AttachmentStorage.list()).length}))()');
+  assert.notEqual(second.id,bootProfile);assert.equal(second.note,null);assert.equal(second.assets,0);
+  const imported=await page.evaluate('('+async function({backup,assetId,noteKey}){
+    const d=__nativeQA,blob=new Blob([Uint8Array.from(backup.bytes)]),candidate=await d.BackupController.inspect(blob,{filename:backup.filename});
+    const result=await d.BackupController.restore(candidate,{missingOnly:true});
+    const file=await d.AttachmentStorage.get(assetId);
+    return {verified:result.verified,changed:result.changed,note:d.AppData.notes.get(noteKey)?.text,asset:file&&await file.text(),profile:StudyDirector.backup.profile.id()};
+  }.toString()+')('+JSON.stringify({backup,assetId,noteKey})+')');
+  assert.equal(imported.verified,true);assert.equal(imported.changed,true);assert.equal(imported.note,noteText);assert.equal(imported.asset,pdfText);assert.equal(imported.profile,second.id);
+  await reloadThrough('__nativeQA.Profiles.switchTo('+JSON.stringify(bootProfile)+')');
+  assert.equal(await page.evaluate('StudyDirector.backup.profile.id()'),bootProfile);
+  await appRead(assetId,canonical);
+  console.log('Profile isolation, portable backup import and switch-back verified');
+}
+async function security(){
+  assert.equal(await page.evaluate('(()=>{const node=document.createElement("div");try{node.innerHTML="<b>untrusted</b>";return false;}catch(error){return error instanceof TypeError&&node.childNodes.length===0;}})()'),true,'Trusted Types must block raw HTML');
+  assert.equal(await page.evaluate('Array.from(document.scripts).some(script=>/accounts\\.google\\.com|google-drive|drive\\.[a-f0-9]+\\.js/i.test(script.src))'),false,'browser OAuth bundle must not load');
+  await page.evaluate('window.open("about:blank","qa-popup");true');
+  await page.evaluate('setTimeout(()=>location.assign("https://tauri-qa.invalid/"),0);true');
+  await new Promise(resolve=>setTimeout(resolve,750));
+  assert.equal(await page.evaluate('location.origin'),origin);
+  const targets=await (await fetch('http://127.0.0.1:'+debugPort+'/json/list')).json();
+  assert.equal(targets.filter(row=>row.type==='page').length,1,'no new popup WebView');
+  console.log('Trusted Types, OAuth isolation, popup and external navigation denial verified');
 }
 
 async function navigation(){
@@ -214,15 +269,15 @@ async function navigation(){
 try{
   debugPort=await port();installPolicy();
   await start();await profile();await navigation();
-  const assetId=await appWrite();await editor();
+  const assetId=await appWrite(),canonical=await editor();
   const first=await storage(true);verify(first);
   const bootProfile=JSON.parse(first.profile).active;
   await stop(false);await start();const normal=await storage(false);verify(normal);
-  assert.equal(JSON.parse(normal.profile).active,bootProfile);await appRead(assetId);
+  assert.equal(JSON.parse(normal.profile).active,bootProfile);await appRead(assetId,canonical);
   await stop(true);await start();const killed=await storage(false);verify(killed);
-  assert.equal(JSON.parse(killed.profile).active,bootProfile);await appRead(assetId);
-  await navigation();await stop(false);
-  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardMount:true}));
+  assert.equal(JSON.parse(killed.profile).active,bootProfile);await appRead(assetId,canonical);
+  await navigation();await profilesAndImport(bootProfile,assetId,canonical);await security();await stop(false);
+  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardEdit:true,workerSyncOPFS:true,profileSwitchIsolation:true,portableImport:true,security:true}));
 }finally{
   clearTimeout(deadline);
   if(page)page.socket.close();
