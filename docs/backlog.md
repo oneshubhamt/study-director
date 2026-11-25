@@ -41,6 +41,6 @@ Historical fixes for 7 (safe areas), 8 (verification wording), 10 (abandoned upl
 - Future encryption at rest and sign-in/password design. Current local-first behavior and accepted Drive sign-in/storage trade-offs remain. Fully silent background sync needing a server is not planned.
 - Very large restore/storage measurements; resumable Drive maintenance planning, duplicate checkpoint capture and module splitting only with evidence. Deployment minification remains deferred. The unregistered diagnostics storage-key observation remains unverified here.
 - Smart merge (`mergeThreeWay`) redesign remains explicitly deferred: do not audit or propose changes to it as backlog work. Math equations in notes are also deferred.
-- The imported production test programme is historical context; Phase 6/7 and the current execution record control this branch's test work.
+- The [Phase 6 roadmap](typescript/PHASE-6.md) incorporates the approved F33 test-suite programme into typed tooling and test conversion after REVIEW-P5. Phase 7 owns full certification.
 
 Real-device obligations remain: live Drive interruptions/handoff, folder permission changes, Android/iOS suspend/kill/reopen and eviction, Safari cleanup behavior, accessibility/skins and phone audio. See [final certification](VERIFICATION.md#final-certification). These are not claimed covered by simulated tests.
