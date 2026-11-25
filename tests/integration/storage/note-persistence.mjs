@@ -380,23 +380,6 @@ for(const failEpochRead of [false,true]){
   assert.deepEqual(app.notes.linkedFrom('pharm').map(note=>note.label),['cardio'],'the backlink survives the combine');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
-  'queued batches use the revision committed by the earlier batch',
-  'rows lost to a browser data clear are rewritten from memory',
-  'reloads keep in-memory survivors of a data clear',
-  'strict flush self-heals after storage loss',
-  'existing rows and recorded deletions keep the stored-version fail-safe',
-  'a clashing edit is kept as an unsaved-copy note',
-  'a clear counted by the database layer protects edits before the handler runs',
-  'an unreadable takeover check keeps memory and deletion records',
-  'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days',
-  'rename changes only titles: a note and its children keep their ids; a taken title merges only when asked',
-  'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version',
-  'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
-  'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
-  'a backup note that takes a local id keeps the bars and text links that point to it'
-]},null,2));
-
  // A new ownership claim cannot complete an earlier note operation that was
  // waiting for its save lane. Exercise the actual repository, not a fake owner.
 {
@@ -414,7 +397,7 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
       if(reacquire){controls.owned=true;controls.ownershipRevision++;}
       await assert.rejects(pending,/superseded|ownership/i,action+' must retain originating authority');
       assert.deepEqual([...stores.area],before,action+' must preserve canonical notes');
-      assert.deepEqual(app.notes.exportPayload(),memory,action+' must preserve runtime notes');
+      assert.deepEqual(structuredClone(app.notes.exportPayload()),memory,action+' must preserve runtime notes');
     }
   }
 }
@@ -459,3 +442,23 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
     assert.deepEqual([...stores.area],before,'stale collection operation preserves canonical Notes');
   }
 }
+
+console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
+  'queued batches use the revision committed by the earlier batch',
+  'rows lost to a browser data clear are rewritten from memory',
+  'reloads keep in-memory survivors of a data clear',
+  'strict flush self-heals after storage loss',
+  'existing rows and recorded deletions keep the stored-version fail-safe',
+  'a clashing edit is kept as an unsaved-copy note',
+  'a clear counted by the database layer protects edits before the handler runs',
+  'an unreadable takeover check keeps memory and deletion records',
+  'deleted notes go to Recently deleted, restore beside a newer note, and expire after 30 days',
+  'rename changes only titles: a note and its children keep their ids; a taken title merges only when asked',
+  'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version',
+  'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
+  'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
+  'a backup note that takes a local id keeps the bars and text links that point to it',
+  'note operations retain ownership through save settlement',
+  'transaction reads, conflict-copy creation and commit acknowledgement retain the write token',
+  'whole-collection operations reject superseded ownership before replacement'
+]},null,2));
