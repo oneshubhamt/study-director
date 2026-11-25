@@ -66,7 +66,7 @@ async function start(){
   await waitForStudyDirector(page,{timeout:60000});
   assert.equal(await page.evaluate('location.origin'),origin);
   assert.equal(await page.evaluate('isSecureContext'),true);
-  assert.equal(await page.evaluate('document.querySelector(\'meta[name="study-director-source-commit"]\').content'),process.env.SD_TAURI_EXPECTED_SHA||process.env.GITHUB_SHA);
+  assert.equal(await page.evaluate('document.querySelector(\'meta[name="study-director-source-commit"]\').content'),process.env.GITHUB_SHA);
   assert.equal(await page.evaluate('PlatformRuntime.kind'),'tauri');
   assert.equal(await page.evaluate('!!window[Symbol.for("studyDirector.installCapture.v1")]'),false);
   assert.equal(await page.evaluate('navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(rows=>rows.length) : 0'),0);
