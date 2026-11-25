@@ -228,9 +228,9 @@ assert.match(mutation,/const expiresAt=nowMs\(\)\+LEASE_MS;[\s\S]*?input\.durabl
 assert.match(mutation,/value=\{version:1,tabId,pageId,claimId,kind:state\.kind,id:state\.id,expiresAt:state\.expiresAt\}/u,'local mirror uses the acknowledged durable expiry, not a later fresh TTL');
 assert.match(mutation,/state\.expiresAt=proof\.expiresAt;writeLease\(state\)/u,'initial acquisition mirrors the durable proof');
 assert.match(mutation,/async function refreshAuthority[\s\S]*?state\.expiresAt=proof\.expiresAt;[\s\S]*?writeLease\(state\)/u,'renewal mirrors the renewed durable proof');
-assert.match(mutation,/Number\(result\.holder&&result\.holder\.expiresAt\)-nowMs\(\)\+50/,'recovery lease wait uses the injected decision clock');
-assert.match(mutation,/const id=`mutation_\$\{nowMs\(\)\.toString\(36\)\}_/,'mutation identifiers use the same injected decision clock');
-assert.match(mutation,/startedAt:new Date\(\)\.toISOString\(\)/,'human/audit mutation start time remains informational wall clock');
+assert.match(mutation,/Number\(proof\.result\.holder\?\.expiresAt\)-nowMs\(\)\+50/,'recovery lease wait uses the injected decision clock');
+assert.match(mutation,/id:`mutation_\$\{nowMs\(\)\.toString\(36\)\}_[^`]+\$\{\(\+\+sequence\)\.toString\(36\)\}`/,'mutation identifiers use the same injected decision clock and a per-controller sequence');
+assert.doesNotMatch(mutation,/startedAt:/,'the unused private mutation start timestamp is retired rather than used for lease decisions');
 
 assert.doesNotMatch(host,/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\s*,\s*Date\.now\(\)\)/,'host Pacer bridges must not bypass the injected Pacer clock');
 assert.equal(((host+execution+executionViews).match(/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\);/g)||[]).length,2,'both host Pacer pause bridges defer to the Pacer clock');
