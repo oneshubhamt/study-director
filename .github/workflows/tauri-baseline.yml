@@ -1,0 +1,54 @@
+name: Tauri spike baseline reproduction
+
+on:
+  push:
+    branches: [tauri-spike]
+    paths: ['.github/workflows/tauri-baseline.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  f33-baseline:
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: d69f2053629a7e24d106a969f0d69eac65b4996b
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Confirm immutable baseline and toolchain
+        run: |
+          test "$(git rev-parse HEAD)" = d69f2053629a7e24d106a969f0d69eac65b4996b
+          test "$(git rev-parse HEAD^{tree})" = 7ae2c068f2964f8e1eac58536e885ab14532eff4
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree}
+          node --version
+      - name: Fast suite
+        run: node tests/helpers/run-category.mjs fast
+      - name: PWA deployment contract
+        run: node tests/architecture/build/deployment-contract.mjs
+      - name: Source build
+        run: node build/build.mjs
+      - name: Verify generated build
+        run: node build/verify-build.mjs
+      - name: Verify generated syntax
+        run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --version
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Baseline browser journeys (serial)
+        run: |
+          node tests/browser/app/core-flow.mjs
+          node tests/browser/library/notes-management.mjs
+          node tests/browser/pwa/pwa-offline.mjs
+          node tests/browser/pwa/pwa-update.mjs
