@@ -41,7 +41,7 @@ assert.equal(tauri.app.windows[0].dragDropEnabled,false);
 assert.equal(tauri.bundle.active,false,'no installer or publication in the initial shell');
 const shell=read('src-tauri/src/main.rs');
 assert.match(shell,/\.on_navigation\(packaged_origin\)/u);
-assert.match(shell,/\.on_new_window\(\|_, _\| NewWindowResponse\.Deny\)/u);
+assert.match(shell,/\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)/u);
 assert.doesNotMatch(shell,/invoke_handler|#\[tauri::command\]|\.plugin\(/u);
 const manifest=JSON.parse(read('source/platform/manifest.webmanifest'));
 const merge=JSON.parse(read('source/platform/firebase-hosting-headers.merge.json'));
