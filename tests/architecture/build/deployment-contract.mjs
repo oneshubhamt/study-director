@@ -21,13 +21,18 @@ assert.equal(build.native.has('sw.js'),false);
 assert.equal(build.native.has('manifest.webmanifest'),false);
 assert.equal(build.native.has('firebase-hosting-headers.merge.json'),false);
 assert.equal(build.native.has(build.externalNames.development.get('drive')),false);
+assert.ok(build.native.has(build.nativeDriveName));
+assert.match(build.native.get(build.nativeDriveName),/kind:'native'/u);
+assert.match(build.native.get(build.nativeDriveName),/invoke\('native_drive'/u);
+assert.doesNotMatch(build.native.get(build.nativeDriveName),/accounts\.google\.com\/gsi\/client/u);
+new vm.Script(build.native.get(build.nativeDriveName));
 assert.ok(![...build.native.values()].some(value=>typeof value==='string'&&value.includes('const GOOGLE_OAUTH_CLIENT_ID=')),'native assets must not contain the web OAuth provider');
 assert.notEqual(build.nativeAssetId,build.pwa.development.assetId);
 // Execute the actual early platform composition and install capture, not a
 // copy of the policy. A malformed target must never fall back to web.
 const platformScript=html=>[...html.matchAll(/<script>([\s\S]*?)<\/script>/gu)].find(match=>match[1].includes('const RUNTIME_PLATFORM='))[1];
-function platformWitness(script){
-  const events=[],window={addEventListener:name=>events.push(name)};
+function platformWitness(script,configured=false){
+  const events=[],window={addEventListener:name=>events.push(name),...(configured?{__SD_NATIVE_DRIVE_AVAILABLE__:true,__TAURI_INTERNALS__:{invoke(){}}}:{})};
   const capabilities=vm.runInNewContext(script+'\nPlatformRuntime;', {window});
   return {capabilities,events,installCapture:!!window[Symbol.for('studyDirector.installCapture.v1')]};
 }
@@ -35,10 +40,12 @@ for(const [html,kind,web] of [[nativeIndex,'tauri',false],[build.development.get
   const {capabilities,events,installCapture}=platformWitness(platformScript(html));
   assert.equal(capabilities.kind,kind);
   assert.equal(Object.isFrozen(capabilities),true);
-  for(const key of ['pwaUpdates','webDrive','browserDeviceFolder','browserNotifications','browserPdfWindow'])assert.equal(capabilities[key],web,key);
+  for(const key of ['pwaUpdates','webDrive','drive','browserDeviceFolder','browserNotifications','browserPdfWindow'])assert.equal(capabilities[key],web,key);
   assert.deepEqual(events,web?['beforeinstallprompt','appinstalled']:[]);
   assert.equal(installCapture,web);
 }
+const configured=platformWitness(platformScript(nativeIndex),true).capabilities;
+assert.equal(configured.drive,true);assert.equal(configured.webDrive,false);assert.equal(configured.pwaUpdates,false);
 assert.throws(()=>platformWitness(platformScript(nativeIndex).replace("RUNTIME_PLATFORM='tauri'","RUNTIME_PLATFORM='invalid'")),/Unknown Study Director runtime platform/);
 assert.match(nativeIndex,/if\(!Object\.isFrozen\(PlatformRuntime\)\)throw new Error\('Study Director runtime platform is unavailable\.'\);\s*const INTERNAL_MODULES=/u);
 const pickerExpression=nativeIndex.match(/showDirectoryPicker:(PlatformRuntime\.browserDeviceFolder[^\n]+),/u)[1];
@@ -51,7 +58,7 @@ assert.equal(picker(platformWitness(platformScript(build.development.get(build.i
 assert.equal(pickerReads,2,'web folder picker remains admitted');
 assert.match(nativeIndex,/function supported\(\)\{return PlatformRuntime\.browserNotifications&&'Notification' in window/);
 const platform=platformWitness(platformScript(nativeIndex)).capabilities;
-const firstStartConnect=nativeIndex.slice(nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.webDrive)"),nativeIndex.indexOf("  async function finish(){",nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.webDrive)")));
+const firstStartConnect=nativeIndex.slice(nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.drive)"),nativeIndex.indexOf("  async function finish(){",nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.drive)")));
 assert.ok(firstStartConnect.includes('applyPassword()'),'witness must cover the actual first-start action');
 let calls=0;
 const result=await vm.runInNewContext(firstStartConnect+'\nconnect();',{PlatformRuntime:platform,connectDriveForProfile:()=>{calls++;return false;}});
@@ -83,9 +90,9 @@ assert.equal(tauri.build.frontendDist,'../dist/tauri');
 assert.equal(tauri.build.beforeBuildCommand,'node build/stage-tauri.mjs');
 assert.equal(Object.hasOwn(tauri.build,'devUrl'),false,'packaged-origin acceptance cannot depend on a dev server');
 assert.equal(tauri.app.withGlobalTauri,false);
-assert.deepEqual(tauri.app.security.capabilities,[]);
+assert.deepEqual(tauri.app.security.capabilities.map(row=>({windows:row.windows,permissions:row.permissions})),[{windows:['main'],permissions:['allow-native-drive']}]);
 assert.equal(tauri.app.security.assetProtocol.enable,false);
-assert.match(tauri.app.security.csp,/connect-src 'self';/u);
+assert.match(tauri.app.security.csp,/connect-src 'self' ipc: http:\/\/ipc\.localhost https:\/\/ipc\.localhost;/u);
 assert.match(tauri.app.security.csp,/require-trusted-types-for 'script'/u);
 assert.doesNotMatch(tauri.app.security.csp,/accounts\.google\.com|googleapis\.com|'unsafe-eval'/u);
 assert.equal(tauri.app.windows.length,1);
@@ -97,7 +104,11 @@ assert.equal(tauri.bundle.active,false,'no installer or publication in the initi
 const shell=read('src-tauri/src/main.rs');
 assert.match(shell,/\.on_navigation\(packaged_origin\)/u);
 assert.match(shell,/\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)/u);
-assert.doesNotMatch(shell,/invoke_handler|#\[tauri::command\]|\.plugin\(/u);
+assert.match(shell,/invoke_handler\(tauri::generate_handler!\[drive_ipc::native_drive\]\)/u);
+assert.doesNotMatch(shell,/\.plugin\(/u);
+const ipc=read('src-tauri/src/drive_ipc.rs');
+assert.match(ipc,/window\.label\(\)!="main"\|\|!super::packaged_origin/u);
+assert.match(read('src-tauri/build.rs'),/AppManifest::new\(\)\.commands\(&\["native_drive"\]\)/u);
 const manifest=JSON.parse(read('source/platform/manifest.webmanifest'));
 const merge=JSON.parse(read('source/platform/firebase-hosting-headers.merge.json'));
 

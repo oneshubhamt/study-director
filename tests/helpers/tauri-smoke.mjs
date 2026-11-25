@@ -86,6 +86,11 @@ async function start({offline=false}={}){
   assert.equal(await page.evaluate('!!window[Symbol.for("studyDirector.installCapture.v1")]'),false);
   assert.equal(await page.evaluate('navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(rows=>rows.length) : 0'),0);
   assert.equal(await page.evaluate('!!window.__TAURI__'),false);
+  assert.equal(await page.evaluate('PlatformRuntime.drive'),false);
+  assert.equal(await page.evaluate('window.__SD_NATIVE_DRIVE_AVAILABLE__'),false);
+  assert.equal(await page.evaluate('(async()=>{const result=await window.__TAURI_INTERNALS__.invoke("native_drive",{command:{op:"status"}});return result.configured;})()'),false);
+  assert.equal(await page.evaluate('(async()=>{try{await window.__TAURI_INTERNALS__.invoke("native_drive",{command:{op:"open",scope:"",email:null}});return false;}catch{return true;}})()'),true);
+  assert.equal(await page.evaluate('(async()=>{try{await window.__TAURI_INTERNALS__.invoke("native_drive",{command:{op:"request",session:"invalid",generation:1,id:"invalid",request:{url:"https://evil.invalid/",method:"GET",headers:{},body:""}}});return false;}catch{return true;}})()'),true);
   console.log('Packaged WebView2 startup verified');
   await exposeApplication();
 }

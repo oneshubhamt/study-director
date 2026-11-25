@@ -210,7 +210,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     state.replaceNativeConnection=()=>{state.nativeEpoch++;state.nativeConnected=true;onInvalidated();notify();};
     return Object.freeze({kind:'native',identity,prepare:async()=>{},authorize:async()=>{if(!state.nativeConnected)state.replaceNativeConnection();},
       connected:()=>state.nativeConnected,automaticConfigured:()=>state.nativeConnected,connectionExpiresAt:()=>0,subscribeConnection:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
-      restoreSession:()=>{},disconnect:async expected=>invalidate(expected),invalidate,release:()=>{},
+      restoreSession:()=>false,admit:async expected=>{assert.equal(expected,identity());},confirmAdmission:expected=>assert.equal(expected,identity()),disconnect:async expected=>invalidate(expected),invalidate,release:()=>{},
       prepareRequest:(url,options,expected)=>async signal=>{assert.equal(expected,identity());const headers=new Headers(options.headers);assert.equal(headers.has('Authorization'),false);state.nativeHeaders.push([...headers]);headers.set('Authorization','Bearer token-native-fixture');const response=await mockFetch(url,{...options,headers,signal});if(expected!==identity())throw new Error('native authorization changed');return response;}
     });
   };

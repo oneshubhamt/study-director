@@ -93,8 +93,9 @@
   let releaseFile=async()=>{},receiveBackupStream=null,checksumBlob=null,nativeAdmission=null;
   // The build composes exactly one connection owner. The repository protocol
   // is shared; native credentials never cross this interface.
-  const connection=createStudyDirectorDriveConnection(Object.freeze({Platform,requirePlatform,profileEmail,timeoutError,onInvalidated:()=>{invalidateFolderIdentity();cancelFolderResolution();}}));
+  const connection=createStudyDirectorDriveConnection(Object.freeze({Platform,requirePlatform,profileEmail,profileFolder:()=>String(profilePort?.folder?.()||''),timeoutError,onInvalidated:()=>{invalidateFolderIdentity();cancelFolderResolution();}}));
   const native=connection.kind==='native';
+  if(native&&connection.available===false)return;
   if(!native&&connection.kind!=='web')throw new Error('Unknown Drive connection platform.');
   const nativeIdentity=()=>native?connection.identity():null;
 
@@ -391,7 +392,8 @@
       await checkNativeDeletion();
       if(expectedProfile()!==expected)throw noRetry(new Error('The local profile changed before Google Drive binding.'));
     }
-    const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
+    const checkCurrent=native?async()=>{await checkNativeDeletion();if(![expected,found].includes(expectedProfile()))throw noRetry(new Error('The local profile changed during Google Drive binding.'));}:null;
+    const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library,...(checkCurrent?{checkCurrent}:{})}));
     if(native){await assertDriveOperationCurrent(context);checkProof();}
     if(!(mine&&decision==='continue'&&(!native||expectedProfile()===expected)||!mine&&decision==='adopt'&&expectedProfile()===found)){
       refuse('This Google account holds the library of another profile. Drive was not used.');
@@ -401,6 +403,9 @@
       // Do not admit writes until the adopted identity is checked again.
       await checkNativeDeletion();
       if(expectedProfile()!==found)throw noRetry(new Error('The local profile changed after Google Drive binding.'));
+      await connection.admit(context.authIdentity,id,found,context.signal);
+      await assertDriveOperationCurrent(context);checkProof();
+      if(expectedProfile()!==found)throw noRetry(new Error('The local profile changed after native Google Drive admission.'));
       deletionChecked=found;
     }
     boundFolder=`${id}\n${expectedProfile()}`;
@@ -948,7 +953,7 @@
     }
     let payload,session=saved||null;
     try{
-      if(file.blob.size<=MULTIPART_UPLOAD_MAX_BYTES)payload=await uploadRepositoryMultipart(file,parent,context);
+      if(!native&&file.blob.size<=MULTIPART_UPLOAD_MAX_BYTES)payload=await uploadRepositoryMultipart(file,parent,context);
       else{
         let recovered=null;
         if(session){
@@ -1195,14 +1200,21 @@
     // What the app can do with the profile's library.
     if(profilePort&&typeof profilePort.controls==='function')profilePort.controls(Object.freeze({deleteLibrary}));
     if(!profilePort||native&&['folder','email'].some(key=>typeof profilePort[key]!=='function'))return false;
-    connection.restoreSession();
-    return api.backup.providers.register(Object.freeze({
+    async function verifyNativeAccount({signal=null}={}){
+      const context=driveOperationContext({signal});
+      const parent=await ensureFolder(context);
+      await assertDriveOperationCurrent(context);
+      connection.confirmAdmission(context.authIdentity);
+      return parent;
+    }
+    if(!native)connection.restoreSession();
+    const registered=api.backup.providers.register(Object.freeze({
       id:'google-drive',
       label:'Google Drive',
       shared:true,
       prepare:connection.prepare,
       authorize:connection.authorize,
-      verifyAccount:()=>native?ensureFolder(driveOperationContext()):requireProfileAccount(),
+      verifyAccount:native?verifyNativeAccount:()=>requireProfileAccount(),
       backgroundAvailable:()=>connection.connected()&&Platform.online(),
       connected:connection.connected,
       automaticConfigured:connection.automaticConfigured,
@@ -1212,6 +1224,8 @@
       release:connection.release,
       repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,now:driveNow,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),listSessionWatch:opts=>listSessionWatch(opts),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
+    if(native&&registered)void Promise.resolve(connection.restoreSession()).then(restored=>restored?verifyNativeAccount():null).catch(()=>{const original=nativeIdentity();if(original)void connection.invalidate(original);});
+    return registered;
   }
 
   const PLUGIN_READY_EVENT='studydirector:ready';

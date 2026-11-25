@@ -269,8 +269,8 @@ registry.define('backup-provider',1,input=>{
     finally{if(timer!==null)clearTimeout(timer);}
   }
 
-  async function authorize(selected,operation){
-    if(selected.authorize)await selected.authorize(Object.freeze({operation}));
+  async function authorize(selected,operation,signal=null){
+    if(selected.authorize)await selected.authorize(Object.freeze({operation,...(signal?{signal}:{})}));
     presentation.condition(selected.id,'permission','');if(presentation.read(selected.id)?.lifecycle==='failed')presentation.resolve(selected.id);notifyStatus();
   }
   function repositoryProviderItem(raw,kind){
@@ -2334,8 +2334,8 @@ registry.define('backup-provider',1,input=>{
     try{
       // Sign-in opens from the click, so preparation runs alongside the
       // background work giving way rather than after it.
-      await Promise.all([foreground.settled,selected.prepare?selected.prepare():null]);await authorize(selected,'connect');
-      if(selected.verifyAccount)await selected.verifyAccount();
+      await Promise.all([foreground.settled,selected.prepare?selected.prepare():null]);await authorize(selected,'connect',foreground.signal);
+      if(selected.verifyAccount)await selected.verifyAccount(Object.freeze({signal:foreground.signal}));
       statusText('');return true;
     }catch(error){statusText(`Connection failed: ${userProviderMessage(error,`${selected.label} could not be connected.`)}`,false);return false;}
     finally{await release(selected,'connect');setBusy(false);foreground.release();}

@@ -731,7 +731,7 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         Ok(lock(&self.state)?.generation)
     }
 
-    fn begin(&self, expected_generation: u64, new_identity: bool) -> Result<Operation<'_>> {
+    fn begin(&self, expected_generation: u64, new_identity: bool, cancel: Arc<AtomicBool>) -> Result<Operation<'_>> {
         let mut state = lock(&self.state)?;
         if state.generation != expected_generation {
             return Err(AuthError::CredentialChanged);
@@ -739,6 +739,7 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         if state.disabled {
             return Err(AuthError::CredentialStore);
         }
+        check_cancel(&cancel)?;
         if new_identity {
             state.generation = state
                 .generation
@@ -746,7 +747,6 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
                 .ok_or(AuthError::Unavailable)?;
             state.access = None;
         }
-        let cancel = Arc::new(AtomicBool::new(false));
         state.active = Some(cancel.clone());
         Ok(Operation {
             state: &self.state,
@@ -865,8 +865,12 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
     }
 
     fn authorize_for(&self, expected_generation: u64) -> Result<AuthorizedAccount> {
+        self.authorize_with(expected_generation, Arc::new(AtomicBool::new(false)))
+    }
+
+    fn authorize_with(&self, expected_generation: u64, cancel: Arc<AtomicBool>) -> Result<AuthorizedAccount> {
         let _serial = lock(&self.serial)?;
-        let op = self.begin(expected_generation, true)?;
+        let op = self.begin(expected_generation, true, cancel)?;
         let prior = self.read_record()?;
         {
             let mut state = op.current()?;
@@ -901,8 +905,12 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
     }
 
     fn refresh_for(&self, expected_generation: u64) -> Result<AuthorizedAccount> {
+        self.refresh_with(expected_generation, Arc::new(AtomicBool::new(false)))
+    }
+
+    fn refresh_with(&self, expected_generation: u64, cancel: Arc<AtomicBool>) -> Result<AuthorizedAccount> {
         let _serial = lock(&self.serial)?;
-        let op = self.begin(expected_generation, false)?;
+        let op = self.begin(expected_generation, false, cancel)?;
         let prior = match self.read_record() {
             Ok(prior) => prior,
             Err(error) => {

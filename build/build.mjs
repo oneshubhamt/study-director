@@ -25,7 +25,7 @@ function sourceFile(relative){return fs.readFileSync(path.join(SOURCE,relative),
 function sourceBytes(relative){return fs.readFileSync(path.join(SOURCE,relative));}
 function moduleSourceFiles(module){return Array.isArray(module.sources)?[...module.sources]:[module.source];}
 function moduleSource(module){return moduleSourceFiles(module).map(sourceFile).join('\n');}
-function externalSourceFiles(){return externalModules.flatMap(moduleSourceFiles);}
+function externalSourceFiles(){return [...new Set(externalModules.flatMap(module=>[...moduleSourceFiles(module),...(module.nativeSources||[])]))];}
 function escapeRegExp(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function escapeHtml(value){return String(value).replace(/[&<>]/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[character]));}
 
@@ -194,20 +194,23 @@ export function renderBuild({includeNative=false}={}){
     development:new Map(externalModules.map(module=>[module.id,filename(module,externalSources.development.get(module.id))])),
     deployment:new Map(externalModules.map(module=>[module.id,filename(module,externalSources.deployment.get(module.id))]))
   });
+  const nativeDrive=externalModules.find(module=>module.id==='drive');
+  const nativeDriveSource=includeNative?renderTokens(nativeDrive.nativeSources.map(sourceFile).join('\n'),identity,nativeDrive.nativeSources.join('+')):null;
+  const nativeDriveName=includeNative?filename({stem:'sd.drive-native'},nativeDriveSource):null;
   const templateSource=sourceFile(htmlSource);
   const withoutTag=(source,tag)=>{
     invariant(source.split(tag).length===2,`Native build expected exactly one ${tag}.`);
     return source.replace(tag,'');
   };
   const template=(target,platform='web')=>renderPlatformTokens(platform==='tauri'
-    ?withoutTag(withoutTag(templateSource,'<link rel="manifest" href="manifest.webmanifest">'),'<script src="@@SD_EXTERNAL_DRIVE_FILENAME@@" defer></script>')
+    ?withoutTag(templateSource,'<link rel="manifest" href="manifest.webmanifest">')
     :templateSource,identity,htmlSource,{
     RUNTIME_PLATFORM:platform,
     EXTERNAL_GLASS_FILENAME:externalNames[target].get('glass'),
     EXTERNAL_AURORA_FILENAME:externalNames[target].get('aurora'),
     EXTERNAL_GUIDE_FILENAME:externalNames[target].get('guide'),
     EXTERNAL_INSIGHTS_FILENAME:externalNames[target].get('insights'),
-    EXTERNAL_DRIVE_FILENAME:externalNames[target].get('drive'),
+    EXTERNAL_DRIVE_FILENAME:platform==='tauri'?nativeDriveName:externalNames[target].get('drive'),
     RICH_TEXT_FILENAME:externalNames[target].get('rich-text'),
     EXPORT_WORKER_FILENAME:externalNames[target].get('export-worker'),
     SEARCH_WORKER_FILENAME:externalNames[target].get('search-worker'),
@@ -228,7 +231,7 @@ export function renderBuild({includeNative=false}={}){
     const files=new Map([[identity.main,html]]);
     for(const module of privateModules)files.set(privateNames.get(module.id),privateSources.get(module.id));
     for(const module of externalModules){
-      if(platform==='tauri'&&module.id==='drive')continue;
+      if(platform==='tauri'&&module.id==='drive'){files.set(nativeDriveName,nativeDriveSource);continue;}
       files.set(externalNames[target].get(module.id),externalSources[target].get(module.id));
     }
     for(const module of styleModules)files.set(styleNames.get(module.id),styleSources.get(module.id));
@@ -288,7 +291,7 @@ export function renderBuild({includeNative=false}={}){
   const deploymentTarget=renderTarget('deployment',template('deployment').replace(privateModuleMarker,()=>deploymentTags));
   const nativeTarget=includeNative?renderTarget('development',template('development','tauri').replace(privateModuleMarker,()=>developmentTags),'tauri'):null;
   return Object.freeze({
-    ...(nativeTarget?{native:nativeTarget.files,nativeAssetId:nativeTarget.assetId}:{}),
+    ...(nativeTarget?{native:nativeTarget.files,nativeAssetId:nativeTarget.assetId,nativeDriveName}:{}),
     identity,
     development:developmentTarget.files,
     deployment:deploymentTarget.files,
@@ -338,15 +341,18 @@ function validateNativeTarget(build){
   const {native,nativeAssetId,development,identity,externalNames}=build;
   invariant(native instanceof Map&&/^[a-f0-9]{24}$/u.test(nativeAssetId),'Native asset target or identity is missing.');
   const excluded=new Set([platformFiles.manifest.output,platformFiles.serviceWorker.output,externalNames.development.get('drive')]);
-  const expected=[...development.keys()].filter(name=>!excluded.has(name)).sort();
+  const expected=[...development.keys()].filter(name=>!excluded.has(name)).concat(build.nativeDriveName).sort();
   invariant(JSON.stringify([...native.keys()].sort())===JSON.stringify(expected),'Native asset inventory differs from the shared frontend.');
   for(const name of expected){
-    if(name===identity.main)continue;
+    if(name===identity.main||name===build.nativeDriveName)continue;
     invariant(sha256(native.get(name))===sha256(development.get(name)),`Native shared asset bytes drifted: ${name}.`);
   }
   const html=native.get(identity.main);
   invariant(html.includes("const RUNTIME_PLATFORM='tauri';")&&development.get(identity.main).includes("const RUNTIME_PLATFORM='web';")&&build.deployment.get(identity.main).includes("const RUNTIME_PLATFORM='web';"),'Native and web runtime capabilities are not isolated.');
-  invariant(!/<link[^>]+rel="manifest"/iu.test(html)&&!html.includes(externalNames.development.get('drive')),'Native frontend includes browser installation or OAuth assets.');
+  invariant(!/<link[^>]+rel="manifest"/iu.test(html)&&!html.includes(externalNames.development.get('drive'))&&html.includes(build.nativeDriveName),'Native frontend includes web OAuth or lacks its native provider.');
+  const nativeDrive=native.get(build.nativeDriveName);
+  invariant(typeof nativeDrive==='string'&&nativeDrive.includes("kind:'native'")&&!nativeDrive.includes('const GOOGLE_OAUTH_CLIENT_ID=')&&!nativeDrive.includes('accounts.google.com/gsi/client'),'Native provider composition is invalid.');
+  invariant(build.nativeDriveName===filename({stem:'sd.drive-native'},nativeDrive),'Native provider content filename drifted.');
   invariant(html.includes(`<meta name="study-director-assets" content="${nativeAssetId}">`),'Native page asset identity drifted.');
   const preIdentity=[...native].map(([name,value])=>[name,name===identity.main?value.replaceAll(nativeAssetId,'__SD_PAGE_ASSET_ID__'):value]);
   const expectedId=sha256(JSON.stringify(preIdentity.sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)]))).slice(0,24);

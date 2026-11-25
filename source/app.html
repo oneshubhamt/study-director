@@ -26,7 +26,8 @@ const RUNTIME_PLATFORM='@@SD_RUNTIME_PLATFORM@@';
 const PlatformRuntime=(()=>{
   if(RUNTIME_PLATFORM!=='web'&&RUNTIME_PLATFORM!=='tauri')throw new Error('Unknown Study Director runtime platform.');
   const web=RUNTIME_PLATFORM==='web';
-  return Object.freeze({kind:RUNTIME_PLATFORM,pwaUpdates:web,webDrive:web,browserDeviceFolder:web,browserNotifications:web,browserPdfWindow:web});
+  const drive=web||window.__SD_NATIVE_DRIVE_AVAILABLE__===true&&typeof window.__TAURI_INTERNALS__?.invoke==='function';
+  return Object.freeze({kind:RUNTIME_PLATFORM,pwaUpdates:web,webDrive:web,drive,browserDeviceFolder:web,browserNotifications:web,browserPdfWindow:web});
 })();
 (()=>{
   if(!PlatformRuntime.pwaUpdates)return;
@@ -2173,7 +2174,7 @@ async function showBackupPresentation(source,kind){
 async function openBackupRestore(){
   return showBackupPresentation('restore',DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive')?'history':'status');
 }
-function backupRestoreChoices(){return !PlatformRuntime.webDrive?'a backup file':DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
+function backupRestoreChoices(){return !PlatformRuntime.drive?'a backup file':DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
 function renderNotificationSurfaces(state){
   const latest=new Map();
   for(const event of state.events)if(event.surfaceId&&(!latest.has(event.surfaceId)||event.surfaceRevision>latest.get(event.surfaceId).surfaceRevision))latest.set(event.surfaceId,event);
@@ -3386,7 +3387,7 @@ function toggleBackupSettings(kind){
 function renderDriveBackup(){
   const state=BackupProviderRuntime.locationStatus('google-drive');
   if(!state){
-    if(!PlatformRuntime.webDrive){
+    if(!PlatformRuntime.drive){
       const status=document.getElementById('backup-provider-row-status-google-drive');if(status)status.textContent='Unavailable';
       const button=document.getElementById('connect-drive-backup');if(button){button.hidden=true;button.disabled=true;}
     }
@@ -6950,9 +6951,9 @@ function renderProfilePanel(){
   // Sync state is the Sync & backups section's; the subtitle names the account.
   const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
-  if(driveValue)driveValue.textContent=!PlatformRuntime.webDrive?'Unavailable in this build':drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
+  if(driveValue)driveValue.textContent=!PlatformRuntime.drive?'Unavailable in this build':drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
   // Signed in, Disconnect is the quieter button beside Sync now.
-  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.classList.toggle('profile-act-muted',!!drive?.connected);driveAction.disabled=!PlatformRuntime.webDrive||!!drive?.engineBusy;}
+  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.classList.toggle('profile-act-muted',!!drive?.connected);driveAction.disabled=!PlatformRuntime.drive||!!drive?.engineBusy;}
   const passwordValue=document.getElementById('profile-password-value'),passwordAction=document.getElementById('profile-password-action');
   if(passwordValue)passwordValue.textContent=protection.enabled?(protection.unlocked?'On':'On · Not entered on this device yet'):'Off';
   if(passwordAction)passwordAction.textContent=protection.enabled?(protection.unlocked?'Change…':'Enter…'):'Set…';
@@ -7106,8 +7107,8 @@ const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
 // The indicator shows Connecting… from the click until the sign-in settles,
 // and the Connect card follows the first sync to its end.
 function connectDriveForProfile(){
-  if(!PlatformRuntime.webDrive){
-    Interactions.notify({key:'native-drive-unavailable',title:'Native Google Drive is not available yet',message:'This experimental build is local-only until native authentication is implemented.'});
+  if(!PlatformRuntime.drive){
+    Interactions.notify({key:'native-drive-unavailable',title:'Native Google Drive is not available yet',message:'This experimental build is local-only without configured native Google Drive authorization.'});
     return Promise.resolve(false);
   }
   // A profile that already has its Drive library signs in again to it; only
@@ -7176,12 +7177,14 @@ function renderDriveConnectCard(){
   // Synced closes on its own; anything that needs the person stays.
   if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
 }
-async function recordDriveLibrary(email,folder){
+async function recordDriveLibrary(email,folder,checkCurrent=null){
   const mine=Profiles.current();if(!mine)return;
+  if(checkCurrent)await checkCurrent();
   // Another Drive library than the one last synced with: what was shared
   // with the old one says nothing about the new one, so the next sync is a
   // first sync (nothing is deleted on either side).
   if(mine.folder!==folder)await ReconciliationBaselineStore.clear();
+  if(checkCurrent){await checkCurrent();if(Profiles.current()?.scope!==mine.scope)throw new Error('The local profile changed during Drive binding.');}
   Profiles.setAccount({email,folder});renderProfile();
 }
 function askToJoinLibrary(email,library){
@@ -7202,13 +7205,15 @@ async function bindDriveLibrary(info){
   const refuse=message=>{endDriveConnectCard();Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
   const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
   if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
-  if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
+  const checkCurrent=typeof info?.checkCurrent==='function'?info.checkCurrent:null;
+  if(info?.mine){await recordDriveLibrary(email,folder,checkCurrent);return 'continue';}
   if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
   driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
   if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
+  if(checkCurrent){await checkCurrent();if(Profiles.current()?.scope!==mine.scope)throw new Error('The local profile changed during Drive binding.');}
   if(!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
   FirstStart.joined();
-  await recordDriveLibrary(email,folder);
+  await recordDriveLibrary(email,folder,checkCurrent);
   return 'adopt';
 }
 // First start (and Add profile): name, an optional password and Google
@@ -7240,11 +7245,11 @@ const FirstStart=(()=>{
     const mine=Profiles.current(),adding=!!(mine&&mine.from!==null);
     node('first-start-eyebrow').textContent=adding?'New profile':'Welcome';
     node('first-start-title').textContent=adding?'Add a profile':'Personalise Study Director';
-    node('first-start-note').textContent=!PlatformRuntime.webDrive?'Your notes, days and plans stay on this device. Add a password to encrypt portable backups.':adding?'A profile has its own notes, days, plans and backups on this device. Add a password to encrypt its backups, and Google Drive to sync it across devices.':'Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.';
+    node('first-start-note').textContent=!PlatformRuntime.drive?'Your notes, days and plans stay on this device. Add a password to encrypt portable backups.':adding?'A profile has its own notes, days, plans and backups on this device. Add a password to encrypt its backups, and Google Drive to sync it across devices.':'Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.';
     node('first-start-skip').textContent=adding?'Cancel':'Skip';
     const drive=BackupProviderRuntime.locationStatus('google-drive'),button=node('first-start-drive'),note=node('first-start-drive-note');
-    if(button){button.textContent=drive?.connected?'Google Drive connected':'Connect Google Drive';button.disabled=!PlatformRuntime.webDrive||!!drive?.connected||!!drive?.engineBusy;button.classList.toggle('connected',!!drive?.connected);}
-    if(note)note.textContent=!PlatformRuntime.webDrive?'Native Google Drive connection is not available yet.':drive?.connected?(joined?'Your library is coming to this device.':Profiles.current()?.email||'Synced through your Google account.'):'Keeps your devices in sync. You can connect later.';
+    if(button){button.textContent=drive?.connected?'Google Drive connected':'Connect Google Drive';button.disabled=!PlatformRuntime.drive||!!drive?.connected||!!drive?.engineBusy;button.classList.toggle('connected',!!drive?.connected);}
+    if(note)note.textContent=!PlatformRuntime.drive?'Native Google Drive connection is not available yet.':drive?.connected?(joined?'Your library is coming to this device.':Profiles.current()?.email||'Synced through your Google account.'):'Keeps your devices in sync. You can connect later.';
   }
   function open(){
     const dialog=node('first-start-dialog');if(!dialog||dialog.open)return false;
@@ -7254,7 +7259,7 @@ const FirstStart=(()=>{
   }
   function close(){const dialog=node('first-start-dialog');if(dialog?.open)dialog.close();}
   async function connect(){
-    if(!PlatformRuntime.webDrive)return connectDriveForProfile();
+    if(!PlatformRuntime.drive)return connectDriveForProfile();
     error('');if(!await applyPassword())return false;
     // The id follows the name until a Drive library knows it.
     const raw=String(node('first-start-name')?.value||'').trim();if(raw)Profiles.rename(raw);

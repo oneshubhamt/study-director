@@ -323,10 +323,10 @@ struct Stream{
     response:Response,media:Media,remaining:u64,full:bool,hash:Sha256,verified:bool,
 }
 struct Transfer{
-    generation:u64,cancelled:AtomicBool,started:AtomicBool,stream:Mutex<Option<Stream>>,touched:Mutex<Instant>,
+    generation:u64,cancelled:Arc<AtomicBool>,started:AtomicBool,stream:Mutex<Option<Stream>>,touched:Mutex<Instant>,
 }
 impl Transfer{
-    fn new(generation:u64)->Self{Self{generation,cancelled:AtomicBool::new(false),started:AtomicBool::new(false),stream:Mutex::new(None),touched:Mutex::new(Instant::now())}}
+    fn new(generation:u64)->Self{Self{generation,cancelled:Arc::new(AtomicBool::new(false)),started:AtomicBool::new(false),stream:Mutex::new(None),touched:Mutex::new(Instant::now())}}
     fn touch(&self)->DriveResult<()>{*locked(&self.touched)?=Instant::now();Ok(())}
 }
 #[derive(Clone)]
@@ -371,19 +371,28 @@ impl NativeDrive{
         if gate.generation!=generation{*gate=Gate::for_generation(generation);}
         Ok(())
     }
-    pub fn authorize(&self,expected:u64,interactive:bool)->DriveResult<AuthorizedAccount>{
-        self.current(expected,None)?;
-        let result=match self.host.refresh_for(expected){
-            Ok(account)=>Ok(account),
-            Err(error @ (AuthError::NotAuthorized|AuthError::Revoked)) if interactive=>{
-                let next=if error==AuthError::Revoked{expected.checked_add(1).ok_or_else(changed)?}else{expected};
-                self.current(next,None)?;
-                self.host.authorize_for(next)
-            }
-            Err(error)=>Err(error),
-        }.map_err(auth_error)?;
-        self.rotate_gate(result.generation)?;
-        Ok(result)
+    pub fn authorize(&self,expected:u64,id:&str,interactive:bool)->DriveResult<AuthorizedAccount>{
+        let transfer=locked(&self.transfers)?.get(id).cloned().ok_or_else(changed)?;
+        self.current(expected,Some(&transfer))?;
+        if transfer.started.swap(true,Ordering::AcqRel){return Err(blocked());}
+        transfer.touch()?;
+        let result=(||{
+            let result=match self.host.refresh_with(expected,transfer.cancelled.clone()){
+                Ok(account)=>Ok(account),
+                Err(error @ (AuthError::NotAuthorized|AuthError::Revoked)) if interactive=>{
+                    let next=if error==AuthError::Revoked{expected.checked_add(1).ok_or_else(changed)?}else{expected};
+                    self.current(next,None)?;
+                    check_cancel(&transfer.cancelled).map_err(auth_error)?;
+                    self.host.authorize_with(next,transfer.cancelled.clone())
+                }
+                Err(error)=>Err(error),
+            }.map_err(auth_error)?;
+            check_cancel(&transfer.cancelled).map_err(auth_error)?;
+            self.rotate_gate(result.generation)?;
+            Ok(result)
+        })();
+        self.remove(id,&transfer);
+        result
     }
     fn token(&self,generation:u64,transfer:Option<&Transfer>)->DriveResult<Token>{
         self.current(generation,transfer)?;
@@ -430,11 +439,6 @@ impl NativeDrive{
             state.access=None;state.generation
         };
         self.stop_transfers(Some(generation));self.rotate_gate(next)?;Ok(next)
-    }
-    pub fn cancel_auth(&self,generation:u64)->DriveResult<bool>{
-        let state=lock(&self.host.state).map_err(auth_error)?;
-        if state.generation!=generation{return Ok(false);}
-        if let Some(flag)=&state.active{flag.store(true,Ordering::Release);Ok(true)}else{Ok(false)}
     }
     fn send(&self,token:&Token,method:Method,url:Url,headers:&BTreeMap<String,String>,body:Vec<u8>,transfer:Option<&Transfer>)->DriveResult<Response>{
         let mut request=self.client.request(method,url).bearer_auth(&token.value);
