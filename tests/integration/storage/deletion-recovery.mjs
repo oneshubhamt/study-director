@@ -128,6 +128,26 @@ assert.equal((await h.app.deletionRecovery.attachments()).some(row=>row.assetId=
 }
 
 const session={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
+
+// A queued clear must still own the session before writing a durable deletion
+// marker. A rejected former-owner operation must not hide a valid session.
+{
+  const authority={};
+  const owned=createHarness(new Map(),null,authority);
+  assert.equal((await owned.app.activeSession.save(session)).ok,true);
+  const current=structuredClone(owned.stores.session.get('active'));
+  const pending=owned.app.activeSession.clear();
+  authority.owned=false;
+  const rejected=await pending;
+  assert.equal(rejected.ok,false);
+  assert.equal(rejected.error?.code,'OWNERSHIP');
+  assert.equal(owned.sharedLocal.has('deletionRecovery'),false,'a former owner cannot stage deletion recovery');
+  assert.deepEqual(owned.stores.session.get('active'),current);
+  authority.owned=true;
+  assert.deepEqual((await owned.app.activeSession.load(0,{strict:true})).value,current,'the rejected clear must not hide the active session');
+  assert.equal((await owned.app.activeSession.clear()).ok,true,'the current owner can still delete the session');
+}
+
 await h.app.activeSession.save(session);
 controls.failSessionWrite=true;
 const cleared=await h.app.activeSession.clear();

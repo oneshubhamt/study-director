@@ -994,21 +994,23 @@ async function loadActiveSessionRecord(retry:number=0,options:{strict?:boolean}=
 }
 
 async function clearActiveSessionRecord():Promise<SessionResult>{
-  activeSessionMutationEpoch++;
   let ownershipToken:WriteToken;
   try{ownershipToken=issueWriteToken('clearing the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
+  activeSessionMutationEpoch++;
   const finishWrite=beginAuthoritativeWrite();
   const writing=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-clear',error,'error');}).then(async()=>{
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID);
     let staged=false,localCleared=false,idbCleared=false,idbError:unknown=null;
     try{
+      assertWriteToken(ownershipToken,'staging the active-session deletion');
       staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
       assertWriteToken(ownershipToken,'the active-session deletion');
       localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
       if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('ActiveSession recovery envelope could not be cleared and no durable deletion marker could be established.');
       assertWriteToken(ownershipToken,'the active-session IndexedDB deletion');
       await idbDeleteActiveSession(ownershipToken);idbCleared=true;
+      assertWriteToken(ownershipToken,'completing the active-session deletion');
       if(localCleared&&idbCleared)clearDeletionRecoveryKeys([recoveryKey]);
       reportCanonicalCommit('activeSession','delete');
     }catch(e){
