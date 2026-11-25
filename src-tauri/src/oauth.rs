@@ -768,7 +768,10 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
             || value.scope != self.scope
             || value.client_id != self.config.id
             || value.enrollment.len() != 43
-            || !value.enrollment.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            || !value
+                .enrollment
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
             || value.permission_scope != SCOPE
             || !visible_ascii(&value.refresh_token, 2048)
             || Account::verified(&value.account.email, &value.account.permission_id)?
@@ -888,7 +891,10 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
 
     fn fence_access(state: &mut State) -> Result<()> {
         if state.access.take().is_some() {
-            state.generation = state.generation.checked_add(1).ok_or(AuthError::Unavailable)?;
+            state.generation = state
+                .generation
+                .checked_add(1)
+                .ok_or(AuthError::Unavailable)?;
             state.active = None;
         }
         Ok(())
@@ -900,7 +906,8 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         let prior = match self.read_record() {
             Ok(prior) => prior,
             Err(error) => {
-                Self::fence_access(&mut op.current()?)?;
+                let mut state = op.current()?;
+                Self::fence_access(&mut state)?;
                 return Err(error);
             }
         };

@@ -409,8 +409,14 @@ fn queued_calls_cannot_acquire_a_successor_generation() {
     let host = host(store.clone());
     let old = host.authorize().unwrap();
     host.disconnect().unwrap();
-    assert!(matches!(host.authorize_for(old.generation), Err(AuthError::CredentialChanged)));
-    assert!(matches!(host.refresh_for(old.generation), Err(AuthError::CredentialChanged)));
+    assert!(matches!(
+        host.authorize_for(old.generation),
+        Err(AuthError::CredentialChanged)
+    ));
+    assert!(matches!(
+        host.refresh_for(old.generation),
+        Err(AuthError::CredentialChanged)
+    ));
     assert!(store.read().unwrap().is_none());
     assert!(host.authorize().is_ok());
 }
