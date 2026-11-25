@@ -281,10 +281,6 @@ P5.10–P5.13 are independently verified at the source and targeted behavioral l
 - **Scope boundary:** no P5.11b presentation work, P5.12 install/update policy, P5.13 generic plugin loading, canonical storage topology, workflow configuration, `main`, `TS-Conversion` or vendored Wordgard was changed.
 - **Still open:** P5.11b, P5.12, P5.13, Phase 6 and Phase 7/full whole-app/device QA remain intentionally open.
 
-## Executor handoff · 2026-11-21
-
-The audited application baseline is `6b16c82a`. Start with **P5.11a, Guide and its Insights sample producer**. P5.11–P5.13 are planned and unstarted. P5.11b covers Director, Glass and Aurora together. P5.12 checks the page and worker sides of one update. P5.13 checks the public plugin API and then the assembled host. These checkpoints can share an implementation session and its verification. Follow the [five-step procedure](AGENTS.md#five-step-procedure) and the [executor handoff](docs/typescript/PHASE-5.md#executor-handoff) for source owners, acceptance criteria and targeted checks. After P5.13, hand Phase 5 to the owner for independent audit before Phase 6. The later [branch decision](docs/typescript/DECISIONS.md#branch-lifecycle-and-f33-parity) pins F33 parity after the complete TypeScript program.
-
 ## Owner audit of P5.8, P5.9 and P5.10 · closed with targeted verification · 2026-11-21
 
 - Audited branch `ts-exp` from `b98ce000` against the original JavaScript at `28c8c1d`, the phase objectives, host wiring and production-shaped tests.
@@ -308,7 +304,7 @@ The audited application baseline is `6b16c82a`. Start with **P5.11a, Guide and i
 - **Objective reconciliation:** all four owner-requested corrections/evidence objectives are closed. P5.9a/b are now **CLOSED — AUDITED — TARGETED**; P5.10 remains **CLOSED — AUDITED — TARGETED**. P5.11a remains the next programme outcome.
 - **Limits:** this is targeted hosted closure, not whole-app/device certification. `insights-maximum-import`, full QA and Phase 7 certification remain intentionally open.
 
-## Last verified application checkpoint
+## P5.5–P5.7 audit checkpoint
 
 `28c8c1d` is published on both `ts-exp` and `TS-Conversion`; P5.5–P5.7 are **CLOSED — AUDITED — TARGETED**. Production corrections at `6005b1c` and `e4b7aa6` protect lifecycle/Diary successors and attachment rollback/cleanup. Strict types/lint/build and targeted module/browser checks passed; full QA and hosted/device certification were not claimed. The [complete audit record](https://github.com/oneshubhamt/study-director/blob/28c8c1d/TS-CONVERSION-EXECUTION.md) owns exact selections, endpoints, five-run notes evidence, limitations and earlier history. Preparation/Phases 1–4 and P5.0–P5.4 retain their recorded completion, including prior audit corrections.
 

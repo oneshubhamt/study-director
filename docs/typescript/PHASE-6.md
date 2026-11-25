@@ -2,13 +2,9 @@
 
 **Planned. Start after REVIEW-P5 closes.** Convert remaining first-party tooling and tests and improve the tests as each owner is converted. The actual Phase 5 exit SHA is the baseline. Full application and device certification follows in Phase 7. F33 product behavior, deployed-data compatibility and SDVC1 are Phase 8 work.
 
-Choose the test layer and grouping by the failure each case must expose. One provider integration case may replace several text checks when it demonstrates every protected behavior. Preserve an isolated browser case when shared setup could mask the failure. Apply the [shared executor guidance](../../AGENTS.md#executor-judgment-across-phases) throughout.
-
 ## Intake and design review
 
 F33's backlog says steps 1–3 shipped and step 4 paused at 4a. Its detailed plan also marks historical-format test retirement (C3) complete in F30 and Insights timing work (D7) done. These are statements about F33. On the planning TS head `f415f0a9`, the generated-case helper, timer and retention tests, coverage floors, mutation runner and browser isolation registry already exist. The push workflow still selects targeted tests. F33's description of a whole-fast-suite push workflow cannot establish TS coverage. [F33 backlog](https://github.com/oneshubhamt/study-director/blob/d69f2053/docs/backlog.md#test-suite-programme-approved-by-the-owner-on-2026-11-02) · [Original objectives, ground rules and step 4 register](https://github.com/oneshubhamt/study-director/blob/d69f2053/docs/test-programme.md)
-
-Three findings change how to execute the original plan.
 
 - **A failing process can give false mutation evidence.** Both branches' mutation runners credit a nonzero test status. A broken loader, missing dependency or unrelated assertion can therefore look like a successful kill. Before retiring a guard, run the unchanged control in the same disposable environment, apply one unique mutation to the actual executed owner, and identify the intended failing assertion. An unrelated failure is inconclusive. Exercise the runner itself with a surviving mutant, an intended kill and a setup failure. Preserve the failing test, reason and replay command.
 - **Consolidation can remove useful isolation.** TS's browser registry records standalone execution for encryption, update, handoff and performance journeys. Merge only shared setup with compatible isolation, tiers and failure modes. Keep scenario names, assertions, tags, fresh state and individual selection. Preserve a separate stress or performance run when a shared setup would warm caches or hide a leak. Compare runtime on the same machine and inputs. F33's file counts and timing estimates are historical measurements, never deletion targets.

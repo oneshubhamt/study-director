@@ -6,7 +6,7 @@ Start with the [product guide](docs/PRODUCT.md) for the app's purpose and workfl
 
 ## Working on this branch
 
-Continue TypeScript conversion on **`ts-exp`**. Read [AGENTS.md](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and the assigned [Phase 5 objectives](docs/typescript/PHASE-5.md) before implementation. The control record owns current status, evidence and the durable scratchpad; history is preserved separately. Current canonical formats are supported; historical data/topology migration code is retired on this branch.
+Continue TypeScript conversion on **`ts-exp`**. Read [AGENTS.md](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and the [assigned phase plan](docs/README.md#typescript-programme) before implementation. The control record owns current status, evidence and the durable scratchpad; history is preserved separately. Current canonical formats are supported; historical data/topology migration code is retired on this branch.
 
 ## Build and run locally
 

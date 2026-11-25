@@ -1,6 +1,6 @@
 # TypeScript tooling and checked boundaries
 
-For current program status and implementation workflow, use the [execution control record](../TS-CONVERSION-EXECUTION.md), [decisions](typescript/DECISIONS.md) and [Phase 5 scope register](typescript/PHASE-5.md). This document owns toolchain/checking mechanics, not pass completion status.
+This guide covers the toolchain, compiler projects and runtime boundaries. See the [execution record](../TS-CONVERSION-EXECUTION.md) for verified status and the [programme map](README.md#typescript-programme) for executor plans.
 
 ## Toolchain and commands
 
@@ -73,13 +73,8 @@ The portable hashing/file-output/encryption/integrity/processing/ZIP implementat
 
 Classic build/VM loading still uses `compileScript`/`readScript`, which reject runtime module syntax. Coverage uses the shared offset-preserving `eraseTypes` primitive for both classic scripts and portable ESM; Node executes the portable `.ts` imports directly. Dynamic core-test loaders resolve source filenames from the production manifest. Type-only contracts live under `types/`, outside runtime coverage inventory. No coverage thresholds were reduced.
 
-Record and backup codecs are checked together with their persistence and session dependencies. The registry is also checked. Phase 5 extended strict checking through the host composition and external features.
-
-
 ## Runtime and tooling boundaries
 
-Persistence, canonical record/backup codecs, repositories, ownership/mutation, sessions/timers, attachments, export, provider orchestration and recovery implementations are now admitted to strict checking. The final `backup.ts` and `backup-provider.ts` expose actual checked construction/output contracts; reduced retention proofs are distinct from restore manifests and pending review subjects determine their payloads. Phase 4's exact validation evidence is in the [history archive](typescript/HISTORY-PREPARATION-PHASE-4.md).
+The registry, persistence, canonical record/backup codecs, repositories, ownership/mutation, sessions/timers, attachments, export, provider orchestration and recovery implementations are now admitted to strict checking. The final `backup.ts` and `backup-provider.ts` expose actual checked construction/output contracts; reduced retention proofs are distinct from restore manifests and pending review subjects determine their payloads. Phase 4's exact validation evidence is in the [history archive](typescript/HISTORY-PREPARATION-PHASE-4.md).
 
-The five inline host scripts, UI modules, external integrations and service worker have TypeScript entry points. Verify coverage by reconciling the shipping manifest, generated bundle producers and compiler projects as well as the unchecked-TypeScript count. Phase 6 owns remaining first-party build tooling, contracts, tests and retirement of transitional source readers. The [execution record](../TS-CONVERSION-EXECUTION.md) holds the dated audit evidence.
-
-The [Phase 6 execution plan](typescript/PHASE-6.md) integrates first-party tooling and test conversion with the F33 suite overhaul after REVIEW-P5.
+The five inline host scripts, UI modules, external integrations and service worker have TypeScript entry points. Verify coverage by reconciling the shipping manifest, generated bundle producers and compiler projects as well as the unchecked-TypeScript count. [Phase 6](typescript/PHASE-6.md) covers remaining first-party tooling, contracts, tests and transitional source readers.
