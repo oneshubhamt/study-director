@@ -28,7 +28,7 @@ function prepare(current,{covered=false,choice=null,changeDuringChoice=false}={}
     Interactions:{choose:async spec=>{chosen=spec;if(changeDuringChoice)stored={...stored,revision:99};return choice;},confirm:async()=>true,notify(){}},NoticeCoordinator:{resolveEvent(){},emit(){}},
     AppDiagnostics:{capture(scope,error){events.push([scope,String(error)]);}},PlanScheduleGateway:{hasLiveState:()=>false},
     markStorageHealthError(){},setPlanStatus(message){events.push(message);},prettyDate:x=>x,refreshStorageFallbackWarning(){},notifyBackupChange(){},
-    updateExecuteSessionStatus(){},refreshExecuteIdleDisplay(){},updateSessionControls(){},scheduleSyncStatus(){},goTab(){},appCanMutate:()=>true,
+    updateExecuteSessionStatus(){},refreshExecuteIdleDisplay(){},updateSessionControls(){},scheduleSyncStatus(){},goTab(){},appCanMutate:()=>true,ownershipRevision:()=>1,
     storageHealthTime:x=>x,deviceName:()=>'',navigator:{onLine:true},clearCanonicalSessionAfterSavedDay:async()=>{clears++;stored=null;}
   };
   return {controller:SessionActions.createController(ports),ports,state,events,counts:()=>({applies,claims,clears,restores,exclusive}),chosen:()=>chosen};
@@ -67,15 +67,15 @@ for(const [owner,choice,changed] of [['inst_other','recover',false],['inst_other
 // the captured evidence and never navigate as though the day was committed.
 for(const failure of ['', 'write', 'readback']){
   const fixture=prepare(session('active','inst_here',today)),events=[],snapshot={date:today,contentRevision:7};
-  const timer={mode:'ready',runtime:{startMs:null},currentIndex:0,emptyRuntime:()=>({startMs:null})};
+  const timer={mode:'ready',runtime:{startMs:null},currentIndex:0,emptyRuntime:()=>({startMs:null})},lifecycle={revision:0};
   const controller=SessionActions.createController({...fixture.ports,
     runtime:{...fixture.ports.runtime,TASKS:[{kind:'work'}],TimerState:timer,TIMER_MODES:{DONE:'done',READY:'ready'},
       TimerEngine:{stopExecution:()=>events.push('stop')},PracticePacer:{pauseForSessionEnd:()=>events.push('pause')},
       setTimerMode:mode=>{timer.mode=mode;},resetBreakState(){}},
     isTrackableBlock:task=>task?.kind==='work',refreshCoreUi(){},goTab:tab=>events.push(tab),ReviewView:{refresh(){}},
     NoticeCoordinator:{begin:()=>({operationId:'finish',update:value=>events.push(value.lifecycle)})},notifyBackupChange:()=>events.push('backup'),
-    ActiveSessionRuntime:{captureSnapshot:()=>snapshot,writeCanonicalNow:async()=>{events.push('write');if(failure)throw {message:`${failure} failed`};},
-      rollbackLocalTransition:async(value,source)=>{assert.equal(value,snapshot);assert.equal(source,'finish-today-rollback');timer.mode='ready';events.push('rollback');}},
+    SessionLifecycle:lifecycle,
+    ActiveSessionRuntime:{finishLocal:async prepare=>{lifecycle.revision++;prepare();events.push('write');if(failure){timer.mode='ready';events.push('rollback');throw {message:`${failure} failed`};}}},
   });
   assert.equal(await controller.finishTodaySession(),!failure);
   assert.equal(events.includes('rollback'),!!failure);assert.equal(events.includes('review'),!failure);assert.equal(events.includes('succeeded'),!failure);assert.equal(events.includes('backup'),!failure);

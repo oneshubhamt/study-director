@@ -14,14 +14,23 @@ const taskState={
   getField(i,k){return fields.get(`${i}:${k}`)},setField(i,k,v){fields.set(`${i}:${k}`,v);return true},deleteField(){return true},indexSnapshot(){return{}},resolvedState(i){return resolved.get(i)||null},setResolved(i,v){if(v)resolved.set(i,v);else resolved.delete(i);return true},isDone(i){return resolved.get(i)==='done'},isSkipped(i){return resolved.get(i)==='skipped'},isResolved(i){return resolved.has(i)},toggleDone(){return'done'},resolvedIndices(){return[]},indices(){return[]},clear(){fields.clear();resolved.clear()}
 };
 const timerState={contentRevision:3,savedRevision:1,adjustedSchedule:{},pendingRestore:null,currentIndex:0,projectSessionSnapshot(input){return structuredClone({...input,currentTaskId:tasks[this.currentIndex]?.id||null,contentRevision:this.contentRevision,savedRevision:this.savedRevision,scheduleAdjustments:{}})}};
-let repoValue=null,revision=10,saveMode='idb',lastSaveOptions=null,clearMode='idb',readFailure=false;
+let repoValue=null,revision=10,saveMode='idb',lastSaveOptions=null,clearMode='idb',readFailure=false,ownerRevision=1,lifeRevision=0;
 const result=value=>({ok:true,value,error:null,storage:{local:false,idb:true}});
 const repo={
- async save(value,options={}){lastSaveOptions=options;repoValue=structuredClone(value);if(saveMode==='readback'||saveMode==='superseded'){readFailure=true;if(saveMode==='superseded')repoValue.revision+=100;saveMode='idb';}if(saveMode==='local')return {ok:true,value:structuredClone(value),error:new Error('idb unavailable'),storage:{local:true,idb:false}};return result(structuredClone(value));},
+ async save(value,options={}){
+  lastSaveOptions=options;
+  if(Object.hasOwn(options,'expectedCanonical')&&JSON.stringify(options.expectedCanonical)!==JSON.stringify(repoValue))return {ok:false,value,error:new Error('Active Session changed'),storage:{local:false,idb:false}};
+  if(saveMode==='local'&&Object.hasOwn(options,'expectedCanonical')&&!options.recoveryFallback)return {ok:false,value,error:new Error('idb unavailable'),storage:{local:false,idb:false}};
+  repoValue=structuredClone(value);
+  if(saveMode==='readback'||saveMode==='superseded'||saveMode==='owner-lost'){if(saveMode!=='owner-lost')readFailure=true;if(saveMode==='superseded'){repoValue.revision+=100;repoValue.snapshot.latestCarryForward='newer progress';}if(saveMode==='owner-lost')ownerRevision++;saveMode='idb';}
+  if(saveMode==='local')return {ok:true,value:structuredClone(value),error:new Error('idb unavailable'),storage:{local:true,idb:false}};
+  return result(structuredClone(value));
+ },
  async load(){if(readFailure){readFailure=false;throw new Error('injected verification read failure');}return repoValue?result(structuredClone(repoValue)):{ok:true,value:null,error:null,storage:{local:false,idb:false}}},
- async clear(){repoValue=null;return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
+ async clear(options={}){if(Object.hasOwn(options,'expectedCanonical')&&JSON.stringify(options.expectedCanonical)!==JSON.stringify(repoValue))return {ok:false,value:null,error:new Error('Active Session changed'),storage:{local:false,idb:false}};repoValue=null;if(clearMode==='superseded'){repoValue=structuredClone(clearSuccessor);readFailure=true;clearMode='idb';}return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
  readLocal(){return repoValue?structuredClone(repoValue):null},nextRevision(seed=0){return ++revision+Number(seed)*0},settled(){return Promise.resolve()}
 };
+let clearSuccessor=null;
 let appliedText='08:00 | 60 | A | work | X | pages | 10\n09:00 | 30 | B | support | Y | block | 1';
 let planDraft='independent draft';let studyDate='2026-11-10';let carry='carry';let practice={active:null,runs:[]};let review={reflection:'r',studyQuality:4};let resetCount=0,applyCount=0,marked=0,warnings=[],recovery=false,blocked=false,recoveryWork=false,canMutate=true,timerEligible=true;
 const input={
@@ -30,8 +39,8 @@ const input={
  repository:repo,canonical:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
  snapshot:{tasks:()=>tasks,ensureTaskIds(){},taskIdentity:{idAt:i=>tasks[i]?.id||null,indexMap:()=>new Map(tasks.map((t,i)=>[t.id,i])),indexForId:(id,map)=>map?.get(String(id))??null},taskState,timerState,captureEvidence:()=>({actualTime:{'0':42},actualRecords:{},taskEvidence:{}}),timerPayload:()=>null,reviewSnapshot:()=>review,practiceSnapshot:()=>practice,practiceRestore:v=>{practice=v||{active:null,runs:[]}},getReviewDate:()=>studyDate,scheduleFingerprint:()=>`fp:${appliedText}`,sessionFingerprint:s=>`fp:${s.scheduleText}`,appliedScheduleText:()=>appliedText,getCarryForward:()=>carry,setCarryForward:v=>{carry=v},clearProgress:()=>taskState.clear(),sanitizeAdjustedSchedule:v=>v,invalidateScheduleDerived(){},setCurrentTask:i=>{timerState.currentIndex=i},timerRestoreValid:()=>false},
  domain:{normalizeCompletionSource:v=>['manual','time','units','skipped'].includes(v)?v:'none',clampCompletion:v=>Math.max(0,Math.min(100,Number(v)||0)),cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),clampText:(v,max)=>String(v??'').slice(0,max),isCanonicalScheduleText:v=>String(v).trim().length>0,isValidIsoDate:v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v)),todayISO:()=>studyDate},
- persistence:{canMutate:()=>canMutate,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){},warn:m=>warnings.push(m)},
- lifecycle:{async run(_k,_o,op){return op()},runSync(_k,_o,op){return op()}},
+ persistence:{canMutate:()=>canMutate,ownsSession:()=>canMutate,ownershipRevision:()=>ownerRevision,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){},warn:m=>warnings.push(m)},
+ lifecycle:{revision:()=>lifeRevision,async run(_k,_o,op){lifeRevision++;return op()},runSync(_k,_o,op){lifeRevision++;return op()}},
  apply:{readPlanDraft:()=>planDraft,writePlanDraft:v=>{planDraft=v},previewPlanDraft(){},setStudyDate:d=>{studyDate=d},applySessionSchedule({snapshot,scheduleText}){applyCount++;appliedText=scheduleText;controller.applySnapshot(snapshot);return true}},
  reset:{stopTimerPresentation(){},invalidatePresentation(){},resetCountdown(){},setCurrentTask:i=>{timerState.currentIndex=i},resetBreak(){},setEmptyTimerMode(){},clearTimerSession(){timerState.contentRevision=0;timerState.savedRevision=0},hydrateReview(){review={reflection:'',studyQuality:null}},invalidateSchedule(){},resetPlanSession(){resetCount++},clearProgress:()=>taskState.clear(),clearCarryForward:()=>{carry=''},resetPractice:()=>{practice={active:null,runs:[]}},pausePracticeForSessionEnd(){if(practice?.active)practice={...practice,active:{...practice.active,pauseCause:'session'}}}},
  installation:{id:()=> 'device-1'},clock:{nowMs:()=>now,nowIso:()=>new Date(now).toISOString()},environment:{clearTimeout:id=>timers.delete(id),setTimeout(fn){const id=++timerId;timers.set(id,fn);return id}}
@@ -86,4 +95,23 @@ await controller.resetLocal();assert.equal(repoValue,null);
 const preReset=controller.captureSnapshot();repoValue=controller.payload(preReset);clearMode='local';
 await assert.rejects(()=>controller.resetLocal(),/delete failed|not durably cleared/);
 assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preReset);
+// Compensation must never replace or re-project a canonical successor.
+clearMode='idb';saveMode='idb';
+for(const action of ['suspend','yield','finish','reset']){
+  repoValue=controller.payload(controller.captureSnapshot());const before=structuredClone(repoValue),beforeApply=applyCount,beforeReset=resetCount;
+  if(action==='reset'){clearSuccessor={...before,revision:before.revision+100,snapshot:{...before.snapshot,latestCarryForward:'newer progress'}};clearMode='superseded';}
+  else saveMode='superseded';
+  const run=()=>action==='reset'?controller.resetLocal():action==='finish'?controller.finishLocal(()=>{}):controller.suspendLocal(action==='yield'?{source:'session-yield'}:{});
+  await assert.rejects(run,/successor was preserved/);
+  assert.equal(repoValue.snapshot.latestCarryForward,'newer progress',action+' preserves canonical successor');
+  assert.equal(applyCount,beforeApply,action+' does not restore obsolete runtime');
+  assert.equal(resetCount,beforeReset,action+' does not reset successor runtime');
+  assert.equal(await controller.writeNow(),null,action+' blocks blind follow-up checkpoints');
+}
+for(const action of ['suspend','finish']){
+  repoValue=controller.payload(controller.captureSnapshot());const beforeApply=applyCount,beforeReset=resetCount;
+  saveMode='owner-lost';
+  await assert.rejects(()=>action==='finish'?controller.finishLocal(()=>{}):controller.suspendLocal(),/superseded/);
+  assert.equal(applyCount,beforeApply);assert.equal(resetCount,beforeReset);
+}
 console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-failure-rollback','suspend-restore','reset-clear','reset-failure-rollback']}));

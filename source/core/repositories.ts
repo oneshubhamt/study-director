@@ -851,7 +851,16 @@ async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipTo
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{changed});};
   },'daily record deletion aborted');
 }
-async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:WriteToken|null=null,strictDurability:boolean=false,expectedCanonical:ActiveSession | null=null){
+function assertExpectedSessionRecovery(expected:ActiveSession|null){
+  const local=readLocalRecoverySession();
+  if(local&&!sameDataValue(local,expected))throw Object.assign(new Error('Active Session recovery changed before this mutation.'),{code:'ACTIVE_SESSION_CHANGED'});
+}
+function assertExpectedSessionRecord(raw:unknown,expected:ActiveSession|null){
+  const present=raw==null?null:ActiveSessionCodec.sanitizeCurrent(raw);
+  if((raw!=null&&!present)||!sameDataValue(present,expected))throw Object.assign(new Error('Active Session changed before this mutation.'),{code:'ACTIVE_SESSION_CHANGED'});
+  assertExpectedSessionRecovery(expected);
+}
+async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:WriteToken|null=null,strictDurability:boolean=false,expectedCanonical:ActiveSession|null|undefined=undefined){
   const current=ActiveSessionCodec.sanitizeCurrent(session);if(!current)throw canonicalRuntimeError('Active Session write requires the current canonical schema.');session=current;
   return (strictDurability?idbStrictTransaction:idbTransaction)<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
@@ -861,7 +870,7 @@ async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:Wri
       const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
     };
     tx.oncomplete=()=>finish(true,undefined);
-    if(expectedCanonical){
+    if(expectedCanonical!==undefined){
       // Compare and replace in one readwrite transaction: a competing local
       // write between Drive verification and recovery cannot be overwritten.
       const request=store.get(ACTIVE_SESSION_ID);
@@ -869,12 +878,7 @@ async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:Wri
       request.onsuccess=()=>{
         try{
           if(ownershipToken)assertWriteToken(ownershipToken,'the conditional active-session write');
-          const present=ActiveSessionCodec.sanitizeCurrent(request.result);
-          if(!present||!sameDataValue(present,expectedCanonical)){
-            try{tx.abort();}catch{}
-            finish(false,Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'}));
-            return;
-          }
+          assertExpectedSessionRecord(request.result,expectedCanonical);
           put();
         }catch(error){try{tx.abort();}catch{}finish(false,error);}
       };
@@ -882,16 +886,28 @@ async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:Wri
   },'active session write aborted');
 }
 function idbGetActiveSession(){return idbGet(DB_ACTIVE_SESSION_STORE,ACTIVE_SESSION_ID,'active session read failed');}
-async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null){
+async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expectedCanonical:ActiveSession|null|undefined=undefined){
   return idbStrictTransaction<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
     if(ownershipToken)assertWriteToken(ownershipToken,'the active-session deletion');
-    stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.delete(ACTIVE_SESSION_ID);request.onerror=()=>finish(false,request.error||new Error('active session delete failed'));
+    const remove=()=>{
+      stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.delete(ACTIVE_SESSION_ID);request.onerror=()=>finish(false,request.error||new Error('active session delete failed'));
+    };
     tx.oncomplete=()=>finish(true,undefined);
+    if(expectedCanonical===undefined){remove();return;}
+    const request=store.get(ACTIVE_SESSION_ID);
+    request.onerror=()=>finish(false,request.error||new Error('Active Session deletion precondition read failed'));
+    request.onsuccess=()=>{
+      try{
+        if(ownershipToken)assertWriteToken(ownershipToken,'the conditional active-session deletion');
+        assertExpectedSessionRecord(request.result,expectedCanonical);
+        remove();
+      }catch(error){try{tx.abort();}catch{}finish(false,error);}
+    };
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical=null}:{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null}={}):Promise<SessionResult>{
+async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical,recoveryFallback=false}:{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null;recoveryFallback?:boolean}={}):Promise<SessionResult>{
   let ownershipToken:WriteToken;
   try{ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
@@ -899,9 +915,9 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
   // metadata is stamped. Exact stored-record validation belongs after that.
   const session=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
   if(!session||session['id']!==ACTIVE_SESSION_ID||!session['snapshot']||Number(session['version'])!==DATA_CONTRACT.schemas.ActiveSession.version)return {ok:false,value:null,error:new Error('invalid active session'),storage:{local:false,idb:false}};
-  const expected=expectedCanonical===null?null:ActiveSessionCodec.sanitizeCurrent(expectedCanonical);
-  if(expectedCanonical!==null&&(!expected||emergency))
-    return {ok:false,value:null,error:new Error('Conditional ownership recovery requires an exact canonical precondition without an emergency fallback.'),storage:{local:false,idb:false}};
+  const expected=expectedCanonical===undefined?undefined:expectedCanonical===null?null:ActiveSessionCodec.sanitizeCurrent(expectedCanonical);
+  if((expectedCanonical!=null&&!expected)||(expected!==undefined&&emergency)||(recoveryFallback&&expected===undefined))
+    return {ok:false,value:null,error:new Error('Conditional session recovery requires an exact canonical precondition.'),storage:{local:false,idb:false}};
   const revision=boundedNumber(session['revision'],{min:1,max:Number.MAX_SAFE_INTEGER,fallback:nextSessionRevision()});
   lastSessionRevision=Math.max(lastSessionRevision,revision);
   const clean=ActiveSessionCodec.canonicalize({...session,version:DATA_CONTRACT.schemas.ActiveSession.version,revision,updatedAt:normalizeTimestamp(session['updatedAt'],new Date().toISOString())});
@@ -928,8 +944,18 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
     }catch(e){
       if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:idbSaved}};
       idbError=e;
-      if(!expected&&!localSaved&&writeEpoch===activeSessionMutationEpoch){
-        try{checkpoint();}catch(error){if(isOwnershipLostError(error))return {ok:false,value:clean,error,storage:{local:false,idb:false}};throw error;}
+      if(!localSaved&&writeEpoch===activeSessionMutationEpoch){
+        if(expected===undefined){
+          try{checkpoint();}catch(error){if(isOwnershipLostError(error))return {ok:false,value:clean,error,storage:{local:false,idb:false}};throw error;}
+        }else if(recoveryFallback&&!(e&&typeof e==='object'&&'code' in e&&e.code==='ACTIVE_SESSION_CHANGED')){
+          // A conditional rollback may use the recovery envelope only after a
+          // fresh physical read proves the same precondition still holds.
+          try{
+            const present=await idbGetActiveSession();
+            assertWriteToken(ownershipToken,'verifying conditional session recovery');
+            if(writeEpoch===activeSessionMutationEpoch){assertExpectedSessionRecord(present,expected);checkpoint();}
+          }catch(error){return {ok:false,value:clean,error,storage:{local:false,idb:false}};}
+        }
       }
     }
     if(idbSaved&&writeEpoch===activeSessionMutationEpoch){
@@ -1000,7 +1026,9 @@ async function loadActiveSessionRecord(retry:number=0,options:{strict?:boolean}=
   }
 }
 
-async function clearActiveSessionRecord():Promise<SessionResult>{
+async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:ActiveSession|null}={}):Promise<SessionResult>{
+  const expected=expectedCanonical===undefined?undefined:expectedCanonical===null?null:ActiveSessionCodec.sanitizeCurrent(expectedCanonical);
+  if(expectedCanonical!=null&&!expected)return {ok:false,value:null,error:new Error('Active Session deletion precondition is invalid.'),storage:{local:false,idb:false}};
   let ownershipToken:WriteToken;
   try{ownershipToken=issueWriteToken('clearing the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
@@ -1011,13 +1039,22 @@ async function clearActiveSessionRecord():Promise<SessionResult>{
     let staged=false,localCleared=false,idbCleared=false,idbError:unknown=null;
     try{
       assertWriteToken(ownershipToken,'staging the active-session deletion');
-      staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
-      assertWriteToken(ownershipToken,'the active-session deletion');
-      localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
-      if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('ActiveSession recovery envelope could not be cleared and no durable deletion marker could be established.');
+      if(expected===undefined){
+        staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
+        assertWriteToken(ownershipToken,'the active-session deletion');
+        localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
+        if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('ActiveSession recovery envelope could not be cleared and no durable deletion marker could be established.');
+      }
       assertWriteToken(ownershipToken,'the active-session IndexedDB deletion');
-      await idbDeleteActiveSession(ownershipToken);idbCleared=true;
+      await idbDeleteActiveSession(ownershipToken,expected);idbCleared=true;
       assertWriteToken(ownershipToken,'completing the active-session deletion');
+      if(expected!==undefined){
+        // Conditional deletion must not stage a marker or remove a recovery
+        // copy until the exact canonical record has been deleted.
+        localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
+        if(!localCleared)staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
+        if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('Active Session recovery cleanup failed.');
+      }
       if(localCleared&&idbCleared)clearDeletionRecoveryKeys([recoveryKey]);
       reportCanonicalCommit('activeSession','delete');
     }catch(e){

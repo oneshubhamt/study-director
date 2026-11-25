@@ -606,6 +606,7 @@ const SessionActions=SessionActionsModule.createController(Object.freeze<Paramet
   scheduleSyncStatus:(...args)=>scheduleSyncStatus(...args),
   goTab:(...args)=>goTab(...args),
   appCanMutate:(...args)=>appCanMutate(...args),
+  ownershipRevision:()=>AppOwnership.revision,
   getReviewDate:(...args)=>getReviewDate(...args),
   resetCountdownRuntime:(...args)=>resetCountdownRuntime(...args),
   restoreTimerRuntimeIfAny:(...args)=>restoreTimerRuntimeIfAny(...args),
@@ -2582,7 +2583,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
   codec:Object.freeze<SessionHostInput['codec']>({sanitizeCurrent:value=>ActiveSessionCodec.sanitizeCurrent(value),sanitizeSessionSnapshot:(value,date,fingerprint,revision)=>ActiveSessionCodec.sanitizeSessionSnapshot(value,date,fingerprint,revision)}),
   repository:Object.freeze<SessionHostInput['repository']>({
     save:(value,options)=>AppData.activeSession.save(value,options),load:(retry,options)=>AppData.activeSession.load(retry,options),
-    clear:()=>AppData.activeSession.clear(),readLocal:()=>AppData.activeSession.readLocal(),
+    clear:options=>AppData.activeSession.clear(options),readLocal:()=>AppData.activeSession.readLocal(),
     nextRevision:seed=>AppData.activeSession.nextRevision(seed),settled:()=>AppData.activeSession.settled()
   }),
   canonical:Object.freeze<SessionHostInput['canonical']>({same:(a,b)=>CanonicalModule.same(a,b)}),
@@ -2597,7 +2598,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
   }),
   domain:Object.freeze<SessionHostInput['domain']>({normalizeCompletionSource,clampCompletion:CompletionModel.clampPercent,cleanDayRevision,clampText,isCanonicalScheduleText,isValidIsoDate,todayISO}),
   persistence:Object.freeze<SessionHostInput['persistence']>({
-    canMutate:appCanMutate,recoveryQuiesced:managedRecoverySessionQuiesced,
+    canMutate:appCanMutate,ownsSession:()=>AppOwnership.canMutate(),ownershipRevision:()=>AppOwnership.revision,recoveryQuiesced:managedRecoverySessionQuiesced,
     persistenceBlocked:()=>ReviewSaveService.status().activeSessionPersistenceBlocked,
     recoveryWorkActive:()=>AppOwnership.canMutate()&&AppMutationCoordinator?.status().active==='managed-recovery',
     timerSnapshotEligible:()=>!TimerState.paused&&!TimerState.inactiveGap&&!!TimerState.runtime&&TimerState.runtime.startMs!==null,
@@ -2605,7 +2606,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
     snapshotForWrite:()=>SessionHandoffRuntime?.snapshotForWrite()||requireActiveSessionRuntime().captureSnapshot(),
     reportResult:handleActiveSessionRepositoryResult,warn:showLiveDraftSaveWarning
   }),
-  lifecycle:Object.freeze<SessionHostInput['lifecycle']>({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation)}),
+  lifecycle:Object.freeze<SessionHostInput['lifecycle']>({revision:()=>SessionLifecycle.revision,run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation)}),
   apply:Object.freeze<SessionHostInput['apply']>({
     readPlanDraft:()=>{const input=document.getElementById('plan-input');return input instanceof HTMLTextAreaElement||input instanceof HTMLInputElement?input.value:'';},
     writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input instanceof HTMLTextAreaElement||input instanceof HTMLInputElement)input.value=value;},

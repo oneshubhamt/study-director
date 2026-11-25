@@ -41,7 +41,7 @@ export interface SessionActionInput{
   updateExecuteSessionStatus():unknown;refreshExecuteIdleDisplay(now:Date,options:{force:boolean}):unknown;
   updateSessionControls():unknown;scheduleSyncStatus():unknown;
   goTab(tab:'plan'|'execute'|'review',options:{source:string;history?:'none'|'replace'}):unknown;
-  appCanMutate():boolean;getReviewDate():string;resetCountdownRuntime():unknown;restoreTimerRuntimeIfAny():boolean;
+  appCanMutate():boolean;ownershipRevision():number;getReviewDate():string;resetCountdownRuntime():unknown;restoreTimerRuntimeIfAny():boolean;
   showEmpty(message:string,title?:string):unknown;renderSched():unknown;updateBadges():unknown;updateHeaderInfo():unknown;
   updateRealTimeAwareness():unknown;renderRecoveryReview():unknown;updateExecutePanels():unknown;
   storageHealthTime(value:string):string;deviceName(id:string|undefined|null):string;refreshCoreUi():unknown;

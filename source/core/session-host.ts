@@ -34,8 +34,8 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   functions(snapshot,['tasks','ensureTaskIds','captureEvidence','timerPayload','reviewSnapshot','practiceSnapshot','practiceRestore','getReviewDate','scheduleFingerprint','sessionFingerprint','appliedScheduleText','getCarryForward','setCarryForward','clearProgress','sanitizeAdjustedSchedule','invalidateScheduleDerived','setCurrentTask','timerRestoreValid'],'Session snapshot port');
   if(!snapshot.taskIdentity||!snapshot.taskState||!snapshot.timerState)throw new TypeError('Session runtime state ports are incomplete.');
   functions(domain,['normalizeCompletionSource','clampCompletion','cleanDayRevision','clampText','isCanonicalScheduleText','isValidIsoDate','todayISO'],'Session domain port');
-  functions(persistence,['canMutate','recoveryQuiesced','persistenceBlocked','recoveryWorkActive','timerSnapshotEligible','markContentChanged','snapshotForWrite','reportResult','warn'],'Session persistence port');
-  functions(lifecycle,['run'],'Session lifecycle port');
+  functions(persistence,['canMutate','ownsSession','ownershipRevision','recoveryQuiesced','persistenceBlocked','recoveryWorkActive','timerSnapshotEligible','markContentChanged','snapshotForWrite','reportResult','warn'],'Session persistence port');
+  functions(lifecycle,['revision','run'],'Session lifecycle port');
   functions(apply,['readPlanDraft','writePlanDraft','previewPlanDraft','setStudyDate','applySessionSchedule'],'Session apply port');
   functions(reset,['stopTimerPresentation','invalidatePresentation','resetCountdown','setCurrentTask','resetBreak','setEmptyTimerMode','clearTimerSession','hydrateReview','invalidateSchedule','resetPlanSession','clearProgress','clearCarryForward','resetPractice','pausePracticeForSessionEnd'],'Session reset port');
   functions(installation,['id'],'Session installation port');
@@ -43,6 +43,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   functions(environment,['clearTimeout','setTimeout'],'Session environment port');
 
   let liveDraftSaveTimer:number|null=null,liveDraftSaveDueAt=0,lastTimerSnapshotMs=0,pendingOptions:LiveDraftWriteOptions|null=null,suppressionDepth=0;
+  let localTransitionDepth=0,conflictRevision:{owner:number;life:number}|null=null;
   const mergeOptions=(base:Readonly<LiveDraftWriteOptions>|null,next:Readonly<LiveDraftWriteOptions>|null):LiveDraftWriteOptions=>({
     markChanged:(base?base.markChanged!==false:false)||(next?next.markChanged!==false:false),
     backupCapture:!!(base?.backupCapture||next?.backupCapture),
@@ -54,6 +55,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   const persistenceSuppressed=()=>suppressionDepth>0;
   function blocked(options:Readonly<LiveDraftWriteOptions>={}){
     const recoveryCheckpoint=options.allowDuringRecoveryQuiescence===true&&persistence.recoveryWorkActive();
+    if(localTransitionDepth||conflictRevision?.owner===persistence.ownershipRevision()&&conflictRevision.life===lifecycle.revision())return true;
     return (persistenceSuppressed()||persistence.recoveryQuiesced())&&options.allowDuringRecoveryQuiescence!==true||!persistence.canMutate()&&!recoveryCheckpoint||persistence.persistenceBlocked();
   }
   function captureSnapshot(evidence:RuntimeEvidence|null=null):SessionSnapshot|null{
@@ -151,29 +153,71 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     try{return report(await repository.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}),'save');}
     catch(error){const failed:SessionResult={ok:false,value:session,error,storage:{local:false,idb:false}};report(failed,'save');return failed;}
   }
-  async function preserveRecoverySnapshot(value:SessionSnapshot,operation:string):Promise<SessionResult>{
-    const saved=await writeSnapshot(value,{emergency:true,strictDurability:true,markChanged:false});
-    const recovered=saved?.value?sessionSnapshot(saved.value):null;
-    if(!saved||saved.ok!==true||(!saved.storage.idb&&!saved.storage.local)||!recovered||!canonical.same(recovered,value)){
-      throw saved?.error||new Error(`The pre-transition Active Session could not be preserved while ${operation}.`);
-    }
-    return saved;
+  type TransitionAuthority={owner:number;life:number};
+  type LocalTransition={authority:TransitionAuthority;before:ActiveSession|null;rollback:SessionSnapshot|null;attempted:ActiveSession|null|undefined;runtimeChanged:boolean};
+  const authorityCurrent=(authority:TransitionAuthority)=>persistence.ownsSession()&&persistence.ownershipRevision()===authority.owner&&lifecycle.revision()===authority.life;
+  function assertTransition(authority:TransitionAuthority){
+    if(!authorityCurrent(authority))throw new Error('The Active Session transition was superseded; newer progress was preserved.');
   }
-  async function rollbackLocalTransition(value:SessionSnapshot,source:string,{restoreRuntime=true}:Readonly<{restoreRuntime?:boolean}>={}){
-    let runtimeError:unknown=null,recoveryError:unknown=null;
-    if(restoreRuntime){
+  function blockConflictedRuntime(authority:TransitionAuthority){
+    if(authorityCurrent(authority))conflictRevision=authority;
+  }
+  async function transitionRead(authority:TransitionAuthority):Promise<ActiveSession|null>{
+    assertTransition(authority);
+    const read=await repository.load(0,{strict:true});
+    assertTransition(authority);
+    if(!read.ok||read.error)throw read.error||new Error('The canonical Active Session could not be read safely.');
+    return read.value;
+  }
+  async function rollbackLocalTransition(transition:LocalTransition,source:string){
+    const {authority,before,rollback,attempted,runtimeChanged}=transition;
+    assertTransition(authority);
+    // No operation may adopt a successor as its own rollback precondition.
+    const latest=await transitionRead(authority);
+    if(!canonical.same(latest,before)&&(attempted===undefined||!canonical.same(latest,attempted))){
+      blockConflictedRuntime(authority);
+      throw new Error('The canonical session advanced; its successor was preserved.');
+    }
+    if(!rollback)return;
+    const intended=payload(rollback);if(!intended)throw new Error('The pre-transition Active Session snapshot is invalid.');
+    const saved=report(await repository.save(intended,{strictDurability:true,expectedCanonical:latest,recoveryFallback:true}),'save');
+    assertTransition(authority);
+    const recovered=saved.value?sessionSnapshot(saved.value):null;
+    if(!saved.ok||!recovered||!canonical.same(recovered,rollback))throw saved.error||new Error('The pre-transition recovery snapshot was not preserved.');
+    if(saved.storage.idb)await requireCanonicalWrite(saved,intended,source);
+    else if(!saved.storage.local||!canonical.same(repository.readLocal(),intended))throw saved.error||new Error('The emergency recovery snapshot could not be verified.');
+    assertTransition(authority);
+    if(runtimeChanged){
+      const restored=await withPersistenceSuppressed(()=>applyStoredSession(intended,rollback,{source,lifecycleManaged:true}));
+      assertTransition(authority);
+      if(restored===false)throw new Error('The pre-transition Active Session runtime could not be restored.');
+    }
+  }
+  async function runLocalTransition<T>(kind:string,date:string,operation:(transition:LocalTransition)=>Promise<T>):Promise<T>{
+    const owner=persistence.ownershipRevision();
+    if(!persistence.ownsSession())throw new Error('Use the primary tab to change the Active Session.');
+    let authority:TransitionAuthority|undefined;
+    const result=await lifecycle.run(kind,{scheduleIdentity:true,date,autoDate:date===domain.todayISO()},async()=>{
+      authority={owner,life:lifecycle.revision()};assertTransition(authority);
+      localTransitionDepth++;cancelPendingLiveDraftSave();
       try{
-        const session=payload(value);if(!session)throw new Error('The pre-transition Active Session snapshot is invalid.');
-        const restored=await withPersistenceSuppressed(()=>applyStoredSession(session,value,{source,lifecycleManaged:true}));
-        if(restored===false)throw new Error('The pre-transition Active Session runtime could not be restored.');
-      }catch(error){runtimeError=error;}
-    }
-    try{await preserveRecoverySnapshot(value,source);}catch(error){recoveryError=error;}
-    if(runtimeError||recoveryError){
-      const detail=[runtimeError&&`runtime: ${String((runtimeError as {message?:unknown})?.message||runtimeError)}`,recoveryError&&`recovery: ${String((recoveryError as {message?:unknown})?.message||recoveryError)}`].filter(Boolean).join('; ');
-      throw new Error(`Active Session rollback failed (${detail}).`);
-    }
-    return true;
+        const before=await transitionRead(authority);
+        const transition:LocalTransition={authority,before,rollback:persistence.snapshotForWrite(),attempted:undefined,runtimeChanged:false};
+        try{
+          const value=await operation(transition);assertTransition(authority);return value;
+        }catch(error){
+          if(!authorityCurrent(authority))throw error;
+          try{await rollbackLocalTransition(transition,kind+'-rollback');}
+          catch(rollbackError){
+            blockConflictedRuntime(authority);
+            throw new Error(`${String((error as {message?:unknown})?.message||error)} Rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);
+          }
+          throw error;
+        }
+      }finally{localTransitionDepth--;}
+    });
+    if(!authority)throw new Error('The Active Session transition did not start.');
+    assertTransition(authority);return result;
   }
   async function writeNow(options:Readonly<LiveDraftWriteOptions>={}):Promise<SessionResult|null>{
     if(blocked(options))return null;
@@ -231,9 +275,9 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     cancelPendingLiveDraftSave();lastTimerSnapshotMs=clock.nowMs();
     return saveCanonicalSession(session,operation,{backupCapture:options.backupCapture===true});
   }
-  async function clearCanonical(operation:string):Promise<SessionResult>{
+  async function clearCanonical(operation:string,options:Readonly<{expectedCanonical?:ActiveSession|null}>={}):Promise<SessionResult>{
     cancelPendingLiveDraftSave();
-    const cleared=report(await repository.clear(),'clear');
+    const cleared=report(await repository.clear(options),'clear');
     if(!cleared||cleared.ok!==true||cleared.error||cleared.storage.idb!==true)throw cleared?.error||new Error(`The Active Session was not durably cleared while ${operation}.`);
     const readBack=await repository.load(0,{strict:true});
     if(!readBack||readBack.ok!==true||readBack.error||readBack.value)throw readBack?.error||new Error(`The Active Session clear could not be verified after ${operation}.`);
@@ -254,19 +298,12 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   async function resetLocal():Promise<SessionResult>{
     const date=domain.todayISO();
-    return lifecycle.run('session-reset',{scheduleIdentity:true,date,autoDate:true},async()=>{
-      const rollback=persistence.snapshotForWrite();let cleared:SessionResult|null=null;
-      try{
-        cleared=await clearCanonical('resetting today’s session');
-        resetCore(date,'session-reset');
-        return cleared;
-      }catch(error){
-        if(rollback){
-          try{await rollbackLocalTransition(rollback,'rolling back a failed session reset',{restoreRuntime:!!cleared});}
-          catch(rollbackError){throw new Error(`${String((error as {message?:unknown})?.message||error)} Rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
-        }
-        throw error;
-      }
+    return runLocalTransition('session-reset',date,async transition=>{
+      transition.attempted=null;
+      const cleared=await clearCanonical('resetting today’s session',{expectedCanonical:transition.before});
+      assertTransition(transition.authority);
+      transition.runtimeChanged=true;resetCore(date,'session-reset');
+      return cleared;
     });
   }
   function applyStoredSession(session:ActiveSession,value:SessionSnapshot,options:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>={}){
@@ -283,53 +320,72 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   async function suspendLocal(options:Readonly<{source?:string}>={}):Promise<ActiveSession>{
     const source=options.source||'session-suspend';
-    return lifecycle.run(source,{scheduleIdentity:true,date:snapshot.getReviewDate(),autoDate:true},async()=>{
-      const rollback=persistence.snapshotForWrite();if(!rollback)throw new Error('No active study session is available to suspend.');
-      try{
-        reset.pausePracticeForSessionEnd();cancelPendingLiveDraftSave();
-        const value=persistence.snapshotForWrite(),session=payload(value,{status:'suspended'});if(!session)throw new Error('No active study session is available to suspend.');
-        const saved=await saveCanonicalSession(session,'suspending today’s session');
-        resetCore(session.date,source);
-        return saved.value as ActiveSession;
-      }catch(error){
-        try{await rollbackLocalTransition(rollback,'rolling back a failed session suspension');}
-        catch(rollbackError){throw new Error(`${String((error as {message?:unknown})?.message||error)} Rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
-        throw error;
-      }
+    return runLocalTransition(source,snapshot.getReviewDate(),async transition=>{
+      if(!transition.rollback)throw new Error('No active study session is available to suspend.');
+      transition.runtimeChanged=true;
+      reset.pausePracticeForSessionEnd();cancelPendingLiveDraftSave();
+      const session=payload(persistence.snapshotForWrite(),{status:'suspended'});
+      if(!session)throw new Error('No active study session is available to suspend.');
+      transition.attempted=session;
+      await saveCanonicalSession(session,'suspending today’s session',{expectedCanonical:transition.before});
+      assertTransition(transition.authority);
+      resetCore(session.date,source);
+      return session;
+    });
+  }
+  async function finishLocal(prepare:()=>void):Promise<SessionResult>{
+    return runLocalTransition('session-finish',snapshot.getReviewDate(),async transition=>{
+      if(!transition.rollback)throw new Error('No active study session is available to finish.');
+      transition.runtimeChanged=true;prepare();persistence.markContentChanged();
+      const session=payload(persistence.snapshotForWrite());if(!session)throw new Error('No canonical Active Session is available while finishing today.');
+      transition.attempted=session;
+      lastTimerSnapshotMs=clock.nowMs();
+      const saved=await saveCanonicalSession(session,'finishing today’s session',{expectedCanonical:transition.before});
+      assertTransition(transition.authority);return saved;
     });
   }
   async function restoreSuspendedLocal(session:ActiveSession):Promise<ActiveSession>{
     const current=codec.sanitizeCurrent(session);if(!current||classify(current)!=='today-suspended')throw new Error('No suspended session is available for today.');
-    return lifecycle.run('session-restore',{scheduleIdentity:true,date:current.date,autoDate:true,snapshotReview:current.snapshot.review},async()=>{
-      const loaded=await repository.load(0,{strict:true});
+    const owner=persistence.ownershipRevision();
+    if(!persistence.ownsSession())throw new Error('Use the primary tab to restore the Active Session.');
+    let authority:TransitionAuthority|undefined;
+    const result=await lifecycle.run('session-restore',{scheduleIdentity:true,date:current.date,autoDate:true,snapshotReview:current.snapshot.review},async()=>{
+      authority={owner,life:lifecycle.revision()};assertTransition(authority);
+      const loaded=await repository.load(0,{strict:true});assertTransition(authority);
       if(!loaded?.ok||loaded.error||!loaded.storage.idb||!loaded.value||!canonical.same(loaded.value,current))throw new Error('The suspended Active Session changed before it could be restored.');
       const active=codec.sanitizeCurrent({...current,status:'active',runningOn:installation.id(),revision:repository.nextRevision(current.revision),suspendedAt:null,updatedAt:clock.nowIso()});
       if(!active)throw new Error('The suspended Active Session could not be activated.');
       let applying=false;
       try{
         await saveCanonicalSession(active,'restoring today’s suspended session',{expectedCanonical:current});
+        assertTransition(authority);
         const value=sessionSnapshot(active);if(!value)throw new Error('The restored Active Session snapshot is incompatible.');
         applying=true;
         const restored=await applyStoredSession(active,value,{source:'session-restore',lifecycleManaged:true});
+        assertTransition(authority);
         if(restored===false)throw new Error('The suspended Active Session could not be applied to the runtime.');
         return active;
       }catch(error){
-        if(applying)resetCore(current.date,'session-restore-rollback');
+        if(!authorityCurrent(authority))throw error;
         try{
-          const latest=await repository.load(0,{strict:true});
+          const latest=await repository.load(0,{strict:true});assertTransition(authority);
           if(!latest.ok||latest.error||!latest.storage.idb)throw latest.error||new Error('The canonical session could not be verified for rollback.');
           if(canonical.same(latest.value,active))await saveCanonicalSession({...current,revision:repository.nextRevision(active.revision),updatedAt:clock.nowIso()},'rolling back a failed suspended-session restore',{expectedCanonical:active});
           else if(!canonical.same(latest.value,current))throw new Error('The canonical session advanced during restore; its successor was preserved.');
+          assertTransition(authority);
+          if(applying)resetCore(current.date,'session-restore-rollback');
         }
-        catch(rollbackError){throw new Error(`${String((error as {message?:unknown})?.message||error)} Automatic session rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
+        catch(rollbackError){blockConflictedRuntime(authority);throw new Error(`${String((error as {message?:unknown})?.message||error)} Automatic session rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
         throw error;
       }
     });
+    if(!authority)throw new Error('The Active Session restoration did not start.');
+    assertTransition(authority);return result;
   }
   const controller:SessionHostController=freeze({
     format:'study-director.session-host',contractVersion:1,captureSnapshot,applySnapshot,sessionSnapshot,classify,payload,load,readLocal:()=>repository.readLocal(),restoreLocalRecovery,
     writeSnapshot,writeNow,writeCanonicalNow,saveLiveDraft,flushLiveDraft,cancelPendingLiveDraftSave,maybeSnapshotRunningTimer,requireCanonicalWrite,saveCanonicalSession,clearCanonical,settled:()=>repository.settled(),
-    persistenceSuppressed,withPersistenceSuppressed,rollbackLocalTransition,applyStoredSession,resetRuntime,resetLocal,suspendLocal,restoreSuspendedLocal
+    persistenceSuppressed,withPersistenceSuppressed,finishLocal,applyStoredSession,resetRuntime,resetLocal,suspendLocal,restoreSuspendedLocal
   });
   return controller;
 }

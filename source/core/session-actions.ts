@@ -445,9 +445,11 @@ async function finishTodaySession(){
     confirmLabel:'Finish today',cancelLabel:'Keep studying'
   });
   if(!accepted||!appCanMutate())return false;
-  const rollbackSnapshot=ports.ActiveSessionRuntime.captureSnapshot();
-  let completionNotice=null;
+  const owner=ports.ownershipRevision(),life=ports.SessionLifecycle.revision;
+  const current=()=>appCanMutate()&&ports.ownershipRevision()===owner&&ports.SessionLifecycle.revision===life+1;
+  let completionNotice:ReturnType<typeof ports.NoticeCoordinator.begin>|null=null;
   try{
+    await ports.ActiveSessionRuntime.finishLocal(()=>{
     const hadActiveTimer=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
     if(hadActiveTimer)resolveActivePauseBeforeTimerSwitch();
     if(hadActiveTimer&&!isTaskResolved(TimerState.currentIndex)){
@@ -464,24 +466,22 @@ async function finishTodaySession(){
     setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
     refreshCoreUi();
-    await ports.ActiveSessionRuntime.writeCanonicalNow('finishing today’s session',{markChanged:true});
+    });
+    if(!current())return false;
     setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
+    if(!current())return false;
     ports.ReviewView.refresh({force:true});
-    completionNotice.update({lifecycle:'succeeded',cue:'day-complete',occurrence:completionNotice.operationId});
+    const notice=completionNotice as ReturnType<typeof ports.NoticeCoordinator.begin>|null;
+    notice?.update({lifecycle:'succeeded',cue:'day-complete',occurrence:notice.operationId});
     notifyBackupChange({urgent:true,reason:'finish-today'});
     return true;
   }catch(error){
-    let rollbackError=null;
-    if(rollbackSnapshot){
-      try{await ports.ActiveSessionRuntime.rollbackLocalTransition(rollbackSnapshot,'finish-today-rollback');}
-      catch(recoveryError){rollbackError=recoveryError;}
-    }
-    if(rollbackError&&TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
+    const notice=completionNotice as ReturnType<typeof ports.NoticeCoordinator.begin>|null;
+    notice?.update({lifecycle:'cancelled'});
+    if(!current())return false;
     refreshCoreUi();
-    completionNotice?.update({lifecycle:'cancelled'});
-    const base='Could not finish today safely: '+(errorMessage(error));
-    setPlanStatus(rollbackError?base+' Rollback also failed: '+(errorMessage(rollbackError)):base+' The active runtime and recovery snapshot were restored.',false);
+    setPlanStatus('Could not finish today safely: '+errorMessage(error),false);
     return false;
   }
 }

@@ -14,9 +14,9 @@ export interface SessionCodecPort{
   sanitizeSessionSnapshot(value:unknown,date:string,fingerprint:string,revision:number):SessionSnapshot|null;
 }
 export interface SessionRepositoryPort{
-  save(value:ActiveSession,options?:Readonly<{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null}>):PromiseLike<SessionResult>;
+  save(value:ActiveSession,options?:Readonly<{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null;recoveryFallback?:boolean}>):PromiseLike<SessionResult>;
   load(retry?:number,options?:Readonly<{strict?:boolean}>):PromiseLike<SessionResult>;
-  clear():PromiseLike<SessionResult>;
+  clear(options?:Readonly<{expectedCanonical?:ActiveSession|null}>):PromiseLike<SessionResult>;
   readLocal():ActiveSession|null;
   nextRevision(seed?:number):number;
   settled():PromiseLike<unknown>;
@@ -55,6 +55,8 @@ export interface SessionSnapshotDomainPorts{
 }
 export interface SessionPersistencePorts{
   canMutate():boolean;
+  ownsSession():boolean;
+  ownershipRevision():number;
   recoveryQuiesced():boolean;
   persistenceBlocked():boolean;
   recoveryWorkActive():boolean;
@@ -65,6 +67,7 @@ export interface SessionPersistencePorts{
   warn(message:string):unknown;
 }
 export interface SessionLifecyclePorts{
+  revision():number;
   run<T>(kind:string,options:Readonly<SessionOptions>,operation:()=>T|PromiseLike<T>):Promise<T>;
 }
 export interface SessionApplyPorts{
@@ -157,7 +160,7 @@ export interface SessionHostController{
   settled():PromiseLike<unknown>;
   persistenceSuppressed():boolean;
   withPersistenceSuppressed<T>(operation:()=>T|PromiseLike<T>):Promise<T>;
-  rollbackLocalTransition(snapshot:SessionSnapshot,source:string,options?:Readonly<{restoreRuntime?:boolean}>):Promise<boolean>;
+  finishLocal(prepare:()=>void):Promise<SessionResult>;
   applyStoredSession(session:ActiveSession,snapshot:SessionSnapshot,options?:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>):unknown|Promise<unknown>;
   resetRuntime(options?:Readonly<{source?:string;date?:string;lifecycleManaged?:boolean}>):boolean|Promise<boolean>;
   resetLocal():Promise<SessionResult>;
