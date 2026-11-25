@@ -464,10 +464,10 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
     state=Clear.createState({data:h.app,createRollbackScope:Clear.createRollbackScope,withPersistenceSuppressed:work=>work(),references:{scan:rich.scanAttachmentReferences,remove:rich.removeAttachmentReferences,listSources:()=>refs.sources({includeLive:false})},attachments:{inventory:async()=>[],verifyMetadata:async()=>{},restoreMetadata:async()=>{}},review:{hydrate:options=>events.push(options),invalidateBindings(){}},nowIso:()=> '2026-10-02T12:00:00.000Z'});
     const assertAuthority=()=>{if(controls.owned===false||Number(controls.ownershipRevision||1)!==1)throw new Error('originating owner lost');};
     if(mode==='committed-readback'){
-      let fail=false;
-      controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&Array.isArray(stores)&&stores.includes('daily'))fail=true;};
+      let armed=true,fail=false;
+      controls.onTransactionComplete=({stores,mode})=>{if(armed&&mode==='readwrite'&&Array.isArray(stores)&&stores.includes('daily')){armed=false;fail=true;}};
       controls.onStorageRead=({store,kind})=>{if(fail&&store==='daily'&&kind==='get'){fail=false;throw new Error('injected committed day readback failure');}};
-      await assert.rejects(()=>refs.removeEverywhere(id,assertAuthority),/injected committed day readback failure/);
+      await assert.rejects(()=>refs.removeEverywhere(id,assertAuthority),error=>{assert.match(error.message,/injected committed day readback failure/);assert.doesNotMatch(error.message,/rollback also failed/i);return true;});
       controls.onTransactionComplete=null;controls.onStorageRead=null;
     }else if(mode==='uncommitted-note'){
       controls.failNextAreaWrite=true;
