@@ -502,8 +502,17 @@ for(const mode of ['combine','replace']){
     importedDailyRecords.splice(0,importedDailyRecords.length);
     journalFault='';journalFailure=failure;selectIncomingSavedDay=true;restoring=true;safetyReadDone=false;
     const before=JSON.stringify({notes:currentNotes,days:importedDailyRecords}),rollbacks=events.filter(x=>x==='rollback-notes').length;
-    const candidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
-    const result=await (mode==='combine'?runtime.controller.restore(candidate):runtime.controller.restoreStandaloneVersion(candidate,{confirmed:true})).then(value=>({value}),error=>({error}));
+    let result;
+    if(mode==='combine'){
+      const candidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
+      result=await runtime.controller.restore(candidate).then(value=>({value}),error=>({error}));
+    }else{
+      importDecision='replace';
+      const value=await runtime.controller.importLocal({target:{files:[created.blob],value:'selected'}},()=>{});
+      importDecision=null;
+      const receipt=backupPresentation.read('file');
+      result=value?.verified?{value}:{error:new Error(String(receipt?.message||''))};
+    }
     journalFailure='';
     if(failure.startsWith('prepare')){
       assert.match(result.error?.message||'',new RegExp('injected '+failure),mode);
