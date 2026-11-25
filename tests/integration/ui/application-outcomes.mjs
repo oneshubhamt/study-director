@@ -11,7 +11,7 @@ const noop=()=>{};
 {
   const {coordinator}=createNotifications(),registrations=[],shown=[];let preference=true,permission='granted',permissionRequests=0;
   class Notification {static get permission(){return permission;}static requestPermission(){permissionRequests++;return Promise.resolve(permission);}constructor(title,options){shown.push({title,options});}}
-  const context={NoticeCoordinator:coordinator,Notification,window:{Notification},AppData:{local:{getJson:()=>preference,setJson:(_k,value)=>{preference=value;}}},STORAGE_KEYS:{systemAlerts:'alerts'},document:{getElementById:()=>null,addEventListener:noop},AppDiagnostics:{capture:noop},Interactions:{notify:noop},appCanMutate:()=>true,location:{href:'https://example.test/'},URL,navigator:{serviceWorker:{getRegistration:()=>{const gate=deferred();registrations.push(gate);return gate.promise;}}}};
+  const context={PlatformRuntime:Object.freeze({browserNotifications:true}),NoticeCoordinator:coordinator,Notification,window:{Notification},AppData:{local:{getJson:()=>preference,setJson:(_k,value)=>{preference=value;}}},STORAGE_KEYS:{systemAlerts:'alerts'},document:{getElementById:()=>null,addEventListener:noop},AppDiagnostics:{capture:noop},Interactions:{notify:noop},appCanMutate:()=>true,location:{href:'https://example.test/'},URL,navigator:{serviceWorker:{getRegistration:()=>{const gate=deferred();registrations.push(gate);return gate.promise;}}}};
   vm.createContext(context);vm.runInContext(html.slice(html.indexOf('const SystemNotifications='),html.indexOf('/* SHARED SCALAR HELPERS */'))+';globalThis.api=SystemNotifications;',context);
   const registration={showNotification:async(title,options)=>shown.push({title,options})};
   const first=context.api.notify('Cue','Break','pomodoro','one');
@@ -24,6 +24,24 @@ const noop=()=>{};
   const stale=context.api.notify('Cue','Old','pomodoro','four'),newer=context.api.notify('Cue','New','pomodoro','five');
   registrations.shift().resolve(registration);assert.equal(await stale,false);registrations.shift().resolve(registration);assert.equal(await newer,true);assert.equal(shown.at(-1).options.body,'New');
   assert.equal(permissionRequests,0,'delivery must never request permission');assert.equal(coordinator.eventStatus().toasts.length,0,'OS transport must not add duplicate in-app cues');
+  coordinator.clear();
+}
+
+
+// Native P1.A has no OS notification transport. Even a WebView exposing the
+// browser APIs must not acquire permission, inspect a worker or write settings.
+{
+  const {coordinator}=createNotifications();
+  let browserReads=0,preferenceWrites=0;
+  const forbidden=()=>{browserReads++;throw new Error('Browser notification transport accessed in native shell');};
+  const context={PlatformRuntime:Object.freeze({browserNotifications:false}),NoticeCoordinator:coordinator,window:{get Notification(){return forbidden();}},navigator:{get serviceWorker(){return forbidden();}},AppData:{local:{getJson:()=>true,setJson:()=>{preferenceWrites++;}}},STORAGE_KEYS:{systemAlerts:'alerts'},document:{getElementById:()=>null,addEventListener:noop},AppDiagnostics:{capture:noop},Interactions:{notify:noop},appCanMutate:()=>true};
+  vm.createContext(context);vm.runInContext(html.slice(html.indexOf('const SystemNotifications='),html.indexOf('/* SHARED SCALAR HELPERS */'))+';globalThis.api=SystemNotifications;',context);
+  assert.equal(context.api.status().supported,false);
+  assert.equal(context.api.status().enabled,false);
+  assert.equal(await context.api.toggle(),false);
+  assert.equal(await context.api.notify('Cue','Break','pomodoro','one'),false);
+  assert.equal(await context.api.deliver({title:'Cue'}),false);
+  assert.equal(browserReads,0);assert.equal(preferenceWrites,0);
   coordinator.clear();
 }
 
@@ -71,4 +89,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','native browser transport refusal','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));

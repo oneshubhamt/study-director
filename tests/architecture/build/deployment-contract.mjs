@@ -40,7 +40,15 @@ for(const [html,kind,web] of [[nativeIndex,'tauri',false],[build.development.get
   assert.equal(installCapture,web);
 }
 assert.throws(()=>platformWitness(platformScript(nativeIndex).replace("RUNTIME_PLATFORM='tauri'","RUNTIME_PLATFORM='invalid'")),/Unknown Study Director runtime platform/);
-assert.match(nativeIndex,/showDirectoryPicker:PlatformRuntime\.browserDeviceFolder&&typeof window\.showDirectoryPicker/);
+assert.match(nativeIndex,/if\(!Object\.isFrozen\(PlatformRuntime\)\)throw new Error\('Study Director runtime platform is unavailable\.'\);\s*const INTERNAL_MODULES=/u);
+const pickerExpression=nativeIndex.match(/showDirectoryPicker:(PlatformRuntime\.browserDeviceFolder[^\n]+),/u)[1];
+let pickerReads=0;
+const pickerWindow={get showDirectoryPicker(){pickerReads++;return ()=> 'folder';}};
+const picker=(platform)=>vm.runInNewContext(pickerExpression,{PlatformRuntime:platform,window:pickerWindow});
+assert.equal(picker(platformWitness(platformScript(nativeIndex)).capabilities),null);
+assert.equal(pickerReads,0,'native must not touch the browser folder API');
+assert.equal(picker(platformWitness(platformScript(build.development.get(build.identity.main))).capabilities)({}),'folder');
+assert.equal(pickerReads,2,'web folder picker remains admitted');
 assert.match(nativeIndex,/function supported\(\)\{return PlatformRuntime\.browserNotifications&&'Notification' in window/);
 const platform=platformWitness(platformScript(nativeIndex)).capabilities;
 const firstStartConnect=nativeIndex.slice(nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.webDrive)"),nativeIndex.indexOf("  async function finish(){",nativeIndex.indexOf("  async function connect(){\n    if(!PlatformRuntime.webDrive)")));
@@ -50,6 +58,21 @@ const result=await vm.runInNewContext(firstStartConnect+'\nconnect();',{Platform
 assert.equal(result,false);assert.equal(calls,1,'native unavailable action must return before changing name or password');
 const restoreChoices=nativeIndex.match(/function backupRestoreChoices\(\)\{[^\n]+\}/u)[0];
 assert.equal(vm.runInNewContext(restoreChoices+'\nbackupRestoreChoices();',{PlatformRuntime:platform}),'a backup file');
+const webPlatform=platformWitness(platformScript(build.development.get(build.identity.main))).capabilities;
+assert.equal(vm.runInNewContext(restoreChoices+'\nbackupRestoreChoices();',{PlatformRuntime:webPlatform,DeviceBackup:{status:()=>({supported:true})}}),'your Device Folder, Google Drive or a backup file');
+assert.equal(vm.runInNewContext(restoreChoices+'\nbackupRestoreChoices();',{PlatformRuntime:webPlatform,DeviceBackup:{status:()=>({supported:false})}}),'Google Drive or a backup file');
+const nativePdf=nativeIndex.match(/function prefersNativePdfNavigation\(\)\{[^\n]+\}/u)[0];
+const pdfPreference=(platform,window)=>vm.runInNewContext(nativePdf+'\nprefersNativePdfNavigation();',{PlatformRuntime:platform,window});
+assert.equal(pdfPreference(platform,{matchMedia(){throw new Error('Native popup path accessed');}}),false);
+assert.equal(pdfPreference(webPlatform,{matchMedia:()=>({matches:true})}),true);
+const driveRender=nativeIndex.slice(nativeIndex.indexOf('function renderDriveBackup(){'),nativeIndex.indexOf('// One Back up now'));
+const driveStatus={textContent:'Not connected'},driveButton={hidden:false,disabled:false};
+vm.runInNewContext(driveRender+'\nrenderDriveBackup();',{PlatformRuntime:platform,BackupProviderRuntime:{locationStatus:()=>null},document:{getElementById:id=>id==='backup-provider-row-status-google-drive'?driveStatus:driveButton}});
+assert.equal(driveStatus.textContent,'Unavailable');assert.equal(driveButton.hidden,true);assert.equal(driveButton.disabled,true);
+const checkUpdate=nativeIndex.slice(nativeIndex.indexOf('async function checkUnsupportedUpdate(){'),nativeIndex.indexOf('function renderKeptVersions(){'));
+let updateNotice;
+assert.equal(await vm.runInNewContext(checkUpdate+'\ncheckUnsupportedUpdate();',{PlatformRuntime:platform,Interactions:{notify:value=>{updateNotice=value;}}}),false);
+assert.equal(updateNotice.key,'native-update-unavailable');
 // Parse every staged native inline script; the web generated-syntax suite
 // does not exercise the native target.
 for(const match of nativeIndex.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/giu))new vm.Script(match[1]);

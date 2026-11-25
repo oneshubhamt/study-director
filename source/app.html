@@ -1565,6 +1565,8 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
 // shell/public plugins -> DOM/startup. Private modules never resolve one another.
 /* CONFIG AND DATA CONTRACT */
 const APP_VERSION='@@SD_RELEASE@@';
+// The early platform contract must exist before any application owner starts.
+if(!Object.isFrozen(PlatformRuntime))throw new Error('Study Director runtime platform is unavailable.');
 const INTERNAL_MODULES=window[Symbol.for('studyDirector.internalModules.v1')];
 if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-registry'||INTERNAL_MODULES.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
