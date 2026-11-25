@@ -8,7 +8,7 @@ The roadmap is not a mandatory number of chat sessions. Complete each coherent e
 
 | ID | Outcome | Dependency / status |
 |---|---|---|
-| P0 | Baseline, threat/data/platform inventory, qualification environment | Partial: source census, historical CI; independent baseline reproduction open |
+| P0 | Baseline, threat/data/platform inventory, qualification environment | VERIFIED — TARGETED; exact F33 independent reproduction and Windows environment passed |
 | P1.A | Packaged shell and platform boundary | VERIFIED — TARGETED; five fresh Windows samples passed |
 | P1.B | Native Drive auth and transport, same managed library | Active; intake and implementation |
 | P1.C | Native Device Folder, same repository protocol | After A; open |

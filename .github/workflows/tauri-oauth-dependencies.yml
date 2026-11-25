@@ -1,49 +1,28 @@
-name: Native OAuth dependency resolution
+name: Native OAuth source formatting
 
 on:
   push:
     branches: [tauri-spike]
-    paths: ['.github/workflows/tauri-oauth-dependencies.yml']
+    paths: ['src-tauri/src/**', '.github/workflows/tauri-oauth-dependencies.yml']
 
 permissions:
   contents: read
 
 jobs:
-  resolve:
+  format:
     if: github.ref == 'refs/heads/tauri-spike'
-    runs-on: windows-2025
-    timeout-minutes: 12
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Pin Rust toolchain
+      - name: Pin Rust formatter
         run: |
-          rustup toolchain install 1.100.0 --profile minimal
+          rustup toolchain install 1.100.0 --profile minimal --component rustfmt
           rustup override set 1.100.0
-      - name: Resolve proposed native OAuth dependencies in disposable checkout
-        shell: pwsh
+      - name: Produce reproducible formatting delta without committing
         run: |
-          $manifest = 'src-tauri/Cargo.toml'
-          $old = Get-Content $manifest -Raw
-          $deps = @'
-          tauri = { version = "=2.12.7", features = [] }
-          base64 = "=0.21.7"
-          getrandom = "=0.3.4"
-          sha2 = "=0.10.9"
-          serde = { version = "=1.0.229", features = ["derive"] }
-          serde_json = "=1.0.154"
-          url = "=2.5.9"
-          reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls", "blocking", "form"] }
-          '@
-          $old.Replace('tauri = { version = "=2.12.7", features = [] }', $deps.TrimEnd()) + @'
-
-          [target.'cfg(windows)'.dependencies]
-          windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-          '@ | Set-Content $manifest -NoNewline
-          cargo update --manifest-path $manifest --workspace
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo metadata --manifest-path $manifest --locked --no-deps --format-version 1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock
-          Get-FileHash src-tauri/Cargo.lock -Algorithm SHA256
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          git diff -- src-tauri/src
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
