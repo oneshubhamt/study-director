@@ -9,6 +9,10 @@ use study_director_tauri_spike::oauth::{
 };
 use tauri::{State, WebviewWindow};
 
+// Public installed-app client identity; the client secret is supplied at launch.
+const NATIVE_GOOGLE_CLIENT_ID: &str =
+    "306494096916-sb0ce5t5gc2kj373bmog9qb7p7vnkleb.apps.googleusercontent.com";
+
 type Result<T> = std::result::Result<T, String>;
 fn unavailable() -> String {
     "Native Google Drive is not configured in this build.".into()
@@ -23,8 +27,14 @@ fn opaque() -> Result<String> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 struct Config {
-    client_id: String,
     client_secret: String,
+}
+impl Config {
+    fn new(secret: Option<String>) -> Option<Self> {
+        let client_secret = secret?;
+        DesktopClient::new(NATIVE_GOOGLE_CLIENT_ID.to_owned(), client_secret.clone()).ok()?;
+        Some(Self { client_secret })
+    }
 }
 struct Session {
     key: String,
@@ -43,17 +53,7 @@ pub struct DriveManager {
 
 impl DriveManager {
     pub fn from_environment() -> Self {
-        let config = std::env::var("SD_NATIVE_GOOGLE_CLIENT_ID")
-            .ok()
-            .zip(std::env::var("SD_NATIVE_GOOGLE_CLIENT_SECRET").ok())
-            .and_then(|(id, secret)| {
-                DesktopClient::new(id.clone(), secret.clone())
-                    .ok()
-                    .map(|_| Config {
-                        client_id: id,
-                        client_secret: secret,
-                    })
-            });
+        let config = Config::new(std::env::var("SD_NATIVE_GOOGLE_CLIENT_SECRET").ok());
         Self {
             config,
             page: Mutex::new(Page::default()),
@@ -80,8 +80,11 @@ impl DriveManager {
         if page.opening || page.session.is_some() {
             return Err(stale());
         }
-        let client = DesktopClient::new(config.client_id.clone(), config.client_secret.clone())
-            .map_err(|_| unavailable())?;
+        let client = DesktopClient::new(
+            NATIVE_GOOGLE_CLIENT_ID.to_owned(),
+            config.client_secret.clone(),
+        )
+        .map_err(|_| unavailable())?;
         page.opening = true;
         Ok((page.epoch, client))
     }
@@ -264,5 +267,22 @@ pub async fn native_drive(
             })
             .await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pinned_desktop_client_requires_valid_runtime_secret() {
+        assert_eq!(
+            NATIVE_GOOGLE_CLIENT_ID,
+            "306494096916-sb0ce5t5gc2kj373bmog9qb7p7vnkleb.apps.googleusercontent.com"
+        );
+        assert!(Config::new(None).is_none());
+        assert!(Config::new(Some(String::new())).is_none());
+        assert!(Config::new(Some("invalid\nsecret".into())).is_none());
+        assert!(Config::new(Some("fixture-only".into())).is_some());
     }
 }
