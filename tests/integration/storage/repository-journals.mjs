@@ -131,3 +131,34 @@ console.log(JSON.stringify({status:'PASS',suite:'read-only-data-diagnostics',hea
   assert.equal((await app.mutationLease.acquire({...request,renew:true,expiresAt:clock.now()+1000})).acquired,false,'retired lease cannot be resurrected by renewal');
   assert.equal((await app.mutationLease.acquire({...request,expiresAt:clock.now()-1})).acquired,false,'expired request cannot acquire');
 }
+
+{
+  const request={id:'mutation_journal_fence_12345',owner:'tab_journal_fence_owner',kind:'restore',expiresAt:clock.now()+60000};
+  assert.equal((await app.mutationLease.acquire(request)).acquired,true);
+  const library={id:'libraryclear_fence_12345',signature:'qa-signature',payload},restore={id:'restore_fence_12345',blob,filename:'qa.sdbackup'};
+  for(const [journal,value] of [[app.libraryClearJournal,library],[app.restoreJournal,restore]]){
+    let checks=0;const stale={id:request.id,owner:request.owner,assert(){if(++checks===2)throw new Error('injected owner loss at write boundary');return true;}};
+    await assert.rejects(journal.prepare(value,stale),/injected owner loss/u);assert.equal(await journal.read(),null);
+    const fence={id:request.id,owner:request.owner,assert:()=>true};
+    await journal.prepare(value,fence);
+    const other={...fence,owner:'tab_journal_other_owner'};
+    await assert.rejects(journal.mark(value.id,'verified',other),/original durable mutation lease/u);
+    await assert.rejects(journal.clear(value.id,other),/original durable mutation lease/u);
+    assert.equal((await journal.read()).state.phase,'prepared');
+    checks=0;await assert.rejects(journal.mark(value.id,'verified',stale),/injected owner loss/u);assert.equal((await journal.read()).state.phase,'prepared');
+    checks=0;await assert.rejects(journal.clear(value.id,stale),/injected owner loss/u);assert.equal((await journal.read()).state.id,value.id);
+    await journal.mark(value.id,'verified',fence);await journal.clear(value.id,fence);assert.equal(await journal.read(),null);
+  }
+  await app.mutationLease.release(request.id,request.owner);
+  await assert.rejects(app.restoreJournal.prepare(restore,{id:request.id,owner:request.owner,assert:()=>true}),/original durable mutation lease/u);
+}
+{
+  await app.libraryClearJournal.prepare({id:'libraryclear_orphan_12345',signature:'qa-signature',payload});
+  await journalMeta.remove('libraryClearJournalState');
+  await assert.rejects(app.libraryClearJournal.read(),/orphaned payload chunks/u);
+  await assert.rejects(app.libraryClearJournal.prepare({id:'libraryclear_other_12345',signature:'qa-signature',payload}),/Orphaned Library-clear journal chunks/u);
+  await assert.rejects(app.libraryClearJournal.clear(),/unmatched recovery evidence/u);
+  const rows=await journalMeta.list('libraryClearJournalPayloadPrefix');assert.ok(rows.length>0);
+  for(const row of rows)await journalMeta.remove('libraryClearJournalPayloadPrefix',row.suffix);
+}
+console.log('PASS: original durable journal fence and orphan preservation');

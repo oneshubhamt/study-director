@@ -53,10 +53,28 @@ try{
       const recovered=await open();await waitFor(()=>recovered.evaluate('__PWA6.AppOwnership.canMutate()'),{label:kind+' recovered primary'});
       const proof=await recovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal;return {journal:await journal.read(),note:(await data.notes.readFreshPayload())[${JSON.stringify(original.key)}]?.text,owner:d.AppOwnership.canMutate()};})()`);
       assert.deepEqual(proof,{journal:null,note:'original journal recovery note',owner:true},kind+' fresh startup must verify the preimage and retire the journal');
+      // A verified operation whose journal remains must preserve committed
+      // Notes across startup, not replay its old preimage.
+      const terminal=await recovered.evaluate(`(async()=>{
+        const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal,id=kind==='library-clear'?'libraryclear_terminal_12345':'restore_terminal_12345';
+        await d.AppMutationCoordinator.runExclusive(kind==='library-clear'?'clear-library':'restore-backup',async()=>{
+          const fence=d.AppMutationCoordinator.journalFence();
+          if(kind==='library-clear'){
+            const plan=await d.LibraryClearCoordinator.preflight({notes:true});const payload=await d.LibraryClearState.capture(plan,{forceReferenced:false,deleteIds:[],protectedIds:plan.attachments.protectedIds});await journal.prepare({id,signature:plan.signature,payload},fence);
+          }else{
+            const checkpoint=await d.BackupController.createCheckpoint();try{const blob=new Blob([await checkpoint.blob.arrayBuffer()],{type:checkpoint.blob.type});await journal.prepare({id,blob,filename:checkpoint.filename,savedDayDeletions:await data.deletionRecovery.savedDays(),noteDeletions:await data.deletionRecovery.notes(),attachmentDeletions:await data.deletionRecovery.attachments()},fence);}finally{await checkpoint.release();}
+          }
+          await journal.mark(id,'applying-notes',fence);await data.notes.clearAll();await data.notes.flush({strict:true});await journal.mark(id,'verified',fence);
+        });return {phase:(await journal.read()).state.phase,notes:Object.keys(await data.notes.readFreshPayload())};
+      })()`);
+      assert.deepEqual(terminal,{phase:'verified',notes:[]});await browser.closePage(recovered);
+      const terminalRecovered=await open();await waitFor(()=>terminalRecovered.evaluate('__PWA6.AppOwnership.canMutate()'),{label:'verified journal retired'});
+      const terminalProof=await terminalRecovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal;return {journal:await journal.read(),notes:Object.keys(await data.notes.readFreshPayload())};})()`);
+      assert.deepEqual(terminalProof,{journal:null,notes:[]},kind+' verified journal must retire without replay');
       // Real host composition: keep an authority past retirement, then lose
       // AppOwnership during a second mutation. No fake storage or lease port.
       if(kind==='library-clear'){
-        const witness=await recovered.evaluate(`(async()=>{
+        const witness=await terminalRecovered.evaluate(`(async()=>{
           const d=__PWA6,c=d.AppMutationCoordinator;let old,retired=false,borrowed=false,rollbackDenied=false,aborted=false,operationRejected=false;
           const code=error=>error?.code==='STUDY_DIRECTOR_MUTATION_AUTHORITY_LOST';
           await c.runExclusive('clear-library',authority=>{old=authority;authority.assert();});
@@ -74,7 +92,7 @@ try{
         })()`);
         assert.deepEqual(witness,{retired:true,borrowed:true,rollbackDenied:true,aborted:true,operationRejected:true,released:true,active:'',fault:true},'real host must retire old authorities, reject rollback after ownership loss and release the original durable lease');
       }
-      results.push({kind,denied:true,journalRetained:true,recovered:true,mutationLifetime:kind==='library-clear'});await browser.closePage(recovered);
+      results.push({kind,denied:true,journalRetained:true,recovered:true,mutationLifetime:kind==='library-clear',verifiedCommitPreserved:true});await browser.closePage(terminalRecovered);
     }finally{await browser.close();}
   }
   console.log(JSON.stringify({status:'PASS',suite:'recovery-takeover',results}));

@@ -2649,12 +2649,11 @@ async function restoreBackupAttemptWithOperation(candidate:Candidate,operation:I
       await AppData.restoreJournal.mark(restoreId,'verifying');
       await verifyRestoreCommit(expectedCommit,signal);
       throwIfImportAborted(signal);
-      await AppData.restoreJournal.mark(restoreId,'verified');
       OperationDiagnostics.mark('canonical-verification-complete');
     });
     const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged||reviewResult.changed);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
-    retiring=true;assertAuthority();await AppData.restoreJournal.mark(restoreId,'retiring');await retireRestoreJournal(restoreId);journalPrepared=false;
+    assertAuthority();retiring=true;await AppData.restoreJournal.mark(restoreId,'verified');await retireRestoreJournal(restoreId);journalPrepared=false;
     let ancestryWarning='';
     if(sharedBase){
       const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'');
@@ -2882,10 +2881,9 @@ async function restoreExactVersionWithOperation(candidate:Candidate|null,operati
       const restored=await replacePortableCanonicalSnapshot(target,{deletionState:targetDeletionState,signal,restoreId,requirePersonal:true,phasePrefix:'version-restore'});
       OperationDiagnostics.mark('canonical-replacement-complete',{savedDays:Number(restored&&restored.records)||0,notes:Number(restored&&restored.notes)||0,assets:Number(restored&&restored.assets)||0});
       committedDescription='The selected portable version was written and verified';
-      await AppData.restoreJournal.mark(restoreId,'verified');
       OperationDiagnostics.mark('canonical-verification-complete');
       await rebaseRepositoryPreparationAcceleration('replace');
-      retiring=true;assertAuthority();await AppData.restoreJournal.mark(restoreId,'retiring');await retireRestoreJournal(restoreId);journalPrepared=false;
+      assertAuthority();retiring=true;await AppData.restoreJournal.mark(restoreId,'verified');await retireRestoreJournal(restoreId);journalPrepared=false;
       // A restored version is this device's own change: the base stays what
       // was last shared, so the next sync carries the restore to Drive.
       const live=Object.keys(notes).filter(key=>notesTrashKey(key)).length,plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
@@ -2942,19 +2940,21 @@ async function recoverInterruptedRestore(){
   try{return await runExclusive('restore-recovery',()=>withPersistenceSuppressed(async()=>{
     const recoveryNotice=presentation.begin('file','startup-recovery',{id:'startup-recovery',surfaceId:'library-status',foreground:false,label:'Local recovery',message:'Recovering an interrupted restore from the verified safety copy…'});
     try{
-      const current=await AppData.restoreJournal.read();assertAuthority();
+      const current=await AppData.restoreJournal.read();
+      try{assertAuthority();}catch(error){if(current)await releaseRestoreScratch(current.payload.blob,'backup.recovery-file-release');throw error;}
       if(!current){clearFault();recoveryNotice.finish({message:'Local recovery already completed.',outcome:'local-recovery-completed'});OperationDiagnostics.finish({recovered:false},traceId);return freeze({recovered:false});}
       try{
         if(current.state.id!==durable.state.id)throw new Error('Restore recovery journal changed before recovery.');
-        if(!['retiring','rolled-back','startup-rolled-back'].includes(current.state.phase)){
+        const retireOnly=['prepared','verified','rolled-back','startup-rolled-back'].includes(current.state.phase);
+        if(!retireOnly){
           const parsed=await BackupCodec.inspect(current.payload.blob,{filename:current.payload.filename});
           assertAuthority();await AppData.restoreJournal.mark(current.state.id,'startup-rolling-back');
           await rollbackImportedState(parsed,{savedDays:current.payload.savedDayDeletions,notes:current.payload.noteDeletions,attachments:current.payload.attachmentDeletions});
           assertAuthority({allowDurableProtected:true});await AppData.restoreJournal.mark(current.state.id,'startup-rolled-back',{allowDurableProtected:true});
         }
         await retireRestoreJournal(current.state.id,{allowDurableProtected:true});
+        recoveryNotice.finish({message:retireOnly?'Local recovery completed: the outstanding recovery journal was safely retired.':'Local recovery completed: the interrupted restore was rolled back and verified before Study Director became writable.',outcome:'local-recovery-completed'});
       }finally{await releaseRestoreScratch(current.payload.blob,'backup.recovery-file-release');}
-      recoveryNotice.finish({message:'Local recovery completed: the interrupted restore was rolled back and verified before Study Director became writable.',outcome:'local-recovery-completed'});
       OperationDiagnostics.finish({recovered:true},traceId);return Object.freeze({recovered:true});
     }catch(error){
       recoveryNotice.finish({lifecycle:'failed',message:`Interrupted restore recovery could not finish: ${error&&fields(error)['message']||error}. Preserve browser storage and retry recovery.`});

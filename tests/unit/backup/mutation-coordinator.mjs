@@ -150,3 +150,14 @@ for(const loss of ['claim','revision','expiry','mirror-then-claim','renewal-race
   release.resolve(true);await task;
 }
 console.log('PASS: immutable origin, pending reservation, retired authority, recovery wait, stale renewal and expired durable protection');
+
+{
+  const {coordinator}=lifetime();
+  coordinator.failClosed('library fault','library-clear');coordinator.failClosed('restore fault','restore');
+  coordinator.clearFault('restore');assert.equal(coordinator.status().recoveryKind,'library-clear');assert.equal(coordinator.writesBlocked(),true);
+  await assert.rejects(coordinator.runExclusive('restore-recovery',()=>assert.fail('unrelated recovery admitted')),/library fault/u);
+  await coordinator.runExclusive('library-clear-recovery',authority=>{assert.equal(coordinator.writesBlocked(),false);const fence=coordinator.journalFence();assert.equal(fence.assert(),true);authority.assert();coordinator.clearFault('library-clear');});
+  assert.equal(coordinator.writesBlocked(),false);
+  let retired;await coordinator.runExclusive('restore-backup',()=>{retired=coordinator.journalFence();});
+  assert.throws(()=>retired.assert(),lost);
+}

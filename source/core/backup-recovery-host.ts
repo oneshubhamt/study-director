@@ -248,15 +248,15 @@ const createModule=()=>{
         catch(error){
           try{
             const raw:unknown=await input.appData.restoreJournal.read(),row=raw&&typeof raw==='object'?raw as Record<string,unknown>:null,payload=row?.['payload'],payloadRow=payload&&typeof payload==='object'?payload as Record<string,unknown>:null,ref=payloadRow?.['backupFile'],refRow=ref&&typeof ref==='object'?ref as Record<string,unknown>:null;
-            if(String(refRow?.['name']||'')!==backupFile.name)await input.files.release(backupFile.name);
+            if(raw===null||(refRow&&typeof refRow['name']==='string'&&refRow['name']!==backupFile.name)||(payloadRow&&payloadRow['blob'] instanceof Blob))await input.files.release(backupFile.name);
           }catch(probeError){input.diagnostics.capture('backup.restore-journal-orphan-check',probeError,'warn');}
           throw error;
         }
       },
       restoreJournalRead:async():Promise<Journal|null>=>{
-        const raw:unknown=await input.appData.restoreJournal.read();if(!raw)return null;
+        const raw:unknown=await input.appData.restoreJournal.read();if(raw===null)return null;
         const row=raw&&typeof raw==='object'?raw as Record<string,unknown>:null,stateRow=row?.['state']&&typeof row['state']==='object'?row['state'] as Record<string,unknown>:null,payloadRow=row?.['payload']&&typeof row['payload']==='object'?row['payload'] as Record<string,unknown>:null;
-        if(!stateRow||!payloadRow)throw new Error('The interrupted-restore journal is incomplete or corrupted.');
+        if(!stateRow||!payloadRow||typeof stateRow['id']!=='string'||stateRow['id']!==payloadRow['id']||typeof stateRow['phase']!=='string')throw new Error('The interrupted-restore journal is incomplete or corrupted.');
         const state={format:String(stateRow['format']||''),version:Number(stateRow['version']),id:String(stateRow['id']||''),phase:String(stateRow['phase']||''),createdAt:String(stateRow['createdAt']||''),updatedAt:String(stateRow['updatedAt']||'')};
         const refValue=payloadRow['backupFile'],refRow=refValue&&typeof refValue==='object'?refValue as Record<string,unknown>:null;
         let blob:Blob;
@@ -274,7 +274,8 @@ const createModule=()=>{
       restoreJournalMark:async(id,phase,options)=>{const fence=input.journalFence(options),marked=await input.appData.restoreJournal.mark(id,phase,fence);fence.assert();if(phase==='verified')input.events.settleStorageReset();return marked;},
       restoreJournalClear:async(id,options)=>{
         const fence=input.journalFence(options),raw=await input.appData.restoreJournal.read();
-        if(!raw||raw.state.id!==id)throw new Error('Restore journal identity changed before retirement.');
+        const state=raw&&typeof raw==='object'&&'state' in raw?raw.state:null;
+        if(!state||typeof state!=='object'||!('id' in state)||state.id!==id)throw new Error('Restore journal identity changed before retirement.');
         try{await input.appData.restoreJournal.clear(id,fence);}catch(error){if(await input.appData.restoreJournal.read()!==null)throw error;}
         fence.assert();
         const row=raw&&typeof raw==='object'?raw as Record<string,unknown>:null,payload=row?.['payload'],payloadRow=payload&&typeof payload==='object'?payload as Record<string,unknown>:null,ref=payloadRow?.['backupFile'],refRow=ref&&typeof ref==='object'?ref as Record<string,unknown>:null,name=String(refRow?.['name']||'');

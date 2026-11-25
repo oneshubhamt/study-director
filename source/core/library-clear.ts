@@ -433,23 +433,22 @@ const createModule=()=>{
           if(selection.savedDays){ports.assertAuthority();const result=await ports.deleteSavedDays();savedDays=Math.max(0,Number(result?.count)||0);}
           if(selection.attachments&&forceReferenced&&plan.attachments.rewriteTargets.length){
             ports.assertAuthority();
-            await ports.journal.mark(id,'removing-references');
+            await ports.journal.mark(id,'removing-references');ports.assertAuthority();
             await ports.removeReferences(plan.attachments.rewriteTargets);
           }
           ports.assertAuthority();
           await ports.verifyLogical(plan,policy);trace.mark('clear-logical-verified');
           if(deleteIds.length){
             ports.assertAuthority();
-            await ports.journal.mark(id,'removing-attachment-metadata');
+            await ports.journal.mark(id,'removing-attachment-metadata');ports.assertAuthority();
             const result=await ports.removeAttachmentMetadata(deleteIds);
             attachmentsRemoved=Math.max(0,Number(result?.removed)||0);
           }
           ports.assertAuthority();
           await ports.verifyFinal(plan,policy);trace.mark('clear-final-verified');
           ports.assertAuthority();
-          await ports.journal.mark(id,'verified');
-          ports.assertAuthority();
-          retiring=true;await retireJournal(id);
+          retiring=true;await ports.journal.mark(id,'verified');
+          await retireJournal(id);
           journal=null;trace.mark('clear-journal-retired');
         }catch(error){
           if(journal&&!retiring){await rollbackJournal(journal,error,{trace});}
@@ -479,7 +478,7 @@ const createModule=()=>{
           const current=await ports.journal.read();ports.assertAuthority();
           if(!current){ports.clearFault();return freeze({recovered:false,pending:false});}
           if(current.state.id!==journal.state.id)throw new Error('Library-clear recovery journal changed before recovery.');
-          if(['verified','rolled-back','startup-rolled-back'].includes(current.state.phase||''))await retireJournal(current.state.id);
+          if(['prepared','verified','rolled-back','startup-rolled-back'].includes(current.state.phase||''))await retireJournal(current.state.id);
           else await rollbackJournal(current,new Error('Interrupted Library clear'),{startup:true,trace});
         }catch(error){ports.failClosed(recoveryMessage);throw error;}
         return freeze({recovered:true,pending:false});

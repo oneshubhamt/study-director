@@ -119,7 +119,7 @@ let corruptAfterImportOnce=false;
 let corruptPostCommitReadOnce=false;
 let corruptDuringVerificationOnce=false;
 let cancelDuringBatchOnce=false;
-let restoreJournal=null;
+let restoreJournal=null,journalFault='',journalFailure='';
 let failStartupRollbackOnce=false;
 let activeSessionBlocking=false;
 let selectIncomingSavedDay=false;
@@ -170,10 +170,10 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     },dailyRecordRemove:async date=>{for(let index=importedDailyRecords.length-1;index>=0;index--)if(importedDailyRecords[index].date===date)importedDailyRecords.splice(index,1);return true;},dailyRecordTimestamp:value=>Date.parse(value?.savedAt||value?.updatedAt||'')||0,
     notesExportPayload:()=>currentNotes,notesReadFreshPayload:async()=>currentNotes,notesReadFreshItems:async keys=>(keys||[]).map(key=>currentNotes[key]||null),notesFlush:async()=>{changeImportOwner('preflight');return true;},notesNormalizePayload:value=>Object.fromEntries(Object.entries(value||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)),
     notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>noteFailure,
-    restoreJournalPrepare:async value=>{journalPrepares++;restoreJournal={state:{id:value.id},payload:value};return restoreJournal;},
+    restoreJournalPrepare:async value=>{journalPrepares++;if(journalFailure==='prepare-before')throw new Error('injected prepare-before');restoreJournal={state:{id:value.id,phase:'prepared'},payload:value};if(journalFailure==='prepare-ack')throw new Error('injected prepare-ack');return restoreJournal;},
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
-    restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
+    restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);if(journalFailure==='clear-before')throw new Error('injected clear-before');restoreJournal=null;if(journalFailure==='clear-ack')throw new Error('injected clear-ack');return true;},
     personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.full===true?'full-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
     installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),...keptReviews.ports,reconciliationBaseReadDayAncestry:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
@@ -199,7 +199,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreSessionState:async()=>{events.push('restore-session-state');if(failStartupRollbackOnce){failStartupRollbackOnce=false;throw new Error('injected startup rollback interruption');}return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
-  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>{importExclusiveEntries++;changeImportOwner('lease');return operation();}}),
+  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:()=>{journalFault='';},failClosed:message=>{journalFault=message;},runExclusive:async(kind,operation)=>{importExclusiveEntries++;changeImportOwner('lease');return operation();}}),
   interactions:freeze({
     choose:async()=>{changeImportOwner('decision');return importDecision;},
     configure:async config=>{
@@ -393,9 +393,9 @@ currentNotes=notes;
 restoring=false;
 
 // A terminated standalone or managed restore can leave the durable journal at
-// any commit boundary. Startup must replay the same verified pre-restore state
-// for every phase, never infer success from a partially written phase marker.
-const crashPhases=["prepared","applying-assets","assets-committed","applying-saved-day-state","saved-day-state-committed","applying-notes","notes-committed","applying-pending-reviews","applying-active-session","active-session-committed","applying-personal-data","verifying","verified","startup-rolling-back"];
+// any incomplete commit boundary. Startup must replay the verified preimage;
+// prepared and terminal phases have distinct no-rewrite witnesses below.
+const crashPhases=["applying-assets","assets-committed","applying-saved-day-state","saved-day-state-committed","applying-notes","notes-committed","applying-pending-reviews","applying-active-session","active-session-committed","applying-personal-data","verifying","startup-rolling-back"];
 for(const [index,phase] of crashPhases.entries()){
   importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted '+phase,savedAt:'2026-08-04T20:00:00.000Z'}));
   currentNotes=freeze({Corrupted:normalizeNote({key:'Corrupted',text:'interrupted '+phase},'Corrupted')});
@@ -410,6 +410,17 @@ for(const [index,phase] of crashPhases.entries()){
   assert.equal(currentNotes.Ethics.text,notes.Ethics.text,phase+' restores the original note bytes');
   assert.equal(restoreJournal,null,phase+' clears the journal only after verified rollback');
 }
+for(const phase of ['prepared','verified','rolled-back','startup-rolled-back']){
+  const successor=freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'preserve '+phase,savedAt:'2026-08-04T20:00:00.000Z'});
+  importedDailyRecords.splice(0,importedDailyRecords.length,successor);
+  currentNotes=freeze({Successor:normalizeNote({key:'Successor',text:'preserve '+phase},'Successor')});
+  restoreJournal={state:{id:'restore_terminal_12345678',phase},payload:{blob:created.blob,filename:created.filename}};
+  const before=JSON.stringify({notes:currentNotes,days:importedDailyRecords}),rollbackCount=events.filter(x=>x==='rollback-notes').length;
+  assert.equal((await runtime.controller.recoverInterruptedRestore()).recovered,true);
+  assert.equal(JSON.stringify({notes:currentNotes,days:importedDailyRecords}),before,phase+' must not overwrite the durable current state');
+  assert.equal(events.filter(x=>x==='rollback-notes').length,rollbackCount);assert.equal(restoreJournal,null);
+}
+currentNotes=notes;
 assert.equal(backupPresentation.read('file','startup-recovery').outcome,'local-recovery-completed');
 assert.equal(backupPresentation.read('file','startup-recovery').lifecycle,'succeeded');
 // A second crash during rollback must retain the journal and make a later
@@ -484,3 +495,30 @@ console.log(JSON.stringify({
   coverage:['current verified checkpoint export','per-key reconciled notes','restore preview','post-commit verification and rollback','mid-import cancellation','terminated-tab recovery','expanded-byte limit','saved reflection preservation','canonical capture and rescue'],
   counts:created.counts,importOrder:events.filter(x=>x.startsWith('import-'))
 },null,2));
+
+for(const mode of ['combine','replace']){
+  for(const failure of ['prepare-before','prepare-ack','clear-before','clear-ack']){
+    currentNotes=freeze({Economics:notes.Economics});
+    importedDailyRecords.splice(0,importedDailyRecords.length);
+    journalFault='';journalFailure=failure;selectIncomingSavedDay=true;restoring=true;safetyReadDone=false;
+    const before=JSON.stringify({notes:currentNotes,days:importedDailyRecords}),rollbacks=events.filter(x=>x==='rollback-notes').length;
+    const candidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
+    const result=await (mode==='combine'?runtime.controller.restore(candidate):runtime.controller.restoreStandaloneVersion(candidate,{confirmed:true})).then(value=>({value}),error=>({error}));
+    journalFailure='';
+    if(failure.startsWith('prepare')){
+      assert.match(result.error?.message||'',new RegExp('injected '+failure),mode);
+      assert.equal(JSON.stringify({notes:currentNotes,days:importedDailyRecords}),before);
+      assert.equal(Boolean(restoreJournal),failure==='prepare-ack');assert.equal(Boolean(journalFault),failure==='prepare-ack');
+    }else if(failure==='clear-before'){
+      assert.match(result.error?.message||'',/injected clear-before/u,mode);assert.equal(restoreJournal?.state.phase,'verified');assert.ok(journalFault);
+    }else{assert.equal(result.value?.verified,true,mode);assert.equal(restoreJournal,null);assert.equal(journalFault,'');}
+    if(restoreJournal){
+      const committed=JSON.stringify({notes:currentNotes,days:importedDailyRecords});
+      assert.equal((await runtime.controller.recoverInterruptedRestore()).recovered,true);
+      assert.equal(JSON.stringify({notes:currentNotes,days:importedDailyRecords}),committed,mode+' startup must preserve prepared or verified data');
+    }
+    if(mode==='combine')assert.equal(events.filter(x=>x==='rollback-notes').length,rollbacks,mode+' must not replay a safety copy on receipt ambiguity');
+    restoring=false;selectIncomingSavedDay=false;
+  }
+}
+console.log('PASS: Combine and Replace journal acknowledgement boundaries');
