@@ -1,5 +1,11 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 Notes authority pass · 2026-11-25
+
+- Start `6b3e30686bc4da517f107cf58746c628b584a549`. Prior application unchanged since `316f074`; historical inventory and all five audit jobs at `2bd39de` [passed](https://github.com/oneshubhamt/study-director/actions/runs/45566520650). Inventory (named occurrences, not semantic equivalence): baseline 69 authored files / 5898 functions (3880 exact, 248 relocated, 1637 changed-name candidates, 133 unmatched); current 97 / 7543 (3977 exact, 323 relocated, 2374 changed, 869 unmatched).
+- Objectives: preserve originating ownership and note identity across picker, dialog, settlement and import/tag awaits; reject stale UI completion, preserve ordinary note/Plan behavior; test actual checked owner and repository interleavings. Audit attachment compensation separately; do not close wider P5.6 or Stage 1 without evidence.
+- Status: active. No migration or Phase 6.
+
 
 ## REVIEW-P5 · Stage 1 continuation 3 — P5.4 rollback correction / verified targeted QA · 2026-11-25
 
