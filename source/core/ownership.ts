@@ -152,13 +152,15 @@ const createModule=()=>{
         hooks.resume();hooks.refreshCore();hooks.render();hooks.scheduleMaintenance();
       }catch(error){
         // A delayed former attempt cannot release or fault a newer claim.
-        if(!sameAttempt())return;
-        if((error as {code?:unknown}|null)?.code==='STUDY_DIRECTOR_OWNERSHIP_RELOAD_REQUIRED')reloadRequired=true;
+        const promoted=state===OWNERSHIP_STATES.PRIMARY&&claimId===attemptClaim&&revision===attemptRevision+1;
+        if(!sameAttempt()&&!promoted)return;
+        const requiresReload=(error as {code?:unknown}|null)?.code==='STUDY_DIRECTOR_OWNERSHIP_RELOAD_REQUIRED';
         diagnostics.capture('ownership.hydrate',error,'error');
-        release();setPrimary(false,{faulted:true,error});hooks.refreshCore();
+        release();setPrimary(false,{faulted:true,error});reloadRequired=requiresReload;hooks.refreshCore();
       }
     }
     function setPrimary(primary:boolean,options:PrimaryOptions={}){
+      if(reloadRequired)return false;
       const next=!!primary;
       const resolvingLoss=!next&&state===OWNERSHIP_STATES.RESOLVING&&!!claimId;
       const lostPrimary=hasControl&&!next;
@@ -173,7 +175,7 @@ const createModule=()=>{
         hooks.invalidate(freeze({reason:options.error&&(options.error as {message?:unknown}).message||'ownership changed',state,revision}));
       }
       if(becamePrimary){
-        const shouldHydrate=!!options.hydrate&&hooks.isInitialized();
+        const shouldHydrate=hooks.isInitialized();
         if(shouldHydrate){
           transition(OWNERSHIP_STATES.HYDRATING,'canonical reload');
           hooks.render();stopExecution();
@@ -270,6 +272,7 @@ const createModule=()=>{
       return promise;
     }
     function acquireWebLock(force=false,hydrate=true){
+      if(reloadRequired)return Promise.resolve(false);
       if(!webLocks)return Promise.resolve(writeLease({force,hydrate}));
       if(webLockHeld)return Promise.resolve(writeLease({force:true,hydrate}));
       if(webLockAttempt)return webLockAttempt;

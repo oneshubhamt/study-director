@@ -64,7 +64,7 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
       refreshStorage:input.hooks.refreshStorage,
       stopExecution:input.hooks.stopExecution,
       isInitialized:input.lifecycle.isReady,
-      admitHydration:async assertCurrent=>{
+      admitHydration:async (assertCurrent:()=>void)=>{
         const requireReload=(message:string,kind:'library-clear'|'restore'|'journal-verification',cause?:unknown):never=>{
           assertCurrent();
           input.recovery.failClosed(message,kind);
@@ -78,7 +78,7 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
           if(journal!==null)return requireReload('Interrupted data recovery must finish before taking control. Reload to complete recovery. Do not clear site data.',kind);
         }
       },
-      hydrate:async({sameTabReload,assertCurrent})=>{
+      hydrate:async({sameTabReload,assertCurrent}:Readonly<{sameTabReload:boolean;assertCurrent:()=>void}>)=>{
         assertCurrent();await input.hydration.hydratePlanData();assertCurrent();
         input.hydration.hydratePlanRuntime();
         input.hydration.renderSavedPlans();
@@ -88,7 +88,7 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
         if(input.lifecycle.isReady())input.lifecycle.resumeStorageReset();
         return result;
       },
-      finalizeHydration:async assertCurrent=>{
+      finalizeHydration:async (assertCurrent:()=>void)=>{
         assertCurrent();await input.hydration.censusUnsupported();assertCurrent();
         await input.hydration.hydrateSavedDrafts(freeze({forcePreferences:true,failClosed:true}));assertCurrent();
       },

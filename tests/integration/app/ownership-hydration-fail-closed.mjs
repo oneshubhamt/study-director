@@ -76,7 +76,7 @@ function admissionHarness({library=async()=>null,restore=async()=>null,plan=asyn
 for(const kind of ['library-clear','restore','library-read-error','restore-read-error']){
   const gate=deferred(),isLibrary=kind.startsWith('library'),read=()=>gate.promise;
   const h=admissionHarness(isLibrary?{library:read}:{restore:read});
-  assert.equal(h.tab.writeLease({force:true,hydrate:true}),true);
+  assert.equal(h.tab.writeLease({force:true}),true,'any initialized acquisition must admit recovery, even without a hydrate hint');
   await drain();
   assert.equal(h.tab.status().state,'hydrating');
   assert.throws(()=>h.tab.issueWriteToken('read repair',{allowHydrating:true}),Ownership.isOwnershipLostError,'unadmitted hydration must not authorize read repair');
