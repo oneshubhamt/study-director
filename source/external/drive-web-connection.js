@@ -173,13 +173,16 @@ const createStudyDirectorDriveConnection=ports=>{
   // its permission on the Google account, so the profile's other devices
   // stay signed in; the account's own settings withdraw it everywhere.
   async function disconnect(){clearSession();signedInBefore=false;return true;}
-  function request(url,options,identity,progress){
+  function prepareRequest(url,options){
+    // Capture the credential before asynchronous provider guards.
     const headers=new Platform.Headers(options.headers||{});
     headers.set('Authorization',`Bearer ${requireAccessToken()}`);
-    const requestOptions={...options,headers};
     const progressUpload=Platform.XMLHttpRequest&&Platform.Response&&options.body instanceof Platform.Blob&&new Platform.URL(url).pathname==='/upload/drive/v3/files';
-    return progressUpload?uploadWithProgress(url,requestOptions,options.signal,progress):Platform.fetch(url,{...requestOptions,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});
+    return (signal,progress)=>{
+      const requestOptions={...options,headers,signal};
+      return progressUpload?uploadWithProgress(url,requestOptions,signal,progress):Platform.fetch(url,{...requestOptions,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'});
+    };
   }
   return Object.freeze({kind:'web',prepare,authorize,connected:tokenValid,automaticConfigured:()=>tokenValid()||signedInBefore,
-    connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,subscribeConnection,restoreSession,disconnect,release,request,invalidate:clearSession});
+    connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,subscribeConnection,restoreSession,disconnect,release,prepareRequest,invalidate:clearSession});
 };

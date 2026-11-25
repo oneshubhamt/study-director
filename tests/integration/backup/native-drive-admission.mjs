@@ -61,13 +61,27 @@ async function seed(){
   const web=await seed(),native=await connect(createDriveHarness({native:true,remoteState:web.state}));
   const target=[...native.state.files.values()].find(row=>row.appProperties.studyDirectorRepositoryKind==='commit');
   // Keep length equal to isolate the digest failure from size validation.
-  target.content=new Blob(['corrupted commit']);
-  await assert.rejects(native.provider.verifyAccount(),/verification|length|size|metadata|read/);
+  target.content=new Blob(['modified commit']);
+  await assert.rejects(native.provider.verifyAccount(),/bytes failed verification/);
   assert.equal(mutationCount(native.state),0);assert.equal(native.state.binds.length,0);
 }
 {
   const web=await seed(),native=await connect(createDriveHarness({native:true,remoteState:web.state}));
   native.state.email='wrong@example.com';
   await assert.rejects(native.provider.verifyAccount(),/This profile syncs with/);assert.equal(mutationCount(native.state),0);
+}
+// A successful HTTP response without the requested inventory is not evidence.
+{
+  const web=await seed(),native=await connect(createDriveHarness({native:true,remoteState:web.state}));
+  native.state.jsonFault={mode:'complete',payload:{},remaining:1};
+  await assert.rejects(native.provider.verifyAccount(),/complete repository listing/);
+  assert.equal(mutationCount(native.state),0);assert.equal(native.state.binds.length,0);
+}
+// Authorization replacement while awaiting a local profile decision.
+{
+  const web=await seed();let native;
+  native=await connect(createDriveHarness({native:true,remoteState:web.state,bind:async()=>{native.state.replaceNativeConnection();return 'continue';}}));
+  await assert.rejects(native.provider.verifyAccount(),/authorization changed|abort|cancel/i);
+  assert.equal(mutationCount(native.state),0);
 }
 console.log(JSON.stringify({status:'PASS',suite:'native-drive-admission',hermetic:true,noCreationOnAbsence:true,verifiedExistingBytes:true,sharedRepository:true,staleCleanupFenced:true,wrongAccountAndFolderRefused:true,refusalAndCorruptionFailClosed:true}));

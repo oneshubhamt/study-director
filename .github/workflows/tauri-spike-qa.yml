@@ -40,6 +40,9 @@ jobs:
           node tests/browser/library/notes-management.mjs
           node tests/browser/pwa/pwa-offline.mjs
           node tests/browser/pwa/pwa-update.mjs
+          node tests/browser/backup/drive-sign-in-again.mjs
+          node tests/browser/backup/sync-and-profiles.mjs
+          node tests/browser/backup/cold-start-drive-recovery.mjs
   windows-build:
     if: github.ref == 'refs/heads/tauri-spike'
     runs-on: windows-2025

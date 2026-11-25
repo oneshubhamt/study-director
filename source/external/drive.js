@@ -189,7 +189,7 @@
     }
     return url.href;
   }
-  async function fetchWithTimeout(url,options,timeoutMs,context=EMPTY_DRIVE_OPERATION){
+  async function fetchWithTimeout(url,options,timeoutMs,context,dispatch){
     const controller=new Platform.AbortController();
     const operation=context||EMPTY_DRIVE_OPERATION;
     const externalSignal=options&&options.signal||operation.signal;
@@ -200,7 +200,7 @@
     try{
       await assertDriveOperationCurrent(operation);renew();
       assertNativeMutation(options.method,operation);
-      const response=await connection.request(url,{...options,signal:controller.signal},operation.authIdentity,renew);
+      const response=await dispatch(controller.signal,renew);
       const media=response.ok&&new Platform.URL(url).searchParams.get('alt')==='media';
       if(!media&&![204,308,401].includes(response.status)){
         const stopped=new Promise((_,reject)=>{
@@ -225,9 +225,10 @@
   async function authorizedFetch(url,options={},timeoutMs=API_TIMEOUT_MS,context=EMPTY_DRIVE_OPERATION){
     const method=String(options.method||'GET').toUpperCase();
     const safeUrl=validatedDriveRequest(url,method);
-    const operation=context===EMPTY_DRIVE_OPERATION?driveOperationContext():context;
-    const headers=new Platform.Headers(options.headers||{});
-    const response=await fetchWithTimeout(safeUrl,{...options,method,headers},timeoutMs,operation);
+    const operation=native&&context===EMPTY_DRIVE_OPERATION?driveOperationContext():context;
+    const requestOptions={...options,method,headers:new Platform.Headers(options.headers||{})};
+    const dispatch=connection.prepareRequest(safeUrl,requestOptions,operation.authIdentity);
+    const response=await fetchWithTimeout(safeUrl,requestOptions,timeoutMs,operation,dispatch);
     if(response.status===401){await connection.invalidate(operation.authIdentity);throw new Error('Google authorization expired. Retry the Drive action.');}
     return response;
   }
@@ -344,13 +345,14 @@
       }
       deletionChecked=expected;
     }
-    let found=await findFolder(context);
+    let found=await findFolder(context),proof=null;
     if(native){
-      const wanted=String(profilePort.folder?.()||'');
-      if(!found||wanted&&wanted!==found)throw noRetry(new Error('Native Google Drive could not verify the existing Study Director folder. No library was created or changed.'));
-      await verifyNativeLibrary(found,context);
+      const wanted=String(profilePort.folder()||'');
+      if(!found||wanted&&wanted!==found||expectedProfile()!==expected)throw noRetry(new Error('Native Google Drive could not verify the existing Study Director folder. No library was created or changed.'));
+      proof=await verifyNativeLibrary(found,context);
+      if(expectedProfile()!==expected)throw noRetry(new Error('The local profile changed during Google Drive verification.'));
     }else if(!found)found=await createFolder(context);
-    await bindFolder(found,context);
+    await bindFolder(found,context,proof);
     return found;
   }
   // The folder must belong to the active profile. Once per sign-in the app is
@@ -359,23 +361,34 @@
   // marked by another profile on this device is always refused.
   function expectedProfile(){try{const id=String(profilePort.id()||'');return PROFILE_PATTERN.test(id)?id:'';}catch{return '';}}
   function folderProfile(folder){const id=folder?.appProperties?.[PROFILE_MARKER];return typeof id==='string'&&PROFILE_PATTERN.test(id)&&Object.keys(folder.appProperties).length===2?id:'';}
-  async function bindFolder(id,context=EMPTY_DRIVE_OPERATION){
+  async function bindFolder(id,context=EMPTY_DRIVE_OPERATION,proof=null){
     const expected=expectedProfile();
     // The folder was just found or checked; its markers came with it.
     const metadata=seenFolder&&seenFolder.id===id?seenFolder:await getFolderMetadata(id,context),found=folderProfile(metadata),mine=found===expected;
+    function checkProof(){
+      if(!native)return;
+      assertNativeIdentity(context);
+      if(proof?.folder!==id||proof.epoch!==folderEpoch||proof.authIdentity!==context.authIdentity||proof.remoteProfile!==found||folderId!==id||!validFolderMetadata(seenFolder)||folderProfile(seenFolder)!==found)throw noRetry(new Error('Native Google Drive folder identity changed during verification.'));
+    }
     function refuse(message){
+      checkProof();
       invalidateFolderIdentity();
       scheduleConnectionRefusal(context);
       throw noRetry(Object.assign(new Error(message),{studyDirectorProfileRefused:true}));
     }
+    checkProof();
     if(!found)refuse('The Study Director folder on this Google account has no valid profile identity. Drive was not used.');
     if(mine&&boundFolder===`${id}\n${expected}`&&(!native||nativeAdmission?.authIdentity===context.authIdentity))return;
     const [email,library]=await Promise.all([requireProfileAccount(context),mine?null:latestLibrary(id,context)]);
+    if(native){
+      await assertDriveOperationCurrent(context);checkProof();
+      if(expectedProfile()!==expected)throw noRetry(new Error('The local profile changed before Google Drive binding.'));
+    }
     const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
-    if(!(mine&&decision==='continue'||!mine&&decision==='adopt'&&expectedProfile()===found)){
+    if(native){await assertDriveOperationCurrent(context);checkProof();}
+    if(!(mine&&decision==='continue'&&(!native||expectedProfile()===expected)||!mine&&decision==='adopt'&&expectedProfile()===found)){
       refuse('This Google account holds the library of another profile. Drive was not used.');
     }
-    if(native)await assertDriveOperationCurrent(context);
     boundFolder=`${id}\n${expectedProfile()}`;
     if(native)nativeAdmission=Object.freeze({folder:String(id),profile:expectedProfile(),authIdentity:context.authIdentity,epoch:folderEpoch});
     // The folder is named after its profile ("Study Director – Ana") and
@@ -410,7 +423,7 @@
     const expected=expectedProfile(),context=native?driveOperationContext():EMPTY_DRIVE_OPERATION;
     if(!expected)throw new Error('This profile is still starting.');
     if(!connection.connected())throw new Error('Sign in to Google Drive first.');
-    if(native)await ensureFolder(context);
+    if(native){await ensureFolder(context);if(expected!==expectedProfile())throw noRetry(new Error('The local profile changed before Google Drive deletion. Nothing was deleted.'));}
     if(!await deletionMarker(expected,context)){
       const existing=await findFolder(context);
       if(existing&&folderProfile(seenFolder)!==expected)throw noRetry(new Error('The Drive library does not identify this profile. Nothing was deleted.'));
@@ -775,6 +788,7 @@
       const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1000',orderBy:'createdTime desc',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});if(pageToken)params.set('pageToken',pageToken);
       const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not read the Study Director backup history in Google Drive.');
       const payload=await jsonResponse(response),files=Array.isArray(payload&&payload.files)?payload.files:[];
+      if(native&&(!Array.isArray(payload?.files)||payload.incompleteSearch!==undefined&&typeof payload.incompleteSearch!=='boolean'||payload.nextPageToken!==undefined&&typeof payload.nextPageToken!=='string'))throw noRetry(new Error('Native Google Drive could not verify the complete repository listing.'));
       if(payload&&payload.incompleteSearch===true){overflow=true;break;}
       for(const file of files){if(validRepositoryMetadata(file,parent,kind)){items.push(repositoryDescriptor(file,parent));if(items.length>=limit){overflow=!!payload?.nextPageToken||files.indexOf(file)<files.length-1;break;}}else ignored+=1;}
       if(items.length>=limit)break;pageToken=String(payload&&payload.nextPageToken||'');
@@ -789,7 +803,10 @@
   // published commit/checkpoint pair and one object. The shared repository
   // engine still owns full checkpoint, ancestry and reconciliation checks.
   async function verifyNativeLibrary(parent,context){
-    if(nativeAdmission?.folder===parent&&nativeAdmission.authIdentity===context.authIdentity&&nativeAdmission.epoch===folderEpoch&&nativeAdmission.profile===expectedProfile())return;
+    const remoteProfile=folderProfile(seenFolder),epoch=folderEpoch;
+    const proof=Object.freeze({folder:parent,remoteProfile,epoch,authIdentity:context.authIdentity});
+    if(!remoteProfile)throw noRetry(new Error('Native Google Drive could not verify the existing folder profile.'));
+    if(nativeAdmission?.folder===parent&&nativeAdmission.authIdentity===context.authIdentity&&nativeAdmission.epoch===epoch&&nativeAdmission.profile===expectedProfile()&&remoteProfile===expectedProfile())return proof;
     const kinds=['commit','checkpoint','object'],rows=[];
     for(const kind of kinds){
       const listing=await listRepositoryFilesInFolder(parent,kind,{limit:100000},context);
@@ -809,7 +826,11 @@
         if(latest.id!==item.id||latest.kind!==item.kind||latest.digest!==item.digest||latest.serverDigest!==item.digest||latest.size!==item.size||latest.remoteVersion!==item.remoteVersion)throw noRetry(new Error('Native Google Drive repository identity changed during verification.'));
       }finally{await releaseFile(blob);}
     }
+    const latestFolder=await getFolderMetadata(parent,context);
     await assertDriveOperationCurrent(context);
+    if(epoch!==folderEpoch||folderId!==parent||!validFolderMetadata(latestFolder)||folderProfile(latestFolder)!==remoteProfile)throw noRetry(new Error('Native Google Drive folder identity changed during verification.'));
+    seenFolder=latestFolder;
+    return proof;
   }
   // The session check, every 10 s while a session is open on screen: one
   // request for the newest takeover notes and version-complete records,
@@ -1158,7 +1179,7 @@
     devicePort=typeof api.backup.device==='function'?api.backup.device:null;
     // What the app can do with the profile's library.
     if(profilePort&&typeof profilePort.controls==='function')profilePort.controls(Object.freeze({deleteLibrary}));
-    if(!profilePort)return false;
+    if(!profilePort||native&&['folder','email'].some(key=>typeof profilePort[key]!=='function'))return false;
     connection.restoreSession();
     return api.backup.providers.register(Object.freeze({
       id:'google-drive',
