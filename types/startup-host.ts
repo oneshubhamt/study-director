@@ -12,6 +12,11 @@ export interface OwnershipHydrationInput{
   censusUnsupported():unknown|PromiseLike<unknown>;
   hydrateSavedDrafts(options:Readonly<{forcePreferences:true;failClosed:true}>):unknown|PromiseLike<unknown>;
 }
+export interface OwnershipRecoveryAdmissionInput{
+  readLibraryClear():PromiseLike<unknown>;
+  readRestore():PromiseLike<unknown>;
+  failClosed(message:string,kind:'library-clear'|'restore'|'journal-verification'):unknown;
+}
 export interface OwnershipLifecycleInput{
   isReady():boolean;
   resumeStorageReset():unknown;
@@ -40,6 +45,7 @@ export interface OwnershipHostInput{
   readonly reloadHint:()=>boolean;
   readonly lifecycle:Readonly<OwnershipLifecycleInput>;
   readonly hydration:Readonly<OwnershipHydrationInput>;
+  readonly recovery:Readonly<OwnershipRecoveryAdmissionInput>;
   readonly hooks:Readonly<OwnershipPassThroughHooks>;
 }
 export interface StartupHostCoordinatorInput{

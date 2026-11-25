@@ -45,7 +45,7 @@ const createModule=()=>{
     functions(input.local,['getJson','setJson','remove','lastError'],'App ownership storage');
     functions(input.diagnostics,['capture','guard'],'App ownership diagnostics');
     functions(input.hooks,[
-      'render','refreshStorage','stopExecution','isInitialized','hydrate','finalizeHydration','resume','refreshCore',
+      'render','refreshStorage','stopExecution','isInitialized','admitHydration','hydrate','finalizeHydration','resume','refreshCore',
       'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled',...(Object.hasOwn(input.hooks,'peerStorageReset')?['peerStorageReset']:[])
     ],'App ownership hooks');
     const config=input.config;
@@ -72,7 +72,7 @@ const createModule=()=>{
     let state:OwnershipState=OWNERSHIP_STATES.SECONDARY;
     let revision=0;
     let hasControl=false;
-    let hydrating=false;
+    let hydrating=false,hydrationAdmitted=false,reloadRequired=false;
     let heartbeatTimer:number|null=null;
     let channel:OwnerChannel|null=null;
     let takeoverPending:{requestId:string;resolve(value:boolean):void}|null=null;
@@ -90,7 +90,7 @@ const createModule=()=>{
       if(state!==target&&!allowed.includes(target)){
         diagnostics.capture('ownership.invalid-transition',new Error(`${state} -> ${target}${detail?`: ${detail}`:''}`),'error');
       }
-      if(state!==target)revision++;
+      if(state!==target){revision++;hydrationAdmitted=false;}
       state=target;
       hydrating=target===OWNERSHIP_STATES.HYDRATING;
       hasControl=(target===OWNERSHIP_STATES.HYDRATING||target===OWNERSHIP_STATES.PRIMARY||target===OWNERSHIP_STATES.RELEASING);
@@ -136,18 +136,27 @@ const createModule=()=>{
     function stopExecution(){
       try{hooks.stopExecution();}catch(error){diagnostics.capture('ownership.stop-execution',error,'error');}
     }
-    async function completePrimaryHydration(){
-      const owner=readOwner();
-      if(state!==OWNERSHIP_STATES.HYDRATING||!isSelf(owner)||owner!.claimId!==claimId||!fenceValid())return;
-      // Keep ordinary mutation disabled while the takeover finishes loading
-      // (unsupported-data census, saved drafts). Only writers holding explicit
-      // allowHydrating tokens (active-session reconciliation) run meanwhile, so
-      // an unrelated UI/editor write cannot slip into this takeover window.
-      await hooks.finalizeHydration();
-      const verified=readOwner();
-      if(state!==OWNERSHIP_STATES.HYDRATING||!isSelf(verified)||verified!.claimId!==claimId||!fenceValid())return;
-      transition(OWNERSHIP_STATES.PRIMARY,'hydration complete');
-      hooks.resume();hooks.refreshCore();hooks.render();hooks.scheduleMaintenance();
+    async function completePrimaryHydration(sameTabReload:boolean){
+      const attemptClaim=claimId,attemptRevision=revision;
+      const sameAttempt=()=>state===OWNERSHIP_STATES.HYDRATING&&claimId===attemptClaim&&revision===attemptRevision;
+      const assertCurrent=()=>{if(!sameAttempt()||!fenceValid(attemptClaim))throw ownershipLost('Study Director ownership changed during hydration.');};
+      try{
+        // Before recovery admission, even explicit allowHydrating tokens
+        // are unavailable: a canonical read can otherwise repair storage.
+        assertCurrent();
+        await hooks.admitHydration(assertCurrent);assertCurrent();
+        hydrationAdmitted=true;
+        await hooks.hydrate(freeze({sameTabReload,assertCurrent}));assertCurrent();
+        await hooks.finalizeHydration(assertCurrent);assertCurrent();
+        transition(OWNERSHIP_STATES.PRIMARY,'hydration complete');
+        hooks.resume();hooks.refreshCore();hooks.render();hooks.scheduleMaintenance();
+      }catch(error){
+        // A delayed former attempt cannot release or fault a newer claim.
+        if(!sameAttempt())return;
+        if((error as {code?:unknown}|null)?.code==='STUDY_DIRECTOR_OWNERSHIP_RELOAD_REQUIRED')reloadRequired=true;
+        diagnostics.capture('ownership.hydrate',error,'error');
+        release();setPrimary(false,{faulted:true,error});hooks.refreshCore();
+      }
     }
     function setPrimary(primary:boolean,options:PrimaryOptions={}){
       const next=!!primary;
@@ -168,12 +177,7 @@ const createModule=()=>{
         if(shouldHydrate){
           transition(OWNERSHIP_STATES.HYDRATING,'canonical reload');
           hooks.render();stopExecution();
-          Promise.resolve(hooks.hydrate(freeze({sameTabReload:!!options.sameTabReload}))).then(completePrimaryHydration).catch(error=>{
-            diagnostics.capture('ownership.hydrate',error,'error');
-            release();
-            setPrimary(false,{faulted:true,error});
-            hooks.refreshCore();
-          });
+          void completePrimaryHydration(!!options.sameTabReload);
         }else{
           transition(OWNERSHIP_STATES.PRIMARY,'lease verified');
           hooks.render();hooks.resume();hooks.scheduleMaintenance();hooks.refreshCore();
@@ -183,6 +187,7 @@ const createModule=()=>{
       return next;
     }
     function writeLease(options:LeaseOptions={}){
+      if(reloadRequired)return false;
       const force=!!options.force;
       const hydrate=!!options.hydrate;
       const now=env.now();
@@ -306,6 +311,7 @@ const createModule=()=>{
       return attempt;
     }
     function evaluate(){
+      if(reloadRequired)return Promise.resolve(false);
       if(takeoverPending)return Promise.resolve(false);
       if(evaluationPending)return evaluationPending;
       evaluationPending=(async()=>{
@@ -331,6 +337,7 @@ const createModule=()=>{
       },config.heartbeatMs);
     }
     async function takeOwnership(force=false){
+      if(reloadRequired)return false;
       if(!force)return evaluate();
       const owner=readOwner();
       const requestId='takeover_'+env.now().toString(36)+'_'+env.randomIdPart(6);
@@ -386,7 +393,7 @@ const createModule=()=>{
     }
     function issueWriteToken(reason='write',options:{allowHydrating?:boolean}={}):WriteToken{
       const allowHydrating=!!(options&&options.allowHydrating);
-      if((state!==OWNERSHIP_STATES.PRIMARY&&!(allowHydrating&&state===OWNERSHIP_STATES.HYDRATING))||!claimId){
+      if((state!==OWNERSHIP_STATES.PRIMARY&&!(allowHydrating&&hydrationAdmitted&&state===OWNERSHIP_STATES.HYDRATING))||!claimId){
         throw ownershipLost(`App ownership is unavailable before ${reason}.`);
       }
       assertWriteAuthority(claimId,reason);
@@ -397,7 +404,7 @@ const createModule=()=>{
     }
     function assertWriteToken(input:unknown,reason='write'){
       const token=input as Partial<Record<keyof WriteToken,unknown>>|null;
-      const validState=state===OWNERSHIP_STATES.PRIMARY||(token&&token.allowHydrating&&state===OWNERSHIP_STATES.HYDRATING);
+      const validState=state===OWNERSHIP_STATES.PRIMARY||(token&&token.allowHydrating&&hydrationAdmitted&&state===OWNERSHIP_STATES.HYDRATING);
       const valid=!!(validState&&token&&token.format==='study-director.ownership-write-token'&&token.contractVersion===1&&
         token.tabId===tabId&&token.pageId===pageId&&token.claimId===claimId&&token.revision===revision);
       if(!valid)throw ownershipLost(`App ownership changed before ${reason}.`);

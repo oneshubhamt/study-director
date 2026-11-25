@@ -758,6 +758,10 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Own
     isReady:()=>StartupLifecycle.status().fullyInitialized,
     resumeStorageReset:()=>resumeUnresolvedStorageReset()
   }),
+  recovery:Object.freeze<OwnershipControllerInput['recovery']>({
+    readLibraryClear:()=>AppData.libraryClearJournal.read(),readRestore:()=>AppData.restoreJournal.read(),
+    failClosed:(message,kind)=>requireMutationCoordinator().failClosed(message,kind)
+  }),
   hydration:Object.freeze<OwnershipControllerInput['hydration']>({
     hydratePlanData:()=>PlanData.hydrate(),
     hydratePlanRuntime:()=>PlanRuntime.hydrate(),

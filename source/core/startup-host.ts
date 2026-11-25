@@ -42,15 +42,16 @@ function createActivation(input:Readonly<{capture(scope:string,error:unknown,sev
 }
 
 function createOwnershipController(input:Readonly<OwnershipHostInput>){
-  exactObject(input,['module','config','environment','local','diagnostics','activation','reloadHint','lifecycle','hydration','hooks'],'Startup ownership host input');
+  exactObject(input,['module','config','environment','local','diagnostics','activation','reloadHint','lifecycle','hydration','recovery','hooks'],'Startup ownership host input');
   if(typeof input.reloadHint!=='function')throw new TypeError('Startup ownership reload hint must be a function.');
   exactObject(input.lifecycle,['isReady','resumeStorageReset'],'Startup ownership lifecycle');
   functions(input.lifecycle,['isReady','resumeStorageReset'],'Startup ownership lifecycle');
   exactObject(input.hydration,['hydratePlanData','hydratePlanRuntime','renderSavedPlans','hydratePrimary','censusUnsupported','hydrateSavedDrafts'],'Startup ownership hydration');
   functions(input.hydration,['hydratePlanData','hydratePlanRuntime','renderSavedPlans','hydratePrimary','censusUnsupported','hydrateSavedDrafts'],'Startup ownership hydration');
+  functions(input.recovery,['readLibraryClear','readRestore','failClosed'],'Startup recovery admission');
   exactObject(input.hooks,['render','refreshStorage','stopExecution','resume','refreshCore','scheduleMaintenance','practiceRender','blocked','peerStorageReset','invalidate','flush','settled'],'Startup ownership hooks');
   functions(input.hooks,['render','refreshStorage','stopExecution','resume','refreshCore','scheduleMaintenance','practiceRender','blocked','peerStorageReset','invalidate','flush','settled'],'Startup ownership hooks');
-  if(!Object.isFrozen(input.config)||!Object.isFrozen(input.environment)||!Object.isFrozen(input.local)||!Object.isFrozen(input.diagnostics)||!Object.isFrozen(input.activation)||!Object.isFrozen(input.lifecycle)||!Object.isFrozen(input.hydration)||!Object.isFrozen(input.hooks))throw new TypeError('Startup ownership contracts must be frozen.');
+  if(!Object.isFrozen(input.config)||!Object.isFrozen(input.environment)||!Object.isFrozen(input.local)||!Object.isFrozen(input.diagnostics)||!Object.isFrozen(input.activation)||!Object.isFrozen(input.lifecycle)||!Object.isFrozen(input.hydration)||!Object.isFrozen(input.recovery)||!Object.isFrozen(input.hooks))throw new TypeError('Startup ownership contracts must be frozen.');
   if(input.module.format!=='study-director.ownership'||input.module.contractVersion!==1)throw new TypeError('Ownership module is unavailable or incompatible.');
   if(input.activation.format!=='study-director.activation-contract'||input.activation.contractVersion!==1)throw new TypeError('Activation contract is unavailable or incompatible.');
   const controller=input.module.createOwnershipController(freeze({
@@ -63,18 +64,33 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
       refreshStorage:input.hooks.refreshStorage,
       stopExecution:input.hooks.stopExecution,
       isInitialized:input.lifecycle.isReady,
-      hydrate:async(options:Readonly<{sameTabReload:boolean}>)=>{
-        await input.hydration.hydratePlanData();
+      admitHydration:async assertCurrent=>{
+        const requireReload=(message:string,kind:'library-clear'|'restore'|'journal-verification',cause?:unknown):never=>{
+          assertCurrent();
+          input.recovery.failClosed(message,kind);
+          throw Object.assign(new Error(message,{cause}),{code:'STUDY_DIRECTOR_OWNERSHIP_RELOAD_REQUIRED'});
+        };
+        for(const [kind,read] of [['library-clear',input.recovery.readLibraryClear],['restore',input.recovery.readRestore]] as const){
+          assertCurrent();
+          let journal:unknown;
+          try{journal=await read();}catch(error){return requireReload('Recovery journal state could not be verified. Reload after browser storage recovers. Do not clear site data.','journal-verification',error);}
+          assertCurrent();
+          if(journal!==null)return requireReload('Interrupted data recovery must finish before taking control. Reload to complete recovery. Do not clear site data.',kind);
+        }
+      },
+      hydrate:async({sameTabReload,assertCurrent})=>{
+        assertCurrent();await input.hydration.hydratePlanData();assertCurrent();
         input.hydration.hydratePlanRuntime();
         input.hydration.renderSavedPlans();
-        const result=await input.hydration.hydratePrimary(freeze({sameTabReload:!!options.sameTabReload||input.reloadHint()}));
+        const result=await input.hydration.hydratePrimary(freeze({sameTabReload:!!sameTabReload||input.reloadHint()}));
+        assertCurrent();
         input.activation.publish(input.activation.kinds.OWNERSHIP_TAKEOVER,'app-ownership',{destructive:true});
         if(input.lifecycle.isReady())input.lifecycle.resumeStorageReset();
         return result;
       },
-      finalizeHydration:async()=>{
-        await input.hydration.censusUnsupported();
-        await input.hydration.hydrateSavedDrafts(freeze({forcePreferences:true,failClosed:true}));
+      finalizeHydration:async assertCurrent=>{
+        assertCurrent();await input.hydration.censusUnsupported();assertCurrent();
+        await input.hydration.hydrateSavedDrafts(freeze({forcePreferences:true,failClosed:true}));assertCurrent();
       },
       resume:input.hooks.resume,
       refreshCore:input.hooks.refreshCore,
@@ -140,7 +156,7 @@ function renderOwnershipBanner(){
   title.textContent=recoveryFault?(recoveryKind==='library-clear'?'Library data recovery required':'Data recovery required'):AppOwnership.state===OWNERSHIP_STATES.FAULTED?'Study Director control unavailable':'Study Director controlled elsewhere';
   const body=document.createElement('span');
   body.textContent=recoveryFault
-    ? recoveryKind==='library-clear'?'Study Director retained the Library-clear journal. Reload to complete recovery. Do not clear site data.':'Study Director retained the recovery journal. Reload to complete recovery. Do not clear site data.'
+    ? recoveryKind==='journal-verification'?'Study Director could not verify the recovery journals. Reload after browser storage recovers. Do not clear site data.':recoveryKind==='library-clear'?'Study Director retained the Library-clear journal. Reload to complete recovery. Do not clear site data.':'Study Director retained the recovery journal. Reload to complete recovery. Do not clear site data.'
     : AppOwnership.state===OWNERSHIP_STATES.FAULTED
     ? 'Study Director write ownership could not be established safely. Browsing remains available; retry after browser storage recovers.'
     : 'Another live tab controls Study Director writes. This tab remains read-only until you take control.';

@@ -31,7 +31,7 @@ const ownershipInput=Object.freeze({
   }),
   diagnostics:Object.freeze({capture:()=>{},guard:(_scope,fn)=>fn()}),
   hooks:Object.freeze({
-    render:()=>{ownershipHookCalls.render+=1;},refreshStorage:()=>{ownershipHookCalls.refreshStorage+=1;},stopExecution:()=>{},isInitialized:()=>false,hydrate:async()=>{},finalizeHydration:async()=>{},resume:()=>{},refreshCore:()=>{},
+    render:()=>{ownershipHookCalls.render+=1;},refreshStorage:()=>{ownershipHookCalls.refreshStorage+=1;},stopExecution:()=>{},isInitialized:()=>false,admitHydration:async()=>{},hydrate:async()=>{},finalizeHydration:async()=>{},resume:()=>{},refreshCore:()=>{},
     scheduleMaintenance:()=>{},practiceRender:()=>{ownershipHookCalls.practiceRender+=1;},blocked:()=>{},invalidate:()=>{},flush:async()=>{},settled:async()=>{if(ownershipSettleFailure)throw new Error('durability barrier failed');}
   })
 });
