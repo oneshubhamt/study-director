@@ -30,7 +30,7 @@ const input=Object.freeze({ports:Object.freeze({
     list:()=>appData.notes.metadataSnapshot().records
   }),
   text:Object.freeze({tagsIn:(value:string)=>rich.tagsIn(value)}),
-  ownership:Object.freeze({canMutate:()=>ownership.canMutate()})
+  ownership:Object.freeze({canMutate:()=>ownership.canMutate(),revision:()=>ownership.revision})
 })}) satisfies Readonly<NoteLinksInput>;
 const controller=module.createController(input);
 void controller.tags();void controller.tagged(['focus']);void controller.pick({query:'focus'});controller.cancel();

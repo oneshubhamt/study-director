@@ -78,7 +78,7 @@ const attachments=Object.freeze({
 const overlays=Object.freeze({
   createAnchoredPopover:(popup:HTMLElement,options?:Parameters<RichTextApi['createAnchoredPopover']>[1])=>richText.createAnchoredPopover(popup,options)
 }) satisfies Ports['overlays'];
-const ownership=Object.freeze({canMutate:()=>ownershipController.canMutate()}) satisfies Ports['ownership'];
+const ownership=Object.freeze({canMutate:()=>ownershipController.canMutate(),revision:()=>ownershipController.revision}) satisfies Ports['ownership'];
 const session=Object.freeze({hasActiveSession:()=>sessionActions.hasBlockingActiveSession()}) satisfies Ports['session'];
 
 const input=Object.freeze({ports:Object.freeze({

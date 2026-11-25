@@ -379,6 +379,9 @@ const createModule=():LibraryModuleContract=>{
     }
     function renameNoteInPlace(entry:NoteCatalogueEntry,title:HTMLElement|null=document.querySelector<HTMLElement>('#library-notes-editor button.library-notes-editor-title')){
       if(!title||!title.isConnected||!canMutate())return false;
+      const stored=getNote(entry.key,entry.label);
+      if(!stored||stored.id!==entry.id)return false;
+      const target={...entry,updatedAt:String(stored.updatedAt||'')};
       const leaf=noteLeaf(entry.label),input=document.createElement('input');
       input.type='text';input.className='library-notes-title-input ui-field';input.value=leaf;input.maxLength=160;input.setAttribute('aria-label','Note name');
       title.replaceWith(input);input.focus();input.select();
@@ -387,7 +390,7 @@ const createModule=():LibraryModuleContract=>{
         if(done)return;done=true;
         const connected=input.isConnected,next=input.value.trim();if(connected)input.replaceWith(title);
         if(!save||!connected||!currentOwner(owner)||!next||next===leaf)return;
-        const parent=noteParentPath(entry.label);void applyNoteRename(entry,parent?`${parent} > ${next}`:next);
+        const parent=noteParentPath(entry.label);void applyNoteRename(target,parent?`${parent} > ${next}`:next);
       };
       input.addEventListener('keydown',event=>{
         if(event.key==='Enter'){event.preventDefault();finish(true);}
