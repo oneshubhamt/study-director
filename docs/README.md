@@ -11,7 +11,7 @@ Read only what the task needs. Current source and executed checks establish beha
 | Feature contracts | [Notes](NOTES.md), [backup](BACKUP-ENGINE.md), [background operations](BACKGROUND-OPERATIONS.md), [notifications](NOTIFICATIONS.md) |
 | Focused product references | [Storage](areas/data-and-storage.md), [sessions](areas/study-session.md), [status indicator](areas/status-indicator.md), [updates](areas/app-updates.md), [UI](areas/ui.md) |
 | Build and QA | [README](../README.md), [contributing](../CONTRIBUTING.md), [verification](VERIFICATION.md), [test guide](../tests/README.md) |
-| Parked reports and ideas; incidental fixes only | [Backlog](backlog.md) |
+| F33 backlog, phase assignments and work after SDVC1 | [Backlog](backlog.md) |
 | Served product policies | [Privacy](../source/legal/privacy.html), [security](../source/legal/security.html), [terms](../source/legal/terms.html) |
 
 ## TypeScript programme
@@ -22,6 +22,19 @@ Read only what the task needs. Current source and executed checks establish beha
 | 6 · Convert tooling and overhaul the test suite | [QA design, baseline measurements and implementation passes](typescript/PHASE-6.md) |
 | 7 · Certify the converted application | [Candidate, device checks and certification handoff](typescript/PHASE-7.md) |
 | 8 · Reconcile F33 and build SDVC1 | [Execution and release criteria](typescript/PHASE-8.md) · [Source comparison and commit inventory](typescript/PHASE-8-INTAKE.md) |
+
+## Assigning one executor outcome
+
+Name the branch, exact pass (or Phase 7 activity), intended outcome and stop point. The execution record supplies the current checkpoint. The linked phase plan supplies the criteria and appropriate QA. The [backlog](backlog.md) supplies related reports. When assigning a child pass, name it explicitly so the executor can finish its dependencies and stop before its sibling.
+
+> Carry out [pass or activity] only on `ts-exp`. Read AGENTS.md, TS-CONVERSION-EXECUTION.md and the corresponding phase plan above. Resume from the verified checkpoint. Complete the named outcome through its real callers, exercise the applicable checks, record evidence and open items, commit/push and verify the remote SHA. Stop at the named boundary.
+
+| Assignment | Specify in the command |
+| --- | --- |
+| REVIEW-P5 Stage 1 / Stage 2 | Sol High resumes the current audit, fixes defects and leaves the gate open. Astra Extra High independently reviews the final SHA against the original JavaScript and decides whether Phase 6 may begin. |
+| P6.0, then P6.1–P6.6 individually | Inventory first. For implementation passes name the test/tool owner, the behavior or failure to prove and the evidence to preserve. |
+| Phase 7 | Use the plan's named activities, starting with **Establish the candidate**. Certification ends with an exact artifact and recorded gate decision. |
+| P8.0, then P8.1–P8.6 individually | Pin F33 and the certified Phase 7 SHA, then reconcile the backlog and both source inventories. P8.6 includes SDVC1 packaging and certification. Deployment requires a separate decision. |
 
 ## Maintaining the docs
 

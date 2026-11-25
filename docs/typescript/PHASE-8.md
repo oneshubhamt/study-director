@@ -12,7 +12,7 @@ The owner confirmed F33’s Drive Disconnect behavior on 2026-11-25. Disconnect 
 
 ## P8.0 · Freeze the inputs and turn history into a worklist
 
-1. Record the Phase 7 certification, its exact source SHA, retained artifact and any limitations. Pin F33 at `d69f2053629a7e24d106a969f0d69eac65b4996b`. Check the release identifiers in both source and built manifests. If a later release appears on `main`, list it separately for the owner. A moving ref must never silently change the F33 target.
+1. Reconcile the [F33 backlog map](../backlog.md) with its pinned source. Assign each shipped fix and outstanding device check to a ledger row, and carry deferred proposals forward under their original status. Record the Phase 7 certification, its exact source SHA, retained artifact and any limitations. Pin F33 at `d69f2053629a7e24d106a969f0d69eac65b4996b`. Check the release identifiers in both source and built manifests. If a later release appears on `main`, list it separately for the owner. A moving ref must never silently change the F33 target.
 2. In disposable checkouts build F33 and the Phase 7 baseline with each checkout's lockfile, toolchain and normal entry points. Retain runnable reference builds, manifests and checksums. If an actual deployed F33 package is available, compare its asset inventory, identity and headers with the reconstructed reference and record which one drove upgrade tests. Isolate browser profiles and provider repositories from production accounts and data.
 3. Generate two complete Git inventories. Set `T` to the full certified Phase 7 SHA. These commands run from the repository root.
 
