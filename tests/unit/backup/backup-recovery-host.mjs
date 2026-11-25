@@ -157,7 +157,7 @@ chooseMode='combine';driveConnected=true;await host.history.open();await new Pro
 assert.equal(deviceHistoryReads,3);assert.equal(providerHistoryReads,1,'with Drive connected too, one list reads both');
 assert.deepEqual(host.history.status().entries.map(entry=>[entry.location.sourceId,entry.location.checkpointId]),[['device-folder',CHECKPOINT('a')],['google-drive',CHECKPOINT('b')]],'each version once, read from where it is held');
 const driveButton={dataset:{versionHistorySource:'google-drive',versionHistoryCheckpoint:CHECKPOINT('b')}};
-changeRecoveryOrigin=true;const beforeChoice=events.filter(event=>event.startsWith('bring-in:')).length;assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),false,'a confirmation cannot move to a successor owner');assert.equal(events.filter(event=>event.startsWith('bring-in:')).length,beforeChoice);changeRecoveryOrigin=false;
+changeRecoveryOrigin=true;const beforeChoice=events.filter(event=>event.startsWith('bring-in:')).length,beforeDiagnostics=diagnostics.length;assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),false,'a confirmation cannot move to a successor owner');assert.equal(events.filter(event=>event.startsWith('bring-in:')).length,beforeChoice);assert.deepEqual(diagnostics.splice(beforeDiagnostics),[freeze({scope:'backup.provider-scoped-recovery',message:'QA removal origin changed',level:'warn'})]);changeRecoveryOrigin=false;
 assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),true);assert.equal(providerBringInCheckpoint,CHECKPOINT('b'));
 
 
