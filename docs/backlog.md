@@ -4,7 +4,7 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
 
 ## Experimental native platform (tauri-spike only)
 
-Owner-authorized programme: see [native platform](areas/native-platform.md). Phase 0 source/design census and exact baseline CI evidence are recorded; independent local baseline reproduction remains unperformed. P1.A shell/platform boundary is completed with real Windows compilation, authentic Cargo.lock, packaged WebView2 feature/persistence/security acceptance and targeted PWA regression. Phase 1 B–G and Phase 2 A–I remain open. Native managed transports, OS capabilities, close settlement, updater and packaging remain outstanding; P1.G includes comprehensive real Windows qualification (including OS restart, sleep, power-loss and broader fault scenarios). No production configuration is changed. The installed-app OAuth client/project and signed updater configuration need appropriate owner approval before external configuration changes. Use synthetic test libraries only.
+See [native platform](areas/native-platform.md), [roadmap](native/PROGRAMME.md) and [execution register](../TAURI-EXECUTION.md). P0 source census and pinned baseline CI recorded; independent baseline reproduction open. P1.A shell implemented and historical Windows journey passed, but fresh-build Wordgard insertion failed twice; qualification reopened. P1.B–G and P2.A–I remain open; complete P1.A before advancing. Native services, OS/close, signed updater, packaging, physical restart/power-loss and broader failure injection remain assigned to their roadmap gates. External OAuth and signing configuration require owner authorization. Synthetic test libraries only; no production changes.
 
 ## Bugs reported by the owner (2026-11-03)
 

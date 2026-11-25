@@ -13,6 +13,10 @@ Report exactly what was run, what failed and what was not run. When the app and 
 
 **Where things are recorded.** Plans, objectives and QA results go in the pull request description. Lasting decisions, rules and known limits go in the area's doc. Open work goes in [backlog.md](backlog.md). History lives in git and pull requests; there is no implementation journal.
 
+## Native programme execution
+
+On `tauri-spike`, [AGENTS.md](../AGENTS.md#native-programme-on-tauri-spike) adds the mandatory audit → analysis → implementation → source-objective verification → targeted QA procedure. The [roadmap](native/PROGRAMME.md) specifies each pass and full qualification gates; the [execution register](../TAURI-EXECUTION.md) holds compact exact-revision evidence. Experimental checkpoints do not require a PR or release bump. Use hosted Windows QA when local Windows is unavailable; actual packaged-origin runtime is not source checks, mock ports or physical-device acceptance. A later failed required witness reopens the gate even if earlier evidence passed. Run changed browser/native journeys on independent clean profiles, preserve failure logs and diagnose rather than retry away failures.
+
 ## Choosing tests
 
 Run targeted tests for each affected surface; run the full suites only after substantial change or before a release.

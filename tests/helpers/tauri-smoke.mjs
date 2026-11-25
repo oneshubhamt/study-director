@@ -5,7 +5,7 @@ import {once} from 'node:events';
 import {createServer} from 'node:net';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {CdpPage,waitFor,waitForStudyDirector} from './browser-harness.mjs';
+import {CdpPage,waitFor,waitForStudyDirector,settleMotion} from './browser-harness.mjs';
 
 assert.equal(process.platform,'win32');
 assert.equal(process.env.GITHUB_ACTIONS,'true');
@@ -212,13 +212,32 @@ async function appRead(assetId,canonical){
 async function editor(){
   await page.evaluate('__nativeQA.goTab("review")');
   await waitFor(()=>page.evaluate('!!document.querySelector(".sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger")'),{label:'Wordgard reflection mounted'});
-  await page.evaluate('document.querySelector(".sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger").click()');
-  const selector='.workspace-overlay-rich-text .sd-rte-editor';
-  await waitFor(()=>page.evaluate('!!document.querySelector('+JSON.stringify(selector)+')'),{label:'Wordgard focus editor'});
-  await page.evaluate('(()=>{const editor=document.querySelector('+JSON.stringify(selector)+');editor.focus();const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);})()');
+  await page.click('.sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger');
+  const selector='dialog.workspace-overlay-rich-text[open] .sd-rte-editor';
+  const state=()=>page.evaluate('('+function({selector,reflection}){
+    const editor=document.querySelector(selector),selection=getSelection(),anchor=selection?.anchorNode;
+    return {exists:!!editor,editable:editor?.isContentEditable===true,focused:!!editor&&(document.activeElement===editor||editor.contains(document.activeElement)),documentFocused:document.hasFocus(),text:editor?.textContent||'',anchorInside:!!editor&&!!anchor&&editor.contains(anchor),anchorType:anchor?.nodeType||0,offset:selection?.anchorOffset??null,collapsed:selection?.isCollapsed===true,anchorText:anchor?.textContent||'',expectedText:reflection};
+  }.toString()+')('+JSON.stringify({selector,reflection})+')');
+  await waitFor(async()=>{const row=await state();return row.editable&&row.text.includes(reflection);},{label:'Wordgard focus editor populated'});
+  await settleMotion(page);await page.settle();
+  await page.click(selector+' p');
+  await page.evaluate('('+function({selector}){
+    const editor=document.querySelector(selector),paragraph=editor.querySelector('p'),walker=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);
+    let node,last;while((node=walker.nextNode()))if(node.textContent.length)last=node;
+    if(!last)throw new Error('Wordgard paragraph has no text node');
+    editor.focus();
+    const selection=getSelection(),range=document.createRange();range.setStart(last,last.textContent.length);range.collapse(true);
+    selection.removeAllRanges();selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }.toString()+')('+JSON.stringify({selector})+')');
+  await page.settle();
+  const ready=await state();
+  console.log('Wordgard input preconditions:',JSON.stringify(ready));
+  assert.ok(ready.editable&&ready.focused&&ready.anchorInside&&ready.collapsed&&ready.anchorType===3&&ready.anchorText.endsWith(reflection)&&ready.offset===ready.anchorText.length,'Wordgard must have an editable, focused caret at the end of the expected text');
   await page.send('Input.insertText',{text:' via Wordgard'});
   const expected=reflection+' via Wordgard';
-  await waitFor(()=>page.evaluate('document.querySelector('+JSON.stringify(selector)+')?.textContent.includes('+JSON.stringify(expected)+')'),{label:'Wordgard keyboard insertion'});
+  try{await waitFor(async()=>{const row=await state();return row.text.includes(expected);},{label:'Wordgard keyboard insertion'});}
+  catch(error){console.error('Wordgard input failure:',JSON.stringify(await state()));throw error;}
   await page.evaluate('document.querySelector(".workspace-overlay-rich-text .workspace-overlay-close").click()');
   await waitFor(()=>page.evaluate('!document.querySelector("dialog.workspace-overlay-rich-text[open]")'),{label:'Wordgard focus close'});
   const row=await page.evaluate('(async()=>{const d=__nativeQA;d.RichTextRuntime.flushEditors();d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const value=(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection;return {value,rich:StudyDirectorRichText.isRichTextValue(value),plain:StudyDirectorRichText.toPlainText(value)};})()');
