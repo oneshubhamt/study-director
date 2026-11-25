@@ -17,7 +17,7 @@ export interface NoteLinksInput{
       list():ReturnType<NotesRepository['metadataSnapshot']>['records'];
     }>;
     text:Readonly<{tagsIn(value:string):readonly string[]}>;
-    ownership:Readonly<{canMutate():boolean}>;
+    ownership:Readonly<{canMutate():boolean;revision():number}>;
   }>;
 }
 export interface NotePickOptions{readonly exclude?:readonly string[];readonly query?:string}

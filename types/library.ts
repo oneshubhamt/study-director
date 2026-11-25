@@ -79,7 +79,7 @@ export interface LibraryInput{
     attachments:Readonly<{batch<T>(operation:()=>Promise<T>):Promise<T>;close():unknown;count():PromiseLike<number>|number;invalidate():unknown;reconcile():PromiseLike<unknown>|unknown;refresh():PromiseLike<unknown>|unknown}>;
     preferences:Readonly<{read():unknown;write(value:LibrarySavedView):unknown}>;
     clearLibrary:Readonly<{preflight(selection:Partial<LibrarySelection>):PromiseLike<LibraryPlan>|LibraryPlan;execute(options:Readonly<{selection:LibrarySelection;signature:string;forceReferenced:boolean}>):PromiseLike<LibraryClearResult>|LibraryClearResult}>;
-    ownership:Readonly<{canMutate():boolean}>;
+    ownership:Readonly<{canMutate():boolean;revision():number}>;
     overlays:Readonly<{createAnchoredPopover(popup:HTMLElement,options?:Readonly<{align?:'start'|'end';onClose?:()=>unknown}>):AnchoredPopover}>;
     session:Readonly<{hasActiveSession():boolean}>;
   }>;

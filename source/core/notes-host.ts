@@ -183,14 +183,19 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   function renderInheritedForTask(container:HTMLElement|null,task:Task|undefined,compact=false){renderInherited(container,task&&domain.hasOngoingTaskNotes(task)&&!domain.isSupportBlock(task)?domain.noteKeyForTask(task):'',compact);}
   function currentEntriesForTasks(tasks:readonly Task[]){const seen=new Set<string>(),entries:Readonly<{key:string;label:string;text:string}>[]=[];(tasks||[]).filter(domain.hasOngoingTaskNotes).forEach(task=>{const key=domain.noteKeyForTask(task);if(!key||seen.has(key))return;seen.add(key);const entry=repository.get(key);if(entry&&String(entry.text||'').trim())entries.push(freeze({key:entry.key,label:entry.label,text:richText.plain(entry.text||'')}));});return freeze(entries);}
   function refreshConsumers(){catalogueCache=null;if(!lifecycle.canWrite())return false;try{refreshAllFields();view.refreshExecute();view.refreshLibrary();view.requestScheduleRender();view.refreshReviewIfVisible();view.refreshRecovery();return true;}catch(error){diagnostics.capture('notes.consumer-render',error,'warn');return false;}}
+  function requireOperationOwner(owner:number){
+    if(!ownership.canMutate()||ownership.revision()!==owner)throw new Error('Note operation was superseded by an ownership change.');
+  }
   async function renameTag(from:unknown,to:unknown){
     if(!ownership.canMutate())throw new Error('Use the primary tab to rename tags.');const source=richText.normalizeTag(from),target=richText.normalizeTag(to);if(!source||!target)throw new Error('A tag starts with a letter and uses letters, digits, - or _.');
-    return richText.quiesce(()=>mutation.runExclusive('rename-tag',async()=>{await repository.flush({strict:true});let changed=0;const failed:string[]=[];for(const key of tags.tagged([source])){const note=repository.get(key);if(!note)continue;const value=richText.renameTag(note.text,source,target);if(value===note.text)continue;const result=repository.update(note.id,note.label,value,String(note.updatedAt||''));if(result.status==='changed')changed++;else failed.push(note.label);}await repository.flush({strict:true});if(repository.failure().failed)throw new Error('The renamed tags have not saved yet. They will be retried.');return freeze({changed,failed:freeze(failed)});}));
+    const owner=ownership.revision();
+    return richText.quiesce(()=>mutation.runExclusive('rename-tag',async()=>{requireOperationOwner(owner);await repository.flush({strict:true});requireOperationOwner(owner);let changed=0;const failed:string[]=[];for(const key of tags.tagged([source])){const note=repository.get(key);if(!note)continue;const value=richText.renameTag(note.text,source,target);if(value===note.text)continue;const result=repository.update(note.id,note.label,value,String(note.updatedAt||''));if(result.status==='changed')changed++;else failed.push(note.label);}await repository.flush({strict:true});requireOperationOwner(owner);if(repository.failure().failed)throw new Error('The renamed tags have not saved yet. They will be retried.');return freeze({changed,failed:freeze(failed)});}));
   }
   async function importFiles(files:Iterable<File>|ArrayLike<File>,parent=''){
     if(!ownership.canMutate())throw new Error('Use the primary tab to import notes.');const list=Array.from(files as ArrayLike<File>),made:{id:string;label:string}[]=[],skipped:string[]=[];
     const titleFor=(name:string)=>{const base=domain.clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;repository.get(title);count++)title=`${full} (${count})`;return title;};
-    return richText.quiesce(()=>mutation.runExclusive('import-notes',async()=>{let full=false;for(const file of list){const name=String(file?.name||'file'),match=/\.(md|markdown|txt)$/i.exec(name),kind=match?.[1]?.toLowerCase();if(full){skipped.push(`${name} (notes are at their limit)`);continue;}if(!kind){skipped.push(`${name} (not a .txt or .md file)`);continue;}if(file.size>configuration.maxRichTextBytes){skipped.push(`${name} (too large for one note)`);continue;}let value:string;try{const text=await file.text();value=kind==='txt'?richText.fromText(text):richText.fromMarkdown(text);}catch(error){skipped.push(`${name} (${String((error as {message?:unknown})?.message||'could not be read').replace(/\.$/,'')})`);continue;}if(!value){skipped.push(`${name} (empty)`);continue;}const title=titleFor(name),result=repository.update(title,title,value,'');if(result.status==='changed'){made.push(freeze({id:repository.get(title)?.id||'',label:title}));continue;}skipped.push(`${name} (${result.status==='limit'?'notes are at their limit':result.status==='content-limit'?'too large for one note':'could not be saved'})`);full=result.status==='limit';}if(made.length){await repository.flush({strict:true});if(repository.failure().failed)throw new Error('The imported notes have not saved yet. They will be retried.');}return freeze({made:freeze(made),skipped:freeze(skipped)});}));
+    const owner=ownership.revision();
+    return richText.quiesce(()=>mutation.runExclusive('import-notes',async()=>{requireOperationOwner(owner);let full=false;for(const file of list){requireOperationOwner(owner);const name=String(file?.name||'file'),match=/\.(md|markdown|txt)$/i.exec(name),kind=match?.[1]?.toLowerCase();if(full){skipped.push(`${name} (notes are at their limit)`);continue;}if(!kind){skipped.push(`${name} (not a .txt or .md file)`);continue;}if(file.size>configuration.maxRichTextBytes){skipped.push(`${name} (too large for one note)`);continue;}let value:string;try{const text=await file.text();value=kind==='txt'?richText.fromText(text):richText.fromMarkdown(text);}catch(error){skipped.push(`${name} (${String((error as {message?:unknown})?.message||'could not be read').replace(/\.$/,'')})`);continue;}requireOperationOwner(owner);if(!value){skipped.push(`${name} (empty)`);continue;}const title=titleFor(name),result=repository.update(title,title,value,'');if(result.status==='changed'){made.push(freeze({id:repository.get(title)?.id||'',label:title}));continue;}skipped.push(`${name} (${result.status==='limit'?'notes are at their limit':result.status==='content-limit'?'too large for one note':'could not be saved'})`);full=result.status==='limit';}requireOperationOwner(owner);if(made.length){await repository.flush({strict:true});requireOperationOwner(owner);if(repository.failure().failed)throw new Error('The imported notes have not saved yet. They will be retried.');}return freeze({made:freeze(made),skipped:freeze(skipped)});}));
   }
   const runtime=freeze({
     format:'study-director.notes-runtime' as const,contractVersion:1 as const,bindingVersion:BINDING_VERSION,
@@ -201,22 +206,29 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
 }
 
 function createLibraryWorkflows(input:Readonly<LibraryNoteWorkflowInput>):Readonly<LibraryNoteWorkflows>{
-  exactObject(input,['runtime','repository','plan','interactions','mergeText'],'Library note workflow input');
-  if(!Object.isFrozen(input.runtime)||!Object.isFrozen(input.repository)||!Object.isFrozen(input.plan)||!Object.isFrozen(input.interactions))throw new TypeError('Library note workflow providers must be frozen.');
-  const {runtime,repository,plan,interactions,mergeText}=input;
+  exactObject(input,['runtime','repository','plan','interactions','ownership','mergeText'],'Library note workflow input');
+  if(!Object.isFrozen(input.runtime)||!Object.isFrozen(input.repository)||!Object.isFrozen(input.plan)||!Object.isFrozen(input.interactions)||!Object.isFrozen(input.ownership))throw new TypeError('Library note workflow providers must be frozen.');
+  const {runtime,repository,plan,interactions,ownership,mergeText}=input;
   function areaUse(title:unknown){return plan.areaUse(title);}
   async function rename(entry:Readonly<NoteAreaIdentity>,value:unknown,{renamePlans=false}:Readonly<{renamePlans?:boolean}>={}):Promise<LibraryNoteRenameResult>{
     const identity=runtime.normalizeAreaInput(value);if(!identity||identity.label===entry.label)return freeze({status:'rejected',identity});
+    const owner=ownership.revision(),current=()=>ownership.canMutate()&&ownership.revision()===owner;
+    if(!current())return freeze({status:'rejected',identity});
     let outcome=await repository.rename(entry.key,identity.label);
+    if(!current())return freeze({status:'cancelled',identity});
     if(outcome.status==='collision'){
+      const revision=repository.metadataSnapshot().revision;
       const into=outcome.labels[0]||identity.label,others=outcome.labels.length-1;
       const ok=await interactions.confirm(freeze({title:'Merge notes?',message:`Merge “${entry.label}” into “${into}”? Its text is added to the end of “${into}”.`,details:freeze(others>0?[`${others} more note${others===1?'':'s'} inside it ${others===1?'is':'are'} merged the same way.`]:[]),confirmLabel:'Merge',cancelLabel:'Cancel'}));
-      if(!ok)return freeze({status:'cancelled',identity});outcome=await repository.rename(entry.key,identity.label,{merge:mergeText});
+      if(!ok||!current()||repository.metadataSnapshot().revision!==revision)return freeze({status:'cancelled',identity});
+      outcome=await repository.rename(entry.key,identity.label,{merge:mergeText});
+      if(!current())return freeze({status:'cancelled',identity});
     }
     if(outcome.status==='content-limit')return freeze({status:'content-limit',identity,label:String(outcome.label||identity.label)});
     if(outcome.status!=='renamed')return freeze({status:outcome.status==='inside-itself'?'inside-itself':'rejected',identity});
     let planResult={blocks:0,savedPlans:0},planError:unknown=null;const requested=renamePlans;
     if(requested)try{planResult=await plan.renameArea(entry.key,identity.label);}catch(error){planError=error;}
+    if(!current())return freeze({status:'cancelled',identity});
     return freeze({status:'renamed',identity,moved:freeze(outcome.moved.map(move=>freeze({...move}))),merged:outcome.merged,plan:freeze({requested,ok:planError===null,blocks:planResult.blocks,savedPlans:planResult.savedPlans,error:planError})});
   }
   return freeze({format:'study-director.library-note-workflows' as const,contractVersion:1 as const,areaUse,rename,trash:(key:unknown)=>repository.trash(key),restore:(key:unknown)=>repository.restore(key),remove:(key:unknown)=>repository.remove(key)});

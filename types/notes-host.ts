@@ -87,7 +87,8 @@ export interface NotesRuntime{
   importFiles(files:Iterable<File>|ArrayLike<File>,parent?:string):Promise<Readonly<{made:readonly Readonly<{id:string;label:string}>[];skipped:readonly string[]}>>;
 }
 export interface LibraryNoteWorkflowInput{
-  readonly runtime:Readonly<NotesRuntime>;readonly repository:Readonly<Pick<NotesRepository,'rename'|'trash'|'restore'|'remove'>>;
+  readonly runtime:Readonly<NotesRuntime>;readonly repository:Readonly<Pick<NotesRepository,'rename'|'trash'|'restore'|'remove'|'metadataSnapshot'>>;
+  readonly ownership:Readonly<{canMutate():boolean;revision():number}>;
   readonly plan:Readonly<Pick<PlanController,'areaUse'|'renameArea'>>;
   readonly interactions:Readonly<{confirm(options:Readonly<Record<string,unknown>>):boolean|PromiseLike<boolean>}>;
   readonly mergeText:(existing:string,moved:string)=>string;

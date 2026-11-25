@@ -1450,7 +1450,7 @@ const NotesRepository=NotesRepositoryModule.create(freeze({
       codecs:freeze({sanitizeCurrentNote,noteKeys:DailyRecordCodec.noteKeys}),keyedRecord:KeyedRecord,
       helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.noteRescue,APP_LIMITS.noteRescueBytes)}),
       hooks:freeze({
-        canMutate:appCanMutate,storageOk:markStorageHealthOk,reportCommit:reportCanonicalCommit,
+        canMutate:appCanMutate,ownershipRevision:getOwnershipRevision,storageOk:markStorageHealthOk,reportCommit:reportCanonicalCommit,
         onNotesChanged:refreshNoteConsumers,onNoteSyncState:setNoteSyncStateForKey,onNoteConflict:reportNoteConflict,saveWarning:showSubjectNoteSaveWarning,
         diagnosticsCapture:(scope:string,error:unknown,level:'warn'|'error')=>AppDiagnostics.capture(scope,error,level)
       }),

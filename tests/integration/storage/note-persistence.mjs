@@ -396,3 +396,25 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
   'a backup note that takes a local id keeps the bars and text links that point to it'
 ]},null,2));
+
+ // A new ownership claim cannot complete an earlier note operation that was
+ // waiting for its save lane. Exercise the actual repository, not a fake owner.
+{
+  for(const action of ['rename','trash','restore','remove']){
+    for(const reacquire of [false,true]){
+      const {app,stores,controls}=await setup();
+      controls.ownershipRevision=1;
+      app.notes.update('authority note','Authority Note','original evidence','');
+      await app.notes.flush({strict:true});
+      const id=app.notes.get('authority note').id;
+      const trashKey=action==='restore'?await app.notes.trash(id):null;
+      const before=structuredClone([...stores.area]),memory=structuredClone(app.notes.exportPayload());
+      const pending=action==='rename'?app.notes.rename(id,'Other title'):action==='trash'?app.notes.trash(id):action==='restore'?app.notes.restore(trashKey):app.notes.remove(id);
+      controls.owned=false;controls.ownershipRevision++;
+      if(reacquire){controls.owned=true;controls.ownershipRevision++;}
+      await assert.rejects(pending,/superseded|ownership/i,action+' must retain originating authority');
+      assert.deepEqual([...stores.area],before,action+' must preserve canonical notes');
+      assert.deepEqual(app.notes.exportPayload(),memory,action+' must preserve runtime notes');
+    }
+  }
+}

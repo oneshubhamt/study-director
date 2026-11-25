@@ -18,7 +18,7 @@ const createModule=():NoteLinksModuleContract=>{
     view:freeze(['document']),
     notes:freeze(['documents','get','link','linkedFrom','list']),
     text:freeze(['tagsIn']),
-    ownership:freeze(['canMutate'])
+    ownership:freeze(['canMutate','revision'])
   });
   const SHOWN=50;
   type PickerValue=NoteView|NoteTagCompletion;
@@ -42,7 +42,7 @@ const createModule=():NoteLinksModuleContract=>{
     requireFunctions(ports.notes,PORT_FIELDS.notes,'Note links notes port');
     requireFunctions(ports.ownership,PORT_FIELDS.ownership,'Note links ownership port');
     requireFunctions(ports.text,PORT_FIELDS.text,'Note links text port');
-    const {document}=ports.view,notes=ports.notes,text=ports.text,canMutate=ports.ownership.canMutate;
+    const {document}=ports.view,notes=ports.notes,text=ports.text,{canMutate,revision}=ports.ownership;
     if(!document||typeof document.createElement!=='function')throw new TypeError('Note links document is unavailable.');
     const leaf=(label:unknown):string=>String(label||'').split(/\s*>\s*/u).filter(Boolean).at(-1)||String(label||'');
     const path=(label:unknown):string=>String(label||'').split(/\s*>\s*/u).filter(Boolean).slice(0,-1).join(' › ');
@@ -168,27 +168,30 @@ const createModule=():NoteLinksModuleContract=>{
       });
     }
     async function pick({exclude=[],query=''}:NotePickOptions={}):Promise<NoteView|null>{
-      const parts=pickerParts();parts.exclude=[...exclude];const result=await open(NOTE_MODE,query);
-      return result&&'id' in result&&'key' in result?result:null;
+      if(!canMutate())return null;
+      const owner=revision(),parts=pickerParts();parts.exclude=[...exclude];const result=await open(NOTE_MODE,query);
+      return canMutate()&&revision()===owner&&result&&'id' in result&&'key' in result?result:null;
     }
     async function pickTag({query='',anchor=null}:NoteTagPickOptions={}):Promise<NoteTagCompletion|null>{
       const typed=String(query||'').toLowerCase();if(!typed||!tags().some(row=>row.tag!==typed&&row.tag.startsWith(typed)))return null;
-      const result=await open(TAG_MODE,query,anchor);return result&&'text' in result&&'end' in result?result:null;
+      if(!canMutate())return null;
+      const owner=revision(),result=await open(TAG_MODE,query,anchor);return canMutate()&&revision()===owner&&result&&'text' in result&&'end' in result?result:null;
     }
     function bar({ref,label='',own=false,current='',onOpen,onChange=()=>undefined}:NoteLinkBarOptions):NoteLinkBar{
       const root=element('div','note-links') as NoteLinkBar;root.setAttribute('role','group');root.setAttribute('aria-label','Linked notes');
       const render=()=>{
-        const note=notes.get(ref),id=note?note.id:'',writable=canMutate();
+        const note=notes.get(ref),id=note?note.id:'',writable=canMutate(),owner=revision();
+        const currentSource=()=>{const latest=notes.get(ref);return root.isConnected&&canMutate()&&revision()===owner&&(latest?.id||'')===id&&(latest?.key||'')===(note?.key||'');};
         const linked=(note?note.links:[]).map(other=>notes.get(other)).filter((other):other is NoteView=>other!==null);
         const row=element('div','note-links-row');
         if(own){const chip=button(`note-link-chip own${!current||current===id?' current':''}`,leaf(note?note.label:label),note?note.label:label);chip.addEventListener('click',()=>{onOpen(ref);});row.append(chip);}
         for(const other of linked){
           const chip=element('span',`note-link-chip${current===other.id?' current':''}`),openButton=button('note-link-open',leaf(other.label));openButton.title=other.label;openButton.addEventListener('click',()=>{onOpen(other.id);});chip.append(openButton);
-          if(writable){const remove=button('note-link-remove','×',`Remove ${leaf(other.label)} from linked notes`);remove.addEventListener('click',()=>{if(notes.link(ref,other.id,{on:false}).status==='changed'){render();onChange();}});chip.append(remove);}row.append(chip);
+          if(writable){const remove=button('note-link-remove','×',`Remove ${leaf(other.label)} from linked notes`);remove.addEventListener('click',()=>{if(remove.isConnected&&currentSource()&&notes.link(ref,other.id,{on:false}).status==='changed'){render();onChange();}});chip.append(remove);}row.append(chip);
         }
         if(writable){
           const add=button('note-links-add',linked.length?'+':'+ Link note',linked.length?'Link another note':'Link note');
-          add.addEventListener('click',()=>{void pick({exclude:[id,...linked.map(other=>other.id)]}).then(chosen=>{if(chosen&&notes.link(ref,chosen.id,{label}).status==='changed'){render();onChange();}});});row.append(add);
+          add.addEventListener('click',()=>{if(!add.isConnected||!currentSource())return;void pick({exclude:[id,...linked.map(other=>other.id)]}).then(chosen=>{if(chosen&&currentSource()&&notes.link(ref,chosen.id,{label}).status==='changed'){render();onChange();}});});row.append(add);
         }
         const from=id?notes.linkedFrom(id):[],parts:HTMLElement[]=[row];
         if(from.length){const line=element('div','note-links-from');line.append(element('span','note-links-from-label','Linked from'));for(const other of from){if(!other)continue;const openButton=button('note-link-from',leaf(other.label));openButton.title=other.label;openButton.addEventListener('click',()=>{onOpen(other.id);});line.append(openButton);}parts.push(line);}

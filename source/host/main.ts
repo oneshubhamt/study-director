@@ -2097,7 +2097,7 @@ const NoteLinks=NoteLinksModule.createController(Object.freeze<NoteLinksInput>({
   view:Object.freeze<NoteLinksInput['ports']['view']>({document}),
   notes:Object.freeze<NoteLinksInput['ports']['notes']>({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
   text:Object.freeze<NoteLinksInput['ports']['text']>({tagsIn:value=>RichTextApi.tagsIn(value)}),
-  ownership:Object.freeze<NoteLinksInput['ports']['ownership']>({canMutate:()=>appCanMutate()})
+  ownership:Object.freeze<NoteLinksInput['ports']['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision})
 })}));
 // Checked P5.6B navigation keeps link context with the rich-text surface while
 // deferring Library access until a user actually follows a link or tag.
@@ -2301,6 +2301,7 @@ const {
 }=PlanRuntime;
 LibraryNoteWorkflows=NotesHostModule.createLibraryWorkflows(Object.freeze<Parameters<typeof NotesHostModule.createLibraryWorkflows>[0]>({
   runtime:NotesRuntime,repository:AppData.notes,plan:PlanRuntime,
+  ownership:Object.freeze({canMutate:appCanMutate,revision:()=>AppOwnership.revision}),
   interactions:Object.freeze({confirm:async options=>(await Interactions.confirm(options))===true}),
   mergeText:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value
 }));
@@ -2967,7 +2968,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
     preflight:selection=>LibraryClearCoordinator.preflight(selection),
     execute:options=>RichTextRuntime.quiesce(()=>LibraryClearCoordinator.execute(options))
   }),
-  ownership:Object.freeze<LibraryViewInput['ports']['ownership']>({canMutate:()=>appCanMutate()}),
+  ownership:Object.freeze<LibraryViewInput['ports']['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
   overlays:Object.freeze<LibraryViewInput['ports']['overlays']>({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
   session:Object.freeze<LibraryViewInput['ports']['session']>({hasActiveSession:hasBlockingActiveSession})
 })}));

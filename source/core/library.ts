@@ -31,7 +31,7 @@ const createModule=():LibraryModuleContract=>{
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
-    ownership:freeze(['canMutate']),
+    ownership:freeze(['canMutate','revision']),
     overlays:freeze(['createAnchoredPopover']),
     session:freeze(['hasActiveSession'])
   });
@@ -88,7 +88,8 @@ const createModule=():LibraryModuleContract=>{
     }=ports.notes;
     const {batch:batchAttachments,close:closeAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments,refresh:refreshAttachments}=ports.attachments;
     const {preflight:preflightClearLibrary,execute:executeClearLibrary}=ports.clearLibrary;
-    const {canMutate}=ports.ownership;
+    const {canMutate,revision:ownershipRevision}=ports.ownership;
+    const currentOwner=(owner:number)=>canMutate()&&ownershipRevision()===owner;
     const {createAnchoredPopover}=ports.overlays;
     const {hasActiveSession}=ports.session;
 
@@ -381,11 +382,11 @@ const createModule=():LibraryModuleContract=>{
       const leaf=noteLeaf(entry.label),input=document.createElement('input');
       input.type='text';input.className='library-notes-title-input ui-field';input.value=leaf;input.maxLength=160;input.setAttribute('aria-label','Note name');
       title.replaceWith(input);input.focus();input.select();
-      let done=false;
+      let done=false;const owner=ownershipRevision();
       const finish=(save:boolean)=>{
         if(done)return;done=true;
-        const next=input.value.trim();if(input.isConnected)input.replaceWith(title);
-        if(!save||!next||next===leaf)return;
+        const connected=input.isConnected,next=input.value.trim();if(connected)input.replaceWith(title);
+        if(!save||!connected||!currentOwner(owner)||!next||next===leaf)return;
         const parent=noteParentPath(entry.label);void applyNoteRename(entry,parent?`${parent} > ${next}`:next);
       };
       input.addEventListener('keydown',event=>{
@@ -861,15 +862,17 @@ const createModule=():LibraryModuleContract=>{
     }
     async function renameSelectedTag(){
       const from=noteTagFilter[0];if(noteTagFilter.length!==1||!from||!canMutate())return false;
+      const owner=ownershipRevision();
       const result=await requestInput({
         title:`Rename #${from}`,message:'Every note with this tag gets the new name. A name already in use merges the two tags.',
         inputLabel:'New name',defaultValue:from,maxLength:80,required:true,requiredMessage:'Enter a tag name.',
         validate:value=>normalizeTag(value)?'':'A tag starts with a letter and uses letters, digits, - or _.',
         confirmLabel:'Rename',cancelLabel:'Cancel'
       });
-      const to=result?normalizeTag(result.value):'';if(!to||to===from)return false;
+      const to=result?normalizeTag(result.value):'';if(!currentOwner(owner)||!to||to===from||noteTagFilter.length!==1||noteTagFilter[0]!==from)return false;
       const notice=notifications.begin({id:'note-tag-rename',surfaceId:'notes-status',title:'Rename tag',message:`Renaming #${from}…`});
       let outcome;try{outcome=await renameNoteTag(from,to);}catch(error){notice.finish('failed',errorMessage(error)||'The tag could not be renamed.');return false;}
+      if(!currentOwner(owner)){notice.finish('cancelled','Study control changed.');return false;}
       setNoteTagFilter([to]);
       const changed=`${outcome.changed} ${outcome.changed===1?'note':'notes'}`,failed=outcome.failed||[];
       notice.finish(failed.length?'failed':'succeeded',failed.length?`Renamed #${from} to #${to} in ${changed}. Not changed, as they changed meanwhile: ${failed.join(', ')}.`:`Renamed #${from} to #${to} in ${changed}.`);
@@ -879,17 +882,18 @@ const createModule=():LibraryModuleContract=>{
     // level or inside the open note.
     async function importNotes(files:Iterable<File>|ArrayLike<File>){
       const list=Array.from(files||[]);if(!list.length||!canMutate())return false;
-      const open=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support&&!entry.ephemeral)||null;
+      const owner=ownershipRevision(),open=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support&&!entry.ephemeral)||null;
       let parent='';
       if(open){
         const where=await choose({title:list.length===1?'Import 1 file':`Import ${list.length} files`,message:'Each file becomes a new note named after it.',cancelLabel:'Cancel',choices:[
           {value:'inside',label:`Inside ${noteLeaf(open.label)}`,kind:'primary',description:`Under ${open.label.replace(/\s*>\s*/g,' › ')}.`},
           {value:'top',label:'At the top level',description:'As notes of their own.'}
         ]});
-        if(!where)return false;parent=where==='inside'?open.label:'';
+        if(!where||!currentOwner(owner)||where==='inside'&&selectedNoteKey!==open.key)return false;parent=where==='inside'?open.label:'';
       }
       const notice=notifications.begin({id:'note-import',surfaceId:'notes-status',title:'Import notes',message:`Importing ${list.length===1?'1 file':`${list.length} files`}…`});
       let result;try{result=await importNoteFiles(list,parent);}catch(error){notice.finish('failed',errorMessage(error)||'The files could not be imported.');return false;}
+      if(!currentOwner(owner)){notice.finish('cancelled','Study control changed.');return false;}
       const made=result.made||[],skipped=result.skipped||[];
       const firstMade=made[0];if(firstMade)revealNoteReference(firstMade.id);
       const parts=[];if(made.length)parts.push(`Imported ${made.length} ${made.length===1?'note':'notes'}.`);if(skipped.length)parts.push(`Not imported: ${skipped.join('; ')}.`);
@@ -902,7 +906,7 @@ const createModule=():LibraryModuleContract=>{
         setNotesStatus('Notes are at their note limit. Delete a note to make room.',{error:true});
         return false;
       }
-      const selected=noteEntries().find(entry=>entry.key===selectedNoteKey)||null;
+      const owner=ownershipRevision(),selected=noteEntries().find(entry=>entry.key===selectedNoteKey)||null;
       const options=selected?[
         {value:'nested',label:`Inside ${noteLeaf(selected.label)}`,description:`Creates a child under ${selected.label}.`},
         {value:'top',label:'At top level',description:'Creates an independent Area.'}
@@ -925,7 +929,7 @@ const createModule=():LibraryModuleContract=>{
         },
         confirmLabel:'Create note',cancelLabel:'Cancel'
       });
-      if(!result||!canMutate())return false;
+      if(!result||!currentOwner(owner)||selected&&result.option==='nested'&&selectedNoteKey!==selected.key)return false;
       const raw=selected&&result.option==='nested'?`${selected.label} > ${result.value}`:result.value;
       const identity=normalizeNoteArea(raw);
       if(!identity){
@@ -957,10 +961,11 @@ const createModule=():LibraryModuleContract=>{
       if(!canMutate())return false;
       const entry=selectedStoredNote();
       if(!entry){setNotesStatus('Select a saved note before deleting it.');return false;}
-      const notice=notifications.begin({id:'note-delete',surfaceId:'notes-status',title:'Delete note',message:'Moving the note to Recently deleted…'});
+      const owner=ownershipRevision(),notice=notifications.begin({id:'note-delete',surfaceId:'notes-status',title:'Delete note',message:'Moving the note to Recently deleted…'});
       let trashKey;
       try{trashKey=await trashNote(entry.key);}
       catch(error){notice.finish('failed',errorMessage(error)||'The note could not be deleted because browser storage could not be updated. Keep this tab open and retry.');return false;}
+      if(!currentOwner(owner)){notice.finish('cancelled','Study control changed.');return false;}
       if(trashKey===null){notice.finish('cancelled','No note was deleted.');return false;}
       if(pendingNote&&pendingNote.key===entry.key)pendingNote=null;
       renderNotes();closeNoteView();
@@ -971,10 +976,11 @@ const createModule=():LibraryModuleContract=>{
     async function restoreTrashedNote(trashKey:unknown){
       if(!canMutate())return false;
       const item=noteTrashItems().find(candidate=>candidate.key===trashKey);if(!item)return false;
-      const notice=notifications.begin({id:'note-restore',surfaceId:'notes-status',title:'Restore note',message:'Restoring the note…'});
+      const owner=ownershipRevision(),notice=notifications.begin({id:'note-restore',surfaceId:'notes-status',title:'Restore note',message:'Restoring the note…'});
       let key;
       try{key=await restoreNote(trashKey);}
       catch(error){notice.finish('failed',errorMessage(error)||'The note could not be restored. Keep this tab open and retry.');return false;}
+      if(!currentOwner(owner)){notice.finish('cancelled','Study control changed.');return false;}
       if(!key){notice.finish('failed',`“${item.label}” could not be restored: every “(restored)” name is taken.`);return false;}
       selectedTrashKey='';selectedNoteKey=key;
       noteTree(noteEntries());expandNoteAncestors(key);renderNotes();
@@ -985,11 +991,13 @@ const createModule=():LibraryModuleContract=>{
     async function deleteTrashedNoteForever(trashKey:unknown){
       if(!canMutate())return false;
       const item=noteTrashItems().find(candidate=>candidate.key===trashKey);if(!item)return false;
+      const owner=ownershipRevision();
       const accepted=await confirm({title:'Delete this note forever?',danger:true,message:`“${item.label}” will be removed for good. This cannot be undone.`,details:['Existing backups are unchanged.'],confirmLabel:'Delete forever',cancelLabel:'Keep it'});
-      if(!accepted||!canMutate())return false;
+      if(!accepted||!currentOwner(owner)||noteTrashItems().find(candidate=>candidate.key===trashKey)?.deletedAt!==item.deletedAt)return false;
       const notice=notifications.begin({id:'note-forget',surfaceId:'notes-status',title:'Delete forever',message:'Deleting the note…'});
       try{if(!await removeNote(trashKey)){notice.finish('cancelled','No note was deleted.');return false;}}
       catch(error){notice.finish('failed',errorMessage(error)||'The note could not be deleted. Keep this tab open and retry.');return false;}
+      if(!currentOwner(owner)){notice.finish('cancelled','Study control changed.');return false;}
       selectedTrashKey='';renderNotes();closeNoteView();
       notice.finish('succeeded',`Deleted “${item.label}” forever.`);
       return true;
@@ -1001,7 +1009,7 @@ const createModule=():LibraryModuleContract=>{
       if(!canMutate())return false;
       const entry=selectedStoredNote();
       if(!entry){setNotesStatus('Select a saved note to move it.');return false;}
-      const nested=noteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `)),use=planAreaUse(entry.key),where=planAreaPlaces(use);
+      const owner=ownershipRevision(),nested=noteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `)),use=planAreaUse(entry.key),where=planAreaPlaces(use);
       const result=await requestInput({
         title:'Move note',
         message:'Type the full name, using > to place it inside another Area, for example “GS2 > Polity”.',
@@ -1012,7 +1020,7 @@ const createModule=():LibraryModuleContract=>{
         validate:value=>normalizeNoteArea(value)?'':'Enter a valid name. Use > only to separate nested Areas.',
         confirmLabel:'Move',cancelLabel:'Cancel'
       });
-      if(!result||!canMutate())return false;
+      if(!result||!currentOwner(owner)||selectedNoteKey!==entry.key)return false;
       return applyNoteRename(entry,result.value,{inPlans:!where||result.checked===true});
     }
     // Where a note's Area is used: "today’s plan", "2 saved plans", or both.
@@ -1023,12 +1031,13 @@ const createModule=():LibraryModuleContract=>{
     // Renames or moves the note; with inPlans (the default, and the rename
     // dialog's tick box) the Area in today's plan and saved plans follows it.
     async function applyNoteRename(entry:NoteCatalogueEntry,value:unknown,{inPlans=true}:Readonly<{inPlans?:boolean}>={}){
-      const identity=normalizeNoteArea(value);
-      if(!identity||identity.label===entry.label||!canMutate())return false;
+      const owner=ownershipRevision(),identity=normalizeNoteArea(value),stored=getNote(entry.key,entry.label);
+      if(!identity||identity.label===entry.label||!currentOwner(owner)||!stored||stored.id!==entry.id||String(stored.updatedAt||'')!==entry.updatedAt)return false;
       const where=planAreaPlaces(planAreaUse(entry.key));
       const notice=notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',message:'Renaming the note…'});
       try{
         const outcome=await renameNote(entry,value,{renamePlans:!!where&&inPlans});
+        if(!currentOwner(owner)){notice.finish('cancelled','Study control changed.');return false;}
         if(outcome.status==='cancelled'){notice.finish('cancelled','Nothing was renamed.');return false;}
         if(outcome.status!=='renamed'){
           notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':outcome.status==='content-limit'?`Merging would make “${outcome.label}” longer than one note can be. Nothing was changed.`:'The note could not be renamed. Nothing was changed.');

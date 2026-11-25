@@ -24,7 +24,7 @@ const createModule=()=>{
     if(typeof codecs.sanitizeCurrentNote!=='function'||!Object.isFrozen(codecs.noteKeys))throw new TypeError('Notes codec port is invalid.');
     if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Notes keyed-record capability must be frozen.');
     const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom'],'Notes helper port');
-    const hooks=functions(input.hooks,['canMutate','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Notes hook port');
+    const hooks=functions(input.hooks,['canMutate','ownershipRevision','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Notes hook port');
     const canonical=functions(input.canonical,['noteDeletionValue','notePreparationUnit','stageMutationEpoch','normalizeNoteDeletions'],'Notes canonical port');
     const clock=functions(input.clock,['nowMs'],'Notes clock');
     const APP_LIMITS=configuration.limits,DATA_CONTRACT=configuration.dataContract,DB_NOTES_STORE=stores.notes,DB_APP_META_STORE=stores.appMeta;
@@ -725,12 +725,20 @@ const repository=(()=>{
   function reconcile(payload:unknown,deletions:unknown=[]){return commitCollection(payload,{merge:true,deletions});}
   // Removes a note for good. A deletion record keeps a live note from coming
   // back through Combine; a trash row needs none.
+  // Settlement can await storage. A later ownership claim is not authority
+  // for the original operation, nor is a newly changed note its original target.
+  const currentOwner=(owner:number)=>appCanMutate()&&hooks.ownershipRevision()===owner;
+  function assertNoteOperation(owner:number,key:string,expected:string){
+    if(!currentOwner(owner))throw new Error('Note operation was superseded by an ownership change.');
+    if(!notes[key]||revision(notes[key])!==expected)throw new Error('The note changed while waiting for storage; its successor was preserved.');
+  }
   async function removeKey(key:string,options:Readonly<{expectedRevision?:string}>={}){
     if(!appCanMutate()||!key||!notes[key])return false;
-    await settle([key]);const current=notes[key];if(!current)return false;
-    if(options.expectedRevision!==undefined&&revision(current)!==options.expectedRevision)throw new Error('The note changed before deletion; its successor was preserved.');
+    const owner=hooks.ownershipRevision(),expected=options.expectedRevision??revision(notes[key]);
+    await settle([key]);assertNoteOperation(owner,key,expected);
+    const current=notes[key]!;
     dropNote(key);touchSnapshot();markDirty(key,revision(current));
-    await settle([key]);return !notes[key];
+    await settle([key]);return currentOwner(owner)&&!notes[key];
   }
   function remove(ref:unknown,options:Readonly<{expectedRevision?:string}>={}){return removeKey(keyFor(ref),options);}
   // Moves a note to Recently deleted under its own id, in one transaction with
@@ -739,12 +747,14 @@ const repository=(()=>{
   async function trash(ref:unknown){
     if(!appCanMutate())return null;
     const id=keyFor(ref);if(!id||isTrashKey(id))return null;
-    await settle([id]);const current=notes[id];if(!current)return null;
+    const owner=hooks.ownershipRevision(),expected=revision(notes[id]);
+    await settle([id]);assertNoteOperation(owner,id,expected);const current=notes[id]!;
     if(!hasContent(current)&&!current.links)return await removeKey(id)?'':null;
     const trashKey=NoteKeys.trash(id);
     setNote(trashKey,{...current,key:trashKey,updatedAt:nextRevision(current.updatedAt)});
     dropNote(id);touchSnapshot();markDirty(id,revision(current));markDirty(trashKey,'');
     await settle([id,trashKey]);
+    if(!currentOwner(owner))return null;
     refreshNoteConsumers();
     return trashKey;
   }
@@ -754,7 +764,9 @@ const repository=(()=>{
   async function restore(trashKey:unknown){
     if(!appCanMutate())return null;
     const key=String(trashKey||''),id=NoteKeys.id(key);if(!isTrashKey(key)||!id||!notes[key]||notes[id])return null;
-    await settle([key]);const item=notes[key];if(!item)return null;
+    const owner=hooks.ownershipRevision(),expected=revision(notes[key]);
+    await settle([key]);assertNoteOperation(owner,key,expected);const item=notes[key]!;
+    if(notes[id])return null;
     const base=displayAreaName(item.label),free=(candidate:string)=>{const title=normalizeAreaName(candidate);return title&&!idForTitle(title)?title:'';};
     let label=clampText(base,APP_LIMITS.maxAreaNameChars),title=free(label);
     for(let index=1;!title&&index<100;index+=1){label=`${clampText(base,Math.max(1,APP_LIMITS.maxAreaNameChars-20))} (restored${index>1?` ${index}`:''})`;title=free(label);}
@@ -762,6 +774,7 @@ const repository=(()=>{
     setNote(id,{...item,key:id,label,updatedAt:nextRevision(item.updatedAt)});
     dropNote(key);touchSnapshot();markDirty(id,'');markDirty(key,revision(item));
     await settle([id,key]);
+    if(!currentOwner(owner))return null;
     refreshNoteConsumers();
     return title;
   }
@@ -777,7 +790,10 @@ const repository=(()=>{
     const source=normalizeAreaName(fromTitle),label=clampText(displayAreaName(toLabel),APP_LIMITS.maxAreaNameChars),target=normalizeAreaName(label);
     if(!source||!target||NoteKeys.isKey(target)||!idForTitle(source))return freeze({status:'rejected'});
     if(target.startsWith(`${source} > `))return freeze({status:'inside-itself'});
-    await settle([idForTitle(source),idForTitle(target)].filter(Boolean));if(!idForTitle(source))return freeze({status:'rejected'});
+    const owner=hooks.ownershipRevision(),expected=revision(notes[fromKey]);
+    await settle([fromKey,idForTitle(target)].filter(Boolean));
+    assertNoteOperation(owner,fromKey,expected);
+    if(idForTitle(source)!==fromKey)return freeze({status:'rejected'});
     const depth=source.split(' > ').length,labelParts=label.split(' > ');
     const moves=[...titles()].filter(([title])=>title===source||title.startsWith(`${source} > `)).map(([title,id])=>{
       const parts=displayAreaName(notes[id]!.label).split(' > ');
@@ -804,6 +820,7 @@ const repository=(()=>{
     for(const {id,base,entry} of writes){setNote(id,entry);markDirty(id,revision(base));}
     touchSnapshot();
     await settle([...removals,...writes].map(item=>item.id));
+    if(!currentOwner(owner))return freeze({status:'rejected'});
     refreshNoteConsumers();
     return freeze({status:'renamed',key:target,moved:freeze(moves.map(move=>freeze({from:move.from,to:move.to}))),merged:clashes.length});
   }
