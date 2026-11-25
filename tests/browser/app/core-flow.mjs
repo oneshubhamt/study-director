@@ -6,7 +6,8 @@ const server=await startReleaseServer();let browser=null,freshBrowser=null,page=
 const result={status:'PASS',release:server.manifest.release,checks:{}};
 async function editReflection(text,quality){
   await page.click('[data-tab="review"]');
-  await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-review'&&!!document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor[contenteditable="true"]')`),{label:'reflection editor mounted through Review navigation'});
+  try{await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-review'&&!!document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor[contenteditable="true"]')`),{label:'reflection editor mounted through Review navigation'});}
+  catch(error){const state=await page.evaluate(`(()=>{const d=__PWA6,field=document.getElementById('daily-reflection');return {startup:d.StartupLifecycle.status(),owner:d.AppOwnership.status(),pane:document.querySelector('.pane.on')?.id,field:{disabled:field?.disabled,readOnly:field?.readOnly,ownership:field?.dataset.ownershipUi,hidden:field?.hidden},rich:d.RichTextRuntime.status(),ui:document.documentElement.dataset.studyDirectorUiMutable}})()`);throw new Error(error.message+'; diagnostics='+JSON.stringify(state),{cause:error});}
   await page.evaluate(`(()=>{const editor=document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor');editor.focus();const range=document.createRange();range.selectNodeContents(editor);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);})()`);
   await page.send('Input.insertText',{text});
   await page.click(`[data-quality="${quality}"]`);

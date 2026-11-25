@@ -189,7 +189,6 @@ const createModule=():StartupLifecycleContract=>{
           await runStage('interrupted-restore-recovery',startup.recoverInterruptedRestore);
           await runStage('notes-load',startup.loadNotes);
           await runStage('drafts-hydrate',startup.hydrateDrafts);
-          await runStage('dom-bindings-install',installDomBindings);
           await runStage('plan-preview',startup.previewPlan);
           await runStage('clock-start',startup.startClock);
           await runStage('header-clock-start',startup.startHeaderClock);
@@ -204,6 +203,7 @@ const createModule=():StartupLifecycleContract=>{
           await runStage('name-setup',startup.showNameSetup);
           await runStage('storage-inspection',startup.inspectStorage);
           const proof=await runStage('canonical-verification',startup.verifyReady);
+          await runStage('dom-bindings-install',installDomBindings);
           fullyInitialized=true;lifecycleState='ready';
           await runStage('startup-ready',()=>startup.markReady(proof));
         }catch(error:unknown){

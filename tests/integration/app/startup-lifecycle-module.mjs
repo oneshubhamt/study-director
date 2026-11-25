@@ -78,12 +78,12 @@ assert.ok(index('canonical-data-validation:end')<index('library-clear-recovery:b
 assert.ok(index('library-clear-recovery:end')<index('restore-recovery:begin'));
 assert.ok(index('restore-recovery:end')<index('notes-load:begin'));
 assert.ok(index('notes-load:end')<index('drafts'));
-assert.ok(index('drafts')<index('bind-dom'),'ordinary bindings follow canonical recovery and hydration');
+assert.ok(index('canonical-verification:end')<index('bind-dom'),'ordinary bindings follow canonical recovery, hydration and verification');
 assert.ok(index('notes-load:end')<index('session-restore:begin'));
 assert.ok(index('session-restore:end')<index('lifecycle-reconcile'));
 assert.ok(index('lifecycle-reconcile')<index('launch-route'));
 assert.ok(index('launch-route')<index('name'));
-assert.deepEqual(status.completedStages.slice(-7),['active-session-restore','lifecycle-reconcile','launch-route','name-setup','storage-inspection','canonical-verification','startup-ready']);
+assert.deepEqual(status.completedStages.slice(-7),['lifecycle-reconcile','launch-route','name-setup','storage-inspection','canonical-verification','dom-bindings-install','startup-ready']);
 assert.ok(index('canonical-verification:end')<index('startup-ready'));
 
 coordinator.flush();

@@ -2081,7 +2081,7 @@ const {DailyReflectionPersistence,DiaryEditor:LibraryDiaryEditor}=ReviewPersiste
 function richTextDocumentFor(field:HTMLTextAreaElement,options:Readonly<{requireVisible?:boolean;editable?:boolean}>={}){
   if(!(field instanceof HTMLTextAreaElement)||!field.isConnected)return null;
   const editable=options.editable!==false,requireVisible=options.requireVisible!==false;
-  if(editable&&(field.disabled||field.readOnly||!appCanMutate()))return null;
+  if(editable&&(!StartupLifecycle?.status().fullyInitialized||field.disabled||field.readOnly||!appCanMutate()))return null;
   if(field.matches('.library-diary-textarea'))return LibraryDiaryEditor.documentFor(field);
   if(field.id==='daily-reflection'){
     const date=getReviewDate();
@@ -3815,7 +3815,8 @@ const BlockedActionHint=(()=>{
 const OwnershipUiProjection=(()=>{
   type OwnershipStateValue=ReturnType<typeof AppOwnership.status>['state'];
   type OwnershipUiElement=HTMLElement&Partial<Pick<HTMLInputElement,'disabled'|'readOnly'>>;
-  type OwnershipBaseline=Readonly<{disabled:boolean|null;readOnly:boolean|null;draggable:string|null;ariaDisabled:string|null;ariaReadonly:string|null}>;
+  type OwnershipProjectionMode='drag'|'readonly'|'disabled'|'action';
+  type OwnershipBaseline=Readonly<{mode:OwnershipProjectionMode;disabled:boolean|null;readOnly:boolean|null;draggable:string|null;ariaDisabled:string|null;ariaReadonly:string|null}>;
   type OwnershipUiSnapshot=Readonly<{format:'study-director.ownership-ui-snapshot';contractVersion:1;state:OwnershipStateValue;canMutate:boolean;activeSessionBlocked:boolean;transitional:boolean;revision:number;reason:string}>;
   const TRANSITIONAL_STATES=new Set<OwnershipStateValue>([
     OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
@@ -3860,31 +3861,39 @@ const OwnershipUiProjection=(()=>{
     queryRoot.querySelectorAll<OwnershipUiElement>('.si.draft[draggable]').forEach(element=>found.add(element));
     return [...found];
   }
-  function captureBaseline(element:OwnershipUiElement):OwnershipBaseline{
-    const prior=baselines.get(element);if(prior)return prior;
-    const baseline=Object.freeze({disabled:typeof element.disabled==='boolean'?element.disabled:null,readOnly:typeof element.readOnly==='boolean'?element.readOnly:null,draggable:element.getAttribute('draggable'),ariaDisabled:element.getAttribute('aria-disabled'),ariaReadonly:element.getAttribute('aria-readonly')});
+  function captureBaseline(element:OwnershipUiElement,mode:OwnershipProjectionMode):OwnershipBaseline{
+    const prior=baselines.get(element);if(prior?.mode===mode)return prior;if(prior)releaseElement(element);
+    const baseline=Object.freeze({mode,disabled:typeof element.disabled==='boolean'?element.disabled:null,readOnly:typeof element.readOnly==='boolean'?element.readOnly:null,draggable:element.getAttribute('draggable'),ariaDisabled:element.getAttribute('aria-disabled'),ariaReadonly:element.getAttribute('aria-readonly')});
     baselines.set(element,baseline);return baseline;
   }
   function restoreAttribute(element:OwnershipUiElement,name:string,value:string|null){if(value===null){if(element.hasAttribute(name))element.removeAttribute(name);}else if(element.getAttribute(name)!==value)element.setAttribute(name,value);}
   function releaseElement(element:OwnershipUiElement){
     const baseline=baselines.get(element);
     if(baseline){
-      if(baseline.disabled!==null&&element.disabled!==baseline.disabled)element.disabled=baseline.disabled;
-      if(baseline.readOnly!==null&&element.readOnly!==baseline.readOnly)element.readOnly=baseline.readOnly;
-      restoreAttribute(element,'draggable',baseline.draggable);restoreAttribute(element,'aria-disabled',baseline.ariaDisabled);restoreAttribute(element,'aria-readonly',baseline.ariaReadonly);baselines.delete(element);
+      // Release only properties owned by the projection mode. Feature renders
+      // may independently enable a read-only textarea while startup is held.
+      if(baseline.mode==='readonly'){
+        if(baseline.readOnly!==null&&element.readOnly!==baseline.readOnly)element.readOnly=baseline.readOnly;
+        restoreAttribute(element,'aria-readonly',baseline.ariaReadonly);
+      }else{
+        if(baseline.mode==='disabled'&&baseline.disabled!==null&&element.disabled!==baseline.disabled)element.disabled=baseline.disabled;
+        if(baseline.mode==='drag')restoreAttribute(element,'draggable',baseline.draggable);
+        restoreAttribute(element,'aria-disabled',baseline.ariaDisabled);
+      }
+      baselines.delete(element);
     }
     BlockedActionHint.hide(element);
     if(element.dataset['ownershipUi']!==undefined)delete element.dataset['ownershipUi'];
     if(element.dataset['ownershipUiReason']!==undefined)delete element.dataset['ownershipUiReason'];
   }
-  function projectionMode(element:OwnershipUiElement){
+  function projectionMode(element:OwnershipUiElement):OwnershipProjectionMode{
     if(element.matches('.si.draft[draggable]'))return 'drag';
     if(element.matches('textarea,input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"])'))return 'readonly';
     if(element.matches('button,select,input,[aria-pressed]'))return 'disabled';
     return 'action';
   }
   function blockElement(element:OwnershipUiElement,reason='ownership'){
-    captureBaseline(element);const mode=projectionMode(element);element.dataset['ownershipUiReason']=reason;if(element.dataset['ownershipUi']!==mode)element.dataset['ownershipUi']=mode;
+    const mode=projectionMode(element);captureBaseline(element,mode);element.dataset['ownershipUiReason']=reason;if(element.dataset['ownershipUi']!==mode)element.dataset['ownershipUi']=mode;
     if(mode==='readonly'){if(!element.readOnly)element.readOnly=true;if(element.getAttribute('aria-readonly')!=='true')element.setAttribute('aria-readonly','true');return;}
     if(mode==='disabled'){if(!element.disabled)element.disabled=true;if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');return;}
     if(mode==='drag'&&element.draggable)element.draggable=false;if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');
