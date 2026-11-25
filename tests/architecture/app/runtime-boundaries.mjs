@@ -121,7 +121,12 @@ for(const stale of ['let fileBackupRowReady=false;','const BackupProtection=Expo
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.7A owner: ${stale}`);
 }
 assert.match(owner,/controller\.subscribeStatus\(\(\)=>\{renderFile\(\);syncFileHold\(\);\}\)/u,'standalone file work keeps background-location exclusion behind the checked owner');
-assert.match(owner,/processing\.open\(inputNode\)/u,'native file-open entry remains synchronous at the checked host boundary');
+const filePicker=owner.slice(owner.indexOf('async function pickImportFile('),owner.indexOf('const cancelStandalone='));
+assert.match(filePicker,/assertOrigin=input\.captureImportAuthority\(\)/u,'file picker captures original ownership before presenting the native dialog');
+const nativeOpen=filePicker.indexOf('await processing.open(');
+assert.ok(nativeOpen>0&&!/\bawait\b/.test(filePicker.slice(0,nativeOpen)),'native file-open entry remains synchronous at the checked host boundary');
+assert.match(filePicker,/processing\.open\(\{click:\(\)=>\{if\(stillCurrent\(\)\)\{fallback=freeze\(\{node:inputNode,assertOrigin\}\);inputNode\.click\(\);/u,'fallback selection carries its original authority before opening the input');
+assert.match(host,/captureImportAuthority:\(\)=>\{[^\n]*AppOwnership\.issueWriteToken\('import a backup'\);return \(\)=>AppOwnership\.assertWriteToken\(token,'import a backup'\)/u,'actual host captures and checks the same write token');
 assert.match(owner,/protection\.ask\(\)/u,'locked backup flows retain password prompting');
 assert.match(ownerTypes,/readonly environment:DeviceBackupInput\['environment'\]/u,'Device Folder composition consumes the actual checked environment contract');
 assert.match(deviceTypes,/showDirectoryPicker:\(\(options:[^\n]+\)\|undefined/u,'the actual Device Backup environment contract represents folder-picker capability explicitly');

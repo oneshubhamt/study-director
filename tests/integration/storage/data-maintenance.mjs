@@ -235,7 +235,7 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',pr
  const presentation=freeze({current:()=>null,summary:()=>'',subscribe:()=>()=>{},locationLabel:()=>'',condition:()=>false});
  const controls=module.createControls(freeze({
    document:{getElementById:()=>null},controller,processing,protection,device:()=>null,providers,presentation,
-   verifiedAt:()=>'',timeLabel:value=>value,capture:(_scope,error)=>assert.fail(error),resolveFileOpen:()=>{},
+   verifiedAt:()=>'',timeLabel:value=>value,capture:(_scope,error)=>assert.fail(error),captureImportAuthority:()=>()=>{},resolveFileOpen:()=>{},
    foregroundChanged:()=>{changes++;},scheduleSyncStatus:()=>{},renderProfile:()=>{},firstStartOpen:()=>false,renderFirstStart:()=>{},
    scheduleUpdate:()=>{},connectDevice:()=>false,connectDrive:()=>false,openHistory:()=>false
  }));
