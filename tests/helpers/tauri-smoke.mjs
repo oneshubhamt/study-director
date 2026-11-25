@@ -26,7 +26,7 @@ const deadline=setTimeout(()=>{
   console.error('Native smoke exceeded its overall deadline');
   if(app?.exitCode===null)app.kill();
   try{removePolicy();}finally{process.exit(1);}
-},240000);
+},420000);
 async function port(){
   const server=createServer();
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
@@ -72,6 +72,7 @@ async function start(){
   assert.equal(await page.evaluate('navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(rows=>rows.length) : 0'),0);
   assert.equal(await page.evaluate('!!window.__TAURI__'),false);
   console.log('Packaged WebView2 startup verified');
+  await exposeApplication();
 }
 async function stop(force){
   const child=app;
@@ -121,6 +122,89 @@ async function profile(){
   await page.evaluate('document.getElementById("first-start-name").value="Tauri QA";document.getElementById("first-start-continue").click();');
   await waitFor(()=>page.evaluate('(()=>{const d=document.getElementById("first-start-dialog");const list=JSON.parse(localStorage.getItem("studyDirector.profiles.v1")||"null");return !d.open&&list?.profiles?.some(row=>row.name==="Tauri QA"&&!row.fresh);})()'),{label:'disposable profile committed'});
 }
+
+// CDP exposes the same real closure as the existing browser harness, without
+// rebuilding/instrumenting packaged assets or adding product IPC.
+async function exposeApplication(){
+  await page.send('Debugger.enable');
+  const remote=await page.evaluate('StudyDirector.ui.goTab',{returnByValue:false});
+  assert.ok(remote.objectId);
+  const {breakpointId}=await page.send('Debugger.setBreakpointOnFunctionCall',{objectId:remote.objectId});
+  const binding='window.__nativeQA=Object.freeze({AppOwnership,AppData,PlanDraftEditor,PlanData,TimerEngine,TimerState,ReviewEditor,LibraryView,Profiles,AttachmentStorage,AttachmentLibrary,Exports,BackupController,RichTextRuntime,applySchedule,goTab,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO})';
+  let off;
+  const paused=new Promise((resolve,reject)=>{
+    off=page.on('Debugger.paused',async event=>{
+      try{
+        const evaluation=await page.send('Debugger.evaluateOnCallFrame',{callFrameId:event.callFrames[0].callFrameId,expression:binding,returnByValue:true});
+        if(evaluation.exceptionDetails)throw new Error(JSON.stringify(evaluation.exceptionDetails));
+        await page.send('Debugger.removeBreakpoint',{breakpointId});
+        await page.send('Debugger.resume');
+        resolve(true);
+      }catch(error){await page.send('Debugger.resume').catch(()=>{});reject(error);}
+    });
+  });
+  const trigger=page.evaluate('StudyDirector.ui.goTab("plan")');
+  try{
+    await Promise.race([paused,new Promise((_,reject)=>setTimeout(()=>reject(new Error('App closure breakpoint not reached')),15000))]);
+    await trigger;
+  }finally{off?.();await page.send('Debugger.disable');}
+  assert.equal(await page.evaluate('!!window.__nativeQA'),true);
+  await waitFor(()=>page.evaluate('__nativeQA.AppOwnership.canMutate()'),{label:'primary application ownership'});
+}
+const noteKey='tauri qa note',noteText='Native durable note '+sentinel,reflection='Native durable review '+sentinel;
+const pdfText='%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n'+sentinel;
+async function appWrite(){
+  const created=await page.evaluate('('+async function({noteKey,noteText,reflection,pdfText}){
+    const d=__nativeQA;
+    const now=new Date(),minutes=now.getHours()*60+now.getMinutes();
+    const base=Math.max(240,Math.min(23*60+30,minutes-1));
+    const fmt=v=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');
+    document.getElementById('plan-input').value=fmt(base)+' | 20 | Native QA study | work | Tauri QA Note | pages | 12';
+    const applied=await d.applySchedule({skipNotify:true});
+    d.AppData.notes.update(noteKey,'Tauri QA Note',noteText);
+    await d.AppData.notes.flush();
+    await d.goTab('execute');
+    d.TimerEngine.startCur(2);
+    await new Promise(r=>setTimeout(r,120));
+    const running=d.TimerState.snapshot().mode;
+    d.TimerEngine.togglePause();
+    const paused=d.TimerState.snapshot().paused;
+    d.TimerEngine.stopExecution();
+    await d.goTab('review');
+    const field=document.getElementById('daily-reflection');
+    field.value=reflection;d.setStudyQuality(4,{save:false});
+    const saved=d.ReviewEditor.saveReview({strict:true});
+    await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();
+    const active=(await d.AppData.activeSession.load()).value;
+    const upload=await d.Exports.job(()=>d.AttachmentLibrary.upload([new File([pdfText],'Native QA.pdf',{type:'application/pdf'})]));
+    const rows=await d.AttachmentStorage.list(),asset=rows.find(row=>row.name==='Native QA.pdf');
+    const file=asset&&await d.AttachmentStorage.get(asset.id);
+    const backup=await d.BackupController.createCheckpoint();
+    const candidate=await d.BackupController.inspect(backup.blob,{filename:backup.filename});
+    return {applied,running,paused,saved:!!saved,review:active?.snapshot?.review?.reflection,note:d.AppData.notes.get(noteKey)?.text,assetId:asset?.id,assetText:file&&await file.text(),backupBytes:backup.blob.size,preview:!!candidate.preview};
+  }.toString()+')('+JSON.stringify({noteKey,noteText,reflection,pdfText})+')');
+  console.log('Application write witness:',JSON.stringify(created));
+  assert.equal(created.applied,true);assert.equal(created.running,'running');assert.equal(created.paused,true);assert.equal(created.saved,true);
+  assert.equal(created.review,reflection);assert.equal(created.note,noteText);assert.equal(created.assetText,pdfText);
+  assert.ok(created.assetId&&created.backupBytes>0&&created.preview);
+  return created.assetId;
+}
+async function appRead(assetId){
+  const row=await page.evaluate('('+async function({assetId,noteKey}){
+    const d=__nativeQA,active=(await d.AppData.activeSession.load()).value;
+    const file=await d.AttachmentStorage.get(assetId);
+    return {note:d.AppData.notes.get(noteKey)?.text,review:active?.snapshot?.review?.reflection,plan:active?.scheduleText,asset:file&&await file.text(),catalogue:(await d.AttachmentStorage.list()).some(row=>row.id===assetId)};
+  }.toString()+')('+JSON.stringify({assetId,noteKey})+')');
+  assert.equal(row.note,noteText);assert.equal(row.review,reflection);assert.ok(row.plan?.includes('Native QA study'));assert.equal(row.asset,pdfText);assert.equal(row.catalogue,true);
+  console.log('Canonical note, review, plan and attachment restart read verified');
+}
+async function editor(){
+  await page.evaluate('__nativeQA.goTab("review")');
+  await waitFor(()=>page.evaluate('!!document.querySelector(".sd-rte[data-sd-rich-surface=reflection]")'),{label:'Wordgard reflection mounted'});
+  assert.equal(await page.evaluate('!!window.StudyDirectorRichText'),true);
+  await page.evaluate('__nativeQA.goTab("plan")');
+}
+
 async function navigation(){
   for(const tab of ['execute','review','library','plan']){
     await page.evaluate('document.getElementById("tab-'+tab+'").click()');
@@ -130,14 +214,15 @@ async function navigation(){
 try{
   debugPort=await port();installPolicy();
   await start();await profile();await navigation();
+  const assetId=await appWrite();await editor();
   const first=await storage(true);verify(first);
   const bootProfile=JSON.parse(first.profile).active;
   await stop(false);await start();const normal=await storage(false);verify(normal);
-  assert.equal(JSON.parse(normal.profile).active,bootProfile);
+  assert.equal(JSON.parse(normal.profile).active,bootProfile);await appRead(assetId);
   await stop(true);await start();const killed=await storage(false);verify(killed);
-  assert.equal(JSON.parse(killed.profile).active,bootProfile);
+  assert.equal(JSON.parse(killed.profile).active,bootProfile);await appRead(assetId);
   await navigation();await stop(false);
-  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true}));
+  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardMount:true}));
 }finally{
   clearTimeout(deadline);
   if(page)page.socket.close();
