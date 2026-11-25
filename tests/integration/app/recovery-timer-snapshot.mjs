@@ -29,7 +29,7 @@ const repo={
  async load(){if(readFailure){readFailure=false;throw new Error('injected verification read failure');}return repoValue?result(structuredClone(repoValue)):{ok:true,value:null,error:null,storage:{local:false,idb:false}}},
  async clear(options={}){if(Object.hasOwn(options,'expectedCanonical')&&JSON.stringify(options.expectedCanonical)!==JSON.stringify(repoValue))return {ok:false,value:null,error:new Error('Active Session changed'),storage:{local:false,idb:false}};if(clearMode==='local')return {ok:false,value:null,error:new Error('delete failed'),storage:{local:false,idb:false}};
   repoValue=null;if(clearMode==='unowned-absence')return {ok:false,value:null,error:new Error('conditional deletion failed'),storage:{local:false,idb:false}};
-  if(clearMode==='superseded'){repoValue=structuredClone(clearSuccessor);readFailure=true;clearMode='idb';}return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
+  if(clearMode==='superseded'){repoValue=structuredClone(clearSuccessor);readFailure=true;clearMode='idb';}else if(clearMode==='readback'){readFailure=true;clearMode='idb';}return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
  readLocal(){return repoValue?structuredClone(repoValue):null},nextRevision(seed=0){return ++revision+Number(seed)*0},settled(){return Promise.resolve()}
 };
 let clearSuccessor=null,hydrating=false;
@@ -87,6 +87,19 @@ saveMode='local';
 await assert.rejects(()=>controller.suspendLocal({source:'session-yield'}),/idb unavailable|durably committed/);
 assert.deepEqual(practice,preSuspend);assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preSuspendSnapshot);
 saveMode='idb';
+// Committed transitions with a transient verification failure compensate
+// their own exact record, without treating failure alone as commit evidence.
+for(const action of ['suspend','yield','finish']){
+  const before=controller.captureSnapshot();repoValue=controller.payload(before);saveMode='readback';
+  const run=()=>action==='finish'?controller.finishLocal(()=>{practice={active:null,runs:[]};}):controller.suspendLocal(action==='yield'?{source:'session-yield'}:{});
+  await assert.rejects(run,/verification read failure/);
+  assert.equal(repoValue.status,'active',action+' compensates its own committed record');
+  assert.deepEqual(repoValue.snapshot,before,action+' retains the complete pre-transition snapshot');
+  assert.deepEqual(practice,before.practice,action+' restores practice evidence');
+}
+const beforeReadbackClear=controller.captureSnapshot();repoValue=controller.payload(beforeReadbackClear);clearMode='readback';
+await assert.rejects(()=>controller.resetLocal(),/verification read failure/);
+assert.deepEqual(repoValue.snapshot,beforeReadbackClear,'committed reset with failed verification restores its own evidence');
 // Suspension is canonical before runtime reset, and restore is canonical active before apply.
 const suspended=await controller.suspendLocal();assert.equal(suspended.status,'suspended');assert.ok(resetCount>0);assert.equal(repoValue.status,'suspended');
 // A committed activation whose read-back fails must be compensated without applying runtime.
@@ -128,5 +141,19 @@ for(const action of ['suspend','finish']){
   saveMode='owner-lost';
   await assert.rejects(()=>action==='finish'?controller.finishLocal(()=>{}):controller.suspendLocal(),/superseded/);
   assert.equal(applyCount,beforeApply);assert.equal(resetCount,beforeReset);
+}
+// A late Plan projection must neither apply an obsolete schedule nor write
+// back the draft captured before ownership/lifecycle changed.
+{
+  const current=controller.payload(controller.captureSnapshot()),original=input.apply.applySessionSchedule;
+  let entered,release;
+  const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  input.apply.applySessionSchedule=async options=>{entered();await gate;return options.current()?original(options):false;};
+  const beforeApply=applyCount,pending=controller.applyStoredSession(current,current.snapshot,{lifecycleManaged:true});
+  await waiting;ownerRevision++;lifeRevision++;planDraft='newer independent draft';release();
+  assert.equal(await pending,false);
+  assert.equal(applyCount,beforeApply);
+  assert.equal(planDraft,'newer independent draft');
+  input.apply.applySessionSchedule=original;
 }
 console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-failure-rollback','suspend-restore','reset-clear','reset-failure-rollback']}));
