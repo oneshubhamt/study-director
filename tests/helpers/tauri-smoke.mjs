@@ -130,7 +130,7 @@ async function exposeApplication(){
   const remote=await page.evaluate('StudyDirector.ui.goTab',{returnByValue:false});
   assert.ok(remote.objectId);
   const {breakpointId}=await page.send('Debugger.setBreakpointOnFunctionCall',{objectId:remote.objectId});
-  const binding='window.__nativeQA=Object.freeze({AppOwnership,AppData,PlanDraftEditor,PlanData,TimerEngine,TimerState,ReviewEditor,LibraryView,Profiles,AttachmentStorage,AttachmentLibrary,Exports,BackupController,RichTextRuntime,applySchedule,goTab,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO})';
+  const binding='window.__nativeQA=Object.freeze({AppOwnership,AppData,PlanDraftEditor,PlanData,TimerEngine,TimerState,ReviewEditor,LibraryView,Profiles,AttachmentStorage,AttachmentLibrary,Exports,BackupController,RichTextRuntime,applySchedule,goTab,setStudyQuality})';
   let off;
   const paused=new Promise((resolve,reject)=>{
     off=page.on('Debugger.paused',async event=>{
