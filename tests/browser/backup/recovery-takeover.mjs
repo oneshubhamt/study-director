@@ -11,7 +11,9 @@ try{
     try{
       const open=async()=>{const page=await browser.createPage(url,{bypassServiceWorker:true});await waitForStudyDirector(page,{instrumented:true});return page;};
       let primary=await open();await skipFirstStart(primary);await waitFor(()=>primary.evaluate('__PWA6.AppOwnership.canMutate()'),{label:'initial primary'});
-      await primary.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('Ethics','Ethics','original journal recovery note');await d.AppData.notes.flush({strict:true});})()`);
+      const original=await primary.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('Ethics','Ethics','original journal recovery note');await d.AppData.notes.flush({strict:true});return Object.values(await d.AppData.notes.readFreshPayload()).find(note=>note.label==='Ethics');})()`);
+      assert.equal(original?.text,'original journal recovery note','fixture must establish the canonical preimage');
+      assert.ok(original.key,'the canonical note identity must be captured before deletion');
       const secondary=await open();
       await waitFor(()=>secondary.evaluate('__PWA6.AppOwnership.state==="secondary"'),{label:'initialized secondary'});
       const fixture=await primary.evaluate(`(async()=>{
@@ -24,7 +26,7 @@ try{
             await journal.prepare({id,signature:plan.signature,payload});
           }else{
             const checkpoint=await d.BackupController.createCheckpoint();
-            try{await journal.prepare({id,blob:checkpoint.blob,filename:checkpoint.filename,savedDayDeletions:await data.deletionRecovery.savedDays(),noteDeletions:await data.deletionRecovery.notes(),attachmentDeletions:await data.deletionRecovery.attachments()});}
+            try{const blob=new Blob([await checkpoint.blob.arrayBuffer()],{type:checkpoint.blob.type});await journal.prepare({id,blob,filename:checkpoint.filename,savedDayDeletions:await data.deletionRecovery.savedDays(),noteDeletions:await data.deletionRecovery.notes(),attachmentDeletions:await data.deletionRecovery.attachments()});}
             finally{await checkpoint.release();}
           }
           await journal.mark(id,'applying-notes');
@@ -49,7 +51,7 @@ try{
       // recovery path as reload. It must replay and verify before admission.
       await browser.closePage(secondary);
       const recovered=await open();await waitFor(()=>recovered.evaluate('__PWA6.AppOwnership.canMutate()'),{label:kind+' recovered primary'});
-      const proof=await recovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal;return {journal:await journal.read(),note:(await data.notes.readFreshPayload()).Ethics?.text,owner:d.AppOwnership.canMutate()};})()`);
+      const proof=await recovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal;return {journal:await journal.read(),note:(await data.notes.readFreshPayload())[${JSON.stringify(original.key)}]?.text,owner:d.AppOwnership.canMutate()};})()`);
       assert.deepEqual(proof,{journal:null,note:'original journal recovery note',owner:true},kind+' fresh startup must verify the preimage and retire the journal');
       results.push({kind,denied:true,journalRetained:true,recovered:true});await browser.closePage(recovered);
     }finally{await browser.close();}

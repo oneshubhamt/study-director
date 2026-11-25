@@ -10,6 +10,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),
     test('attachment-editor','tests/browser/attachments/attachment-editor.mjs',['attachments','pdf','audio','rich-editor','overlay']),
     test('restore-session-safety','tests/browser/backup/restore-session-safety.mjs',['backup','restore','execute','library','recovery','multi-tab','ownership','reflection']),
+    test('recovery-takeover','tests/browser/backup/recovery-takeover.mjs',['backup','restore','library','recovery','multi-tab','ownership','indexeddb']),
     test('exports','tests/browser/exports/exports.mjs',['export','worker','backup','files','cancellation','images']),
     test('saved-plans-ui','tests/browser/plans/saved-plans-ui.mjs',['plan','saved-plans','ui']),
     test('pwa-offline','tests/browser/pwa/pwa-offline.mjs',['pwa','offline','service-worker']),
