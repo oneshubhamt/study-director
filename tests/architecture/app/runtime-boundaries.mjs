@@ -256,11 +256,11 @@ const continueFlow=section(actions,'async function continueSessionHere(', 'async
 assert.match(continueFlow,/SessionHandoffRuntime\?\.prefetchSource\(\)/u,'Continue Here latency prefetch remains inside the checked P5.4C provider boundary');
 const finishTransition=section(actions,'async function finishTodaySession(', 'async function resetTodaySession(');
 assert.match(finishTransition,/ActiveSessionRuntime\.finishLocal\(\(\)=>\{/u,'finish delegates the complete transition to the checked local-session owner');
-const transitionOwner=section(sessionHost,'async function runLocalTransition(', 'async function writeNow(');
+const transitionOwner=section(sessionHost,'async function runLocalTransition', 'async function writeNow(');
 assert.match(transitionOwner,/rollback=persistence\.snapshotForWrite\(\)[\s\S]*await operation\(transition\)[\s\S]*rollbackLocalTransition\(transition,/u,'local owner captures recoverable evidence before mutation and owns compensation');
 const finishOwner=section(sessionHost,'async function finishLocal(', 'async function restoreSuspendedLocal(');
 assert.match(finishOwner,/runLocalTransition\('session-finish'[\s\S]*prepare\(\)[\s\S]*saveCanonicalSession\(session,'finishing today’s session',\{expectedCanonical:transition\.before\}/u,'finish strictly saves against the original canonical record');
-const rollbackOwner=section(sessionHost,'async function rollbackLocalTransition(', 'async function runLocalTransition(');
+const rollbackOwner=section(sessionHost,'async function rollbackLocalTransition(', 'async function runLocalTransition');
 assert.match(rollbackOwner,/canonical\.same\(latest,before\)[\s\S]*canonical\.same\(latest,attempted\)[\s\S]*expectedCanonical:latest[\s\S]*applyStoredSession\(intended,rollback/u,'rollback fences the canonical successor before any runtime reprojection');
 assert.doesNotMatch(finishTransition,/withPersistenceSuppressed|applyStoredSession\(rollbackSession|writeSnapshot\(rollbackSnapshot/u,'finish host wiring must not duplicate the local-session rollback state machine');
 
