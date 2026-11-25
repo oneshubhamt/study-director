@@ -24,7 +24,8 @@ const drain=async(turns=32)=>{for(let i=0;i<turns;i++)await Promise.resolve();};
 const guard=(scope,operation)=>{try{return operation();}catch(error){sequence.push(`guard:${scope}:${error.message}`);return false;}};
 const fn=name=>()=>{sequence.push(name);return true;};
 const asyncFn=name=>async()=>{sequence.push(`${name}:begin`);await Promise.resolve();sequence.push(`${name}:end`);return true;};
-let primary=true,rejectPlanFlush=false;
+let primary=true,rejectPlanFlush=false,releaseRecovery;
+const recoveryGate=new Promise(resolve=>{releaseRecovery=resolve;});
 const activation=StartupHost.createActivation(Object.freeze({capture:(scope,error)=>sequence.push(`capture:${scope}:${error?.message||error}`)}));
 activation.subscribe(event=>sequence.push(`activation:${event.kind}:${event.source}:${event.destructive?'destructive':'non-destructive'}`));
 const coordinator=StartupHost.createCoordinator(Object.freeze({
@@ -45,7 +46,7 @@ const coordinator=StartupHost.createCoordinator(Object.freeze({
   }),
   startup:Object.freeze({
     prepareCanonicalData:asyncFn('canonical-data-validation',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
-    recoverInterruptedLibraryClear:asyncFn('library-clear-recovery',2),
+    recoverInterruptedLibraryClear:async()=>{sequence.push('library-clear-recovery:begin');await recoveryGate;sequence.push('library-clear-recovery:end');return true;},
     recoverInterruptedRestore:asyncFn('restore-recovery',2),
     loadNotes:asyncFn('notes-load',4),hydrateDrafts:fn('drafts'),previewPlan:fn('preview'),
     startClock:fn('clock'),startHeaderClock:fn('header-clock'),refreshCoreUi:fn('core-ui'),
@@ -57,7 +58,13 @@ const coordinator=StartupHost.createCoordinator(Object.freeze({
   })
 }));
 coordinator.start();
-await drain(96);
+await drain(32);
+assert.ok(sequence.includes('library-clear-recovery:begin'),'fixture holds real startup coordinator at recovery');
+assert.equal(coordinator.status().domBindingsInstalled,false,'ordinary bindings must wait for recovery and hydration');
+assert.equal(coordinator.flush(),false,'ordinary flush cannot overtake recovery');
+winListeners.get('focus')?.();document.hidden=true;docListeners.get('visibilitychange')?.();document.hidden=false;docListeners.get('visibilitychange')?.();await drain();
+assert.equal(sequence.some(name=>name.startsWith('flush-')),false);assert.equal(sequence.includes('wake-reconcile'),false);assert.equal(activation.status().sequence,0,'ordinary activation listeners cannot run before startup admission');
+releaseRecovery();await drain(96);
 const status=coordinator.status();
 assert.equal(status.fullyInitialized,true);
 assert.equal(status.initializing,false);
@@ -70,6 +77,8 @@ assert.ok(index('ownership-evaluate:end')<index('canonical-data-validation:begin
 assert.ok(index('canonical-data-validation:end')<index('library-clear-recovery:begin'));
 assert.ok(index('library-clear-recovery:end')<index('restore-recovery:begin'));
 assert.ok(index('restore-recovery:end')<index('notes-load:begin'));
+assert.ok(index('notes-load:end')<index('drafts'));
+assert.ok(index('drafts')<index('bind-dom'),'ordinary bindings follow canonical recovery and hydration');
 assert.ok(index('notes-load:end')<index('session-restore:begin'));
 assert.ok(index('session-restore:end')<index('lifecycle-reconcile'));
 assert.ok(index('lifecycle-reconcile')<index('launch-route'));

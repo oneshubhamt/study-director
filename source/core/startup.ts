@@ -98,7 +98,7 @@ const createModule=():StartupLifecycleContract=>{
       });
     }
     function flush(){
-      if(!ownership.canMutate())return false;
+      if(!fullyInitialized||!ownership.canMutate())return false;
       flushOne('lifecycle.flush-schedule',flushers.planDraft);
       flushOne('lifecycle.flush-preferences',flushers.preferences);
       // Review/editor state must reach the session snapshot before the generic
@@ -110,11 +110,11 @@ const createModule=():StartupLifecycleContract=>{
       return true;
     }
     function queueWakeReconciliation(source:string){
-      if(lifecycleState==='failed')return Promise.resolve(false);
+      if(!fullyInitialized)return Promise.resolve(false);
       const revision=++wakeRevision;
       wakeSequence=wakeSequence.catch(()=>false).then(async()=>{
         const acquired=await ownership.evaluate();
-        if(revision!==wakeRevision||doc.hidden||!acquired||!ownership.canMutate())return false;
+        if(!fullyInitialized||revision!==wakeRevision||doc.hidden||!acquired||!ownership.canMutate())return false;
         timer.syncAfterWake();
         return true;
       }).catch((error:unknown)=>{
@@ -125,29 +125,29 @@ const createModule=():StartupLifecycleContract=>{
     }
     function handleVisibilityChange(){
       if(doc.hidden){
-        activation.publish('background','visibilitychange',{destructive:false});
+        if(fullyInitialized)activation.publish('background','visibilitychange',{destructive:false});
         wakeRevision++;
         timer.stopPresentation();
         flush();
         if(ownership.hasControl())ownership.writeLease();
         return;
       }
-      activation.publish('visibility-return','visibilitychange',{destructive:false});
+      if(fullyInitialized)activation.publish('visibility-return','visibilitychange',{destructive:false});
       void queueWakeReconciliation('visibility');
     }
     function handleFocus(){
-      if(!doc.hidden){activation.publish('ordinary-focus','focus',{destructive:false});void queueWakeReconciliation('focus');}
+      if(fullyInitialized&&!doc.hidden){activation.publish('ordinary-focus','focus',{destructive:false});void queueWakeReconciliation('focus');}
     }
     function handlePageShow(){
       exitHandled=false;
-      if(!doc.hidden){activation.publish('visibility-return','pageshow',{destructive:false});void queueWakeReconciliation('pageshow');}
+      if(fullyInitialized&&!doc.hidden){activation.publish('visibility-return','pageshow',{destructive:false});void queueWakeReconciliation('pageshow');}
     }
     function handlePageExit(){
       if(exitHandled)return false;
       exitHandled=true;
-      activation.publish('exit','page-exit',{destructive:true});
+      if(fullyInitialized)activation.publish('exit','page-exit',{destructive:true});
       wakeRevision++;
-      if(ownership.canMutate()){
+      if(fullyInitialized&&ownership.canMutate()){
         void Promise.resolve(ownership.flushAndRelease()).catch((error:unknown)=>{
           diagnostics.guard('lifecycle.exit-release',()=>{throw error;});
         });
@@ -185,11 +185,11 @@ const createModule=():StartupLifecycleContract=>{
           await runStage('canonical-data-validation',startup.prepareCanonicalData);
           await runStage('lifecycle-install',installLifecycle);
           await runStage('appearance-restore',startup.restoreAppearance);
-          await runStage('dom-bindings-install',installDomBindings);
           await runStage('interrupted-library-clear-recovery',startup.recoverInterruptedLibraryClear);
           await runStage('interrupted-restore-recovery',startup.recoverInterruptedRestore);
           await runStage('notes-load',startup.loadNotes);
           await runStage('drafts-hydrate',startup.hydrateDrafts);
+          await runStage('dom-bindings-install',installDomBindings);
           await runStage('plan-preview',startup.previewPlan);
           await runStage('clock-start',startup.startClock);
           await runStage('header-clock-start',startup.startHeaderClock);

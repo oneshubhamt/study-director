@@ -774,9 +774,9 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Own
     render:()=>renderOwnershipUi(),
     refreshStorage:()=>refreshStorageFallbackWarning(),
     stopExecution:()=>TimerEngine.stopExecution(),
-    resume:()=>resumeTimerLoopAfterPrimaryRestore(),
+    resume:()=>{if(StartupLifecycle.status().fullyInitialized)resumeTimerLoopAfterPrimaryRestore();},
     refreshCore:()=>refreshCoreUi(),
-    scheduleMaintenance:()=>scheduleDataMaintenance(),
+    scheduleMaintenance:()=>{if(StartupLifecycle.status().fullyInitialized)scheduleDataMaintenance();},
     practiceRender:()=>PracticePacer.render(),
     blocked:(status,reason)=>renderPrimaryTabBlock(status,reason),
     peerStorageReset:detectedAt=>handleBrowserStorageReset({detectedAt,peer:true}),
@@ -831,7 +831,7 @@ function flushAutomaticBackups(reason:Parameters<typeof BackupProviderBackground
 function automaticBackupsWaiting(){return BackupProviderBackground.waiting();}
 // Hidden: back up waiting changes. Visible again: redraw the locations, since a
 // sign-in may have ended while timers were throttled.
-document.addEventListener('visibilitychange',()=>{if(document.hidden){if(appCanMutate())void flushAutomaticBackups('app-hidden');}else BackupProviderRuntime.refresh();});
+document.addEventListener('visibilitychange',()=>{if(!StartupLifecycle?.status().fullyInitialized)return;if(document.hidden){if(appCanMutate())void flushAutomaticBackups('app-hidden');}else BackupProviderRuntime.refresh();});
 // A plan applied by hand goes to Drive within seconds, like Suspend and
 // Continue Here, so the other device sees today's session at its next check.
 function uploadSoonAfterPlanApply(...args:Parameters<typeof SessionActions.uploadSoonAfterPlanApply>){return SessionActions.uploadSoonAfterPlanApply(...args);}
@@ -3848,8 +3848,8 @@ const OwnershipUiProjection=(()=>{
     return 'Another tab has control.';
   }
   function createSnapshot():OwnershipUiSnapshot{
-    const status=AppOwnership.status(),transitional=TRANSITIONAL_STATES.has(status.state),mutationBlocked=PwaRuntime.reservationActive()||requireMutationCoordinator().blocksUi();
-    return Object.freeze({format:'study-director.ownership-ui-snapshot',contractVersion:1,state:status.state,canMutate:!mutationBlocked&&!transitional&&status.state===OWNERSHIP_STATES.PRIMARY&&appCanMutate(),activeSessionBlocked:hasBlockingActiveSession(),transitional:transitional||mutationBlocked,revision:Math.max(0,Number(status.revision)||0),reason:mutationBlocked?'A protected data operation is in progress.':reasonFor(status.state)});
+    const status=AppOwnership.status(),startupPending=!StartupLifecycle?.status().fullyInitialized,transitional=TRANSITIONAL_STATES.has(status.state),mutationBlocked=PwaRuntime.reservationActive()||requireMutationCoordinator().blocksUi();
+    return Object.freeze({format:'study-director.ownership-ui-snapshot',contractVersion:1,state:status.state,canMutate:!startupPending&&!mutationBlocked&&!transitional&&status.state===OWNERSHIP_STATES.PRIMARY&&appCanMutate(),activeSessionBlocked:hasBlockingActiveSession(),transitional:startupPending||transitional||mutationBlocked,revision:Math.max(0,Number(status.revision)||0),reason:startupPending?'Verifying stored data before enabling this tab.':mutationBlocked?'A protected data operation is in progress.':reasonFor(status.state)});
   }
   function candidateElements(root:ParentNode=document):OwnershipUiElement[]{
     const found=new Set<OwnershipUiElement>(),elementRoot=root instanceof HTMLElement?root as OwnershipUiElement:null,queryRoot=root&&typeof root.querySelectorAll==='function'?root:document;
@@ -3964,6 +3964,7 @@ function installApplicationDomBindings(){
   void installAttachmentIntegrityAudit();
   void VerifiedRecovery.install().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
   OwnershipUiProjection.install();
+  window.addEventListener('studydirector:startupready',renderOwnershipUi);
   BlockedActionHint.install();
   RichTextRuntime.install();
   SystemNotifications.install();AppAudio.install();renderSoundSettings();

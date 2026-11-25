@@ -139,7 +139,7 @@ function renderOwnershipBanner(){
     OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,
     OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
   ] as readonly OwnershipState[]).includes(AppOwnership.state);
-  if(!recoveryFault&&(AppOwnership.state===OWNERSHIP_STATES.PRIMARY||transient)){
+  if(!recoveryFault&&(!ports.ready()||AppOwnership.state===OWNERSHIP_STATES.PRIMARY||transient)){
     if(ownershipBanner){ownershipBanner.remove();ownershipBanner=null;}
     return;
   }
@@ -182,8 +182,9 @@ function renderOwnershipUi(){
 }
 
 function requirePrimaryTab(event:Event|null,reason='change this tab'){
-  if(AppOwnership.canMutate())return true;
+  if(ports.ready()&&AppOwnership.canMutate())return true;
   if(event){event.preventDefault();event.stopPropagation();}
+  if(!ports.ready()){setPlanStatus('Study Director is still verifying stored data. Try again after startup finishes.',false);return false;}
   return AppOwnership.requirePrimary(reason);
 }
 function renderPrimaryTabBlock(status:OwnershipStatus,reason:string){

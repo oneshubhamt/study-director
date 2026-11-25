@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import {instrumentedHtml,startReleaseServer,launchChromium,waitFor,waitForStudyDirector,skipFirstStart} from '../../helpers/browser-harness.mjs';
 
 const server=await startReleaseServer();
-server.setOverride('deployment','recovery-takeover.html',instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({AppMutationCoordinator,LibraryClearCoordinator,LibraryClearState,StartupLifecycle,'));
+let html=instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({AppMutationCoordinator,LibraryClearCoordinator,LibraryClearState,OwnershipUiProjection,StartupLifecycle,');
+const recoveryEntry=/recoverInterruptedLibraryClear\s*:\s*\(\)\s*=>\s*LibraryClearCoordinator\.recoverInterrupted\(\)/gu;
+assert.equal([...html.matchAll(recoveryEntry)].length,1,'instrument exactly the built recovery stage');
+html=html.replace(recoveryEntry,'recoverInterruptedLibraryClear:async()=>{if(window.qaHoldStartupRecovery){window.qaRecoveryEntered=true;await new Promise(resolve=>{window.qaReleaseRecovery=resolve;});}return LibraryClearCoordinator.recoverInterrupted();}');
+server.setOverride('deployment','recovery-takeover.html',html);
 const url=server.url('deployment','recovery-takeover.html');
 const results=[];
 try{
@@ -50,7 +54,11 @@ try{
       // Close the blocked page and open a new document, the same startup
       // recovery path as reload. It must replay and verify before admission.
       await browser.closePage(secondary);
-      const recovered=await open();await waitFor(()=>recovered.evaluate('__PWA6.AppOwnership.canMutate()'),{label:kind+' recovered primary'});
+      const recovered=await browser.createPage(url,{bypassServiceWorker:true,preload:'window.qaHoldStartupRecovery=true;'});
+      await waitFor(()=>recovered.evaluate('window.qaRecoveryEntered===true'),{label:kind+' pending initial recovery'});
+      const pending=await recovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,journal=${JSON.stringify(kind)}==='library-clear'?data.libraryClearJournal:data.restoreJournal,status=d.StartupLifecycle.status(),field=document.getElementById('plan-input'),before=(await data.planData.read()).draft;const value=field.value;field.value='07:00 | 30 | MUST NOT SAVE | work | Ethics | block | 1';field.dispatchEvent(new Event('input',{bubbles:true}));const flushed=d.StartupLifecycle.flush();field.value=value;return {owner:d.AppOwnership.canMutate(),ready:status.fullyInitialized,bound:status.domBindingsInstalled,ui:d.OwnershipUiProjection.snapshot().canMutate,flushed,draftUnchanged:(await data.planData.read()).draft===before,journal:(await journal.read()).state.id,notes:Object.keys(await data.notes.readFreshPayload())};})()`);
+      assert.deepEqual(pending,{owner:true,ready:false,bound:false,ui:false,flushed:false,draftUnchanged:true,journal:fixture.id,notes:[]},kind+' internal owner may recover but ordinary writers cannot overtake it');
+      await recovered.evaluate('window.qaReleaseRecovery()');await waitForStudyDirector(recovered,{instrumented:true});await waitFor(()=>recovered.evaluate('__PWA6.AppOwnership.canMutate()&&__PWA6.OwnershipUiProjection.snapshot().canMutate'),{label:kind+' recovered primary and admitted UI'});
       const proof=await recovered.evaluate(`(async()=>{const d=__PWA6,data=d.AppData,kind=${JSON.stringify(kind)},journal=kind==='library-clear'?data.libraryClearJournal:data.restoreJournal;return {journal:await journal.read(),note:(await data.notes.readFreshPayload())[${JSON.stringify(original.key)}]?.text,owner:d.AppOwnership.canMutate()};})()`);
       assert.deepEqual(proof,{journal:null,note:'original journal recovery note',owner:true},kind+' fresh startup must verify the preimage and retire the journal');
       // A verified operation whose journal remains must preserve committed
