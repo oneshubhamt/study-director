@@ -27,7 +27,9 @@ const repo={
   return result(structuredClone(value));
  },
  async load(){if(readFailure){readFailure=false;throw new Error('injected verification read failure');}return repoValue?result(structuredClone(repoValue)):{ok:true,value:null,error:null,storage:{local:false,idb:false}}},
- async clear(options={}){if(Object.hasOwn(options,'expectedCanonical')&&JSON.stringify(options.expectedCanonical)!==JSON.stringify(repoValue))return {ok:false,value:null,error:new Error('Active Session changed'),storage:{local:false,idb:false}};repoValue=null;if(clearMode==='superseded'){repoValue=structuredClone(clearSuccessor);readFailure=true;clearMode='idb';}return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
+ async clear(options={}){if(Object.hasOwn(options,'expectedCanonical')&&JSON.stringify(options.expectedCanonical)!==JSON.stringify(repoValue))return {ok:false,value:null,error:new Error('Active Session changed'),storage:{local:false,idb:false}};if(clearMode==='local')return {ok:false,value:null,error:new Error('delete failed'),storage:{local:false,idb:false}};
+  repoValue=null;if(clearMode==='unowned-absence')return {ok:false,value:null,error:new Error('conditional deletion failed'),storage:{local:false,idb:false}};
+  if(clearMode==='superseded'){repoValue=structuredClone(clearSuccessor);readFailure=true;clearMode='idb';}return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
  readLocal(){return repoValue?structuredClone(repoValue):null},nextRevision(seed=0){return ++revision+Number(seed)*0},settled(){return Promise.resolve()}
 };
 let clearSuccessor=null,hydrating=false;
@@ -102,7 +104,11 @@ const preReset=controller.captureSnapshot();repoValue=controller.payload(preRese
 await assert.rejects(()=>controller.resetLocal(),/delete failed|not durably cleared/);
 assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preReset);
 // Compensation must never replace or re-project a canonical successor.
-clearMode='idb';saveMode='idb';
+clearMode='unowned-absence';saveMode='idb';
+await assert.rejects(()=>controller.resetLocal(),/successor was preserved/);
+assert.equal(repoValue,null,'an unrelated canonical deletion is not a successful reset receipt');
+await controller.applyStoredSession(controller.payload(controller.captureSnapshot()),controller.captureSnapshot(),{lifecycleManaged:true});
+clearMode='idb';
 for(const action of ['suspend','yield','finish','reset']){
   repoValue=controller.payload(controller.captureSnapshot());const before=structuredClone(repoValue),beforeApply=applyCount,beforeReset=resetCount;
   if(action==='reset'){clearSuccessor={...before,revision:before.revision+100,snapshot:{...before.snapshot,latestCarryForward:'newer progress'}};clearMode='superseded';}

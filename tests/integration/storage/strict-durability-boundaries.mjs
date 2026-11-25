@@ -209,6 +209,15 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   assert.equal((await owned.app.activeSession.clear({expectedCanonical:null})).ok,false);
   assert.deepEqual(owned.stores.session.get('active'),before);
   assert.equal(owned.sharedLocal.has('deletionRecovery'),false);
+  // Cleanup must fail closed before the physical delete, even without a
+  // deletion marker. The original canonical record is still recoverable.
+  authority.failLocalRemoveKeys=new Set(['recovery']);
+  const cleanupFailed=await owned.app.activeSession.clear({expectedCanonical:before});
+  assert.equal(cleanupFailed.ok,false);
+  assert.equal(cleanupFailed.storage.idb,false);
+  assert.deepEqual(owned.stores.session.get('active'),before);
+  assert.equal(owned.sharedLocal.has('deletionRecovery'),false);
+  authority.failLocalRemoveKeys=null;
   let successorSave;
   authority.onTransactionComplete=({stores,mode})=>{
     if(mode!=='readwrite'||!stores.includes('session'))return;

@@ -297,12 +297,13 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     cancelPendingLiveDraftSave();lastTimerSnapshotMs=clock.nowMs();
     return saveCanonicalSession(session,operation,{backupCapture:options.backupCapture===true});
   }
-  async function clearCanonical(operation:string,options:Readonly<{expectedCanonical?:ActiveSession|null}>={},authority?:TransitionAuthority):Promise<SessionResult>{
+  async function clearCanonical(operation:string,options:Readonly<{expectedCanonical?:ActiveSession|null}>={},authority?:TransitionAuthority,committed?:()=>void):Promise<SessionResult>{
     if(authority)assertTransition(authority);
     cancelPendingLiveDraftSave();
     const cleared=await repository.clear(options);
     if(authority)assertTransition(authority);
     if(!cleared||cleared.ok!==true||cleared.error||cleared.storage.idb!==true)throw cleared?.error||new Error(`The Active Session was not durably cleared while ${operation}.`);
+    committed?.();
     const readBack=await repository.load(0,{strict:true});
     if(!readBack||readBack.ok!==true||readBack.error||readBack.value)throw readBack?.error||new Error(`The Active Session clear could not be verified after ${operation}.`);
     if(authority)assertTransition(authority);
@@ -325,8 +326,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   async function resetLocal():Promise<SessionResult>{
     const date=domain.todayISO();
     return runLocalTransition('session-reset',date,async transition=>{
-      transition.attempted=null;
-      const cleared=await clearCanonical('resetting today’s session',{expectedCanonical:transition.before},transition.authority);
+      const cleared=await clearCanonical('resetting today’s session',{expectedCanonical:transition.before},transition.authority,()=>{transition.attempted=null;});
       assertTransition(transition.authority);
       transition.runtimeChanged=true;resetCore(date,'session-reset');
       return cleared;

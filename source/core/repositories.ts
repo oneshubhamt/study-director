@@ -886,7 +886,7 @@ async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:Wri
   },'active session write aborted');
 }
 function idbGetActiveSession(){return idbGet(DB_ACTIVE_SESSION_STORE,ACTIVE_SESSION_ID,'active session read failed');}
-async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expectedCanonical:ActiveSession|null|undefined=undefined){
+async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expectedCanonical:ActiveSession|null|undefined=undefined,prepare?:()=>void){
   return idbStrictTransaction<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
     if(ownershipToken)assertWriteToken(ownershipToken,'the active-session deletion');
@@ -901,6 +901,7 @@ async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expect
       try{
         if(ownershipToken)assertWriteToken(ownershipToken,'the conditional active-session deletion');
         assertExpectedSessionRecord(request.result,expectedCanonical);
+        prepare?.();
         remove();
       }catch(error){try{tx.abort();}catch{}finish(false,error);}
     };
@@ -1055,17 +1056,17 @@ async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:
         if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('ActiveSession recovery envelope could not be cleared and no durable deletion marker could be established.');
       }
       assertWriteToken(ownershipToken,'the active-session IndexedDB deletion');
-      await idbDeleteActiveSession(ownershipToken,expected);idbCleared=true;
-      assertWriteToken(ownershipToken,'completing the active-session deletion');
-      if(expected!==undefined){
-        // A queued emergency save may have produced a successor while the
-        // transaction was committing. Preserve that copy and its marker.
+      await idbDeleteActiveSession(ownershipToken,expected,()=>{
+        // Remove only the compared recovery copy, before deleting its canonical
+        // counterpart. Failure leaves the IndexedDB record intact; a crash
+        // after the transaction commits cannot resurrect the removed copy.
         if(writeEpoch!==activeSessionMutationEpoch)throw Object.assign(new Error('Active Session advanced during deletion.'),{code:'ACTIVE_SESSION_CHANGED'});
-        assertExpectedSessionRecovery(expected);
         localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
-        if(!localCleared)staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
-        if(!localCleared&&!staged)throw LocalStorageContract.lastError||new Error('Active Session recovery cleanup failed.');
-      }
+        if(!localCleared)throw LocalStorageContract.lastError||new Error('Active Session recovery cleanup failed.');
+      });idbCleared=true;
+      assertWriteToken(ownershipToken,'completing the active-session deletion');
+      if(expected!==undefined&&writeEpoch!==activeSessionMutationEpoch)
+        throw Object.assign(new Error('Active Session advanced during deletion.'),{code:'ACTIVE_SESSION_CHANGED'});
       if(localCleared&&idbCleared)clearDeletionRecoveryKeys([recoveryKey]);
       reportCanonicalCommit('activeSession','delete');
     }catch(e){
