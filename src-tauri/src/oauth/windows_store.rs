@@ -3,7 +3,9 @@
 use super::*;
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, GetLastError, ERROR_NOT_FOUND, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0},
+    Foundation::{
+        CloseHandle, GetLastError, ERROR_NOT_FOUND, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0,
+    },
     Security::Credentials::{
         CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
         CRED_TYPE_GENERIC,
@@ -88,7 +90,9 @@ impl WindowsStore {
             return Err(AuthError::CredentialStore);
         }
         // SAFETY: CredReadW owns count bytes until CredFree.
-        Ok(Some(unsafe { std::slice::from_raw_parts(credential.CredentialBlob, count) }.to_vec()))
+        Ok(Some(
+            unsafe { std::slice::from_raw_parts(credential.CredentialBlob, count) }.to_vec(),
+        ))
     }
 
     fn write_locked(&self, bytes: Option<&[u8]>) -> Result<()> {
@@ -148,9 +152,19 @@ impl CredentialStore for WindowsStore {
 pub struct NativeOAuthHost(Host<WindowsStore, Google>);
 
 impl NativeOAuthHost {
-    pub fn new(config: DesktopClient, scope: String, expected_email: Option<String>) -> Result<Self> {
+    pub fn new(
+        config: DesktopClient,
+        scope: String,
+        expected_email: Option<String>,
+    ) -> Result<Self> {
         let store = WindowsStore::new(&config, &scope)?;
-        Ok(Self(Host::new(config, scope, expected_email, store, Google)?))
+        Ok(Self(Host::new(
+            config,
+            scope,
+            expected_email,
+            store,
+            Google,
+        )?))
     }
 
     pub fn authorize(&self) -> Result<AuthorizedAccount> {

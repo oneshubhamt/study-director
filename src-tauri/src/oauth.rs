@@ -91,9 +91,14 @@ fn valid_profile_scope(value: &str) -> bool {
     if value.is_empty() {
         return true; // The initial profile's stable local namespace.
     }
-    if value.len() > 51 { return false; }
+    if value.len() > 51 {
+        return false;
+    }
     let parts: Vec<_> = value.split('_').collect();
-    let alnum = |s: &str| s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+    let alnum = |s: &str| {
+        s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    };
     parts.len() == 4
         && parts[0] == "prof"
         && (1..=24).contains(&parts[1].len())
@@ -101,7 +106,9 @@ fn valid_profile_scope(value: &str) -> bool {
         && (6..=12).contains(&parts[2].len())
         && alnum(parts[2])
         && parts[3].len() == 8
-        && parts[3].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && parts[3]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn normalize_email(value: &str) -> Result<String> {
@@ -125,7 +132,9 @@ impl DesktopClient {
             .strip_suffix(".apps.googleusercontent.com")
             .ok_or(AuthError::Configuration)?;
         if !visible_ascii(prefix, 128)
-            || !prefix.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || !prefix
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
             || !visible_ascii(&secret, 512)
         {
             return Err(AuthError::Configuration);
@@ -158,12 +167,17 @@ enum Callback {
 
 impl Attempt {
     fn start(timeout: Duration) -> Result<Self> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        let listener =
+            TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|_| AuthError::Unavailable)?;
+        listener
+            .set_nonblocking(true)
             .map_err(|_| AuthError::Unavailable)?;
-        listener.set_nonblocking(true).map_err(|_| AuthError::Unavailable)?;
         let host = format!(
             "127.0.0.1:{}",
-            listener.local_addr().map_err(|_| AuthError::Unavailable)?.port()
+            listener
+                .local_addr()
+                .map_err(|_| AuthError::Unavailable)?
+                .port()
         );
         Ok(Self {
             listener,
@@ -199,7 +213,9 @@ impl Attempt {
     }
 
     fn parse(&self, request: &[u8]) -> Option<Callback> {
-        let text = std::str::from_utf8(request).ok()?.strip_suffix("\r\n\r\n")?;
+        let text = std::str::from_utf8(request)
+            .ok()?
+            .strip_suffix("\r\n\r\n")?;
         let mut lines = text.split("\r\n");
         let mut first = lines.next()?.split(' ');
         if first.next()? != "GET" {
@@ -215,8 +231,11 @@ impl Attempt {
         }
         // Reject malformed percent encodings before URL decoding.
         for (i, b) in query.bytes().enumerate() {
-            if b == b'%' && !query.as_bytes().get(i + 1..i + 3)
-                .is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit))
+            if b == b'%'
+                && !query
+                    .as_bytes()
+                    .get(i + 1..i + 3)
+                    .is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit))
             {
                 return None;
             }
@@ -224,7 +243,8 @@ impl Attempt {
         let mut host = None;
         for line in lines {
             let (name, value) = line.split_once(':')?;
-            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            if name.is_empty()
+                || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
                 || value.bytes().any(|b| b.is_ascii_control() && b != b'\t')
             {
                 return None;
@@ -245,7 +265,10 @@ impl Attempt {
         let url = Url::parse(&format!("http://{}{target}", self.host)).ok()?;
         let mut params = std::collections::HashMap::new();
         for (key, value) in url.query_pairs() {
-            if params.insert(key.into_owned(), value.into_owned()).is_some() {
+            if params
+                .insert(key.into_owned(), value.into_owned())
+                .is_some()
+            {
                 return None;
             }
         }
@@ -261,8 +284,12 @@ impl Attempt {
 
     fn receive(&self, stream: &mut TcpStream, cancel: &AtomicBool) -> Option<Callback> {
         stream.set_nonblocking(false).ok()?;
-        stream.set_read_timeout(Some(Duration::from_millis(200))).ok()?;
-        stream.set_write_timeout(Some(Duration::from_millis(200))).ok()?;
+        stream
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .ok()?;
+        stream
+            .set_write_timeout(Some(Duration::from_millis(200)))
+            .ok()?;
         let deadline = self.expires.min(Instant::now() + Duration::from_secs(2));
         let mut data = Vec::with_capacity(1024);
         let mut chunk = [0_u8; 1024];
@@ -281,7 +308,13 @@ impl Attempt {
                         return None; // No body or pipelined requests.
                     }
                 }
-                Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) => {}
                 Err(_) => return None,
             }
         }
@@ -372,7 +405,10 @@ impl TokenReply {
         if !self.token_type.eq_ignore_ascii_case("bearer")
             || !visible_ascii(&self.access_token, 4096)
             || !(10..=86400).contains(&self.expires_in)
-            || self.refresh_token.as_ref().is_some_and(|t| !visible_ascii(t, 2048))
+            || self
+                .refresh_token
+                .as_ref()
+                .is_some_and(|t| !visible_ascii(t, 2048))
         {
             return Err(AuthError::InvalidResponse);
         }
@@ -389,7 +425,12 @@ impl TokenReply {
 }
 
 trait GoogleProtocol {
-    fn authorize(&self, config: &DesktopClient, hint: Option<&str>, cancel: &AtomicBool) -> Result<TokenReply>;
+    fn authorize(
+        &self,
+        config: &DesktopClient,
+        hint: Option<&str>,
+        cancel: &AtomicBool,
+    ) -> Result<TokenReply>;
     fn refresh(&self, config: &DesktopClient, token: &str) -> Result<TokenReply>;
     fn account(&self, access: &str) -> Result<Account>;
 }
@@ -416,19 +457,30 @@ impl Google {
             return Err(AuthError::InvalidResponse);
         }
         let mut bytes = Vec::new();
-        response.take(MAX_RESPONSE + 1).read_to_end(&mut bytes).map_err(|_| AuthError::Network)?;
+        response
+            .take(MAX_RESPONSE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| AuthError::Network)?;
         if bytes.len() as u64 > MAX_RESPONSE {
             return Err(AuthError::InvalidResponse);
         }
         let json: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
-            if status.is_success() { AuthError::InvalidResponse } else { AuthError::Network }
-        })?;
-        if !status.is_success() {
-            return Err(if status.as_u16() == 400 && json.get("error").and_then(|v| v.as_str()) == Some("invalid_grant") {
-                AuthError::Revoked
+            if status.is_success() {
+                AuthError::InvalidResponse
             } else {
                 AuthError::Network
-            });
+            }
+        })?;
+        if !status.is_success() {
+            return Err(
+                if status.as_u16() == 400
+                    && json.get("error").and_then(|v| v.as_str()) == Some("invalid_grant")
+                {
+                    AuthError::Revoked
+                } else {
+                    AuthError::Network
+                },
+            );
         }
         if !json.is_object() {
             return Err(AuthError::InvalidResponse);
@@ -437,7 +489,11 @@ impl Google {
     }
 
     fn exchange(fields: &[(&str, &str)], initial: bool) -> Result<TokenReply> {
-        let response = Self::client()?.post(TOKEN_ENDPOINT).form(fields).send().map_err(|_| AuthError::Network)?;
+        let response = Self::client()?
+            .post(TOKEN_ENDPOINT)
+            .form(fields)
+            .send()
+            .map_err(|_| AuthError::Network)?;
         let grant: TokenReply = serde_json::from_value(Self::bounded_json(response)?)
             .map_err(|_| AuthError::InvalidResponse)?;
         grant.validate(initial)?;
@@ -446,7 +502,12 @@ impl Google {
 }
 
 impl GoogleProtocol for Google {
-    fn authorize(&self, config: &DesktopClient, hint: Option<&str>, cancel: &AtomicBool) -> Result<TokenReply> {
+    fn authorize(
+        &self,
+        config: &DesktopClient,
+        hint: Option<&str>,
+        cancel: &AtomicBool,
+    ) -> Result<TokenReply> {
         check_cancel(cancel)?;
         let attempt = Attempt::start(AUTH_TIMEOUT)?;
         let url = attempt.authorization_url(config, hint)?;
@@ -456,52 +517,82 @@ impl GoogleProtocol for Google {
         open_google_browser(&url)?;
         let code = attempt.wait(cancel)?;
         check_cancel(cancel)?;
-        Self::exchange(&[
-            ("client_id", &config.id),
-            ("client_secret", &config.secret),
-            ("code", &code),
-            ("code_verifier", &verifier),
-            ("redirect_uri", &redirect),
-            ("grant_type", "authorization_code"),
-        ], true)
+        Self::exchange(
+            &[
+                ("client_id", &config.id),
+                ("client_secret", &config.secret),
+                ("code", &code),
+                ("code_verifier", &verifier),
+                ("redirect_uri", &redirect),
+                ("grant_type", "authorization_code"),
+            ],
+            true,
+        )
     }
 
     fn refresh(&self, config: &DesktopClient, token: &str) -> Result<TokenReply> {
-        Self::exchange(&[
-            ("client_id", &config.id),
-            ("client_secret", &config.secret),
-            ("refresh_token", token),
-            ("grant_type", "refresh_token"),
-        ], false)
+        Self::exchange(
+            &[
+                ("client_id", &config.id),
+                ("client_secret", &config.secret),
+                ("refresh_token", token),
+                ("grant_type", "refresh_token"),
+            ],
+            false,
+        )
     }
 
     fn account(&self, access: &str) -> Result<Account> {
-        let response = Self::client()?.get(ACCOUNT_ENDPOINT).bearer_auth(access).send()
+        let response = Self::client()?
+            .get(ACCOUNT_ENDPOINT)
+            .bearer_auth(access)
+            .send()
             .map_err(|_| AuthError::Network)?;
         let json = Self::bounded_json(response)?;
         let user = json.get("user").ok_or(AuthError::InvalidResponse)?;
         Account::verified(
-            user.get("emailAddress").and_then(|v| v.as_str()).ok_or(AuthError::InvalidResponse)?,
-            user.get("permissionId").and_then(|v| v.as_str()).ok_or(AuthError::InvalidResponse)?,
+            user.get("emailAddress")
+                .and_then(|v| v.as_str())
+                .ok_or(AuthError::InvalidResponse)?,
+            user.get("permissionId")
+                .and_then(|v| v.as_str())
+                .ok_or(AuthError::InvalidResponse)?,
         )
     }
 }
 
 #[cfg(windows)]
 fn open_google_browser(url: &Url) -> Result<()> {
-    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
     use std::ptr::{null, null_mut};
-    if url.scheme() != "https" || url.host_str() != Some("accounts.google.com")
-        || url.path() != "/o/oauth2/v2/auth" || url.port().is_some()
-        || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some()
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+    if url.scheme() != "https"
+        || url.host_str() != Some("accounts.google.com")
+        || url.path() != "/o/oauth2/v2/auth"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
     {
         return Err(AuthError::Configuration);
     }
     let target: Vec<u16> = url.as_str().encode_utf16().chain(Some(0)).collect();
     let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
     // SAFETY: NUL-terminated UTF-16 strings remain alive for this call; no arbitrary shell command.
-    let result = unsafe { ShellExecuteW(null_mut(), verb.as_ptr(), target.as_ptr(), null(), null(), SW_SHOWNORMAL) };
-    if result as isize <= 32 { Err(AuthError::Browser) } else { Ok(()) }
+    let result = unsafe {
+        ShellExecuteW(
+            null_mut(),
+            verb.as_ptr(),
+            target.as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result as isize <= 32 {
+        Err(AuthError::Browser)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(not(windows))]
@@ -566,8 +657,12 @@ struct Operation<'a> {
 impl Operation<'_> {
     fn current(&self) -> Result<MutexGuard<'_, State>> {
         let state = lock(self.state)?;
-        if state.generation != self.generation || state.disabled
-            || !state.active.as_ref().is_some_and(|flag| Arc::ptr_eq(flag, &self.cancel))
+        if state.generation != self.generation
+            || state.disabled
+            || !state
+                .active
+                .as_ref()
+                .is_some_and(|flag| Arc::ptr_eq(flag, &self.cancel))
         {
             return Err(AuthError::CredentialChanged);
         }
@@ -579,7 +674,11 @@ impl Operation<'_> {
 impl Drop for Operation<'_> {
     fn drop(&mut self) {
         if let Ok(mut state) = self.state.lock() {
-            if state.active.as_ref().is_some_and(|flag| Arc::ptr_eq(flag, &self.cancel)) {
+            if state
+                .active
+                .as_ref()
+                .is_some_and(|flag| Arc::ptr_eq(flag, &self.cancel))
+            {
                 state.active = None;
             }
         }
@@ -597,14 +696,33 @@ struct Host<S, G> {
 }
 
 impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
-    fn new(config: DesktopClient, scope: String, email: Option<String>, store: S, google: G) -> Result<Self> {
+    fn new(
+        config: DesktopClient,
+        scope: String,
+        email: Option<String>,
+        store: S,
+        google: G,
+    ) -> Result<Self> {
         if !valid_profile_scope(&scope) {
             return Err(AuthError::Configuration);
         }
         let expected_email = email.as_deref().map(normalize_email).transpose()?;
         Ok(Self {
-            config, scope, expected_email, store, google, serial: Mutex::new(()),
-            state: Mutex::new(State { generation: 1, access_revision: 0, active: None, access: None, enrollment: None, observed: false, disabled: false }),
+            config,
+            scope,
+            expected_email,
+            store,
+            google,
+            serial: Mutex::new(()),
+            state: Mutex::new(State {
+                generation: 1,
+                access_revision: 0,
+                active: None,
+                access: None,
+                enrollment: None,
+                observed: false,
+                disabled: false,
+            }),
         })
     }
 
@@ -614,24 +732,38 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
             return Err(AuthError::CredentialStore);
         }
         if new_identity {
-            state.generation = state.generation.checked_add(1).ok_or(AuthError::Unavailable)?;
+            state.generation = state
+                .generation
+                .checked_add(1)
+                .ok_or(AuthError::Unavailable)?;
             state.access = None;
         }
         let cancel = Arc::new(AtomicBool::new(false));
         state.active = Some(cancel.clone());
-        Ok(Operation { state: &self.state, generation: state.generation, cancel })
+        Ok(Operation {
+            state: &self.state,
+            generation: state.generation,
+            cancel,
+        })
     }
 
     fn read_record(&self) -> Result<Option<Stored>> {
-        let Some(bytes) = self.store.read()? else { return Ok(None); };
+        let Some(bytes) = self.store.read()? else {
+            return Ok(None);
+        };
         if bytes.is_empty() || bytes.len() > MAX_CREDENTIAL {
             return Err(AuthError::CredentialStore);
         }
-        let value: Credential = serde_json::from_slice(&bytes).map_err(|_| AuthError::CredentialStore)?;
-        if value.version != 1 || value.scope != self.scope || value.client_id != self.config.id
-            || value.enrollment.len() != 43 || !visible_ascii(&value.enrollment, 43)
+        let value: Credential =
+            serde_json::from_slice(&bytes).map_err(|_| AuthError::CredentialStore)?;
+        if value.version != 1
+            || value.scope != self.scope
+            || value.client_id != self.config.id
+            || value.enrollment.len() != 43
+            || !visible_ascii(&value.enrollment, 43)
             || !visible_ascii(&value.refresh_token, 2048)
-            || Account::verified(&value.account.email, &value.account.permission_id)? != value.account
+            || Account::verified(&value.account.email, &value.account.permission_id)?
+                != value.account
         {
             return Err(AuthError::CredentialStore);
         }
@@ -640,7 +772,10 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
     }
 
     fn check_account(&self, account: &Account, previous: Option<&Account>) -> Result<()> {
-        if self.expected_email.as_ref().is_some_and(|expected| expected != &account.email)
+        if self
+            .expected_email
+            .as_ref()
+            .is_some_and(|expected| expected != &account.email)
             || previous.is_some_and(|old| old != account)
         {
             return Err(AuthError::WrongAccount);
@@ -648,37 +783,68 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         Ok(())
     }
 
-    fn install(&self, op: &Operation<'_>, prior: Option<&Stored>, grant: TokenReply, account: Account, expires: Instant, initial: bool) -> Result<AuthorizedAccount> {
+    fn install(
+        &self,
+        op: &Operation<'_>,
+        prior: Option<&Stored>,
+        grant: TokenReply,
+        account: Account,
+        expires: Instant,
+        initial: bool,
+    ) -> Result<AuthorizedAccount> {
         grant.validate(initial)?;
         self.check_account(&account, prior.map(|old| &old.value.account))?;
-        let refresh_token = grant.refresh_token.or_else(|| prior.map(|old| old.value.refresh_token.clone()))
+        let refresh_token = grant
+            .refresh_token
+            .or_else(|| prior.map(|old| old.value.refresh_token.clone()))
             .ok_or(AuthError::MissingRefreshGrant)?;
         let enrollment = if initial {
             random_secret()?
         } else {
-            prior.ok_or(AuthError::NotAuthorized)?.value.enrollment.clone()
+            prior
+                .ok_or(AuthError::NotAuthorized)?
+                .value
+                .enrollment
+                .clone()
         };
         let credential = Credential {
-            version: 1, client_id: self.config.id.clone(), scope: self.scope.clone(),
-            enrollment: enrollment.clone(), account: account.clone(), refresh_token,
+            version: 1,
+            client_id: self.config.id.clone(),
+            scope: self.scope.clone(),
+            enrollment: enrollment.clone(),
+            account: account.clone(),
+            refresh_token,
         };
         let bytes = serde_json::to_vec(&credential).map_err(|_| AuthError::CredentialStore)?;
         if bytes.len() > MAX_CREDENTIAL {
             return Err(AuthError::CredentialStore);
         }
         let mut state = op.current()?;
-        if expires <= Instant::now() { return Err(AuthError::Timeout); }
-        let next_revision = state.access_revision.checked_add(1).ok_or(AuthError::Unavailable)?;
-        self.store.replace(prior.map(|old| old.bytes.as_slice()), Some(&bytes))?;
+        if expires <= Instant::now() {
+            return Err(AuthError::Timeout);
+        }
+        let next_revision = state
+            .access_revision
+            .checked_add(1)
+            .ok_or(AuthError::Unavailable)?;
+        self.store
+            .replace(prior.map(|old| old.bytes.as_slice()), Some(&bytes))?;
         state.access_revision = next_revision;
         state.access = Some(Access {
-            token: grant.access_token, account: account.clone(), enrollment: enrollment.clone(),
+            token: grant.access_token,
+            account: account.clone(),
+            enrollment: enrollment.clone(),
             expires,
         });
         state.enrollment = Some(enrollment);
         state.observed = true;
         state.active = None; // Commit and cancellation share the same linearization point.
-        Ok(AuthorizedAccount { generation: state.generation, access_revision: state.access_revision, email: account.email, remaining_seconds: expires.saturating_duration_since(Instant::now()).as_secs() })
+        Ok(AuthorizedAccount {
+            generation: state.generation,
+            access_revision: state.access_revision,
+            email: account.email,
+            remaining_seconds: expires.saturating_duration_since(Instant::now()).as_secs(),
+        })
     }
 
     fn authorize(&self) -> Result<AuthorizedAccount> {
@@ -690,7 +856,10 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
             state.enrollment = prior.as_ref().map(|old| old.value.enrollment.clone());
             state.observed = true;
         }
-        let hint = self.expected_email.as_deref().or_else(|| prior.as_ref().map(|old| old.value.account.email.as_str()));
+        let hint = self
+            .expected_email
+            .as_deref()
+            .or_else(|| prior.as_ref().map(|old| old.value.account.email.as_str()));
         let grant = self.google.authorize(&self.config, hint, &op.cancel)?;
         grant.validate(true)?;
         let expires = grant.expiry();
@@ -717,21 +886,35 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         state.enrollment = Some(prior.value.enrollment.clone());
         state.observed = true;
         if let Some(access) = &state.access {
-            if access.enrollment == prior.value.enrollment && access.expires > Instant::now() && !access.token.is_empty() {
+            if access.enrollment == prior.value.enrollment
+                && access.expires > Instant::now()
+                && !access.token.is_empty()
+            {
                 return Ok(AuthorizedAccount {
-                    generation: state.generation, access_revision: state.access_revision, email: access.account.email.clone(),
-                    remaining_seconds: access.expires.saturating_duration_since(Instant::now()).as_secs(),
+                    generation: state.generation,
+                    access_revision: state.access_revision,
+                    email: access.account.email.clone(),
+                    remaining_seconds: access
+                        .expires
+                        .saturating_duration_since(Instant::now())
+                        .as_secs(),
                 });
             }
         }
         state.access = None;
         drop(state);
-        let grant = match self.google.refresh(&self.config, &prior.value.refresh_token) {
+        let grant = match self
+            .google
+            .refresh(&self.config, &prior.value.refresh_token)
+        {
             Err(AuthError::Revoked) => {
                 let mut state = op.current()?;
                 self.store.replace(Some(&prior.bytes), None)?;
                 state.enrollment = None;
-                state.generation = state.generation.checked_add(1).ok_or(AuthError::Unavailable)?;
+                state.generation = state
+                    .generation
+                    .checked_add(1)
+                    .ok_or(AuthError::Unavailable)?;
                 state.active = None;
                 return Err(AuthError::Revoked);
             }
@@ -769,7 +952,10 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
 
     fn disconnect(&self) -> Result<()> {
         let mut state = lock(&self.state)?;
-        state.generation = state.generation.checked_add(1).ok_or(AuthError::Unavailable)?;
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .ok_or(AuthError::Unavailable)?;
         if let Some(cancel) = state.active.take() {
             cancel.store(true, Ordering::Release);
         }
@@ -778,7 +964,8 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         let bytes = self.store.read()?;
         if state.observed {
             if let Some(raw) = &bytes {
-                let record: Credential = serde_json::from_slice(raw).map_err(|_| AuthError::CredentialStore)?;
+                let record: Credential =
+                    serde_json::from_slice(raw).map_err(|_| AuthError::CredentialStore)?;
                 if state.enrollment.as_ref() != Some(&record.enrollment) {
                     return Err(AuthError::CredentialChanged);
                 }

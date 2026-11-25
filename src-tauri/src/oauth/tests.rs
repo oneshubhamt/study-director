@@ -2,7 +2,11 @@ use super::*;
 use std::sync::atomic::AtomicUsize;
 
 fn config() -> DesktopClient {
-    DesktopClient::new("disposable-fixture.apps.googleusercontent.com".into(), "fixture-only".into()).unwrap()
+    DesktopClient::new(
+        "disposable-fixture.apps.googleusercontent.com".into(),
+        "fixture-only".into(),
+    )
+    .unwrap()
 }
 
 fn account() -> Account {
@@ -11,14 +15,20 @@ fn account() -> Account {
 
 fn reply(initial: bool) -> TokenReply {
     TokenReply {
-        access_token: "fixture-access".into(), token_type: "Bearer".into(), expires_in: 3600,
+        access_token: "fixture-access".into(),
+        token_type: "Bearer".into(),
+        expires_in: 3600,
         scope: initial.then(|| SCOPE.to_owned()),
         refresh_token: initial.then(|| "fixture-refresh".into()),
     }
 }
 
 fn request(attempt: &Attempt, query: &str) -> Vec<u8> {
-    format!("GET {CALLBACK_PATH}?{query} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", attempt.host).into_bytes()
+    format!(
+        "GET {CALLBACK_PATH}?{query} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        attempt.host
+    )
+    .into_bytes()
 }
 
 #[test]
@@ -27,7 +37,9 @@ fn authorization_url_is_fixed_pkce_offline_and_state_bound() {
     let next = Attempt::start(Duration::from_secs(3)).unwrap();
     assert_ne!(attempt.state, next.state);
     assert_ne!(attempt.verifier, next.verifier);
-    let url = attempt.authorization_url(&config(), Some("fixture@example.invalid")).unwrap();
+    let url = attempt
+        .authorization_url(&config(), Some("fixture@example.invalid"))
+        .unwrap();
     assert_eq!(url.host_str(), Some("accounts.google.com"));
     assert_eq!(url.path(), "/o/oauth2/v2/auth");
     let params: std::collections::HashMap<_, _> = url.query_pairs().collect();
@@ -36,7 +48,10 @@ fn authorization_url_is_fixed_pkce_offline_and_state_bound() {
     assert_eq!(params["access_type"], "offline");
     assert_eq!(params["state"], attempt.state);
     assert_eq!(params["redirect_uri"], attempt.redirect);
-    assert_eq!(params["code_challenge"], URL_SAFE_NO_PAD.encode(Sha256::digest(attempt.verifier.as_bytes())));
+    assert_eq!(
+        params["code_challenge"],
+        URL_SAFE_NO_PAD.encode(Sha256::digest(attempt.verifier.as_bytes()))
+    );
     assert!(!params.contains_key("client_secret"));
     assert!(!url.as_str().contains(&attempt.verifier));
     assert!(DesktopClient::new("evil.example".into(), "fixture".into()).is_err());
@@ -47,8 +62,16 @@ fn authorization_url_is_fixed_pkce_offline_and_state_bound() {
 fn callback_parser_rejects_wrong_duplicate_and_malformed_inputs() {
     let attempt = Attempt::start(Duration::from_secs(3)).unwrap();
     let state = &attempt.state;
-    assert!(matches!(attempt.parse(&request(&attempt, &format!("state={state}&code=fixture%2Fcode"))), Some(Callback::Code(code)) if code == "fixture/code"));
-    assert!(matches!(attempt.parse(&request(&attempt, &format!("state={state}&error=access_denied"))), Some(Callback::Denied)));
+    assert!(
+        matches!(attempt.parse(&request(&attempt, &format!("state={state}&code=fixture%2Fcode"))), Some(Callback::Code(code)) if code == "fixture/code")
+    );
+    assert!(matches!(
+        attempt.parse(&request(
+            &attempt,
+            &format!("state={state}&error=access_denied")
+        )),
+        Some(Callback::Denied)
+    ));
     for query in [
         "state=wrong&code=fixture".to_owned(),
         format!("state={state}&state={state}&code=fixture"),
@@ -61,7 +84,8 @@ fn callback_parser_rejects_wrong_duplicate_and_malformed_inputs() {
     ] {
         assert!(attempt.parse(&request(&attempt, &query)).is_none());
     }
-    let valid = String::from_utf8(request(&attempt, &format!("state={state}&code=fixture"))).unwrap();
+    let valid =
+        String::from_utf8(request(&attempt, &format!("state={state}&code=fixture"))).unwrap();
     for invalid in [
         valid.replace("GET ", "POST "),
         valid.replace(CALLBACK_PATH, "/wrong"),
@@ -82,7 +106,9 @@ fn real_loopback_ignores_wrong_state_and_consumes_valid_callback() {
     let worker = thread::spawn(move || attempt.wait(&AtomicBool::new(false)));
     for (bytes, status) in [(invalid, "400 Bad Request"), (valid, "200 OK")] {
         let mut socket = TcpStream::connect(address).unwrap();
-        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         socket.write_all(&bytes).unwrap();
         let mut response = String::new();
         socket.read_to_string(&mut response).unwrap();
@@ -90,15 +116,24 @@ fn real_loopback_ignores_wrong_state_and_consumes_valid_callback() {
         assert!(!response.contains("fixture"));
     }
     assert_eq!(worker.join().unwrap().unwrap(), "fixture");
-    assert!(TcpStream::connect(address).is_err(), "listener is consumed after one callback");
+    assert!(
+        TcpStream::connect(address).is_err(),
+        "listener is consumed after one callback"
+    );
 }
 
 #[test]
 fn loopback_timeout_and_cancellation_are_bounded() {
     let attempt = Attempt::start(Duration::from_millis(40)).unwrap();
-    assert_eq!(attempt.wait(&AtomicBool::new(false)).unwrap_err(), AuthError::Timeout);
+    assert_eq!(
+        attempt.wait(&AtomicBool::new(false)).unwrap_err(),
+        AuthError::Timeout
+    );
     let attempt = Attempt::start(Duration::from_secs(3)).unwrap();
-    assert_eq!(attempt.wait(&AtomicBool::new(true)).unwrap_err(), AuthError::Cancelled);
+    assert_eq!(
+        attempt.wait(&AtomicBool::new(true)).unwrap_err(),
+        AuthError::Cancelled
+    );
     let attempt = Attempt::start(Duration::from_secs(3)).unwrap();
     let address = attempt.listener.local_addr().unwrap();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -156,7 +191,12 @@ struct FixtureGoogle {
 }
 
 impl GoogleProtocol for FixtureGoogle {
-    fn authorize(&self, _: &DesktopClient, _: Option<&str>, cancel: &AtomicBool) -> Result<TokenReply> {
+    fn authorize(
+        &self,
+        _: &DesktopClient,
+        _: Option<&str>,
+        cancel: &AtomicBool,
+    ) -> Result<TokenReply> {
         check_cancel(cancel)?;
         Ok(reply(true))
     }
@@ -167,8 +207,12 @@ impl GoogleProtocol for FixtureGoogle {
             entered.wait();
             release.wait();
         }
-        if self.offline.load(Ordering::SeqCst) { return Err(AuthError::Network); }
-        if self.revoked.load(Ordering::SeqCst) { return Err(AuthError::Revoked); }
+        if self.offline.load(Ordering::SeqCst) {
+            return Err(AuthError::Network);
+        }
+        if self.revoked.load(Ordering::SeqCst) {
+            return Err(AuthError::Revoked);
+        }
         let mut value = reply(false);
         if self.rotate.load(Ordering::SeqCst) {
             value.refresh_token = Some("fixture-rotated".into());
@@ -186,7 +230,14 @@ impl GoogleProtocol for FixtureGoogle {
 }
 
 fn host(store: MemoryStore) -> Host<MemoryStore, FixtureGoogle> {
-    Host::new(config(), "".into(), Some("fixture@example.invalid".into()), store, FixtureGoogle::default()).unwrap()
+    Host::new(
+        config(),
+        "".into(),
+        Some("fixture@example.invalid".into()),
+        store,
+        FixtureGoogle::default(),
+    )
+    .unwrap()
 }
 
 fn expire(host: &Host<MemoryStore, FixtureGoogle>) {
@@ -199,16 +250,26 @@ fn session_restore_refresh_rotation_and_late_401_are_fenced() {
     let first = host(store.clone());
     let initial = first.authorize().unwrap();
     assert_eq!(initial.email, "fixture@example.invalid");
-    assert_eq!(first.refresh().unwrap().access_revision, initial.access_revision);
+    assert_eq!(
+        first.refresh().unwrap().access_revision,
+        initial.access_revision
+    );
     assert_eq!(first.google.refreshes.load(Ordering::SeqCst), 0);
     expire(&first);
     first.google.rotate.store(true, Ordering::SeqCst);
     let next = first.refresh().unwrap();
     assert_eq!(next.generation, initial.generation);
     assert_ne!(next.access_revision, initial.access_revision);
-    assert!(!first.invalidate(initial.generation, initial.access_revision).unwrap());
-    assert!(first.invalidate(next.generation, next.access_revision).unwrap());
-    assert_eq!(first.read_record().unwrap().unwrap().value.refresh_token, "fixture-rotated");
+    assert!(!first
+        .invalidate(initial.generation, initial.access_revision)
+        .unwrap());
+    assert!(first
+        .invalidate(next.generation, next.access_revision)
+        .unwrap());
+    assert_eq!(
+        first.read_record().unwrap().unwrap().value.refresh_token,
+        "fixture-rotated"
+    );
     drop(first);
     let reopened = host(store.clone());
     assert_eq!(reopened.refresh().unwrap().email, "fixture@example.invalid");
@@ -260,9 +321,15 @@ fn cancelled_refresh_cannot_resurrect_disconnected_or_successor_credentials() {
     successor.authorize().unwrap();
     let bytes = store.read().unwrap();
     release.wait();
-    assert!(matches!(worker.join().unwrap(), Err(AuthError::CredentialChanged) | Err(AuthError::Cancelled)));
+    assert!(matches!(
+        worker.join().unwrap(),
+        Err(AuthError::CredentialChanged) | Err(AuthError::Cancelled)
+    ));
     assert_eq!(store.read().unwrap(), bytes);
-    assert!(matches!(original.disconnect(), Err(AuthError::CredentialChanged)));
+    assert!(matches!(
+        original.disconnect(),
+        Err(AuthError::CredentialChanged)
+    ));
     assert_eq!(store.read().unwrap(), bytes);
 }
 
@@ -273,7 +340,10 @@ fn unknown_or_changed_credentials_do_not_become_empty_or_overwritten() {
     let host = host(store.clone());
     assert!(matches!(host.refresh(), Err(AuthError::CredentialStore)));
     assert!(matches!(host.authorize(), Err(AuthError::CredentialStore)));
-    assert_eq!(store.read().unwrap().as_deref(), Some(b"not-json".as_slice()));
+    assert_eq!(
+        store.read().unwrap().as_deref(),
+        Some(b"not-json".as_slice())
+    );
     host.disconnect().unwrap();
     assert!(store.read().unwrap().is_none());
 }
@@ -287,7 +357,11 @@ fn windows_credential_manager_exact_readback_isolation_and_compare_exchange() {
     let scope = format!("prof_qa_fixture_{:08x}", u32::from_le_bytes(seed));
     let store = WindowsStore::new(&config(), &scope).unwrap();
     let other = WindowsStore::new(&config(), &scope).unwrap();
-    let separate = WindowsStore::new(&config(), &format!("prof_qb_fixture_{:08x}", u32::from_le_bytes(seed))).unwrap();
+    let separate = WindowsStore::new(
+        &config(),
+        &format!("prof_qb_fixture_{:08x}", u32::from_le_bytes(seed)),
+    )
+    .unwrap();
     // Unique, synthetic key; no access to the actual application's credential.
     struct Cleanup<'a>(&'a WindowsStore);
     impl Drop for Cleanup<'_> {
@@ -300,12 +374,26 @@ fn windows_credential_manager_exact_readback_isolation_and_compare_exchange() {
     assert!(store.read().unwrap().is_none());
     let _cleanup = Cleanup(&store);
     store.replace(None, Some(b"synthetic-credential")).unwrap();
-    assert_eq!(other.read().unwrap().as_deref(), Some(b"synthetic-credential".as_slice()));
+    assert_eq!(
+        other.read().unwrap().as_deref(),
+        Some(b"synthetic-credential".as_slice())
+    );
     assert!(separate.read().unwrap().is_none());
-    assert_eq!(other.replace(None, Some(b"stale")), Err(AuthError::CredentialChanged));
-    other.replace(Some(b"synthetic-credential"), Some(b"rotated")).unwrap();
-    assert_eq!(store.replace(Some(b"synthetic-credential"), None), Err(AuthError::CredentialChanged));
-    assert_eq!(store.read().unwrap().as_deref(), Some(b"rotated".as_slice()));
+    assert_eq!(
+        other.replace(None, Some(b"stale")),
+        Err(AuthError::CredentialChanged)
+    );
+    other
+        .replace(Some(b"synthetic-credential"), Some(b"rotated"))
+        .unwrap();
+    assert_eq!(
+        store.replace(Some(b"synthetic-credential"), None),
+        Err(AuthError::CredentialChanged)
+    );
+    assert_eq!(
+        store.read().unwrap().as_deref(),
+        Some(b"rotated".as_slice())
+    );
     other.replace(Some(b"rotated"), None).unwrap();
     assert!(store.read().unwrap().is_none());
 }

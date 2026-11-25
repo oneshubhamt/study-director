@@ -24,7 +24,9 @@ fn main() {
                 .windows
                 .iter()
                 .find(|window| window.label == "main")
-                .ok_or_else(|| std::io::Error::other("Missing experimental main window configuration"))?;
+                .ok_or_else(|| {
+                    std::io::Error::other("Missing experimental main window configuration")
+                })?;
             let builder = WebviewWindowBuilder::from_config(app.handle(), config)?
                 .on_navigation(packaged_origin)
                 .on_new_window(|_, _| NewWindowResponse::Deny);
@@ -52,7 +54,9 @@ mod tests {
         } else {
             "tauri://localhost"
         };
-        assert!(packaged_origin(&Url::parse(&format!("{origin}/index.html?tab=library")).unwrap()));
+        assert!(packaged_origin(
+            &Url::parse(&format!("{origin}/index.html?tab=library")).unwrap()
+        ));
         for url in [
             "https://accounts.google.com/",
             "https://study-director.web.app/",
