@@ -133,6 +133,7 @@ jobs:
       max-parallel: 2
       matrix:
         file:
+          - tests/browser/backup/recovery-takeover.mjs
           - tests/browser/library/note-picker-authority.mjs
           - tests/browser/library/notes-management.mjs
           - tests/browser/attachments/attachments.mjs
@@ -159,7 +160,7 @@ jobs:
           TEST_FILE: ${{ matrix.file }}
         run: |
           repeats=1
-          if [ "$TEST_FILE" = tests/browser/app/session-merge-timer.mjs ]; then repeats=5; fi
+          if [ "$TEST_FILE" = tests/browser/app/session-merge-timer.mjs ] || [ "$TEST_FILE" = tests/browser/backup/recovery-takeover.mjs ]; then repeats=5; fi
           for ((pass=1; pass<=repeats; pass++)); do
             echo "=== $TEST_FILE pass $pass/$repeats ==="
             node "$TEST_FILE"
