@@ -166,7 +166,7 @@ async function appWrite(){
     await d.PlanRuntime.savedPlans.act('save');
     const applied=await d.applySchedule({skipNotify:true});
     const diary=await d.DailyReflectionPersistence.commit(diaryDate,diaryText,{expectedCanonical:''});
-    const savedPlan=d.PlanData.library().savedPlans.find(row=>row.name===planName);
+    const savedPlan=d.PlanData.library().savedPlans.find(row=>row.label===planName);
     d.AppData.notes.update(noteKey,'Tauri QA Note',noteText);
     await d.AppData.notes.flush();
     await d.goTab('execute');
@@ -204,7 +204,7 @@ async function appRead(assetId,canonical){
   const row=await page.evaluate('('+async function({assetId,noteKey,diaryDate,planName}){
     const d=__nativeQA,active=(await d.AppData.activeSession.load()).value;
     const file=await d.AttachmentStorage.get(assetId);
-    return {note:d.AppData.notes.get(noteKey)?.text,review:active?.snapshot?.review?.reflection,plan:active?.scheduleText,paused:active?.snapshot?.timerRuntime?.paused,diary:(await d.AppData.dailyRecords.get(diaryDate))?.reflection,savedPlan:d.PlanData.library().savedPlans.some(row=>row.name===planName),asset:file&&await file.text(),catalogue:(await d.AttachmentStorage.list()).some(row=>row.id===assetId)};
+    return {note:d.AppData.notes.get(noteKey)?.text,review:active?.snapshot?.review?.reflection,plan:active?.scheduleText,paused:active?.snapshot?.timerRuntime?.paused,diary:(await d.AppData.dailyRecords.get(diaryDate))?.reflection,savedPlan:d.PlanData.library().savedPlans.some(row=>row.label===planName),asset:file&&await file.text(),catalogue:(await d.AttachmentStorage.list()).some(row=>row.id===assetId)};
   }.toString()+')('+JSON.stringify({assetId,noteKey,diaryDate,planName})+')');
   assert.equal(row.note,noteText);assert.equal(row.review,canonical);assert.ok(row.plan?.includes('Native QA study'));assert.equal(row.asset,pdfText);assert.equal(row.catalogue,true);assert.equal(row.diary,diaryText);assert.equal(row.savedPlan,true);assert.equal(row.paused,true);
   console.log('Canonical note, review, plan and attachment restart read verified');
@@ -274,7 +274,7 @@ async function profilesAndImport(bootProfile,assetId,canonical){
     if(!done)throw new Error('Portable combine did not settle');
     if(error)throw error;
     const file=await d.AttachmentStorage.get(assetId);
-    return {verified:result.verified,changed:result.changed,note:d.AppData.notes.get(noteKey)?.text,diary:(await d.AppData.dailyRecords.get(diaryDate))?.reflection,savedPlan:d.PlanData.library().savedPlans.some(row=>row.name===planName),asset:file&&await file.text(),profile:StudyDirector.backup.profile.id(),result};
+    return {verified:result.verified,changed:result.changed,note:d.AppData.notes.get(noteKey)?.text,diary:(await d.AppData.dailyRecords.get(diaryDate))?.reflection,savedPlan:d.PlanData.library().savedPlans.some(row=>row.label===planName),asset:file&&await file.text(),profile:StudyDirector.backup.profile.id(),result};
   }.toString()+')('+JSON.stringify({backup,assetId,noteKey,diaryDate,planName})+')');
   console.log('Portable combine witness:',JSON.stringify(imported));
   assert.equal(imported.diary,diaryText);assert.equal(imported.savedPlan,true);
