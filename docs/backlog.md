@@ -4,7 +4,7 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
 
 ## Experimental native platform (tauri-spike only)
 
-See [native platform](areas/native-platform.md), [roadmap](native/PROGRAMME.md) and [execution register](../TAURI-EXECUTION.md). P0 source census and pinned baseline CI recorded; independent baseline reproduction open. P1.A shell implemented and historical Windows journey passed, but fresh-build Wordgard insertion failed twice; qualification reopened. P1.B–G and P2.A–I remain open; complete P1.A before advancing. Native services, OS/close, signed updater, packaging, physical restart/power-loss and broader failure injection remain assigned to their roadmap gates. External OAuth and signing configuration require owner authorization. Synthetic test libraries only; no production changes.
+See [native platform](areas/native-platform.md), [roadmap](native/PROGRAMME.md) and [execution register](../TAURI-EXECUTION.md). P0 source census and pinned baseline CI recorded; independent baseline reproduction open. P1.A VERIFIED — TARGETED: locked fresh Windows build and all five independent smoke journeys passed, including offline, Wordgard and exact canonical persistence; PWA and Repository checks passed. P1.B active; P1.C–G and P2.A–I open. Native services, OS/close, signed updater, packaging, physical restart/power-loss and broader failure injection remain assigned to their roadmap gates. External OAuth and signing configuration require owner authorization. Synthetic test libraries only; no production changes.
 
 ## Bugs reported by the owner (2026-11-03)
 
