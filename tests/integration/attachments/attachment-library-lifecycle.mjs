@@ -23,7 +23,7 @@ function createLibrary({confirm=true}={}){
   let listCalls=0,downloads=0;
   const document={activeElement:null,getElementById:id=>ids.get(id)||element(id),querySelectorAll(){return []},querySelector(){return null},createElement:tag=>element(tag),addEventListener(){}};
   const store={list:async()=>{listCalls++;return []},get:async()=>null,requireAvailable(){},during:async fn=>fn(),collect:async fn=>fn({sweep:async()=>0,removeMany:async()=>0}),setLibrary:async()=>{},rename:async()=>{}};
-  const library=attachments.create({notifications:createNotifications('attachments').port,store,processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){downloads++}},document,interactions:{choose:async()=>null,confirm:async()=>confirm,notify(){},input:async()=>null},canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_kind,fn)=>fn(),removeReferences:async()=>null,insert:async()=>{}});
+  const library=attachments.create({notifications:createNotifications('attachments').port,store,processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){downloads++}},document,interactions:{choose:async()=>null,confirm:async()=>confirm,notify(){},input:async()=>null},canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_kind,fn)=>fn(),removeReferences:async()=>null,insert:async()=>{}});
   library.install();
   return {library,ids,listCalls:()=>listCalls,downloads:()=>downloads};
 }
@@ -100,7 +100,7 @@ function createLibrary({open=false,rows=[row(retainedId,true),row(referencedId,f
   const library=module.create({notifications:createNotifications('attachments').port,
     store,processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){}},document,
     interactions:{choose:async()=>null,confirm:async()=>false,notify(){},input:async()=>null},
-    canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,cleanup(){},renderReference(){},sources,destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_k,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{}
+    canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,cleanup(){},renderReference(){},sources,destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_k,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{}
   });
   return {library,document,listCalls:()=>listCalls,store};
 }
@@ -137,7 +137,7 @@ function createLibrary({open=false,rows=[row(retainedId,true),row(referencedId,f
   });
   api=module.create({notifications:createNotifications('attachments').port,
     store:t.store,processing:{check(){},job:fn=>fn()},document:t.document,
-    interactions:{choose:async()=> 'remove',confirm:async()=>true,notify(){}},canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,
+    interactions:{choose:async()=> 'remove',confirm:async()=>true,notify(){}},canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,
     sources:async()=>referenced?[{kind:'note',key:'n',label:'N',ids:new Set([id])}]:[],settle:async()=>{},quiesce:async fn=>fn(),runExclusive:async(_k,fn)=>fn(),
     removeReferences:async()=>{referenced=false;api.invalidate();await drainMicrotasks();duringMutationListCalls=t.listCalls();return {rollback:async()=>{referenced=true}};},
     deletionGuard:async()=>()=>true,cleanup(){},openLibrary(){},renderReference(){},destinations:async()=>[],openSource(){},insert(){}
@@ -161,7 +161,7 @@ function createLibrary({open=false,rows=[row(retainedId,true),row(referencedId,f
   t.store.list=async()=>present?[row(id,true)]:[];
   const api=module.create({notifications:createNotifications('attachments').port,
     store:t.store,processing:{check(){},job:fn=>fn()},document:t.document,
-    interactions:{choose:async()=>null,confirm:async()=>true,notify(){}},canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,
+    interactions:{choose:async()=>null,confirm:async()=>true,notify(){}},canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,
     sources:async()=>[],settle:async()=>{},quiesce:async fn=>fn(),runExclusive:async(_k,fn)=>fn(),removeReferences:async()=>null,deletionGuard:async()=>()=>true,
     cleanup(){},openLibrary(){},renderReference(){},destinations:async()=>[],openSource(){},insert(){}
   });
@@ -178,7 +178,7 @@ function createLibrary({open=false,rows=[row(retainedId,true),row(referencedId,f
   const t=createLibrary({rows:[row(id,false)],sources:async()=>[],collect:async()=>({status:'skipped',reason:'active-editor-or-file-operation',removed:0})});
   const api=module.create({notifications:createNotifications('attachments').port,
     store:t.store,processing:{check(){},job:fn=>fn()},document:t.document,
-    interactions:{choose:async()=>null,confirm:async()=>true,notify(){}},canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,
+    interactions:{choose:async()=>null,confirm:async()=>true,notify(){}},canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,
     sources:async()=>[],settle:async()=>{},quiesce:async fn=>fn(),runExclusive:async(_k,fn)=>fn(),removeReferences:async()=>null,deletionGuard:async()=>()=>true,
     cleanup(){},openLibrary(){},renderReference(){},destinations:async()=>[],openSource(){},insert(){}
   });
@@ -255,7 +255,7 @@ const library=attachments.create({notifications:createNotifications('attachments
   store:{list:async()=>[row],get:async()=>{getCalls++;throw new Error('missing file must not be opened');},requireAvailable(){},during:async fn=>fn(),retain:async()=>()=>{},collect:async fn=>fn({sweep:async()=>0,removeMany:async()=>0}),setLibrary:async()=>{},rename:async()=>{}},
   processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){}},document,
   interactions:{choose:async()=>null,confirm:async()=>false,notify(){},input:async()=>null},
-  canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],integrityIssue:assetId=>assetId===id?issue:null,
+  canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],integrityIssue:assetId=>assetId===id?issue:null,
   destinations:async()=>[{key:'note',label:'Note'}],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_k,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{throw new Error('must not offer insertion for unhealthy attachment');}
 });
 library.install();
@@ -329,7 +329,7 @@ function makeHarness(){
   const library=attachments.create({notifications:createNotifications('attachments').port,store,
     processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){}},document,
     interactions:{choose:async()=>null,confirm:async()=>false,notify(){},input:async()=>null},
-    canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_kind,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{}
+    canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_kind,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{}
   });
   const prepare=async()=>{library.install();await library.refresh();await library.select(id);const download=walk(ids.get('attachment-detail')).find(node=>node.tagName==='A'&&node.textContent==='Download');assert.ok(download,'ordinary Attachment Library detail must expose Download');return download;};
   return {library,store,timer,prepare,stats:()=>({readers,retainCalls,releaseCalls})};

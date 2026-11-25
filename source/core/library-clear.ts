@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {LibraryStatePorts,LibrarySelection,ReferenceSource,ProtectedReference,RewriteTarget,LibraryPlan,LibraryPolicy,ScopedSnapshot,RollbackShape,LibraryRawRow,LibraryCoordinatorPorts,ClearJournal,Trace,TraceOutcome,ClearRecorder} from '../../types/library-clear.ts';
+import type {LibraryStatePorts,LibrarySelection,ReferenceSource,ProtectedReference,RewriteTarget,ReferenceRewriteOperation,LibraryPlan,LibraryPolicy,ScopedSnapshot,RollbackShape,LibraryRawRow,LibraryCoordinatorPorts,ClearJournal,Trace,TraceOutcome,ClearRecorder} from '../../types/library-clear.ts';
 import type {NoteRecord} from '../../types/record-models.ts';
 import type {DailyView} from '../../types/repositories.ts';
 import type {DiagnosticInput} from '../../types/backup-operation-diagnostics.ts';
@@ -71,25 +71,45 @@ const createModule=()=>{
       return loaded.value;
     }
 
-    async function rewriteReferences(targets:readonly RewriteTarget[]){
+    async function rewriteReferences(targets:readonly RewriteTarget[],operation?:ReferenceRewriteOperation){
       const grouped=Array.isArray(targets)?(targets as readonly RewriteTarget[]).filter(Boolean):[];
       let changed=0;
+      const assert=()=>operation?.assert(),stampAfter=(previous:string)=>new Date(Math.max(Date.parse(previous)+1,Date.parse(nowIso()))).toISOString();
+      const localMatches=(expected:NoteRecord)=>{const local=data.notes.get(expected.key);return !!local&&local.updatedAt===expected.updatedAt&&local.label===expected.label&&local.text===expected.text&&same(local.links,expected.links||[]);};
       await ports.withPersistenceSuppressed(async()=>{
+        assert();
         const noteTargets=grouped.filter(target=>target.kind==='note');
         if(noteTargets.length){
-          const fresh=await data.notes.readFreshPayload()||{},expected=new Map<string,string>();
+          const fresh=await data.notes.readFreshPayload()||{},expected=new Map<string,string>(),postimages=new Map<string,NoteRecord>();assert();
           for(const target of noteTargets){
             const current=fresh[target.key];
             if(!current)throw new Error('A note changed before attachment removal.');
-            const value=transformReference(current.text,target,'The note');
+            const before=operation?.snapshot.notes.find(note=>note.key===target.key);
+            if(operation&&(!before||!same(current,before)||!localMatches(before)))throw new Error('A note changed before attachment removal.');
+            const value=transformReference(current.text,target,'The note');assert();
             const result=data.notes.updateValidatedRich(target.key,current.label||target.label,value,current.updatedAt||'');
             if(!['changed','unchanged'].includes(result.status))throw new Error('The note changed during attachment removal.');
+            if(operation&&before&&result.status==='changed'){
+              const after:NoteRecord={...before,text:value,updatedAt:result.revision};postimages.set(target.key,after);
+              operation.record(async()=>{
+                const fresh=(await data.notes.readFreshPayload()||{})[before.key];operation.assert(true);
+                // An unsuccessful flush can leave the exact attempted edit in
+                // the live save lane while storage still contains its preimage.
+                if(same(fresh,before)&&localMatches(before))return;
+                if(!(same(fresh,after)||same(fresh,before))||!localMatches(after))throw new Error('Note changed after attachment removal; its successor was preserved.');
+                const restored=data.notes.updateValidatedRich(before.key,before.label,before.text,after.updatedAt);
+                if(restored.status!=='changed')throw new Error('Note rollback could not restore its own edit.');
+                await data.notes.flush({strict:true});operation.assert(true);
+                const verified=(await data.notes.readFreshPayload()||{})[before.key];operation.assert(true);
+                if(!same(verified,{...before,updatedAt:restored.revision}))throw new Error('Note rollback verification failed.');
+              });
+            }
             expected.set(target.key,value);changed++;
           }
-          await data.notes.flush({strict:true});
+          await data.notes.flush({strict:true});assert();
           if(data.notes.failure().failed)throw new Error('Note reference removal did not save safely.');
-          const verified=await data.notes.readFreshPayload()||{};
-          for(const [key,value] of expected)if(String(verified[key]?.text||'')!==value)throw new Error('Note reference removal verification failed.');
+          const verified=await data.notes.readFreshPayload()||{};assert();
+          for(const [key,value] of expected)if(String(verified[key]?.text||'')!==value||postimages.has(key)&&!same(verified[key],postimages.get(key)))throw new Error('Note reference removal verification failed.');
         }
         const dayTargets=grouped.filter(target=>target.kind==='day');
         if(dayTargets.length){
@@ -97,10 +117,27 @@ const createModule=()=>{
           for(const target of dayTargets){
             const current=await data.dailyRecords.get(target.key,{strict:true});
             if(!current)throw new Error('A Saved Day changed before attachment removal.');
-            const value=transformReference(current.reflection,target,'The Saved-Day');
-            rows.push({...current,reflection:value});expected.set(target.key,value);changed++;
+            const before=operation?.snapshot.days.find(day=>day.date===target.key);
+            if(operation&&(!before||!same(current,before)))throw new Error('A Saved Day changed before attachment removal.');
+            const value=transformReference(current.reflection,target,'The Saved-Day');assert();
+            if(operation&&before){
+              const after:DailyView={...before,reflection:value,updatedAt:stampAfter(before.updatedAt)};
+              operation.record(async()=>{
+                // A failed write or read-back may leave either preimage or
+                // postimage. The repository checks the full canonical record
+                // transactionally; never use a newly observed record as CAS.
+                let unchanged=false;try{unchanged=await data.dailyRecords.verifyCanonical(before);}catch{}
+                operation.assert(true);if(unchanged)return;
+                const restored={...before,updatedAt:stampAfter(after.updatedAt)};
+                await data.dailyRecords.save(restored,{expectedCanonical:after});operation.assert(true);
+                await data.dailyRecords.verifyCanonical(restored);operation.assert(true);
+              });
+              await data.dailyRecords.save(after,{expectedCanonical:before});assert();
+              await data.dailyRecords.verifyCanonical(after);assert();
+            }else{rows.push({...current,reflection:value});expected.set(target.key,value);}
+            changed++;
           }
-          await data.dailyRecords.saveBatch(rows);
+          if(rows.length)await data.dailyRecords.saveBatch(rows);
           for(const [key,value] of expected){const verified=await data.dailyRecords.get(key,{strict:true});if(String(verified?.reflection||'')!==value)throw new Error('Saved-Day reference removal verification failed.');}
         }
         const sessionTargets=grouped.filter(target=>target.kind==='session');
@@ -108,13 +145,28 @@ const createModule=()=>{
         if(sessionTargets.length){
           const target=sessionTargets[0]!,current=await readSession();
           if(!current)throw new Error('The session reflection changed before attachment removal.');
-          const value=transformReference(current.snapshot?.review?.reflection,target,'The session reflection');
+          const before=operation?.snapshot.session;
+          if(operation&&(!before||!same(current,before)||current.id!==target.key))throw new Error('The active session changed before attachment removal.');
+          const value=transformReference(current.snapshot?.review?.reflection,target,'The session reflection');assert();
           const next={...current,revision:data.activeSession.nextRevision(),updatedAt:nowIso(),snapshot:{...current.snapshot,review:{...current.snapshot.review,reflection:value}}};
-          const saved=await data.activeSession.save(next);
+          if(operation&&before){
+            operation.record(async()=>{
+              const present=await readSession();operation.assert(true);
+              if(same(present,before))return;
+              if(!same(present,next))throw new Error('Active session changed after attachment removal; its successor was preserved.');
+              const restored={...before,revision:data.activeSession.nextRevision(),updatedAt:nowIso()};
+              const saved=await data.activeSession.save(restored,{expectedCanonical:next});operation.assert(true);
+              if(!saved?.ok)throw saved?.error||new Error('Active-session rollback failed.');
+              const verified=await readSession();operation.assert(true);
+              if(!verified||!same(verified,restored))throw new Error('Active-session rollback verification failed.');
+              review.hydrate({date:verified.date,snapshotReview:verified.snapshot.review});review.invalidateBindings();
+            });
+          }
+          const saved=await data.activeSession.save(next,operation&&before?{expectedCanonical:before}:{});assert();
           if(!saved?.ok)throw saved?.error||new Error('Session reference removal failed.');
-          const verified=await readSession();
-          if(String(verified?.snapshot?.review?.reflection||'')!==value)throw new Error('Session reference removal verification failed.');
-          review.hydrate({date:verified!.date,snapshotReview:verified!.snapshot.review});review.invalidateBindings();changed++;
+          const verified=await readSession();assert();
+          if(!verified||String(verified.snapshot?.review?.reflection||'')!==value||operation&&!same(verified,next))throw new Error('Session reference removal verification failed.');
+          review.hydrate({date:verified.date,snapshotReview:verified.snapshot.review});review.invalidateBindings();changed++;
         }
       });
       return changed;

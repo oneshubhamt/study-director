@@ -58,14 +58,12 @@ const createModule=()=>{
   }
   function createReferenceCoordinator(p:ReferenceCoordinatorInput){
     if(!p||typeof p!=='object')throw new TypeError('Attachment reference coordinator ports are required.');
-    const data=p.data,review=p.review,background=p.background,live=p.live;
+    const data=p.data,background=p.background,live=p.live;
     if(!data?.notes||!data?.dailyRecords||!data?.activeSession)throw new TypeError('Attachment reference data ports are incomplete.');
     if(typeof p.scan!=='function'||typeof p.rewriteReferences!=='function'||typeof p.withPersistenceSuppressed!=='function')throw new TypeError('Attachment reference mutation ports are incomplete.');
-    if(!review||typeof review.hydrate!=='function'||typeof review.invalidateBindings!=='function')throw new TypeError('Attachment reference review ports are incomplete.');
     if(!background||typeof background.budget!=='function'||typeof background.yieldTask!=='function')throw new TypeError('Attachment reference background ports are incomplete.');
     if(!live||typeof live.fields!=='function'||typeof live.reviewDate!=='function'||typeof live.todayIso!=='function'||typeof live.noteKey!=='function')throw new TypeError('Attachment reference live-source ports are incomplete.');
     const clone=<T>(value:T):T=>value==null?value:structuredClone(value);
-    const nowIso=()=>new Date().toISOString();
     function scan(value:unknown){
       const result=p.scan(String(value||''));
       if(!result||result.trusted!==true)throw new Error('A note could not be verified. Attachment deletion is paused.');
@@ -107,31 +105,22 @@ const createModule=()=>{
       }
       return references||[...sources.values()];
     }
-    async function restore(snapshot:ReferenceSnapshot|null){
-      if(!snapshot)return true;
+    // Only the rewrite owner can register an undo, at the point where its
+    // exact attempted record identity is known. Never infer it from a later read.
+    async function restore(undos:Set<()=>Promise<void>>,assert:(rollback?:boolean)=>void){
       const failures:unknown[]=[];
       await p.withPersistenceSuppressed(async()=>{
-        try{
-          if(snapshot.notes?.length){
-            const fresh=await data.notes.readFreshPayload()||{};
-            for(const original of snapshot.notes){const current=fresh[original.key];if(!current)throw new Error('A note needed for rollback is missing.');const result=data.notes.updateValidatedRich(original.key,original.label,original.text,current.updatedAt||'');if(!['changed','unchanged'].includes(result.status))throw new Error('A note changed before rollback.');}
-            await data.notes.flush({strict:true});
-            const verified=await data.notes.readFreshPayload()||{};for(const original of snapshot.notes)if(verified[original.key]?.text!==original.text)throw new Error('Note rollback verification failed.');
-          }
-        }catch(error){failures.push(error);}
-        try{
-          for(const original of snapshot.days||[]){await data.dailyRecords.save(clone(original));const verified=await data.dailyRecords.get(original.date,{strict:true});if(String(verified?.reflection||'')!==String(original.reflection||''))throw new Error('Saved-Day rollback verification failed.');}
-        }catch(error){failures.push(error);}
-        try{
-          if(snapshot.session){const current=await readSession();if(!current)throw new Error('The active-session snapshot needed for rollback is missing.');const restored={...current,revision:data.activeSession.nextRevision(),updatedAt:nowIso(),snapshot:{...current.snapshot,review:clone(snapshot.session.snapshot?.review)}};const saved=await data.activeSession.save(restored);if(!saved?.ok)throw saved?.error||new Error('Active-session rollback failed.');const verified=await readSession();if(String(verified?.snapshot?.review?.reflection||'')!==String(snapshot.session.snapshot?.review?.reflection||''))throw new Error('Active-session rollback verification failed.');review.hydrate({date:verified!.date,snapshotReview:verified!.snapshot.review});review.invalidateBindings();}
-        }catch(error){failures.push(error);}
+        for(const undo of [...undos].reverse()){
+          try{assert(true);await undo();undos.delete(undo);}
+          catch(error){failures.push(error);}
+        }
       });
       if(failures.length)throw new Error(failures.map(error=>(error as {message?:unknown}|null|undefined)?.message||String(error)).join(' '));
       return true;
     }
     async function verifyAbsent(id:string){return !(await sources({includeLive:false})).some(source=>source.ids.has(String(id||'')));}
-    async function removeEverywhere(id:string){
-      const target=String(id||''),canonical=(await sources({includeLive:false})).filter(source=>source.ids.has(target));
+    async function removeEverywhere(id:string,assert:(rollback?:boolean)=>void){
+      assert();const target=String(id||''),canonical=(await sources({includeLive:false})).filter(source=>source.ids.has(target));assert();
       if(!canonical.length)return Object.freeze({changed:false,sources:0,rollback:null});
       const snapshot:ReferenceSnapshot={notes:[],days:[],session:null},notePayload=await data.notes.readFreshPayload()||{};
       for(const source of canonical){
@@ -140,17 +129,17 @@ const createModule=()=>{
         else if(source.kind==='session'){const session=await readSession();if(!session||String(session.snapshot?.review?.reflection||'')!==source.value)throw new Error('The session reflection changed before attachment removal.');snapshot.session=clone(session);}
       }
       const targets=canonical.map(source=>Object.freeze({kind:source.kind,key:source.key,label:source.label,attachmentIds:Object.freeze([target]),expectedValue:source.value}));
+      assert();const undos=new Set<()=>Promise<void>>();
       try{
-        await p.rewriteReferences(targets);
-        if(!await verifyAbsent(target))throw new Error('Attachment reference removal did not verify globally.');
+        await p.rewriteReferences(targets,{snapshot,assert,record:undo=>{undos.add(undo);}});assert();
+        if(!await verifyAbsent(target))throw new Error('Attachment reference removal did not verify globally.');assert();
       }catch(error){
-        try{await restore(snapshot);}catch(rollbackError){throw new Error(((error as {message?:unknown}|null|undefined)?.message||error)+' Automatic reference rollback also failed: '+((rollbackError as {message?:unknown}|null|undefined)?.message||rollbackError));}
+        try{await restore(undos,assert);}catch(rollbackError){throw new Error(((error as {message?:unknown}|null|undefined)?.message||error)+' Automatic reference rollback also failed: '+((rollbackError as {message?:unknown}|null|undefined)?.message||rollbackError));}
         throw error;
       }
-      let rolledBack=false;
-      return Object.freeze({changed:true,sources:canonical.length,rollback:async()=>{if(rolledBack)return true;await restore(snapshot);rolledBack=true;return true;}});
+      return Object.freeze({changed:true,sources:canonical.length,rollback:()=>restore(undos,assert)});
     }
-    return Object.freeze({format:'study-director.attachment-reference-coordinator',contractVersion:1,scan,descriptor,sources,restore,removeEverywhere,verifyAbsent});
+    return Object.freeze({format:'study-director.attachment-reference-coordinator',contractVersion:1,scan,descriptor,sources,removeEverywhere,verifyAbsent});
   }
   function create(p:AttachmentsInput){
     const {store,processing,document,interactions,notifications}=p;
@@ -291,8 +280,8 @@ const createModule=()=>{
       return Math.max(0,Number(result.swept)||0);
     }
     async function remove(id:string,knownLibrary:boolean|null=null){
-      p.requireOwner();
-      const initialRefs=await references(id),wasLibrary=typeof knownLibrary==='boolean'?knownLibrary:initialRefs.length===0;
+      p.requireOwner();const ownerToken=p.token(),assertOwner=()=>p.assertToken(ownerToken);
+      const initialRefs=await references(id),wasLibrary=typeof knownLibrary==='boolean'?knownLibrary:initialRefs.length===0;assertOwner();
       if(initialRefs.length){
         const decision=await interactions.choose({
           title:'Attachment is in use',danger:true,
@@ -305,14 +294,14 @@ const createModule=()=>{
           ]
         });
         if(!decision)return false;
-        if(decision==='review'){status(`Used in ${initialRefs.length} place${initialRefs.length===1?'':'s'}. Choose a reference below to open it.`);return false;}
+        assertOwner();if(decision==='review'){status(`Used in ${initialRefs.length} place${initialRefs.length===1?'':'s'}. Choose a reference below to open it.`);return false;}
         if(decision!=='remove')return false;
       }else if(!await interactions.confirm({title:'Delete attachment?',message:'This permanently removes the library entry. It cannot be undone.',confirmLabel:'Delete attachment',cancelLabel:'Keep attachment'}))return false;
-      let cleanupPending=false;
+      assertOwner();let cleanupPending=false;
       const quiesce=typeof p.quiesce==='function'?p.quiesce:(<T>(work:()=>Promise<T>)=>work());
       await batch(async()=>{
         await quiesce(()=>p.runExclusive('delete-attachment',async authority=>{
-          const assertAuthority=(options?:AuthorityOptions)=>{if(authority&&typeof authority.assert==='function')authority.assert(options);};
+          const assertAuthority=(options?:AuthorityOptions)=>{assertOwner();if(authority&&typeof authority.assert==='function')authority.assert(options);};
           assertAuthority();p.requireOwner();await p.settle();assertAuthority();let referenceChange:ReferenceChange|null=null;
           const rollbackIfPresent=async(error:unknown)=>{
             if(!referenceChange?.rollback)return error;
@@ -327,7 +316,7 @@ const createModule=()=>{
             const refs=await references(id,{includeLive:false});
             if(refs.length){
               assertAuthority();
-              referenceChange=await p.removeReferences(id,refs);
+              referenceChange=await p.removeReferences(id,refs,rollback=>assertAuthority(rollback?{allowDurableProtected:true}:undefined));
               if(!referenceChange)throw new Error('Attachment references could not be changed safely.');
               assertAuthority();
               const remaining=await references(id,{includeLive:false});
@@ -350,7 +339,7 @@ const createModule=()=>{
         }),{sources:initialRefs});
         invalidate();
       });
-      status(cleanupPending?'Attachment deleted. Storage cleanup will finish automatically.':'Attachment deleted.');return true;
+      assertOwner();status(cleanupPending?'Attachment deleted. Storage cleanup will finish automatically.':'Attachment deleted.');return true;
     }
     function discardPreparedDetail(prepared:PreparedDetail){if(prepared?.url)URL.revokeObjectURL(prepared.url);prepared?.release?.();}
     async function prepareDetail(id:string,row:AssetRow|undefined,epoch:number):Promise<PreparedDetail>{

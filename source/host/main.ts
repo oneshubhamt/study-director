@@ -2770,9 +2770,8 @@ type AttachmentReferenceInput=Parameters<typeof AttachmentsModule.createReferenc
 const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.freeze<AttachmentReferenceInput>({
   data:AppData,
   scan:value=>RichTextApi.scanAttachmentReferences(String(value||'')),
-  rewriteReferences:targets=>LibraryClearState.rewriteReferences(targets),
+  rewriteReferences:(targets,operation)=>LibraryClearState.rewriteReferences(targets,operation),
   withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
-  review:Object.freeze<AttachmentReferenceInput['review']>({hydrate:options=>ReviewEditor.hydrate(options),invalidateBindings:()=>ReviewEditor.invalidateBindings()}),
   background:Object.freeze<AttachmentReferenceInput['background']>({budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options)}),
   live:Object.freeze<AttachmentReferenceInput['live']>({
     fields:()=>document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection'),
@@ -2805,7 +2804,7 @@ AttachmentLibrary=AttachmentsModule.create(Object.freeze<AttachmentLibraryInput>
   notifications:NoticeCoordinator.presentation('attachments',Object.freeze({label:'Open attachments',run:async()=>{if(await goTab('library')){LibraryView.showSection('data');const panel=document.getElementById('library-attachments');if(panel instanceof HTMLDetailsElement){panel.open=true;panel.scrollIntoView({block:'start'});}}}})),
   onWorkStart:()=>{pwaWorkRevision++;},
   store:AttachmentStorage,processing:Exports,document,interactions:Interactions,
-  canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),
+  canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),assertToken:token=>AppOwnership.assertWriteToken(token,'manage attachments'),
   isActive:()=>document.getElementById('pane-library')?.classList.contains('on')===true&&document.getElementById('library-data')?.hidden===false,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>BackupIntegrity?.attachmentIssue(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');void goTab('library',{source:'attachment-library'});},
   openSource:async source=>{if(!await goTab('library',{source:'attachment-reference'}))return false;if(source.kind==='note')return LibraryView.revealNoteReference(source.key);if(source.kind==='day')return LibraryView.openDay(source.key);return false;},
   preparePdfOpen:()=>PdfDocuments.prepareNativeWindow(),
@@ -2813,7 +2812,7 @@ AttachmentLibrary=AttachmentsModule.create(Object.freeze<AttachmentLibraryInput>
   deletionGuard:async options=>{if(journalHasState(await AppData.restoreJournal.read()))throw new Error('Finish backup recovery before deleting attachments.');if(!options?.allowLibraryClearJournal&&journalHasState(await AppData.libraryClearJournal.read()))throw new Error('Finish Library data recovery before deleting attachments.');const token=AppOwnership.issueWriteToken('delete attachment'),revision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();if(dataset===null)throw new Error('Saved notes could not be verified.');return ()=>{AppOwnership.assertWriteToken(token,'delete attachment');return revision===richAssetReferenceRevision;};},
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,authority=>withRestoreSessionPersistenceSuppressed(()=>operation(authority))),
   quiesce:(operation,options)=>quiesceAttachmentMutation(operation,options),
-  removeReferences:id=>AttachmentReferences.removeEverywhere(id),
+  removeReferences:(id,_refs,assert)=>AttachmentReferences.removeEverywhere(id,assert),
   insert:(key,row)=>insertAttachmentIntoNote(key,row)
  }));
 const RichTextAttachmentPort=LibraryDocuments.richAttachmentPort;

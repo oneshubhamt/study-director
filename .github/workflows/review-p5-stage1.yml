@@ -135,6 +135,7 @@ jobs:
         file:
           - tests/browser/library/note-picker-authority.mjs
           - tests/browser/library/notes-management.mjs
+          - tests/browser/attachments/attachments.mjs
           - tests/browser/app/session-draft-edit.mjs
           - tests/browser/app/session-merge-timer.mjs
           - tests/browser/backup/restore-session-safety.mjs

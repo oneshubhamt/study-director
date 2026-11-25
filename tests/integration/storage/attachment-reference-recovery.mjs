@@ -61,7 +61,7 @@ for(const failure of ['active-session','session-rescue','saved-days'])for(const 
   assert.equal(t.scheduled.at(-1),30*60*1000,'unavailable sources use recovery retry rather than daily completion');
   assert.match(t.warnings.at(-1),/Previous findings are retained/);
   assert.equal(t.controller.attachmentState()?.lastOutcome,'unavailable','developer verification status must explain the incomplete scan');
-  await assert.rejects(()=>t.references.verifyAbsent(id));await assert.rejects(()=>t.references.removeEverywhere(id));assert.equal(t.stats().rewrites,0,'incomplete reference inventory cannot authorize reference surgery');
+  await assert.rejects(()=>t.references.verifyAbsent(id));await assert.rejects(()=>t.references.removeEverywhere(id,()=>{}));assert.equal(t.stats().rewrites,0,'incomplete reference inventory cannot authorize reference surgery');
   t.setFailure(failure==='saved-days'?'saved-days-recovered':'');
   const recovered=await t.controller.attachmentJob.run();assert.equal(recovered.status,'completed','source recovery must resume without a false not-due gate');
   assert.equal(t.stats().writes,1);assert.equal(t.stats().durable.issues[0]?.kind,'missing-file');assert.equal(t.stats().durable.progress,null);assert.ok(t.stats().durable.checkedAt);

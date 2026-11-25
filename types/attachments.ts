@@ -4,8 +4,8 @@ import type {RepositoriesModule} from '../source/core/repositories.ts';
 import type {WriteToken} from './ownership.ts';
 import type {AssetRow,AssetMetadata,AssetIssue} from './asset-storage.ts';
 import type {DailyView} from './repositories.ts';
-import type {NoteRecord,ActiveSession,SessionSnapshot} from './record-models.ts';
-import type {RewriteTarget} from './library-clear.ts';
+import type {NoteRecord,ActiveSession} from './record-models.ts';
+import type {RewriteTarget,ReferenceRewriteOperation} from './library-clear.ts';
 import type {WorkerProgress} from '../portable/worker-contracts.ts';
 import type {AuthorityOptions} from './mutation-coordinator.ts';
 import type {ScratchHandle} from './exports.ts';
@@ -24,11 +24,10 @@ export type SourceOptions={referencesOnly?:boolean;includeLive?:boolean;priority
 export type ReferenceSnapshot={notes:NoteRecord[];days:DailyView[];session:ActiveSession|null};
 export type ReferenceChange={changed:boolean;sources:number;rollback:(()=>Promise<boolean>)|null};
 export interface ReferenceCoordinatorInput{
- data:{notes:Pick<AppData['notes'],'readFreshPayload'|'updateValidatedRich'|'flush'>;dailyRecords:Pick<AppData['dailyRecords'],'get'|'list'|'save'>;activeSession:Pick<AppData['activeSession'],'load'|'nextRevision'|'save'>};
- review:{hydrate(input:{date:string;snapshotReview:SessionSnapshot['review']}):unknown;invalidateBindings():void};
+ data:{notes:Pick<AppData['notes'],'readFreshPayload'>;dailyRecords:Pick<AppData['dailyRecords'],'get'|'list'>;activeSession:Pick<AppData['activeSession'],'load'>};
  background:{budget():()=>boolean;yieldTask(options:{priority:'background'|'user-visible'}):Promise<unknown>};
  live:{fields():Iterable<HTMLTextAreaElement>;reviewDate():string;todayIso():string;noteKey(value:string|undefined):string};
- scan(value:string):ReferenceScan;rewriteReferences(targets:readonly RewriteTarget[]):Promise<unknown>;withPersistenceSuppressed<T>(operation:()=>Promise<T>):Promise<T>;
+ scan(value:string):ReferenceScan;rewriteReferences(targets:readonly RewriteTarget[],operation:ReferenceRewriteOperation):Promise<unknown>;withPersistenceSuppressed<T>(operation:()=>Promise<T>):Promise<T>;
 }
 export type AttachmentNoticeEvent={lifecycle:string;message:string};
 export type AttachmentProgress={stage:string;loadedBytes:number;activeBytes:number};
@@ -46,10 +45,10 @@ export interface AttachmentsInput{
  store:AssetStore;processing:ReturnType<ExportsModule['createCoordinator']>;document:Document;
  notifications:Pick<ReturnType<NoticeCoordinator['presentation']>,'begin'|'feedback'>;
  interactions:Pick<ReturnType<InteractionsModule['createController']>,'choose'|'confirm'|'input'>;
- canMutate():boolean;requireOwner():void;token():WriteToken;onWorkStart?:()=>void;cleanup?:()=>unknown;integrityIssue?:(id:string)=>AssetIssue|null;
+ canMutate():boolean;requireOwner():void;token():WriteToken;assertToken(token:WriteToken):unknown;onWorkStart?:()=>void;cleanup?:()=>unknown;integrityIssue?:(id:string)=>AssetIssue|null;
  sources(options?:SourceOptions&{referencesOnly?:false}):Promise<readonly AttachmentSource[]>;destinations():PromiseLike<readonly {key:string;label:string}[]>|readonly {key:string;label:string}[];insert(key:string,row:AssetRow):Promise<unknown>;
  renderReference(element:HTMLElement,reference:AttachmentSource):unknown;openSource(reference:AttachmentSource):Promise<boolean>;
- deletionGuard(options?:{allowLibraryClearJournal:boolean}):Promise<()=>boolean>;settle():Promise<unknown>;removeReferences(id:string,refs:readonly AttachmentSource[]):Promise<ReferenceChange|null>;
+ deletionGuard(options?:{allowLibraryClearJournal:boolean}):Promise<()=>boolean>;settle():Promise<unknown>;removeReferences(id:string,refs:readonly AttachmentSource[],assert:(rollback?:boolean)=>void):Promise<ReferenceChange|null>;
  runExclusive<T>(kind:string,operation:(authority?:{assert(options?:AuthorityOptions):unknown})=>Promise<T>):Promise<T>;
  quiesce?:<T>(operation:()=>Promise<T>,options?:{sources?:readonly AttachmentSource[];notes?:boolean})=>Promise<T>;
  isActive?:()=>boolean;openLibrary():void;preparePdfOpen?:()=>Window|null;openPdf(row:AssetRow,file:Blob,reserved:Window|null,release:()=>void):boolean|Promise<boolean>;

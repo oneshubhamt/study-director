@@ -5,11 +5,14 @@ import type {AssetRow} from './asset-storage.ts';
 import type {AuthorityOptions} from './mutation-coordinator.ts';
 import type {DiagnosticInput} from './backup-operation-diagnostics.ts';
 import type {SessionSnapshot} from './record-models.ts';
+import type {ReferenceSnapshot} from './attachments.ts';
 type AppData=ReturnType<RepositoriesModule['createAppData']>;
 export type LibrarySelection=Readonly<{savedDays:boolean;notes:boolean;attachments:boolean}>;
 export type ReferenceSource={kind:string;key:string;label:string;ids:Iterable<string>};
 export type ProtectedReference={attachmentId:string;kind:string;key:string;label:string};
 export type RewriteTarget={kind:string;key:string;label:string;attachmentIds:readonly string[];expectedValue?:string};
+/** In-memory, operation-owned compensation for individual attachment deletion. The durable Library-clear journal is separate. */
+export type ReferenceRewriteOperation={snapshot:ReferenceSnapshot;assert(rollback?:boolean):void;record(undo:()=>Promise<void>):void};
 export type LibraryPlan=ReturnType<LibraryClearModule['createPlan']>;
 export type LibraryPolicy={forceReferenced?:boolean;deleteIds?:readonly string[];protectedIds?:readonly string[]};
 export type ScopedSnapshot<T>={mode:'all'|'selected';entries:T};
@@ -17,7 +20,7 @@ export type LibraryRawRow=Record<string,unknown>;
 export type RollbackShape={format:'study-director.library-clear-rollback';version:1;notes:{mode:'all'|'selected';entries?:Record<string,LibraryRawRow>|null}|null;dailyRecords:{mode:'all'|'selected';entries?:(LibraryRawRow&{date:string})[]|null}|null;sessionCaptured:unknown;activeSession:LibraryRawRow|null;attachmentMetadata:(LibraryRawRow&{id:string})[]};
 export interface LibraryStatePorts{
  createRollbackScope:LibraryClearModule['createRollbackScope'];withPersistenceSuppressed<T>(operation:()=>Promise<T>):Promise<T>;nowIso?:()=>string;
- data:{notes:Pick<AppData['notes'],'readFreshPayload'|'replace'|'updateValidatedRich'|'flush'|'failure'>;dailyRecords:Pick<AppData['dailyRecords'],'get'|'list'|'saveBatch'|'restoreBatch'>;activeSession:Pick<AppData['activeSession'],'load'|'nextRevision'|'save'|'clear'>};
+ data:{notes:Pick<AppData['notes'],'get'|'readFreshPayload'|'replace'|'updateValidatedRich'|'flush'|'failure'>;dailyRecords:Pick<AppData['dailyRecords'],'get'|'list'|'save'|'verifyCanonical'|'saveBatch'|'restoreBatch'>;activeSession:Pick<AppData['activeSession'],'load'|'nextRevision'|'save'|'clear'>};
  references:{scan(value:string):{assetIds:readonly string[]};remove(value:string,ids:readonly string[]):{value:string;removed:{total:number}}|null;listSources():Promise<readonly ReferenceSource[]>};
  attachments:{inventory():Promise<readonly AssetRow[]>;verifyMetadata(rows:readonly AssetRow[]):Promise<unknown>;restoreMetadata(rows:readonly unknown[]):Promise<unknown>};
  review:{hydrate(input:{date:string;snapshotReview:SessionSnapshot['review']}):unknown;invalidateBindings():void};
