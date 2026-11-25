@@ -154,10 +154,12 @@ assert.match(recovery,/reconcileNotes:\(importedNotes,deletions=\[\]\)=>input\.r
 assert.match(recovery,/restoreNotesSnapshot:snapshotNotes=>input\.recoveryNotes\.lifecycle\.run\('restored-notes-snapshot',[\s\S]*allowDuringRecoveryQuiescence:true/u,'exact note-snapshot restoration lifecycle semantics live in the checked Backup runtime owner');
 assert.doesNotMatch(reconciliationUi,/\bAppData\b|IndexedDb|localStorage|notes\.replace|dailyRecords/u,'scratch reconciliation cannot acquire a canonical persistence path');
 const restoreAttemptAt=backup.indexOf('async function restoreBackupAttemptWithOperation'),reconciliationAt=backup.indexOf('noteResult=await NoteReconciliation.resolve',restoreAttemptAt),mutationAt=backup.indexOf('return runRestoreMutation(',reconciliationAt);
-const safetyAt=backup.indexOf('captureLocalSafetyCopy(stored',mutationAt),journalAt=backup.indexOf('restoreJournal.prepare',safetyAt),verificationAt=backup.indexOf('verifyRestoreCommit(expectedCommit',journalAt),journalClearAt=backup.indexOf('restoreJournal.clear(restoreId)',verificationAt);
+const safetyAt=backup.indexOf('captureLocalSafetyCopy(stored',mutationAt),journalAt=backup.indexOf('prepareRestoreJournal({id:restoreId',safetyAt),verificationAt=backup.indexOf('verifyRestoreCommit(expectedCommit',journalAt),journalClearAt=backup.indexOf('retireRestoreJournal(restoreId)',verificationAt);
 assert.ok(reconciliationAt>0&&mutationAt>reconciliationAt,'user reconciliation must finish before the managed canonical mutation boundary');
 assert.ok(safetyAt>mutationAt&&journalAt>safetyAt,'verified local safety capture must precede restore-journal preparation and canonical writes');
 assert.ok(verificationAt>journalAt&&journalClearAt>verificationAt,'restore journal cannot clear before canonical read-back verification succeeds');
+assert.match(backup,/async function prepareRestoreJournal[\s\S]*?await AppData\.restoreJournal\.prepare\(value\)/u,'prepared journal wrapper uses the actual repository port');
+assert.match(backup,/async function retireRestoreJournal[\s\S]*?assertAuthority\(options\);[\s\S]*?await AppData\.restoreJournal\.clear\(id,options\)/u,'retirement wrapper uses the fenced repository port');
 assert.match(backup,/rollbackImportedState\(rollbackJournal,rollbackDeletionState\)/u,'failed post-side-effect restore retains the verified rollback path');
 assert.match(backup,/resolvedAssetReferenceIds\(resolvedPlan,signal/u,'attachment publication is derived from the resolved reconciliation plan');
 assert.match(backup,/applyResolvedActiveSession\(resolvedPlan,\{clear:clearSession,keepRunning:sync&&session==='graft'\}\)/u,'Active Session reconciliation remains delegated to the checked restore path');

@@ -159,14 +159,14 @@ On-demand diagnostics read six owner-managed metadata summaries in parallel with
 
 Interactive reads may offer rescue data when browser storage fails. Destructive cleanup, attachment reference surgery, Library safety capture and rollback verification explicitly request strict Saved-Day and Active-Session reads. Valid absence is different from an unavailable source; a mixed session result containing both rescue data and an error is not a complete reference inventory. Strict reads include the local recovery/deletion inputs as well as IndexedDB.
 
-Library clear captures the entire affected scope in a durable journal before changing it. Recovery uses that journal and verifies the restored canonical state before journal retirement. If verification cannot read the data, recovery remains pending rather than reporting success.
+Library clear captures the entire affected scope in a durable journal before changing it. Journal preparation, phase updates and retirement at the application boundary use the original protected mutation authority and the matching unexpired durable lease in the metadata transaction. Incomplete mutations replay and verify the preimage before retirement. Prepared-only and verified terminal phases retire without rewriting data. If a write receipt is ambiguous, absence must be proven before ordinary writes resume; pending or unreadable evidence blocks writes. A different journal's absence cannot clear an unrelated recovery fault.
 
 Backup preparation accepts deletion reconciliation only when its boolean result is explicitly true. Both full and incremental preparation enforce that rule, including full captures whose other writers were already settled. Failed settlement can support a clearly labelled rescue export but cannot authorize a complete managed checkpoint or local restore preflight. A read-only export cannot settle deletions; it requires a canonical fast fence to claim complete state, otherwise deletion coverage remains uncertain.
 
 Acceptance invariants for destructive background work:
 
 1. Attachment removal requires a complete, current reference inventory. An unavailable source, even with usable older rescue data, authorizes no removal and retains retry intent.
-2. Library mutation requires a complete durable rollback image before deletion. Its recovery journal retires only after strict read-back verifies restoration. Unknown state must preserve the journal and block further destructive work.
+2. Library mutation requires a complete durable rollback image before deletion. Its recovery journal retires after proof that mutation never started, or after final verification of the commit or rollback. Unknown state must preserve the journal and block further destructive work.
 3. A canonical backup requires successful deletion reconciliation and readable canonical ledgers. False, missing and thrown settlement results forbid canonical publication. A deliberate rescue export must report uncertain deletion state. Earlier settlement is not a substitute for proof at capture time.
 4. Known-empty data remains valid. After a transient failure clears, cleanup, rollback and backup capture must succeed with exact intended data and no lost pending intent.
 
