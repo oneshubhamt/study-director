@@ -1,0 +1,69 @@
+name: Tauri spike QA
+
+on:
+  push:
+    branches: [tauri-spike]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-spike-qa
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Toolchain identity
+        run: |
+          node --version
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+      - name: Stage packaged frontend
+        run: node build/stage-tauri.mjs
+      - name: Resolve initial lockfile or verify committed lock
+        shell: pwsh
+        run: |
+          if (-not (Test-Path src-tauri/Cargo.lock)) {
+            cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          cargo metadata --manifest-path src-tauri/Cargo.toml --locked --no-deps --format-version 1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash src-tauri/Cargo.lock -Algorithm SHA256
+      - name: Preserve resolved lockfile for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-spike-cargo-lock-${{ github.sha }}
+          path: src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+      - name: Rust unit tests (packaged origin)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features custom-protocol
+      - name: Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --features custom-protocol --all-targets -- -D warnings
+      - name: Build experimental Windows executable
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --features custom-protocol
+      - name: Preserve experimental executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-spike-unqualified-exe-${{ github.sha }}
+          path: src-tauri/target/release/study-director-tauri-spike.exe
+          if-no-files-found: error
+          retention-days: 7
+      - name: Packaged WebView2 startup and storage smoke
+        run: node tests/helpers/tauri-smoke.mjs
