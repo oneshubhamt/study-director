@@ -4,6 +4,10 @@
 
 Read the [source audit, version matrix and commit index](PHASE-8-INTAKE.md) alongside this roadmap. The intake records the starting evidence. P8.0 must repeat the comparison on the actual Phase 7 exit SHA. Follow the [execution discipline](../../AGENTS.md), [decision D-15](DECISIONS.md), [verification procedure](../VERIFICATION.md) and [test programme](../../tests/README.md).
 
+## Owner decisions for parity
+
+The owner confirmed F33’s Drive Disconnect behavior on 2026-11-25. Disconnect ends the connection on the initiating device and preserves the Google account grant. P8.2 must assert zero OAuth revocation calls, including during an active sync, and prove that a second connected device can still sync. Record any other disputed F33 behavior in its own ledger row. Bring the specific alternatives, observations and user impact to the owner in the affected pass before changing that behavior.
+
 ## P8.0 · Freeze the inputs and turn history into a worklist
 
 1. Record the Phase 7 certification, its exact source SHA, retained artifact and any limitations. Pin F33 at `d69f2053629a7e24d106a969f0d69eac65b4996b`. Check the release identifiers in both source and built manifests. If a later release appears on `main`, list it separately for the owner. A moving ref must never silently change the F33 target.
