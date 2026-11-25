@@ -63,7 +63,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
     dataset={};isConnected=true;value='';
     setAttribute(){}
   }
-  let pausedSave=null;
+  let pausedSave=null,pausedRead=null,ownerRevision=1,canWrite=true,mutations=0;
   const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,Date,setTimeout,clearTimeout,queueMicrotask,HTMLTextAreaElement:TextArea});
   vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
   vm.runInContext(readRuntimeSource('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});
@@ -75,19 +75,21 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
       get:async(target,options)=>{
         const value=await app.dailyRecords.get(target,options);
         if(!intercepted&&options?.strict===true){intercepted=true;enteredResolve();await release;}
+        if(pausedRead&&options?.strict===true){const pending=pausedRead;pausedRead=null;pending.enter();await pending.wait;}
         return value;
       },
       save:async(...args)=>{
+        mutations++;
         if(pausedSave){const pending=pausedSave;pending.enter();await pending.wait;if(pending.fail)throw new Error('old Diary write failed');}
         return app.dailyRecords.save(...args);
       },
-      remove:(...args)=>app.dailyRecords.remove(...args),
+      remove:(...args)=>{mutations++;return app.dailyRecords.remove(...args);},
       verifyCanonical:(...args)=>app.dailyRecords.verifyCanonical(...args),
       verifyCanonicalAbsent:(...args)=>app.dailyRecords.verifyCanonicalAbsent(...args),
       timestamp:(...args)=>app.dailyRecords.timestamp(...args)
     }),
     codec:Object.freeze({createDiaryRecord:()=>{throw new Error('study-record path must not create a diary record');}}),
-    ownership:Object.freeze({canMutate:()=>true,revision:()=>1}),
+    ownership:Object.freeze({canMutate:()=>canWrite,revision:()=>ownerRevision}),
     text:Object.freeze({clampEditorContent:value=>String(value??''),editorContentWithinLimits:()=>true,plain:value=>String(value??''),isRich:()=>false}),
     richText:Object.freeze({closeField:()=>true,syncField:()=>true,validatedInput:()=>null}),
     dates:Object.freeze({isSupported:value=>/^\d{4}-\d{2}-\d{2}$/.test(value),insights:()=>Object.freeze({dayOfWeek:3,dayName:'Wednesday'})}),
@@ -125,6 +127,28 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
     persistence.DiaryEditor.clear(field);
   }
   pausedSave=null;
+
+  // A read begun by a former owner cannot use a newly acquired write lease.
+  // Exercise both the direct Review commit and the Diary deletion pre-read.
+  for(const action of ['save','delete']){
+    for(const reacquire of [false,true]){
+      const before=await app.dailyRecords.get(date,{strict:true}),beforeMutations=mutations;
+      let enter,release;
+      const started=new Promise(resolve=>{enter=resolve;}),wait=new Promise(resolve=>{release=resolve;});
+      pausedRead={enter,wait};
+      const operation=action==='save'
+        ?persistence.DailyReflectionPersistence.commit(date,'stale owner reflection',{expectedCanonical:before.reflection})
+        :persistence.DiaryEditor.deleteEntry(date);
+      const rejected=assert.rejects(operation,/Daily Reflection ownership changed/);
+      await started;
+      canWrite=false;ownerRevision++;
+      if(reacquire){canWrite=true;ownerRevision++;}
+      release();await rejected;
+      assert.equal(mutations,beforeMutations,'the former owner must not reach a new repository mutation');
+      assert.deepEqual(await app.dailyRecords.get(date,{strict:true}),before,'the canonical Saved Day must remain unchanged');
+      canWrite=true;ownerRevision++;
+    }
+  }
 }
 
 const beforePlanDraftStrict=strictCount();

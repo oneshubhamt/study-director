@@ -28,12 +28,17 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     if(!dates.isSupported(date))return snapshot(null);
     return snapshot(await records.get(date));
   }
+  function assertReflectionOwner(revision:number){
+    if(!ownership.canMutate()||ownership.revision()!==revision)throw new Error('Daily Reflection ownership changed. Reopen it before editing.');
+  }
   async function commit(date:string,value:string,options:Readonly<{expectedCanonical?:string;backupCapture?:boolean}>={}){
     if(!ownership.canMutate())throw new Error('Use the primary tab to edit Daily Reflections.');
+    const ownerRevision=ownership.revision();
     if(!dates.isSupported(date))throw new Error('That reflection date is not available.');
     const candidate=text.clampEditorContent(value,limits.maxReflectionChars);
     if(!text.editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
     const current=await records.get(date,{strict:true}),currentCanonical=String(current?.reflection||'');
+    assertReflectionOwner(ownerRevision);
     if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     const hasContent=!!String(candidate||'').trim(),backupCapture=options.backupCapture===true;
     if(currentCanonical===candidate){
@@ -133,7 +138,9 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   function flush(field:HTMLTextAreaElement,options:FlushOptions={}){const state=activeState(field);return state&&ownership.canMutate()?state.lane.flush(options):Promise.reject(new Error('Diary editor is no longer active for the current study owner.'));}
   async function deleteEntry(date:string,options:Readonly<{backupCapture?:boolean}>={}){
     if(!ownership.canMutate()||!dates.isSupported(date))return false;
+    const ownerRevision=ownership.revision();
     const current=await records.get(date,{strict:true});
+    assertReflectionOwner(ownerRevision);
     if(!current){await records.verifyCanonicalAbsent(date);return true;}
     const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true});
     return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
