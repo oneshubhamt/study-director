@@ -10,6 +10,8 @@ async function editReflection(text,quality){
   catch(error){const state=await page.evaluate(`(()=>{const d=__PWA6,field=document.getElementById('daily-reflection');return {startup:d.StartupLifecycle.status(),owner:d.AppOwnership.status(),pane:document.querySelector('.pane.on')?.id,field:{disabled:field?.disabled,readOnly:field?.readOnly,ownership:field?.dataset.ownershipUi,hidden:field?.hidden},rich:d.RichTextRuntime.status(),ui:document.documentElement.dataset.studyDirectorUiMutable}})()`);throw new Error(error.message+'; diagnostics='+JSON.stringify(state),{cause:error});}
   await page.evaluate(`(()=>{const editor=document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor');editor.focus();const range=document.createRange();range.selectNodeContents(editor);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);})()`);
   await page.send('Input.insertText',{text});
+  const qualityButton=await page.evaluate(`(()=>{const b=document.querySelector('[data-quality="${quality}"]');return {disabled:b?.disabled,inert:b?.inert,ownership:b?.dataset.ownershipUi,reviewMode:document.getElementById('pane-review')?.dataset.reviewMode};})()`);
+  assert.equal(qualityButton.disabled,false,'quality must be enabled before an ordinary edit: '+JSON.stringify(qualityButton));assert.equal(qualityButton.inert,false,'quality must be admitted before an ordinary edit: '+JSON.stringify(qualityButton));
   await page.click(`[data-quality="${quality}"]`);
   await page.evaluate(`document.querySelector('.sd-rte[data-sd-rich-surface="reflection"] .sd-rte-editor')?.blur()`);
   return page.evaluate(`(async()=>{const d=__PWA6;d.RichTextRuntime.flushEditors();await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const session=await d.AppData.activeSession.load();return {accepted:session.value?.snapshot?.review?.studyQuality===${quality},review:session.value?.snapshot?.review?{...session.value.snapshot.review,reflection:StudyDirectorRichText.toPlainText(session.value.snapshot.review.reflection)}:null,record:await d.AppData.dailyRecords.get(d.todayISO())};})()`);
@@ -63,7 +65,7 @@ try{
     throw new Error(error.message+'; diagnostics='+JSON.stringify(diagnostics),{cause:error});
   }
   const newer=await editReflection('Newer active-session review',5);
-  assert.equal(newer.accepted,true);assert.equal(newer.review.reflection,'Newer active-session review');assert.equal(newer.review.studyQuality,5);assert.equal(newer.record,null);result.checks.reviewPersistsOnlyInActiveSessionUntilSave=true;
+  assert.equal(newer.accepted,true,JSON.stringify(newer));assert.equal(newer.review.reflection,'Newer active-session review');assert.equal(newer.review.studyQuality,5);assert.equal(newer.record,null);result.checks.reviewPersistsOnlyInActiveSessionUntilSave=true;
 
   await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'second ownership after reload'});await page.click('[data-tab="review"]');await waitFor(()=>page.evaluate(`document.querySelector('.pane.on')?.id==='pane-review'&&StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection').value)==='Newer active-session review'`),{label:'newer review reload through Review navigation'});
   await page.click('[data-action="save-day"]');

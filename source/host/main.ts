@@ -3815,8 +3815,8 @@ const BlockedActionHint=(()=>{
 const OwnershipUiProjection=(()=>{
   type OwnershipStateValue=ReturnType<typeof AppOwnership.status>['state'];
   type OwnershipUiElement=HTMLElement&Partial<Pick<HTMLInputElement,'disabled'|'readOnly'>>;
-  type OwnershipProjectionMode='drag'|'readonly'|'disabled'|'action';
-  type OwnershipBaseline=Readonly<{mode:OwnershipProjectionMode;disabled:boolean|null;readOnly:boolean|null;draggable:string|null;ariaDisabled:string|null;ariaReadonly:string|null}>;
+  type OwnershipProjectionMode='drag'|'readonly'|'disabled'|'action'|'startup-inert';
+  type OwnershipBaseline=Readonly<{mode:OwnershipProjectionMode;inert:boolean;disabled:boolean|null;readOnly:boolean|null;draggable:string|null;ariaDisabled:string|null;ariaReadonly:string|null}>;
   type OwnershipUiSnapshot=Readonly<{format:'study-director.ownership-ui-snapshot';contractVersion:1;state:OwnershipStateValue;canMutate:boolean;activeSessionBlocked:boolean;transitional:boolean;revision:number;reason:string}>;
   const TRANSITIONAL_STATES=new Set<OwnershipStateValue>([
     OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
@@ -3863,7 +3863,7 @@ const OwnershipUiProjection=(()=>{
   }
   function captureBaseline(element:OwnershipUiElement,mode:OwnershipProjectionMode):OwnershipBaseline{
     const prior=baselines.get(element);if(prior?.mode===mode)return prior;if(prior)releaseElement(element);
-    const baseline=Object.freeze({mode,disabled:typeof element.disabled==='boolean'?element.disabled:null,readOnly:typeof element.readOnly==='boolean'?element.readOnly:null,draggable:element.getAttribute('draggable'),ariaDisabled:element.getAttribute('aria-disabled'),ariaReadonly:element.getAttribute('aria-readonly')});
+    const baseline=Object.freeze({mode,inert:element.inert,disabled:typeof element.disabled==='boolean'?element.disabled:null,readOnly:typeof element.readOnly==='boolean'?element.readOnly:null,draggable:element.getAttribute('draggable'),ariaDisabled:element.getAttribute('aria-disabled'),ariaReadonly:element.getAttribute('aria-readonly')});
     baselines.set(element,baseline);return baseline;
   }
   function restoreAttribute(element:OwnershipUiElement,name:string,value:string|null){if(value===null){if(element.hasAttribute(name))element.removeAttribute(name);}else if(element.getAttribute(name)!==value)element.setAttribute(name,value);}
@@ -3872,7 +3872,8 @@ const OwnershipUiProjection=(()=>{
     if(baseline){
       // Release only properties owned by the projection mode. Feature renders
       // may independently enable a read-only textarea while startup is held.
-      if(baseline.mode==='readonly'){
+      if(baseline.mode==='startup-inert')element.inert=baseline.inert;
+      else if(baseline.mode==='readonly'){
         if(baseline.readOnly!==null&&element.readOnly!==baseline.readOnly)element.readOnly=baseline.readOnly;
         restoreAttribute(element,'aria-readonly',baseline.ariaReadonly);
       }else{
@@ -3889,12 +3890,14 @@ const OwnershipUiProjection=(()=>{
   function projectionMode(element:OwnershipUiElement):OwnershipProjectionMode{
     if(element.matches('.si.draft[draggable]'))return 'drag';
     if(element.matches('textarea,input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"])'))return 'readonly';
-    if(element.matches('button,select,input,[aria-pressed]'))return 'disabled';
+    // During startup, keep feature-owned disabled state independent of admission.
+    if(element.matches('button,select,input,[aria-pressed]'))return StartupLifecycle?.status().fullyInitialized?'disabled':'startup-inert';
     return 'action';
   }
   function blockElement(element:OwnershipUiElement,reason='ownership'){
     const mode=projectionMode(element);captureBaseline(element,mode);element.dataset['ownershipUiReason']=reason;if(element.dataset['ownershipUi']!==mode)element.dataset['ownershipUi']=mode;
     if(mode==='readonly'){if(!element.readOnly)element.readOnly=true;if(element.getAttribute('aria-readonly')!=='true')element.setAttribute('aria-readonly','true');return;}
+    if(mode==='startup-inert'){if(!element.inert)element.inert=true;return;}
     if(mode==='disabled'){if(!element.disabled)element.disabled=true;if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');return;}
     if(mode==='drag'&&element.draggable)element.draggable=false;if(element.getAttribute('aria-disabled')!=='true')element.setAttribute('aria-disabled','true');
   }
@@ -3913,10 +3916,10 @@ const OwnershipUiProjection=(()=>{
   function guardEvent(event:Event){
     const target=event.target instanceof Element?event.target.closest<HTMLElement>('[data-ownership-ui]'):null;if(!target)return;
     const activeSessionReason=target.dataset['ownershipUiReason']==='active-session';if(current.canMutate&&!activeSessionReason)return;const mode=target.dataset['ownershipUi'];
-    if(event.type==='click'&&mode!=='action')return;if(event.type!=='click'&&!BLOCKED_EVENT_TYPES.includes(event.type))return;
+    if(event.type==='click'&&mode!=='action'&&mode!=='startup-inert')return;if(event.type!=='click'&&!BLOCKED_EVENT_TYPES.includes(event.type))return;
     event.preventDefault();event.stopImmediatePropagation();if(event.type==='click'&&!activeSessionReason)AppOwnership.requirePrimary('use this control');
   }
-  function install(){if(observer)return false;BLOCKED_EVENT_TYPES.forEach(type=>document.addEventListener(type,guardEvent,true));document.addEventListener('click',guardEvent,true);observer=new MutationObserver(mutations=>{if(mutations.some(mutationNeedsProjection))queueApply();});observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','readonly','aria-disabled','aria-readonly','draggable']});apply();return true;}
+  function install(){if(observer)return false;BLOCKED_EVENT_TYPES.forEach(type=>document.addEventListener(type,guardEvent,true));document.addEventListener('click',guardEvent,true);observer=new MutationObserver(mutations=>{if(mutations.some(mutationNeedsProjection))queueApply();});observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','readonly','aria-disabled','aria-readonly','draggable','inert']});apply();return true;}
   function snapshot(){return current;}
   return Object.freeze({format:'study-director.ownership-ui-projection',contractVersion:1,apply,install,snapshot});
 })();
