@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 active rollback / hosted audit pass · 2026-11-25
+
+- Owner explicitly authorized complete Stage 1 and GitHub Actions changes to overcome local execution limits; starting SHA `3f67365884d3d316e355685f62906f13825353a4`. Keep Phase 6, 7 promotion/device and 8 boundaries unchanged.
+- Objectives: fence suspend/Yield/reset/finish/restore against newer canonical successors and original authority/lifecycle loss; use exact conditional repository operations including explicit absence; no blind emergency compensation when canonical identity cannot be established; retain ordinary verified failure recovery and independent Plan draft; trace actions and actual ports, test committed-write verification failures and successor/authority interleavings.
+- Hosted execution: add branch-scoped REVIEW-P5 workflow, pinned compiler/lint, negative gates, fast tests, source/generated/minified verification and isolated session journeys. Inspect results at exact source SHA, repair failures without relaxing gates; continue two-way source and type audit. No workflow deployment or promotion.
+- Status: active, not closed.
+
 ## REVIEW-P5 · Stage 1 continuation 2 — PARTIAL / CORRECTED · 2026-11-25
 
 - Resumed remote docs checkpoint `f8a82b7b69e47361f3f3e48b7a28a4c645bebf1b`; final application/test head this pass `d2285937d96777667377d8a0a5bf225c5217f906`. Scope unchanged. Local checkout/network/pinned toolchain unavailable; GitHub source reads, isolated actual-function simulated-port witnesses and hosted pinned QA used. No local full suite.

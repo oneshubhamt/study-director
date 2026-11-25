@@ -1,0 +1,83 @@
+name: REVIEW-P5 Stage 1 audit
+
+on:
+  push:
+    branches: [ts-exp]
+    paths:
+      - 'source/**'
+      - 'types/**'
+      - 'tests/**'
+      - 'build/**'
+      - 'portable/**'
+      - 'rich-text/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/review-p5-stage1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-p5-stage1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-fast:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: Negative type and vendor declaration gates
+        run: npm run test:release:types
+      - name: Complete fast correctness suite
+        run: npm run test:fast
+      - name: Authored syntax, dependencies and deployment contracts
+        run: |
+          npm run test:release:syntax
+          npm run test:release:dependencies
+          npm run test:release:deployment
+      - name: Source build and generated verification
+        run: |
+          npm run build
+          npm run verify
+          npm run test:release:generated-syntax
+      - name: Minified deployment verification (no deployment)
+        run: |
+          npm run stage:firebase:minified
+          npm run test:release:minified
+  session-browser:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Isolated session transition and recovery journeys
+        run: |
+          for file in tests/browser/app/session-draft-edit.mjs tests/browser/app/session-merge-timer.mjs tests/browser/backup/restore-session-safety.mjs tests/browser/backup/session-handoff-journeys.mjs; do
+            echo "=== $file ==="
+            node "$file"
+          done
