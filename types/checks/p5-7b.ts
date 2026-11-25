@@ -52,7 +52,7 @@ recoveryModule.createKeptVersionsView(Object.freeze({document,count:()=>keptVers
 const providerPort=Object.freeze({
   bringInRepositoryProvider:(id:string,options:Parameters<RecoveryHostInput['providers']['bringInRepositoryProvider']>[1])=>backupRuntime.providers.bringInRepositoryProvider(id,options),
   restoreRepositoryProviderVersion:(id:string,options:Parameters<RecoveryHostInput['providers']['restoreRepositoryProviderVersion']>[1])=>backupRuntime.providers.restoreRepositoryProviderVersion(id,options),
-  removeRepositoryProviderVersion:(id:string,checkpointId:string)=>backupRuntime.providers.removeRepositoryProviderVersion(id,checkpointId),
+  removeRepositoryProviderVersion:(id:string,checkpointId:string,assertOrigin:()=>void)=>backupRuntime.providers.removeRepositoryProviderVersion(id,checkpointId,assertOrigin),
   cancelForeground:(reason:string,id:string)=>backupRuntime.providers.cancelForeground(reason,id),
   configureManagedRecovery:(port:Parameters<RecoveryHostInput['providers']['configureManagedRecovery']>[0])=>backupRuntime.providers.configureManagedRecovery(port),
   configurePendingBackupRetry:(port:Parameters<RecoveryHostInput['providers']['configurePendingBackupRetry']>[0])=>backupRuntime.providers.configurePendingBackupRetry(port),
@@ -62,6 +62,9 @@ const providerPort=Object.freeze({
   suspendBackground:(reason:string,options?:Parameters<RecoveryHostInput['providers']['suspendBackground']>[1])=>backupRuntime.providers.suspendBackground(reason,options)
 }) satisfies RecoveryHostInput['providers'];
 void providerPort;
+
+// @ts-expect-error -- explicit destructive requests must carry originating ownership.
+backupRuntime.providers.removeRepositoryProviderVersion('device-folder','checkpoint');
 
 // @ts-expect-error -- kept-version review must consume canonical PendingReview rows, not arbitrary records.
 recoveryModule.createKeptVersions({...keptInput,reviews:Object.freeze({list:async()=>[{id:'bad'}]})});
