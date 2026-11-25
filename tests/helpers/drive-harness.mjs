@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {EXTERNAL_REPOSITORY_IDENTITIES} from '../../contracts/canonical-identities.mjs';
-const source=fs.readFileSync(new URL('../../source/external/drive.js',import.meta.url),'utf8')
+const providerSource=fs.readFileSync(new URL('../../source/external/drive.js',import.meta.url),'utf8');
+const webConnectionSource=fs.readFileSync(new URL('../../source/external/drive-web-connection.js',import.meta.url),'utf8');
+const renderSource=value=>value
  .replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_RELEASE_ID@@','vb8')
  .replaceAll('@@SD_GOOGLE_OAUTH_CLIENT_ID@@','306494096916-p48tjuv0ni01c11a0dp4ini9gp3dafdi.apps.googleusercontent.com')
  .replaceAll('@@SD_DRIVE_SESSION_STORAGE_KEY@@','studyDirector.driveSession.v1')
@@ -22,7 +24,7 @@ export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
 // The profile this test's page belongs to and how it settles a Drive folder:
 // only its own folder continues.
 const defaultBind=async info=>info.mine?'continue':'refuse';
-export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01'}={}){
+export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01',native=false,profileFolder=()=>''}={}){
   const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],folderWrites:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
   // state.offline: the browser says it is offline (navigator.onLine).
   // state.driveClockAheadMs: how far Drive's clock is ahead of this device's
@@ -168,7 +170,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
   const document={scripts,head:{appendChild(node){scripts.push(node);queueMicrotask(()=>node.onload&&node.onload());return node;}},body:{appendChild(){return null;}},createElement(tag){return {tagName:String(tag).toUpperCase(),remove(){},setAttribute(){},appendChild(){},style:{},src:'',async:false,defer:false,onload:null,onerror:null};},getElementById(){return null;}};
   const oauth={hasGrantedAllScopes(response,scope){return String(response.scope||'').split(/\s+/).includes(scope);},initTokenClient(config){return {requestAccessToken(){queueMicrotask(()=>config.callback({access_token:`token-${state.requests.length+1}`,expires_in:state.expiresIn,token_type:'Bearer',scope:state.scope}));}};},revoke(token,callback){queueMicrotask(()=>callback({successful:true}));}};
   state.releasedDownloads=0;
-  const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy,receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},device:()=>device(),profile:{id:()=>profileId(),name:()=>profileName(),bind:async info=>{state.binds.push(info);return bind(info);},deleted:info=>{state.deletedSignals.push(info);},controls:control=>{state.libraryControl=control;}},providers:{register(config){provider=config;return registerProvider?registerProvider(config):true;}}}};
+  const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy,receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},checksum:digest,limits:{maxFileBytes:20*1024*1024},device:()=>device(),profile:{id:()=>profileId(),name:()=>profileName(),email:()=>native?email:'',folder:()=>profileFolder(),bind:async info=>{state.binds.push(info);return bind(info);},deleted:info=>{state.deletedSignals.push(info);},controls:control=>{state.libraryControl=control;}},providers:{register(config){provider=config;return registerProvider?registerProvider(config):true;}}}};
   const harnessSetTimeout=(fn,ms,...args)=>{if(clock)return clock.setTimeout(()=>fn(...args),ms);const timer=setTimeout(fn,ms,...args);if(Number(ms)>5000)timer.unref?.();return timer;};
   const harnessClearTimeout=id=>clock?clock.clearTimeout(id):clearTimeout(id);
   class MockXMLHttpRequest{
@@ -194,6 +196,20 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       }catch(error){if(!this.controller.signal.aborted)this.onerror?.(error);}
     })();}
   }
+  // Tokenless stand-in for the native host contract. The shared provider
+  // receives only an opaque auth identity and authorized Response.
+  state.nativeEpoch=0;state.nativeConnected=false;state.nativeHeaders=[];
+  const nativeFactory=({onInvalidated})=>{
+    const listeners=new Set(),notify=()=>{for(const listener of listeners)listener();};
+    const identity=()=>state.nativeConnected?'native-'+state.nativeEpoch:null;
+    const invalidate=expected=>{if(expected!==identity())return false;state.nativeConnected=false;state.nativeEpoch++;onInvalidated();notify();return true;};
+    state.replaceNativeConnection=()=>{state.nativeEpoch++;state.nativeConnected=true;onInvalidated();notify();};
+    return Object.freeze({kind:'native',identity,prepare:async()=>{},authorize:async()=>{if(!state.nativeConnected)state.replaceNativeConnection();},
+      connected:()=>state.nativeConnected,automaticConfigured:()=>state.nativeConnected,connectionExpiresAt:()=>0,subscribeConnection:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
+      restoreSession:()=>{},disconnect:async expected=>invalidate(expected),invalidate,release:()=>{},
+      request:async(url,options,expected)=>{assert.equal(expected,identity());const headers=new Headers(options.headers);assert.equal(headers.has('Authorization'),false);state.nativeHeaders.push([...headers]);headers.set('Authorization','Bearer token-native-fixture');const response=await mockFetch(url,{...options,headers});if(expected!==identity())throw new Error('native authorization changed');return response;}
+    });
+  };
   const context=vm.createContext({navigator:{get onLine(){return state.offline!==true;}},Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},localStorage,addEventListener,removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
-  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context,fetch:mockFetch};
+  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});if(native)context.createStudyDirectorDriveConnection=nativeFactory;else vm.runInContext(renderSource(webConnectionSource),context,{filename:'source/external/drive-web-connection.js'});vm.runInContext(renderSource(providerSource),context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context,fetch:mockFetch};
 }

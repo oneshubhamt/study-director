@@ -5,21 +5,16 @@
   Source-available for personal and noncommercial use only.
   See LICENSE.txt and NOTICE.txt for full terms.
 
-  Configure GOOGLE_OAUTH_CLIENT_ID below with the Web OAuth client ID for the
-  deployed Study Director origin. Google-specific code remains outside core.
+  Shared managed-repository protocol. The build supplies one platform
+  connection owner; this file does not handle bearer credentials.
 */
 (function(){
   'use strict';
 
   const PLUGIN_VERSION='@@SD_RELEASE@@';
-  const GOOGLE_OAUTH_CLIENT_ID='@@SD_GOOGLE_OAUTH_CLIENT_ID@@';
-  // Each profile on the device keeps its own sign-in (see the profile scope in app.html).
-  const SESSION_KEY=window[Symbol.for('studyDirector.profileScope.v1')].scoped('@@SD_DRIVE_SESSION_STORAGE_KEY@@');
-  const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
   const DRIVE_API='https://www.googleapis.com/drive/v3';
   const DRIVE_UPLOAD_API='https://www.googleapis.com/upload/drive/v3';
   const DRIVE_ORIGIN='https://www.googleapis.com';
-  const GIS_SRC='https://accounts.google.com/gsi/client';
   const REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@);
   const FOLDER_NAME=REPOSITORY_IDENTITIES.driveFolder;
   const FOLDER_MIME='application/vnd.google-apps.folder';
@@ -62,8 +57,6 @@
   const HISTORY_ATTACHMENTS_MISSING_MARKER='sdHistoryAttachmentsMissing';
   // The device that made the version (its ID says what it is).
   const HISTORY_ORIGIN_MARKER='sdHistoryOrigin',ORIGIN_PATTERN=/^inst_[a-z0-9_]{8,96}$/u;
-  const GIS_LOAD_TIMEOUT_MS=20000;
-  const AUTH_TIMEOUT_MS=120000;
   // An upload marker this build cannot read is waited for (it may be live),
   // but not past a day by Drive's own creation time: no upload lasts that
   // long, so it holds nothing, and Drive cleanup goes on.
@@ -89,30 +82,29 @@
 
   // JSON metadata is consumed once, inside the request's timeout/abort lifetime.
   const responsePayloads=new WeakMap();
-  let gisPromise=null;
-  let tokenClient=null;
-  let accessToken='';
-  let tokenExpiresAt=0,signedInBefore=false;
-  let connectionExpiryTimer=null;
-  const connectionListeners=new Set();
   let folderId='';
   // deletionChecked: the profile already checked for a deletion marker in this sign-in.
   let profilePort=null,devicePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='',checkedAccount='';
   function thisDevice(){try{const id=String(devicePort?.()||'');return DEVICE_PATTERN.test(id)?id:'';}catch{return '';}}
   let folderEpoch=0;
   let folderResolutionFlight=null;
-  let pendingAuthorization=null;
   let maxBackupBytes=DEFAULT_MAX_BACKUP_BYTES;
   const repositoryUploads=new Map(),MAX_RETAINED_UPLOADS=16;
-  let releaseFile=async()=>{},receiveBackupStream=null;
+  let releaseFile=async()=>{},receiveBackupStream=null,checksumBlob=null,nativeAdmission=null;
+  // The build composes exactly one connection owner. The repository protocol
+  // is shared; native credentials never cross this interface.
+  const connection=createStudyDirectorDriveConnection(Object.freeze({Platform,requirePlatform,profileEmail,timeoutError,onInvalidated:()=>{invalidateFolderIdentity();cancelFolderResolution();}}));
+  const native=connection.kind==='native';
+  if(!native&&connection.kind!=='web')throw new Error('Unknown Drive connection platform.');
+  const nativeIdentity=()=>native?connection.identity():null;
 
-  const EMPTY_DRIVE_OPERATION=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:null});
-  function driveOperationContext({signal=null,checkProtection=null,checkSource=null,folderState=null}={}){
+  const EMPTY_DRIVE_OPERATION=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:null,authIdentity:null});
+  function driveOperationContext({signal=null,checkProtection=null,checkSource=null,folderState=null,authIdentity=nativeIdentity()}={}){
     return Object.freeze({
       signal:signal&&typeof signal.addEventListener==='function'?signal:null,
       checkProtection:typeof checkProtection==='function'?checkProtection:null,
       checkSource:typeof checkSource==='function'?checkSource:null,
-      folderState:folderState&&typeof folderState==='object'?folderState:{receipt:null}
+      folderState:folderState&&typeof folderState==='object'?folderState:{receipt:null},authIdentity
     });
   }
   function childDriveOperationContext(base=EMPTY_DRIVE_OPERATION,{signal=null,checkProtection=null,checkSource=null}={}){
@@ -121,10 +113,10 @@
       signal:signal&&typeof signal.addEventListener==='function'?signal:parent.signal,
       checkProtection:typeof checkProtection==='function'?checkProtection:parent.checkProtection,
       checkSource:typeof checkSource==='function'?checkSource:parent.checkSource,
-      folderState:parent.folderState
+      folderState:parent.folderState,authIdentity:parent===EMPTY_DRIVE_OPERATION?nativeIdentity():parent.authIdentity
     });
   }
-  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;deletionChecked='';checkedAccount='';folderEpoch+=1;}
+  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;deletionChecked='';checkedAccount='';nativeAdmission=null;folderEpoch+=1;}
   function verifiedFolderReceipt(context=EMPTY_DRIVE_OPERATION){
     const state=context&&context.folderState,receipt=state&&state.receipt;
     if(!receipt)return '';
@@ -135,12 +127,26 @@
     const value=String(id||''),state=context&&context.folderState;if(!value||!state)return value;
     state.receipt=Object.freeze({id:value,epoch:folderEpoch,profile:expectedProfile()});return value;
   }
+  function assertNativeIdentity(operation){
+    if(native&&(!operation.authIdentity||operation.authIdentity!==nativeIdentity()))throw noRetry(new Error('Google Drive authorization changed. Start a new operation.'));
+  }
   async function assertDriveOperationCurrent(context=EMPTY_DRIVE_OPERATION){
     const operation=context||EMPTY_DRIVE_OPERATION;
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
+    if(native&&operation!==EMPTY_DRIVE_OPERATION)assertNativeIdentity(operation);
     await operation.checkProtection?.();
     await operation.checkSource?.();
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
+    if(native&&operation!==EMPTY_DRIVE_OPERATION)assertNativeIdentity(operation);
+  }
+  function scheduleConnectionRefusal(context){
+    const identity=context===EMPTY_DRIVE_OPERATION?nativeIdentity():context.authIdentity;
+    setTimeout(()=>{if(!native||identity&&identity===nativeIdentity())void Promise.resolve(connection.disconnect(identity)).catch(()=>{});},0);
+  }
+  function assertNativeMutation(method,context){
+    if(!native||method==='GET')return;
+    assertNativeIdentity(context);
+    if(!nativeAdmission||nativeAdmission.authIdentity!==context.authIdentity||nativeAdmission.epoch!==folderEpoch||nativeAdmission.folder!==folderId||nativeAdmission.profile!==expectedProfile())throw noRetry(new Error('Verify the existing Study Director library before native Drive writes.'));
   }
 
   function requirePlatform(){
@@ -152,13 +158,6 @@
     const capabilities=api&&api.capabilities;
     return !!capabilities&&Object.entries(requirements).every(([key,minimum])=>Number(capabilities[key]||0)>=Number(minimum));
   }
-  function configuredClientId(){
-    const value=String(GOOGLE_OAUTH_CLIENT_ID||'').trim();
-    return value&&!value.includes('PASTE_')?value:'';
-  }
-  function configurationError(){
-    return new Error('Google Drive is not configured. Add the production Web OAuth client ID in the release configuration and rebuild Study Director.');
-  }
   function delay(ms){return new Promise(resolve=>{setTimeout(resolve,Math.max(0,Number(ms)||0));});}
   function timeoutError(label){return new Error(`${label} timed out. Check the connection and retry.`);}
   function driveAbortError(signal){
@@ -166,122 +165,6 @@
     if(!error.code)error.code='STUDY_DIRECTOR_IMPORT_CANCELLED';if(!error.name||error.name==='Error')error.name='AbortError';return error;
   }
   const operationStopped=error=>error?.name==='AbortError'||error?.code==='BACKUP_POLICY_CHANGED'||error?.code==='STUDY_DIRECTOR_IMPORT_CANCELLED';
-  let signInPolicy;
-  function loadScript(src){
-    if(src!=='https://accounts.google.com/gsi/client')return Promise.reject(new TypeError('Unapproved sign-in script.'));
-    if(globalThis.trustedTypes&&!signInPolicy)signInPolicy=globalThis.trustedTypes.createPolicy('sd-google-signin',{createScriptURL:value=>{if(value!=='https://accounts.google.com/gsi/client')throw new TypeError('Unapproved sign-in script.');return value;}});
-    const existing=[...document.scripts].find(script=>script.src===src);
-    if(existing&&window.google&&window.google.accounts&&window.google.accounts.oauth2)return Promise.resolve();
-    if(existing)existing.remove();
-    return new Promise((resolve,reject)=>{
-      const script=document.createElement('script');
-      let settled=false;
-      const timer=setTimeout(()=>finish(reject,timeoutError('Google sign-in loading')),GIS_LOAD_TIMEOUT_MS);
-      const finish=(fn,value)=>{
-        if(settled)return;
-        settled=true;clearTimeout(timer);
-        script.onload=null;script.onerror=null;
-        fn(value);
-      };
-      script.onload=()=>finish(resolve);
-      script.onerror=()=>{script.remove();finish(reject,new Error('Google sign-in could not be loaded. Check the connection and retry.'));};
-      script.src=signInPolicy?signInPolicy.createScriptURL(src):src;script.async=true;script.defer=true;script.referrerPolicy='strict-origin-when-cross-origin';document.head.appendChild(script);
-    });
-  }
-  function notifyConnectionChange(){for(const listener of [...connectionListeners])try{listener();}catch{}}
-  function clearConnectionExpiryTimer(){if(connectionExpiryTimer!==null){clearTimeout(connectionExpiryTimer);connectionExpiryTimer=null;}}
-  function scheduleConnectionExpiry(){clearConnectionExpiryTimer();if(!accessToken||!tokenExpiresAt)return;const delay=Math.max(0,tokenExpiresAt-Date.now());connectionExpiryTimer=setTimeout(()=>{connectionExpiryTimer=null;if(!accessToken)return;if(Date.now()>=tokenExpiresAt)clearSession();else scheduleConnectionExpiry();},delay);}
-  // The sign-in is kept in this browser until it expires (about an hour), so a
-  // reload or reopening the app does not ask again. Other tabs pick it up too.
-  function parseSession(raw){try{const value=JSON.parse(raw||'null');return value&&typeof value==='object'?value:null;}catch{return null;}}
-  function usableSession(value){const expiresAt=value?.expiresAt;return Number.isSafeInteger(expiresAt)&&Object.keys(value).length===2&&typeof value.token==='string'&&!!value.token&&expiresAt>Date.now()+5000&&expiresAt<=Date.now()+7200000;}
-  function storedSession(){try{return parseSession(window.localStorage.getItem(SESSION_KEY));}catch{return null;}}
-  function rememberSession(){try{window.localStorage.setItem(SESSION_KEY,JSON.stringify({token:accessToken,expiresAt:tokenExpiresAt}));}catch{}}
-  function forgetSession(token){if(token&&(storedSession()||{}).token===token)try{window.localStorage.removeItem(SESSION_KEY);}catch{}}
-  function adoptSession(value){accessToken=value.token;tokenExpiresAt=value.expiresAt;signedInBefore=true;scheduleConnectionExpiry();notifyConnectionChange();}
-  function restoreSession(){
-    const value=storedSession();
-    if(usableSession(value))adoptSession(value);else try{window.localStorage.removeItem(SESSION_KEY);}catch{}
-    try{window.addEventListener('storage',event=>{
-      if(event.key!==SESSION_KEY)return;
-      const next=parseSession(event.newValue);
-      if(usableSession(next)){if(next.token!==accessToken)adoptSession(next);}
-      else if(accessToken&&(parseSession(event.oldValue)||{}).token===accessToken)clearSession();
-    });}catch{}
-  }
-  function clearAccessToken(){const changed=!!accessToken||tokenExpiresAt!==0;forgetSession(accessToken);clearConnectionExpiryTimer();accessToken='';tokenExpiresAt=0;if(changed)notifyConnectionChange();}
-  function clearSession(){clearAccessToken();invalidateFolderIdentity();cancelFolderResolution();}
-  function grantedScopeSet(response){return new Set(String(response&&response.scope||'').split(/\s+/).filter(Boolean));}
-  function settleAuthorization(error,response){
-    const pending=pendingAuthorization;
-    pendingAuthorization=null;
-    if(!pending)return;
-    clearTimeout(pending.timer);
-    if(error){clearSession();pending.reject(error);return;}
-    if(!response||response.error){clearSession();pending.reject(new Error(response&&response.error_description||response&&response.error||'Google authorization was not completed.'));return;}
-    const oauth=window.google&&window.google.accounts&&window.google.accounts.oauth2;
-    const scopes=grantedScopeSet(response);
-    if(!oauth||typeof oauth.hasGrantedAllScopes!=='function'||!oauth.hasGrantedAllScopes(response,DRIVE_SCOPE)||!scopes.has(DRIVE_SCOPE)){
-      clearSession();pending.reject(new Error('Google Drive permission was not granted.'));return;
-    }
-    if(scopes.size!==1){
-      clearSession();pending.reject(new Error('Google returned permissions beyond the requested Drive-file scope. Use a dedicated Study Director OAuth client.'));return;
-    }
-    if(response.token_type&&String(response.token_type).toLowerCase()!=='bearer'){
-      clearSession();pending.reject(new Error('Google returned an unsupported authorization token.'));return;
-    }
-    accessToken=String(response.access_token||'');
-    const lifetimeMs=Math.max(1,Number(response.expires_in)||3600)*1000;
-    const safetyMs=Math.min(60000,Math.max(5000,Math.floor(lifetimeMs*0.1)));
-    tokenExpiresAt=Date.now()+Math.max(1000,lifetimeMs-safetyMs);
-    if(!accessToken){clearSession();pending.reject(new Error('Google did not return an access token.'));return;}
-    signedInBefore=true;rememberSession();scheduleConnectionExpiry();notifyConnectionChange();pending.resolve(accessToken);
-  }
-  async function prepare(){
-    requirePlatform();
-    const clientId=configuredClientId();
-    if(!clientId)throw configurationError();
-    if(!gisPromise)gisPromise=loadScript(GIS_SRC).then(()=>{
-      const oauth=window.google&&window.google.accounts&&window.google.accounts.oauth2;
-      if(!oauth||typeof oauth.initTokenClient!=='function')throw new Error('Google sign-in is unavailable.');
-      tokenClient=oauth.initTokenClient({
-        client_id:clientId,
-        scope:DRIVE_SCOPE,
-        include_granted_scopes:false,
-        prompt:'select_account',
-        callback:response=>settleAuthorization(null,response),
-        error_callback:detail=>{
-          const type=String(detail&&detail.type||'');
-          const message=type==='popup_failed_to_open'?'Google sign-in was blocked by the browser. Allow pop-ups and retry.':
-            type==='popup_closed'?'Google authorization was cancelled.':'Google authorization could not be completed.';
-          settleAuthorization(new Error(message));
-        }
-      });
-    }).catch(error=>{gisPromise=null;tokenClient=null;throw error;});
-    await gisPromise;
-  }
-  function tokenValid(){return !!accessToken&&Date.now()<tokenExpiresAt;}
-  function subscribeConnection(listener){if(typeof listener!=='function')return ()=>{};connectionListeners.add(listener);return ()=>connectionListeners.delete(listener);}
-  function authorize(){
-    if(tokenValid())return Promise.resolve(accessToken);
-    if(!tokenClient)return Promise.reject(new Error('Google Drive is still preparing. Try again in a moment.'));
-    if(pendingAuthorization)return pendingAuthorization.promise;
-    let resolve,reject;
-    const promise=new Promise((ok,fail)=>{resolve=ok;reject=fail;});
-    const timer=setTimeout(()=>settleAuthorization(timeoutError('Google authorization')),AUTH_TIMEOUT_MS);
-    pendingAuthorization={promise,resolve,reject,timer};
-    // A profile syncs with one Google account: once it has one, the sign-in
-    // goes straight to it (no account chooser, here or after a reload).
-    const hint=profileEmail();
-    try{tokenClient.requestAccessToken({include_granted_scopes:false,prompt:signedInBefore||hint?'':'select_account',...(hint?{login_hint:hint}:{})});}
-    catch(error){settleAuthorization(error instanceof Error?error:new Error(String(error)));}
-    return promise;
-  }
-  function requireAccessToken(){
-    if(tokenValid())return accessToken;
-    clearSession();
-    throw new Error('Google authorization expired. Retry the Drive action.');
-  }
   function parseDriveUrl(value){
     let url;
     try{url=new Platform.URL(String(value||''));}catch(error){throw new Error('Blocked an invalid Google Drive endpoint.');}
@@ -306,25 +189,6 @@
     }
     return url.href;
   }
-  // Fetch exposes download streams but no upload byte progress. Use the
-  // browser's asynchronous upload transport only for validated binary uploads.
-  function uploadWithProgress(url,options,signal,progress){
-    return new Promise((resolve,reject)=>{
-      const xhr=new Platform.XMLHttpRequest();let settled=false,uploaded=0,downloaded=0;
-      const finish=(error,response)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);xhr.onload=xhr.onerror=xhr.onabort=xhr.onprogress=null;xhr.upload.onprogress=null;error?reject(error):resolve(response);};
-      const abort=()=>{xhr.abort();finish(signal.reason||Object.assign(new Error('Google Drive upload was stopped.'),{name:'AbortError'}));};
-      try{
-        xhr.open(options.method,url,true);xhr.withCredentials=false;
-        for(const [key,value] of options.headers)xhr.setRequestHeader(key,value);
-        xhr.upload.onprogress=event=>{if(event.loaded>uploaded){uploaded=event.loaded;progress();}};
-        xhr.onprogress=event=>{if(event.loaded>downloaded){downloaded=event.loaded;progress();}};
-        xhr.onerror=()=>finish(new TypeError('Google Drive upload connection failed.'));
-        xhr.onabort=()=>finish(signal.reason||Object.assign(new Error('Google Drive upload was stopped.'),{name:'AbortError'}));
-        xhr.onload=()=>{try{const headers=new Platform.Headers();for(const line of xhr.getAllResponseHeaders().trim().split(/[\r\n]+/u)){const colon=line.indexOf(':');if(colon>0)headers.append(line.slice(0,colon),line.slice(colon+1).trim());}finish(null,new Platform.Response(xhr.responseText||null,{status:xhr.status,headers}));}catch(error){finish(error);}};
-        signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();else xhr.send(options.body);
-      }catch(error){finish(error);}
-    });
-  }
   async function fetchWithTimeout(url,options,timeoutMs,context=EMPTY_DRIVE_OPERATION){
     const controller=new Platform.AbortController();
     const operation=context||EMPTY_DRIVE_OPERATION;
@@ -335,8 +199,8 @@
     let bodyAbort=null;
     try{
       await assertDriveOperationCurrent(operation);renew();
-      const progressUpload=Platform.XMLHttpRequest&&Platform.Response&&options.body instanceof Platform.Blob&&new Platform.URL(url).pathname==='/upload/drive/v3/files';
-      const response=await (progressUpload?uploadWithProgress(url,options,controller.signal,renew):Platform.fetch(url,{...options,signal:controller.signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'}));
+      assertNativeMutation(options.method,operation);
+      const response=await connection.request(url,{...options,signal:controller.signal},operation.authIdentity,renew);
       const media=response.ok&&new Platform.URL(url).searchParams.get('alt')==='media';
       if(!media&&![204,308,401].includes(response.status)){
         const stopped=new Promise((_,reject)=>{
@@ -361,11 +225,10 @@
   async function authorizedFetch(url,options={},timeoutMs=API_TIMEOUT_MS,context=EMPTY_DRIVE_OPERATION){
     const method=String(options.method||'GET').toUpperCase();
     const safeUrl=validatedDriveRequest(url,method);
-    const token=requireAccessToken();
+    const operation=context===EMPTY_DRIVE_OPERATION?driveOperationContext():context;
     const headers=new Platform.Headers(options.headers||{});
-    headers.set('Authorization',`Bearer ${token}`);
-    const response=await fetchWithTimeout(safeUrl,{...options,method,headers},timeoutMs,context);
-    if(response.status===401){clearSession();throw new Error('Google authorization expired. Retry the Drive action.');}
+    const response=await fetchWithTimeout(safeUrl,{...options,method,headers},timeoutMs,operation);
+    if(response.status===401){await connection.invalidate(operation.authIdentity);throw new Error('Google authorization expired. Retry the Drive action.');}
     return response;
   }
   function transientStatus(status){return status===429||status===500||status===502||status===503||status===504;}
@@ -475,13 +338,18 @@
     // this profile deleted on another device?
     if(deletionChecked!==expected){
       if(await deletionMarker(expected,context)){
-        setTimeout(()=>{clearSession();signedInBefore=false;},0);
+        scheduleConnectionRefusal(context);
         Promise.resolve().then(()=>profilePort.deleted?.(Object.freeze({profile:expected}))).catch(()=>{});
         throw noRetry(Object.assign(new Error('This profile was deleted on another device. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));
       }
       deletionChecked=expected;
     }
-    const found=await findFolder(context)||await createFolder(context);
+    let found=await findFolder(context);
+    if(native){
+      const wanted=String(profilePort.folder?.()||'');
+      if(!found||wanted&&wanted!==found)throw noRetry(new Error('Native Google Drive could not verify the existing Study Director folder. No library was created or changed.'));
+      await verifyNativeLibrary(found,context);
+    }else if(!found)found=await createFolder(context);
     await bindFolder(found,context);
     return found;
   }
@@ -497,17 +365,19 @@
     const metadata=seenFolder&&seenFolder.id===id?seenFolder:await getFolderMetadata(id,context),found=folderProfile(metadata),mine=found===expected;
     function refuse(message){
       invalidateFolderIdentity();
-      setTimeout(()=>{clearSession();signedInBefore=false;},0);
+      scheduleConnectionRefusal(context);
       throw noRetry(Object.assign(new Error(message),{studyDirectorProfileRefused:true}));
     }
     if(!found)refuse('The Study Director folder on this Google account has no valid profile identity. Drive was not used.');
-    if(mine&&boundFolder===`${id}\n${expected}`)return;
+    if(mine&&boundFolder===`${id}\n${expected}`&&(!native||nativeAdmission?.authIdentity===context.authIdentity))return;
     const [email,library]=await Promise.all([requireProfileAccount(context),mine?null:latestLibrary(id,context)]);
     const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
     if(!(mine&&decision==='continue'||!mine&&decision==='adopt'&&expectedProfile()===found)){
       refuse('This Google account holds the library of another profile. Drive was not used.');
     }
+    if(native)await assertDriveOperationCurrent(context);
     boundFolder=`${id}\n${expectedProfile()}`;
+    if(native)nativeAdmission=Object.freeze({folder:String(id),profile:expectedProfile(),authIdentity:context.authIdentity,epoch:folderEpoch});
     // The folder is named after its profile ("Study Director – Ana") and
     // follows a rename; only its properties say whose it is.
     const name=libraryName();if(name&&metadata&&metadata.name!==name)await renameFolder(id,name,context).catch(()=>{});
@@ -537,9 +407,10 @@
   // again, then the library folder goes to the Drive Trash, where it can be
   // brought back for 30 days.
   async function deleteLibrary(){
-    const expected=expectedProfile(),context=EMPTY_DRIVE_OPERATION;
+    const expected=expectedProfile(),context=native?driveOperationContext():EMPTY_DRIVE_OPERATION;
     if(!expected)throw new Error('This profile is still starting.');
-    if(!tokenValid())throw new Error('Sign in to Google Drive first.');
+    if(!connection.connected())throw new Error('Sign in to Google Drive first.');
+    if(native)await ensureFolder(context);
     if(!await deletionMarker(expected,context)){
       const existing=await findFolder(context);
       if(existing&&folderProfile(seenFolder)!==expected)throw noRetry(new Error('The Drive library does not identify this profile. Nothing was deleted.'));
@@ -563,8 +434,9 @@
   async function requireProfileAccount(context=EMPTY_DRIVE_OPERATION){
     if(checkedAccount)return checkedAccount;
     const email=await accountEmail(context),wanted=profileEmail();
+    if(native&&!email)throw noRetry(new Error('Native Google Drive could not verify the Google account.'));
     if(wanted&&email!==wanted){
-      setTimeout(()=>{clearSession();signedInBefore=false;},0);
+      scheduleConnectionRefusal(context);
       throw noRetry(Object.assign(new Error(`This profile syncs with ${wanted}${email?`, not ${email}`:''}. Sign in with ${wanted}, or add a new profile for the other Google account. Google Drive was not used.`),{studyDirectorProfileRefused:true}));
     }
     checkedAccount=email;return email;
@@ -627,8 +499,9 @@
     }
   }
   async function ensureFolder(context=EMPTY_DRIVE_OPERATION){
-    const operation=context||EMPTY_DRIVE_OPERATION;
+    const operation=native&&(!context||context===EMPTY_DRIVE_OPERATION)?driveOperationContext():context||EMPTY_DRIVE_OPERATION;
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
+    if(native)assertNativeIdentity(operation);
     const verified=verifiedFolderReceipt(operation);if(verified){await assertDriveOperationCurrent(operation);return verified;}
     const flight=folderResolutionFlight||startFolderResolution();
     const resolved=await awaitFolderResolution(flight,operation);
@@ -796,7 +669,7 @@
       if(driveNow()-created>=PUBLICATION_STALE_MS-PUBLICATION_RENEW_MS)throw noRetry(new Error('The Google Drive backup publication marker went too long without renewal. Retry the backup.'));
       await endRepositoryPublication(ref,context);return next;
     }catch(error){
-      await endRepositoryPublication(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
+      await endRepositoryPublication(next,driveOperationContext({folderState:context.folderState,authIdentity:context.authIdentity})).catch(()=>{});throw error;
     }
   }
 
@@ -882,12 +755,16 @@
       if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||driveNow()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
       await endRepositoryMaintenance(ref,context);return next;
     }catch(error){
-      await endRepositoryMaintenance(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
+      await endRepositoryMaintenance(next,driveOperationContext({folderState:context.folderState,authIdentity:context.authIdentity})).catch(()=>{});throw error;
     }
   }
   async function listRepositoryFiles(kind,{limit=100000}={},context=EMPTY_DRIVE_OPERATION){
     if(!REPOSITORY_KINDS.has(kind))throw noRetry(new Error('Repository file kind is invalid.'));
-    const parent=await ensureFolder(context),q=driveQuery([
+    const parent=await ensureFolder(context);
+    return listRepositoryFilesInFolder(parent,kind,{limit},context);
+  }
+  async function listRepositoryFilesInFolder(parent,kind,{limit=100000}={},context=EMPTY_DRIVE_OPERATION){
+    const q=driveQuery([
       `'${String(parent).replaceAll("'","\\'")}' in parents`,
       `appProperties has { key='${REPOSITORY_MARKER.key}' and value='${REPOSITORY_MARKER.value}' }`,
       `appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='${kind}' }`,
@@ -905,6 +782,34 @@
       pages+=1;if(Number.isFinite(limit)&&pages>=100&&pageToken){overflow=true;break;}
     }while(pageToken);
     return Object.freeze({items:Object.freeze(items),overflow,ignored});
+  }
+  // A narrow per-file grant can omit files the caller cannot see. It is
+  // never sufficient evidence to create a second library. Before native
+  // writes, prove existing private folder identity and verified bytes of a
+  // published commit/checkpoint pair and one object. The shared repository
+  // engine still owns full checkpoint, ancestry and reconciliation checks.
+  async function verifyNativeLibrary(parent,context){
+    if(nativeAdmission?.folder===parent&&nativeAdmission.authIdentity===context.authIdentity&&nativeAdmission.epoch===folderEpoch&&nativeAdmission.profile===expectedProfile())return;
+    const kinds=['commit','checkpoint','object'],rows=[];
+    for(const kind of kinds){
+      const listing=await listRepositoryFilesInFolder(parent,kind,{limit:100000},context);
+      if(listing.overflow||listing.ignored||!listing.items.length)throw noRetry(new Error('Native Google Drive could not verify the existing repository inventory. Nothing was changed.'));
+      const ids=new Set(listing.items.map(item=>item.id));
+      if(ids.size!==listing.items.length)throw noRetry(new Error('Native Google Drive found duplicate repository identities. Nothing was changed.'));
+      rows.push(listing.items);
+    }
+    const commit=rows[0][0],checkpoint=rows[1].find(item=>item.id===commit.id),object=rows[2][0];
+    if(!checkpoint)throw noRetry(new Error('Native Google Drive could not verify an existing committed checkpoint. Nothing was changed.'));
+    for(const item of [commit,checkpoint,object]){
+      if(!item.serverDigest||item.serverDigest!==item.digest||!item.remoteVersion)throw noRetry(new Error('Native Google Drive could not verify existing repository metadata.'));
+      const blob=await downloadBlob({id:item.remoteId,size:item.size},context);
+      try{
+        if(await checksumBlob(blob,context.signal)!==item.digest)throw noRetry(new Error('Native Google Drive existing repository bytes failed verification.'));
+        const latest=repositoryDescriptor(await getFileMetadata(item.remoteId,context),parent);
+        if(latest.id!==item.id||latest.kind!==item.kind||latest.digest!==item.digest||latest.serverDigest!==item.digest||latest.size!==item.size||latest.remoteVersion!==item.remoteVersion)throw noRetry(new Error('Native Google Drive repository identity changed during verification.'));
+      }finally{await releaseFile(blob);}
+    }
+    await assertDriveOperationCurrent(context);
   }
   // The session check, every 10 s while a session is open on screen: one
   // request for the newest takeover notes and version-complete records,
@@ -1097,13 +1002,13 @@
       // Marker retirement is cleanup, not operation work. Like maintenance
       // release, it must survive the operation signal being aborted by an
       // expected foreground preemption.
-      endPublication:ref=>endRepositoryPublication(ref,driveOperationContext({folderState:base.folderState})),
+      endPublication:ref=>endRepositoryPublication(ref,driveOperationContext({folderState:base.folderState,authIdentity:base.authIdentity})),
       beginMaintenance:()=>beginRepositoryMaintenance(base),
       listMaintenances:()=>listRepositoryMaintenances(base),
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
       renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
       now:driveNow,
-      endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
+      endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState,authIdentity:base.authIdentity})),
       listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
       listSessionWatch:opts=>listSessionWatch(opts,base),
       uploadSessionClaim:file=>repositoryUpload(file,base),
@@ -1235,11 +1140,6 @@
     }
     throw lastError||new Error('Could not download the selected Google Drive backup.');
   }
-  function release(){if(accessToken&&Date.now()>=tokenExpiresAt)clearSession();}
-  // Disconnect signs this device out of Google Drive. Study Director keeps
-  // its permission on the Google account, so the profile's other devices
-  // stay signed in; the account's own settings withdraw it everywhere.
-  async function disconnect(){repositoryUploads.clear();clearSession();signedInBefore=false;return true;}
   function setup(api){
     if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.backup||!api.backup.providers||typeof api.backup.providers.register!=='function')return false;
     const policy=api.backup.repositoryPolicy;
@@ -1252,27 +1152,28 @@
     if(Number.isFinite(publishedLimit)&&publishedLimit>0)maxBackupBytes=publishedLimit;
     releaseFile=api.backup.releaseFile||releaseFile;
     receiveBackupStream=typeof api.backup.receiveStream==='function'?api.backup.receiveStream:null;
-    if(!receiveBackupStream)return false;
+    checksumBlob=typeof api.backup.checksum==='function'?api.backup.checksum:null;
+    if(!receiveBackupStream||native&&!checksumBlob)return false;
     profilePort=api.backup.profile&&['id','name','bind'].every(key=>typeof api.backup.profile[key]==='function')?api.backup.profile:null;
     devicePort=typeof api.backup.device==='function'?api.backup.device:null;
     // What the app can do with the profile's library.
     if(profilePort&&typeof profilePort.controls==='function')profilePort.controls(Object.freeze({deleteLibrary}));
     if(!profilePort)return false;
-    restoreSession();
+    connection.restoreSession();
     return api.backup.providers.register(Object.freeze({
       id:'google-drive',
       label:'Google Drive',
       shared:true,
-      prepare,
-      authorize,
-      verifyAccount:()=>requireProfileAccount(),
-      backgroundAvailable:()=>tokenValid()&&Platform.online(),
-      connected:()=>tokenValid(),
-      automaticConfigured:()=>tokenValid()||signedInBefore,
-      connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,
-      subscribeConnection,
-      disconnect,
-      release,
+      prepare:connection.prepare,
+      authorize:connection.authorize,
+      verifyAccount:()=>native?ensureFolder(driveOperationContext()):requireProfileAccount(),
+      backgroundAvailable:()=>connection.connected()&&Platform.online(),
+      connected:connection.connected,
+      automaticConfigured:connection.automaticConfigured,
+      connectionExpiresAt:connection.connectionExpiresAt,
+      subscribeConnection:connection.subscribeConnection,
+      disconnect:async()=>{repositoryUploads.clear();return connection.disconnect(nativeIdentity());},
+      release:connection.release,
       repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,now:driveNow,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),listSessionWatch:opts=>listSessionWatch(opts),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }

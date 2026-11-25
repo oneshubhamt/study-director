@@ -6,7 +6,7 @@ import {externalModules,trustedExternalModuleIds} from '../../../build/module-ma
 
 const read=file=>fs.readFileSync(new URL(`../../../${file}`,import.meta.url),'utf8');
 const app=read('source/app.html');
-const drive=read('source/external/drive.js');
+const drive=read('source/external/drive-web-connection.js')+'\n'+read('source/external/drive.js');
 const review=read('source/core/review.js');
 const plan=read('source/core/plan.js');
 const timer=read('source/core/timer-engine.js');

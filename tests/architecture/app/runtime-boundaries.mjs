@@ -338,7 +338,7 @@ const background=fs.readFileSync('source/core/repository-background.js','utf8');
 const backupEngine=fs.readFileSync('source/core/backup-provider.js','utf8');
 const css=fs.readFileSync('source/styles/core.css','utf8');
 const architecture=fs.readFileSync('contracts/data-architecture.mjs','utf8');
-const drive=fs.readFileSync('source/external/drive.js','utf8');
+const drive=fs.readFileSync('source/external/drive-web-connection.js','utf8')+'\n'+fs.readFileSync('source/external/drive.js','utf8');
 assert.doesNotMatch(timer,/requestAnimationFrame\(step\)[\s\S]{0,240}requestAnimationFrame\(step\)/u,'Timer progress must not run a perpetual display-rate RAF loop.');
 assert.match(timer,/The one-second timer tick already advances progress/u);
 assert.match(ownership,/if\(!\(renewing&&hasControl\)\)setPrimary/u,'Ownership heartbeat renewal must not replay primary UI hooks.');

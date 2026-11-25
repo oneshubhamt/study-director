@@ -21,3 +21,7 @@ Entry runtime: `bdfaf9b6e3df4cac873c64a7ea3c5885cdec8462`; P1.A qualified before
 ## Dependency decisions
 
 Reuse compatible locked crates and OS APIs where they simplify implementation; review actual supported features and dependency closure before adding. Prefer maintained cryptographic/TLS/URL/HTTP and OS credential APIs over hand-rolled cryptography, broad Tauri plugins or unnecessary storage stack. No fake lockfile. Update native QA to Node 26.13.1 LTS and pin Rust 1.100.0 (verified P1.A runner version); check all affected source/build/runtime paths. Do not modify shared production workflows without authorization. 
+
+## B.1 checkpoint boundary
+
+The shared provider and web connection are separate authored sources (assembled as the one web Drive asset). The common provider selects its connection at composition, admits native writes only after existing verified bytes and binding, and retains original auth identity on operations/cleanup. Hermetic tests inject a tokenless native host contract into the real provider; they are not a native host implementation or live Drive evidence. B.2 must implement and wire the narrow OS credential/OAuth/HTTP boundary and independently enforce scope/operation limits, then test actual native calls. The native shell remains unavailable for Drive until configured and qualified. B.2 must distinguish authorized account from admitted repository in restored connection and status/background scheduling; a failed native proof cannot report a usable backup location.

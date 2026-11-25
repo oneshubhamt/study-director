@@ -12443,7 +12443,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     // This device, named on Drive's upload markers.
     device:()=>AppData.provenance.installationId(),
     // The active profile, and who decides which Drive library it may use.
-    profile:Object.freeze({id:()=>Profiles.current()?.id||'',email:()=>Profiles.current()?.email||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
+    profile:Object.freeze({id:()=>Profiles.current()?.id||'',email:()=>Profiles.current()?.email||'',folder:()=>Profiles.current()?.folder||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
     providers:Object.freeze({
       register:BackupProviderRuntime.register,
       list:BackupProviderRuntime.list

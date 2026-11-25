@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
-const app=read('source/app.html'),backup=read('source/core/backup.js'),repository=read('source/core/managed-repository.js'),repositories=read('source/core/repositories.js'),background=read('source/core/repository-background.js'),provider=read('source/core/backup-provider.js'),device=read('source/core/device-backup.js'),drive=read('source/external/drive.js'),managed=read('source/core/managed-recovery.js'),host=read('source/core/backup-recovery-host.js'),manifest=read('build/module-manifest.mjs');
+const app=read('source/app.html'),backup=read('source/core/backup.js'),repository=read('source/core/managed-repository.js'),repositories=read('source/core/repositories.js'),background=read('source/core/repository-background.js'),provider=read('source/core/backup-provider.js'),device=read('source/core/device-backup.js'),drive=read('source/external/drive-web-connection.js')+'\n'+read('source/external/drive.js'),managed=read('source/core/managed-recovery.js'),host=read('source/core/backup-recovery-host.js'),manifest=read('build/module-manifest.mjs');
 
 
 assert.match(app,/ManagedRecoveryModule=INTERNAL_MODULES\.load\('managed-recovery',1,'study-director\.managed-recovery-module',1\)/u);
