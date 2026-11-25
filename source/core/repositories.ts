@@ -979,7 +979,7 @@ async function activeSessionEpochFallback(retry:number,options:{strict?:boolean}
 }
 async function loadActiveSessionRecord(retry:number=0,options:{strict?:boolean}={}):Promise<SessionResult>{
   await activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.pre-read-settle',error,'error');});
-  const readEpoch=activeSessionMutationEpoch;
+  const readEpoch=activeSessionMutationEpoch,ownerRevision=getOwnershipRevision();
   let localSession:ActiveSession|null=null;
   try{
     const rawLocal=readLocalRecoverySession();
@@ -997,21 +997,30 @@ async function loadActiveSessionRecord(retry:number=0,options:{strict?:boolean}=
     activeSessionWriteChain=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-reconciliation',error,'error');}).then(async()=>{
       if(readEpoch!==activeSessionMutationEpoch)return;
       let reconciliationToken=null;
-      try{reconciliationToken=issueWriteToken('reconciling the active session',{allowHydrating:true});}catch(error){reconciliationError=error;}
+      try{
+        if(getOwnershipRevision()!==ownerRevision)throw new Error('Active Session ownership changed during reconciliation.');
+        reconciliationToken=issueWriteToken('reconciling the active session',{allowHydrating:true});
+      }catch(error){reconciliationError=error;}
       if(reconciliationToken&&value===localSession&&value&&(!idbSession||newerActiveSession(idbSession,value)===value)){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session reconciliation');
           await idbPutActiveSession(value,reconciliationToken,true);
-          if(readEpoch===activeSessionMutationEpoch){assertWriteToken(reconciliationToken,'clearing reconciled session recovery');if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');}
-          if(!clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)])&&options.strict)throw LocalStorageContract.lastError||new Error('Session deletion recovery could not be reconciled.');
+          if(readEpoch===activeSessionMutationEpoch){
+            assertWriteToken(reconciliationToken,'clearing reconciled session recovery');
+            if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');
+            if(!clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)])&&options.strict)throw LocalStorageContract.lastError||new Error('Session deletion recovery could not be reconciled.');
+          }
         }catch(e){reconciliationError=e;if(!isOwnershipLostError(e))AppDiagnostics.capture('active-session.reconcile-idb',e);}
       }else if(reconciliationToken&&value===idbSession&&value&&(!localSession||newerActiveSession(localSession,idbSession)===idbSession)){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session canonical read-repair');
           if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken,true);
-          if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
+          if(readEpoch===activeSessionMutationEpoch){
+            assertWriteToken(reconciliationToken,'clearing canonical session recovery');
+            if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
+          }
         }catch(error){reconciliationError=error;if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.reconcile-local',error);}
       }
     });

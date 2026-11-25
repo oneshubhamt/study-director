@@ -14,7 +14,11 @@ try{
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership'});
   const run=`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
     document.getElementById('plan-input').value=[fmt(m-5)+' | 60 | Merge One | work | Medicine | pages | 12',fmt(m+55)+' | 30 | Merge Two | work | Ethics | pages | 5'].join('\\n');
-    const result=d.applySchedule({skipNotify:true});if(result&&result.then)await result;d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(300);await d.flushLiveDraft();return d.TimerState.snapshot().mode;})()`;
+    const result=await d.applySchedule({skipNotify:true});if(result!==true)throw new Error('Session fixture Plan failed to apply: '+document.getElementById('plan-status').textContent);
+    await d.goTab('execute');d.setCurrentTask(0);d.TimerEngine.startCur();await wait(300);
+    const saved=await d.flushLiveDraft();
+    if(!saved?.ok||!saved.storage?.idb||saved.error)throw new Error('Session fixture checkpoint failed: '+JSON.stringify({saved,ownership:d.AppOwnership.status(),lifecycle:d.SessionLifecycle.status(),timer:d.TimerState.snapshot(),plan:document.getElementById('plan-status').textContent}));
+    return d.TimerState.snapshot().mode;})()`;
   // The merged session: the first block done elsewhere, on the second, no timer.
   const merge=keepRunning=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),s=structuredClone((await d.AppData.activeSession.load()).value);
     const ids=d.TimerState.snapshot().tasks.map(task=>task.id),first=s.snapshot.currentTaskId,next=ids[ids.indexOf(first)+1];

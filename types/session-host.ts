@@ -56,6 +56,7 @@ export interface SessionSnapshotDomainPorts{
 export interface SessionPersistencePorts{
   canMutate():boolean;
   ownsSession():boolean;
+  canProject():boolean;
   ownershipRevision():number;
   recoveryQuiesced():boolean;
   persistenceBlocked():boolean;

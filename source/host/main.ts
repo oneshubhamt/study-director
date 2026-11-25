@@ -2598,7 +2598,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<SessionHos
   }),
   domain:Object.freeze<SessionHostInput['domain']>({normalizeCompletionSource,clampCompletion:CompletionModel.clampPercent,cleanDayRevision,clampText,isCanonicalScheduleText,isValidIsoDate,todayISO}),
   persistence:Object.freeze<SessionHostInput['persistence']>({
-    canMutate:appCanMutate,ownsSession:()=>AppOwnership.canMutate(),ownershipRevision:()=>AppOwnership.revision,recoveryQuiesced:managedRecoverySessionQuiesced,
+    canMutate:appCanMutate,ownsSession:()=>AppOwnership.canMutate(),canProject:()=>{try{AppOwnership.issueWriteToken('project the canonical session',{allowHydrating:true});return true;}catch{return false;}},ownershipRevision:()=>AppOwnership.revision,recoveryQuiesced:managedRecoverySessionQuiesced,
     persistenceBlocked:()=>ReviewSaveService.status().activeSessionPersistenceBlocked,
     recoveryWorkActive:()=>AppOwnership.canMutate()&&AppMutationCoordinator?.status().active==='managed-recovery',
     timerSnapshotEligible:()=>!TimerState.paused&&!TimerState.inactiveGap&&!!TimerState.runtime&&TimerState.runtime.startMs!==null,

@@ -34,7 +34,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   functions(snapshot,['tasks','ensureTaskIds','captureEvidence','timerPayload','reviewSnapshot','practiceSnapshot','practiceRestore','getReviewDate','scheduleFingerprint','sessionFingerprint','appliedScheduleText','getCarryForward','setCarryForward','clearProgress','sanitizeAdjustedSchedule','invalidateScheduleDerived','setCurrentTask','timerRestoreValid'],'Session snapshot port');
   if(!snapshot.taskIdentity||!snapshot.taskState||!snapshot.timerState)throw new TypeError('Session runtime state ports are incomplete.');
   functions(domain,['normalizeCompletionSource','clampCompletion','cleanDayRevision','clampText','isCanonicalScheduleText','isValidIsoDate','todayISO'],'Session domain port');
-  functions(persistence,['canMutate','ownsSession','ownershipRevision','recoveryQuiesced','persistenceBlocked','recoveryWorkActive','timerSnapshotEligible','markContentChanged','snapshotForWrite','reportResult','warn'],'Session persistence port');
+  functions(persistence,['canMutate','ownsSession','canProject','ownershipRevision','recoveryQuiesced','persistenceBlocked','recoveryWorkActive','timerSnapshotEligible','markContentChanged','snapshotForWrite','reportResult','warn'],'Session persistence port');
   functions(lifecycle,['revision','run'],'Session lifecycle port');
   functions(apply,['readPlanDraft','writePlanDraft','previewPlanDraft','setStudyDate','applySessionSchedule'],'Session apply port');
   functions(reset,['stopTimerPresentation','invalidatePresentation','resetCountdown','setCurrentTask','resetBreak','setEmptyTimerMode','clearTimerSession','hydrateReview','invalidateSchedule','resetPlanSession','clearProgress','clearCarryForward','resetPractice','pausePracticeForSessionEnd'],'Session reset port');
@@ -330,14 +330,25 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   function applyStoredSession(session:ActiveSession,value:SessionSnapshot,options:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>={}){
     const owner=persistence.ownershipRevision();
     if(!session||!value)return false;
-    const source=String(options.source||'stored-session-apply'),pendingDraft=apply.readPlanDraft();
+    const source=String(options.source||'stored-session-apply');
     const perform=async()=>{
-      const life=lifecycle.revision(),current=()=>persistence.ownsSession()&&persistence.ownershipRevision()===owner&&lifecycle.revision()===life;
+      const life=lifecycle.revision(),current=()=>persistence.canProject()&&persistence.ownershipRevision()===owner&&lifecycle.revision()===life;
       if(!current())return false;
+      const pendingDraft=apply.readPlanDraft();
       resetCore(session.date,source);apply.setStudyDate(session.date,session.date===domain.todayISO());
+      // Restore synchronously cleared draft only before any asynchronous
+      // application work, never overwrite later independent Plan edits.
+      if(apply.readPlanDraft()!==pendingDraft)apply.writePlanDraft(pendingDraft);
       let restored:unknown=false;
-      try{restored=await apply.applySessionSchedule({source,studyDate:session.date,reviewOnly:options.reviewOnly===true,snapshot:value,scheduleText:session.scheduleText,current});return current()?restored:false;}
-      finally{if(current()){apply.writePlanDraft(pendingDraft);if(restored!==false)apply.previewPlanDraft();}}
+      try{
+        restored=await apply.applySessionSchedule({source,studyDate:session.date,reviewOnly:options.reviewOnly===true,snapshot:value,scheduleText:session.scheduleText,current});
+        return current()?restored:false;
+      }finally{
+        if(current()){
+          if(restored===false)runtimeConflicted=true;
+          else apply.previewPlanDraft();
+        }
+      }
     };
     if(options.lifecycleManaged===true)return perform();
     return lifecycle.run(source,{scheduleIdentity:true,date:session.date,autoDate:session.date===domain.todayISO(),snapshotReview:value.review},perform);
