@@ -5,6 +5,7 @@ import {once} from 'node:events';
 import {createServer} from 'node:net';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {CdpPage,waitFor,waitForStudyDirector,settleMotion} from './browser-harness.mjs';
 
 assert.equal(process.platform,'win32');
@@ -12,6 +13,8 @@ assert.equal(process.env.GITHUB_ACTIONS,'true');
 assert.equal(process.env.RUNNER_ENVIRONMENT,'github-hosted');
 assert.equal(process.env.GITHUB_REF,'refs/heads/tauri-spike');
 const executable=path.resolve('src-tauri/target/release/study-director-tauri-spike.exe');
+assert.match(process.env.SD_TAURI_BUILD_SHA256||'',/^[a-f0-9]{64}$/i,'fresh CI build digest required');
+assert.equal(createHash('sha256').update(readFileSync(executable)).digest('hex'),process.env.SD_TAURI_BUILD_SHA256.toLowerCase(),'native executable digest');
 const sentinel='tauri-qa-'+randomUUID(),dbName='study-director-qa-'+sentinel,filename=sentinel+'.txt';
 const origin='https://tauri.localhost';
 let app=null,page=null,debugPort=null,policyInstalled=false;
@@ -44,7 +47,7 @@ function installPolicy(){
   execFileSync('reg.exe',['add',policy,'/v',executableName,'/t','REG_SZ','/d','--remote-debugging-address=127.0.0.1 --remote-debugging-port='+debugPort,'/f','/reg:64'],{stdio:'inherit',timeout:15000});
   policyInstalled=true;
 }
-async function start(){
+async function start({offline=false}={}){
   app=spawn(executable,[],{stdio:'inherit',windowsHide:false});
   let launchError;app.once('error',error=>{launchError=error;});
   let target;
@@ -64,6 +67,18 @@ async function start(){
   page=await CdpPage.connect(target.webSocketDebuggerUrl,target.id);
   await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');
   await waitForStudyDirector(page,{timeout:60000});
+  if(offline){
+    await page.send('Network.enable');
+    await page.send('Network.setCacheDisabled',{cacheDisabled:true});
+    const old=await page.evaluate('performance.timeOrigin');
+    await page.setOffline(true);
+    await page.send('Page.reload',{ignoreCache:true});
+    await waitFor(()=>page.evaluate('performance.timeOrigin!=='+old+'&&document.readyState==="complete"'),{label:'offline packaged reload'});
+    await waitForStudyDirector(page,{timeout:60000});
+    const fonts=await page.evaluate('(async()=>{const loaded=await document.fonts.load(\'400 16px "Barlow"\');await document.fonts.ready;return {offline:!navigator.onLine,count:loaded.length,loaded:loaded.every(font=>font.status==="loaded"),family:loaded.map(font=>font.family),richText:!!window.StudyDirectorRichText};})()');
+    console.log('Offline packaged resources:',JSON.stringify(fonts));
+    assert.equal(fonts.offline,true);assert.ok(fonts.count>0&&fonts.loaded);assert.equal(fonts.richText,true);
+  }
   assert.equal(await page.evaluate('location.origin'),origin);
   assert.equal(await page.evaluate('isSecureContext'),true);
   assert.equal(await page.evaluate('document.querySelector(\'meta[name="study-director-source-commit"]\').content'),process.env.GITHUB_SHA);
@@ -155,7 +170,7 @@ const noteKey='tauri qa note',noteText='Native durable note '+sentinel,reflectio
 const pdfText='%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n'+sentinel;
 const diaryDate=new Date(Date.now()-2*864e5).toISOString().slice(0,10),diaryText='Native durable diary '+sentinel,planName='Native reusable plan';
 async function appWrite(){
-  const created=await page.evaluate('('+async function({noteKey,noteText,reflection,pdfText,diaryDate,diaryText,planName}){
+  const created=await page.evaluate('('+async function({noteKey,noteText,pdfText,diaryDate,diaryText,planName}){
     const d=__nativeQA;
     const now=new Date(),minutes=now.getHours()*60+now.getMinutes();
     const base=Math.max(240,Math.min(23*60+30,minutes-1));
@@ -177,8 +192,9 @@ async function appWrite(){
     const paused=d.TimerState.snapshot().paused;
     d.TimerEngine.stopExecution();
     await d.goTab('review');
-    const field=document.getElementById('daily-reflection');
-    field.value=reflection;d.setStudyQuality(4,{save:false});
+    // Do not write the backing textarea after the editor has mounted.
+    // The separate editor witness will seed the reflection using real input.
+    d.setStudyQuality(4,{save:false});
     const saved=d.ReviewEditor.saveReview({strict:true});
     await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();
     const active=(await d.AppData.activeSession.load()).value;
@@ -190,10 +206,10 @@ async function appWrite(){
     const candidate=await d.BackupController.inspect(backup.blob,{filename:backup.filename});
     try{return {applied,running,paused,saved:!!saved,review:active?.snapshot?.review?.reflection,note:d.AppData.notes.get(noteKey)?.text,assetId:asset?.id,assetHash:asset?.hash,assetText:file&&await file.text(),diary:diary.record?.reflection,diaryKind:diary.recordKind,savedPlan:!!savedPlan,modes,backupBytes:backup.blob.size,preview:!!candidate.preview};}
     finally{await candidate.release();await backup.release();}
-  }.toString()+')('+JSON.stringify({noteKey,noteText,reflection,pdfText,diaryDate,diaryText,planName})+')');
+  }.toString()+')('+JSON.stringify({noteKey,noteText,pdfText,diaryDate,diaryText,planName})+')');
   console.log('Application write witness:',JSON.stringify(created));
   assert.equal(created.applied,true);assert.equal(created.running,'running');assert.equal(created.paused,true);assert.equal(created.saved,true);
-  assert.equal(created.review,reflection);assert.equal(created.note,noteText);assert.equal(created.assetText,pdfText);
+  assert.equal(created.review,'','fresh reflection must start empty');assert.equal(created.note,noteText);assert.equal(created.assetText,pdfText);
   assert.ok(created.assetId&&created.backupBytes>0&&created.preview);
   assert.equal(created.diary,diaryText);assert.equal(created.diaryKind,'diary');assert.equal(created.savedPlan,true);
   assert.equal(created.assetHash,createHash('sha256').update(pdfText).digest('hex'));
@@ -211,17 +227,33 @@ async function appRead(assetId,canonical){
 }
 async function editor(){
   await page.evaluate('__nativeQA.goTab("review")');
-  await waitFor(()=>page.evaluate('!!document.querySelector(".sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger")'),{label:'Wordgard reflection mounted'});
-  await page.click('.sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger');
-  const selector='dialog.workspace-overlay-rich-text[open] .sd-rte-editor';
-  const state=()=>page.evaluate('('+function({selector,reflection}){
-    const editor=document.querySelector(selector),selection=getSelection(),anchor=selection?.anchorNode;
-    return {exists:!!editor,editable:editor?.isContentEditable===true,focused:!!editor&&(document.activeElement===editor||editor.contains(document.activeElement)),documentFocused:document.hasFocus(),text:editor?.textContent||'',anchorInside:!!editor&&!!anchor&&editor.contains(anchor),anchorType:anchor?.nodeType||0,offset:selection?.anchorOffset??null,collapsed:selection?.isCollapsed===true,anchorText:anchor?.textContent||'',expectedText:reflection};
-  }.toString()+')('+JSON.stringify({selector,reflection})+')');
-  await waitFor(async()=>{const row=await state();return row.editable&&row.text.includes(reflection);},{label:'Wordgard focus editor populated'});
+  const normal='#pane-review .sd-rte[data-sd-rich-surface=reflection] .sd-rte-editor';
+  const focused='dialog.workspace-overlay-rich-text[open] .sd-rte-editor';
+  const trigger='#pane-review .sd-rte[data-sd-rich-surface=reflection] .sd-rte-focus-trigger';
+  const state=selector=>page.evaluate('('+function(selector){
+    const editor=document.querySelector(selector),selection=getSelection(),anchor=selection?.anchorNode,field=document.getElementById('daily-reflection');
+    return {exists:!!editor,editable:editor?.isContentEditable===true,focused:!!editor&&(document.activeElement===editor||editor.contains(document.activeElement)),documentFocused:document.hasFocus(),text:editor?.textContent||'',anchorInside:!!editor&&!!anchor&&editor.contains(anchor),anchorType:anchor?.nodeType||0,offset:selection?.anchorOffset??null,collapsed:selection?.isCollapsed===true,anchorText:anchor?.textContent||'',field:field?.value||'',fieldReadOnly:field?.readOnly,dialogs:[...document.querySelectorAll('dialog[open]')].map(node=>node.className),runtime:__nativeQA.RichTextRuntime.status()};
+  }.toString()+')('+JSON.stringify(selector)+')');
+  const until=async(selector,condition,label)=>{
+    try{await waitFor(async()=>condition(await state(selector)),{label});}
+    catch(error){console.error(label+':',JSON.stringify(await state(selector)));throw error;}
+  };
+  const save=()=>page.evaluate('(async()=>{const d=__nativeQA;d.RichTextRuntime.flushEditors();d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const value=(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection;return {value,rich:StudyDirectorRichText.isRichTextValue(value),plain:StudyDirectorRichText.toPlainText(value)};})()');
+  await until(normal,row=>row.editable,'mounted normal Wordgard editor');
+  await settleMotion(page);await page.click(normal);await page.settle();
+  const initial=await state(normal);
+  console.log('Wordgard initial caret:',JSON.stringify(initial));
+  assert.ok(initial.editable&&initial.focused&&initial.anchorInside&&initial.collapsed,'fresh editable caret required');
+  await page.send('Input.insertText',{text:reflection});
+  await until(normal,row=>row.text.includes(reflection),'Wordgard initial keyboard insertion');
+  const seeded=await save();
+  assert.equal(seeded.rich,true);assert.equal(seeded.plain.trim(),reflection);
+  await until(normal,row=>row.editable&&row.text.includes(reflection),'canonical seed visible before focus');
+  await page.click(trigger);
+  await until(focused,row=>row.editable&&row.text.includes(reflection),'Wordgard focus editor populated');
   await settleMotion(page);await page.settle();
-  await page.click(selector+' p');
-  await page.evaluate('('+function({selector}){
+  await page.click(focused+' p');
+  await page.evaluate('('+function(selector){
     const editor=document.querySelector(selector),paragraph=editor.querySelector('p'),walker=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);
     let node,last;while((node=walker.nextNode()))if(node.textContent.length)last=node;
     if(!last)throw new Error('Wordgard paragraph has no text node');
@@ -229,21 +261,20 @@ async function editor(){
     const selection=getSelection(),range=document.createRange();range.setStart(last,last.textContent.length);range.collapse(true);
     selection.removeAllRanges();selection.addRange(range);
     document.dispatchEvent(new Event('selectionchange'));
-  }.toString()+')('+JSON.stringify({selector})+')');
+  }.toString()+')('+JSON.stringify(focused)+')');
   await page.settle();
-  const ready=await state();
-  console.log('Wordgard input preconditions:',JSON.stringify(ready));
+  const ready=await state(focused);
+  console.log('Wordgard focus caret:',JSON.stringify(ready));
   assert.ok(ready.editable&&ready.focused&&ready.anchorInside&&ready.collapsed&&ready.anchorType===3&&ready.anchorText.endsWith(reflection)&&ready.offset===ready.anchorText.length,'Wordgard must have an editable, focused caret at the end of the expected text');
   await page.send('Input.insertText',{text:' via Wordgard'});
   const expected=reflection+' via Wordgard';
-  try{await waitFor(async()=>{const row=await state();return row.text.includes(expected);},{label:'Wordgard keyboard insertion'});}
-  catch(error){console.error('Wordgard input failure:',JSON.stringify(await state()));throw error;}
-  await page.evaluate('document.querySelector(".workspace-overlay-rich-text .workspace-overlay-close").click()');
+  await until(focused,row=>row.text.includes(expected),'Wordgard focus-mode keyboard insertion');
+  await page.click('.workspace-overlay-rich-text .workspace-overlay-close');
   await waitFor(()=>page.evaluate('!document.querySelector("dialog.workspace-overlay-rich-text[open]")'),{label:'Wordgard focus close'});
-  const row=await page.evaluate('(async()=>{const d=__nativeQA;d.RichTextRuntime.flushEditors();d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const value=(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection;return {value,rich:StudyDirectorRichText.isRichTextValue(value),plain:StudyDirectorRichText.toPlainText(value)};})()');
+  const row=await save();
   assert.equal(row.rich,true);assert.equal(row.plain.trim(),expected);
   await page.evaluate('__nativeQA.goTab("plan")');
-  console.log('Wordgard keyboard edit and canonical save verified');
+  console.log('Wordgard normal and focus keyboard edits and canonical save verified');
   return row.value;
 }
 async function pauseDurably(){
@@ -323,8 +354,10 @@ async function navigation(){
 }
 try{
   debugPort=await port();installPolicy();
-  await start();await profile();await navigation();
+  await start({offline:true});await profile();await navigation();
   const assetId=await appWrite(),canonical=await editor();await pauseDurably();
+  assert.equal(await page.evaluate('navigator.onLine'),false,'worker and editor journey remains offline');
+  await page.setOffline(false);
   const first=await storage(true);verify(first);
   const bootProfile=JSON.parse(first.profile).active;
   await stop(false);await start();const normal=await storage(false);verify(normal);
@@ -332,7 +365,7 @@ try{
   await stop(true);await start();const killed=await storage(false);verify(killed);
   assert.equal(JSON.parse(killed.profile).active,bootProfile);await appRead(assetId,canonical);
   await navigation();await profilesAndImport(bootProfile,assetId,canonical);await security();await stop(false);
-  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,diary:true,savedPlan:true,pausedTimerRecovery:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardEdit:true,workerSyncOPFS:true,profileSwitchIsolation:true,portableImport:true,security:true}));
+  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,offlinePackagedReload:true,offlineFonts:true,offlineEditorWorker:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,diary:true,savedPlan:true,pausedTimerRecovery:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardEdit:true,workerSyncOPFS:true,profileSwitchIsolation:true,portableImport:true,security:true}));
 }finally{
   clearTimeout(deadline);
   if(page)page.socket.close();

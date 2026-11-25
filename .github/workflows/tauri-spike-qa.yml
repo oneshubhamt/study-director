@@ -40,10 +40,12 @@ jobs:
           node tests/browser/library/notes-management.mjs
           node tests/browser/pwa/pwa-offline.mjs
           node tests/browser/pwa/pwa-update.mjs
-  windows:
+  windows-build:
     if: github.ref == 'refs/heads/tauri-spike'
     runs-on: windows-2025
     timeout-minutes: 45
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
     env:
       CARGO_TERM_COLOR: never
     steps:
@@ -74,12 +76,63 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --features custom-protocol --all-targets -- -D warnings
       - name: Build experimental Windows executable
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --features custom-protocol
-      - name: Packaged WebView2 startup and storage smoke
+      - name: Identify exact executable
+        id: digest
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash src-tauri/target/release/study-director-tauri-spike.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          Write-Output $hash
+      - name: Stage unqualified build for independent QA samples
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-qa-input-${{ github.sha }}
+          path: src-tauri/target/release/study-director-tauri-spike.exe
+          if-no-files-found: error
+          retention-days: 1
+  windows-smoke:
+    needs: windows-build
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-qa-input-${{ github.sha }}
+          path: src-tauri/target/release
+      - name: Packaged WebView2 sample ${{ matrix.sample }}
+        env:
+          SD_TAURI_BUILD_SHA256: ${{ needs.windows-build.outputs.sha256 }}
         run: node tests/helpers/tauri-smoke.mjs
+  qualified-artifact:
+    needs: [windows-build, windows-smoke, pwa-regression]
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-qa-input-${{ github.sha }}
+          path: qa-exe
+      - name: Verify qualified executable digest
+        env:
+          SD_TAURI_BUILD_SHA256: ${{ needs.windows-build.outputs.sha256 }}
+        run: echo "$SD_TAURI_BUILD_SHA256  qa-exe/study-director-tauri-spike.exe" | sha256sum --check
       - name: Preserve smoke-tested experimental executable
         uses: actions/upload-artifact@v4
         with:
           name: tauri-spike-smoke-tested-exe-${{ github.sha }}
-          path: src-tauri/target/release/study-director-tauri-spike.exe
+          path: qa-exe/study-director-tauri-spike.exe
           if-no-files-found: error
           retention-days: 7
