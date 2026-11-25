@@ -800,7 +800,7 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
   local:Object.freeze<MutationCoordinatorInput['local']>({getJson:(key,fallback)=>AppData.local.getJson(key,fallback),setJson:(key,value)=>AppData.local.setJson(key,value),remove:key=>AppData.local.remove(key)}),
   durable:Object.freeze<MutationCoordinatorInput['durable']>({
     acquire:async request=>{const result=await AppData.mutationLease.acquire(request);return result.acquired?Object.freeze({acquired:true}):Object.freeze({acquired:false,holder:Object.freeze({expiresAt:result.holder['expiresAt']})});},
-    release:id=>AppData.mutationLease.release(id)
+    release:(id,owner)=>AppData.mutationLease.release(id,owner)
   }),
   hooks:Object.freeze<MutationCoordinatorInput['hooks']>({refreshUi:()=>{
     const active=!!AppMutationCoordinator?.status?.().active;

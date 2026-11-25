@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {AuthorityError,AuthorityOptions,MutationAuthority,MutationState,LocalLease,MutationInput} from '../../types/mutation-coordinator.ts';
+import type {AuthorityError,AuthorityOptions,MutationAuthority,MutationState,MutationOrigin,LocalLease,MutationInput} from '../../types/mutation-coordinator.ts';
 const sdMutationCoordinatorFactory=(()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'mutation-coordinator','study-director.mutation-coordinator-module'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -25,13 +25,15 @@ const createModule=()=>{
     functions(input.identity,['canMutate','status'],'Mutation coordinator identity port');
     functions(input.local,['getJson','remove','setJson'],'Mutation coordinator local lease port');
     const LEASE_MS=Math.max(5000,Number(configuration.leaseMs)||20000),HEARTBEAT_MS=Math.max(1000,Number(configuration.heartbeatMs)||5000),LOCK_NAME=String(configuration.lockName||''),STORAGE_KEY=String(configuration.storageKey||'');
-    let active:MutationState|null=null,activePromise:Promise<unknown>=Promise.resolve(),heartbeat:number|null=null,heartbeatRefresh:Promise<void>=Promise.resolve(),recoveryFault='',recoveryKind='';
+    let active:MutationState|null=null,activePromise:Promise<unknown>=Promise.resolve(),sequence=0,recoveryFault='',recoveryKind='';
     const isRecoveryKind=(kind:string)=>kind==='restore-recovery'||kind==='library-clear-recovery';
     const nowMs=()=>{const value=Number(input.environment.now());return Number.isFinite(value)?value:Date.now();};
-    function identity(){const status=input.identity.status();return {tabId:String(status.tabId||''),pageId:String(status.pageId||''),claimId:String(status.claimId||'')};}
-    function ownerIdentity(){const own=identity();return `tab_${own.tabId}_${own.pageId}_${own.claimId}`.replace(/[^a-z0-9_-]/gi,'_').slice(0,164);}
+    function identity():MutationOrigin{const status=input.identity.status();return freeze({tabId:String(status.tabId||''),pageId:String(status.pageId||''),claimId:String(status.claimId||''),revision:status.revision});}
+    function ownerIdentity(own:MutationOrigin){return `tab_${own.tabId}_${own.pageId}_${own.claimId}`.replace(/[^a-z0-9_-]/gi,'_').slice(0,164);}
     function lease(){const value=input.local.getJson(STORAGE_KEY,null) as LocalLease|null|undefined;return value&&value.version===1?value:null;}
-    function sameOwner(value:LocalLease|null|undefined):boolean{const own=identity();return !!(value&&value.tabId===own.tabId&&value.pageId===own.pageId&&value.claimId===own.claimId);}
+    function sameOwner(value:LocalLease|null|undefined,own:MutationOrigin):boolean{return !!(value&&value.tabId===own.tabId&&value.pageId===own.pageId&&value.claimId===own.claimId);}
+    function originCurrent(state:MutationState){const current=identity();return active===state&&state.phase!=='retired'&&input.identity.canMutate()&&sameOwner(current,state.origin)&&current.revision===state.origin.revision;}
+    function assertOrigin(state:MutationState){if(!originCurrent(state))throw authorityError('Study control changed during the protected data operation.');}
     // A tab closed in the middle of a change leaves its lease until it runs
     // out, and nothing announces that: a tab that finds one looks again when
     // it ends (a live tab renews it first, and the look then waits again).
@@ -40,89 +42,123 @@ const createModule=()=>{
       if(foreignExpiry!==null)return;
       foreignExpiry=input.environment.setTimeout(()=>{foreignExpiry=null;if(foreignActive())return;refreshUi();input.hooks.foreignReleased();},Math.max(50,Number(value.expiresAt)-nowMs()+50));
     }
-    function foreignActive(){const value=lease(),foreign=!!(value&&!sameOwner(value)&&Number(value.expiresAt)>nowMs());if(foreign)watchForeignExpiry(value);return foreign;}
-    function writesBlocked(){return foreignActive()||!!(recoveryFault&&!(active&&isRecoveryKind(active.kind)));}
-    function writeLease(kind:string,id:string){
-      const own=identity(),value={version:1,...own,kind,id,expiresAt:nowMs()+LEASE_MS};
-      if(!own.claimId||!input.local.setJson(STORAGE_KEY,value))throw new Error('The cross-tab mutation lock could not be persisted. No changes were made.');
-      const verified=lease();if(!sameOwner(verified)||verified?.id!==id)throw new Error('Another tab acquired the data mutation lock. No changes were made.');return value;
+    function foreignActive(){const value=lease(),foreign=!!(value&&!sameOwner(value,identity())&&Number(value.expiresAt)>nowMs());if(foreign)watchForeignExpiry(value);return foreign;}
+    function writesBlocked(){return foreignActive()||!!(recoveryFault&&!(active?.phase==='active'&&isRecoveryKind(active.kind)));}
+    function writeLease(state:MutationState){
+      assertOrigin(state);
+      const {tabId,pageId,claimId}=state.origin,value={version:1,tabId,pageId,claimId,kind:state.kind,id:state.id,expiresAt:state.expiresAt};
+      if(!input.local.setJson(STORAGE_KEY,value))throw new Error('The cross-tab mutation lock could not be persisted. No changes were made.');
+      const verified=lease();if(!sameOwner(verified,state.origin)||verified?.id!==state.id)throw new Error('Another tab acquired the data mutation lock. No changes were made.');
+      assertOrigin(state);
     }
-    function clearLease(id:string){const value=lease();if(sameOwner(value)&&(!id||value?.id===id))input.local.remove(STORAGE_KEY);}
+    function clearLease(state:MutationState){const value=lease();if(sameOwner(value,state.origin)&&value?.id===state.id)input.local.remove(STORAGE_KEY);}
     function refreshUi(){input.hooks.refreshUi();}
     function blocksUi(){return !!active||foreignActive()||!!recoveryFault;}
-    async function durableAcquire(kind:string,id:string,{waitRecovery=false}={}){
-      let result=await input.durable.acquire({kind,id,owner:ownerIdentity(),expiresAt:nowMs()+LEASE_MS});
-      if(!result.acquired&&waitRecovery&&isRecoveryKind(kind)){
-        const waitMs=Math.max(0,Math.min(LEASE_MS+1000,Number(result.holder&&result.holder.expiresAt)-nowMs()+50));if(waitMs)await new Promise<void>(resolve=>input.environment.setTimeout(resolve,waitMs));
-        result=await input.durable.acquire({kind,id,owner:ownerIdentity(),expiresAt:nowMs()+LEASE_MS});
+    async function durableAcquire(state:MutationState,renew=false){
+      assertOrigin(state);
+      const expiresAt=nowMs()+LEASE_MS;
+      const result=await input.durable.acquire({kind:state.kind,id:state.id,owner:state.owner,expiresAt,...(renew?{renew:true}:{})});
+      return {result,expiresAt};
+    }
+    async function acquireInitial(state:MutationState){
+      let proof=await durableAcquire(state);assertOrigin(state);
+      if(!proof.result.acquired&&isRecoveryKind(state.kind)){
+        const waitMs=Math.max(0,Math.min(LEASE_MS+1000,Number(proof.result.holder?.expiresAt)-nowMs()+50));
+        if(waitMs)await new Promise<void>(resolve=>input.environment.setTimeout(resolve,waitMs));
+        assertOrigin(state);proof=await durableAcquire(state);assertOrigin(state);
       }
-      return result;
+      if(!proof.result.acquired)throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');
+      if(proof.expiresAt<=nowMs())throw authorityError('The durable mutation lease expired before acquisition was acknowledged.');
+      state.expiresAt=proof.expiresAt;writeLease(state);
     }
-    async function acquireInitial(kind:string,id:string){
-      const result=await durableAcquire(kind,id,{waitRecovery:true});if(!result.acquired)throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');
-      try{writeLease(kind,id);}catch(error){try{await input.durable.release(id);}catch{}throw error;}
-    }
-    function loseAuthority(error:unknown,{durableProtected=false}={}){
-      if(!active)return false;
-      const existing=active.authorityError;
+    function loseAuthority(state:MutationState,error:unknown,{durableProtected=false}={}){
+      if(active!==state||state.phase!=='active')return false;
+      const existing=state.authorityError;
       if(existing&&!(existing.durableProtected===true&&durableProtected!==true))return false;
-      const reason=authorityError(error&&(error as {message?:unknown}).message||String(error||'Data mutation authority was lost.'),{durableProtected,cause:error instanceof Error?error:null});
-      active.authorityError=reason;
-      // A failed localStorage mirror renewal is still fail-closed for the active
-      // operation, but the strict IndexedDB lease remains authoritative. Do not
-      // convert that recoverable lock-layer degradation into a persistent app-wide
-      // recovery fault. Losing the durable lease itself is different: mutation
-      // authority is no longer proven, so later writes must remain blocked.
-      if(durableProtected!==true){recoveryFault=reason.message||String(reason);recoveryKind=active.kind;}
-      try{if(!active.controller.signal.aborted)active.controller.abort(reason);}catch{}
+      const reason=authorityError(error instanceof Error?error.message:String(error||'Data mutation authority was lost.'),{durableProtected,cause:error instanceof Error?error:null});
+      state.authorityError=reason;
+      // A mirror-only failure permits rollback under the same unexpired
+      // durable lease and original app owner, never a successor claim.
+      if(!durableProtected){recoveryFault=reason.message;recoveryKind=state.kind;}
+      if(!state.controller.signal.aborted)state.controller.abort(reason);
       refreshUi();return true;
     }
-    async function refreshAuthority(kind:string,id:string){
-      let result;
-      try{result=await durableAcquire(kind,id,{waitRecovery:false});}
-      catch(error){loseAuthority(error,{durableProtected:false});return false;}
-      if(!result.acquired){loseAuthority(new Error('Another Study Director tab acquired the durable data mutation lease.'),{durableProtected:false});return false;}
-      try{writeLease(kind,id);return true;}
-      catch(error){
-        // The durable IndexedDB lease is still ours. Do not release the strongest lock merely
-        // because the localStorage mirror could not be renewed. Stop forward mutation instead.
-        loseAuthority(error,{durableProtected:true});return false;
-      }
+    function checkProtection(state:MutationState){
+      if(active!==state||state.phase!=='active')throw authorityError('The protected data operation is no longer active.');
+      if(!originCurrent(state))loseAuthority(state,authorityError('Study control changed during the protected data operation.'));
+      else if(state.expiresAt<=nowMs())loseAuthority(state,authorityError('The durable data mutation lease expired.'));
     }
-    function assertAuthority(options:AuthorityOptions={}):true{
-      const allowDurableProtected=options&&options.allowDurableProtected===true;
-      if(active&&active.authorityError){if(allowDurableProtected&&active.authorityError.durableProtected===true)return true;throw active.authorityError;}
-      if(active&&active.controller.signal.aborted){const reason:unknown=active.controller.signal.reason;if(allowDurableProtected&&reason&&(reason as {durableProtected?:unknown}).durableProtected===true)return true;throw reason instanceof Error?reason:authorityError('Data mutation authority was lost.');}
+    function assertOperation(state:MutationState,options:AuthorityOptions={}):true{
+      checkProtection(state);
+      const error=state.authorityError;
+      if(error){if(options.allowDurableProtected&&error.durableProtected)return true;throw error;}
       return true;
     }
-    async function execute<T>(kind:string,id:string,operation:(authority:MutationAuthority)=>T|PromiseLike<T>):Promise<T>{
-      await acquireInitial(kind,id);
-      const controller=new input.environment.AbortController(),state:MutationState={kind,id,startedAt:new Date().toISOString(),controller,authorityError:null};active=state;refreshUi();
-      let refreshing=false;
-      heartbeat=input.environment.setInterval(()=>{
-        if(refreshing||active!==state)return;refreshing=true;heartbeatRefresh=(async()=>{try{await refreshAuthority(kind,id);}finally{refreshing=false;}})();
-      },HEARTBEAT_MS);
-      const authority=freeze({signal:controller.signal,assert:assertAuthority,status:()=>freeze({healthy:!state.authorityError,durableProtected:state.authorityError?state.authorityError.durableProtected===true:true})});
-      try{const result=await operation(authority);assertAuthority();return result;}
-      finally{
-        if(heartbeat){input.environment.clearInterval(heartbeat);heartbeat=null;}await heartbeatRefresh;
-        try{await input.durable.release(id);}catch(error){recoveryFault=`The durable mutation lock could not be released safely: ${error&&(error as {message?:unknown}).message||error}`;recoveryKind=kind;}
-        clearLease(id);if(active===state)active=null;refreshUi();input.hooks.scheduleUpdate(250);
+    async function refreshAuthority(state:MutationState){
+      try{
+        assertOperation(state,{allowDurableProtected:true});
+        const previousExpiry=state.expiresAt,proof=await durableAcquire(state,true);
+        if(active!==state||state.phase!=='active')return;
+        checkProtection(state);
+        if(state.authorityError&&!state.authorityError.durableProtected)return;
+        if(!proof.result.acquired||previousExpiry<=nowMs()||proof.expiresAt<=nowMs())throw authorityError('The durable data mutation lease could not be renewed safely.');
+        state.expiresAt=proof.expiresAt;
+        try{writeLease(state);}
+        catch(error){loseAuthority(state,error,{durableProtected:originCurrent(state)&&state.expiresAt>nowMs()});}
+      }catch(error){loseAuthority(state,error);}
+    }
+    // Backup preflight uses this ambient check outside an exclusive operation.
+    // The authority supplied to a callback below is instead bound to its own
+    // reservation; a retired callback can never borrow a later operation.
+    function assertAuthority(options:AuthorityOptions={}):true{
+      return active?assertOperation(active,options):true;
+    }
+    async function execute<T>(state:MutationState,operation:(authority:MutationAuthority)=>T|PromiseLike<T>):Promise<T>{
+      let heartbeat:number|null=null,refreshing=false,heartbeatRefresh:Promise<void>=Promise.resolve();
+      try{
+        await acquireInitial(state);assertOrigin(state);
+        state.phase='active';refreshUi();
+        heartbeat=input.environment.setInterval(()=>{
+          if(refreshing||active!==state||state.phase!=='active')return;
+          refreshing=true;heartbeatRefresh=refreshAuthority(state).finally(()=>{refreshing=false;});
+        },HEARTBEAT_MS);
+        const authority:MutationAuthority=freeze({
+          signal:state.controller.signal,assert:(options?:AuthorityOptions)=>assertOperation(state,options),
+          status:()=>{const protectedHere=state.phase==='active'&&originCurrent(state)&&state.expiresAt>nowMs();return freeze({healthy:protectedHere&&!state.authorityError,durableProtected:protectedHere&&(!state.authorityError||state.authorityError.durableProtected)});}
+        });
+        authority.assert();const result=await operation(authority);authority.assert();return result;
+      }finally{
+        state.phase='retired';
+        if(heartbeat!==null)input.environment.clearInterval(heartbeat);
+        await heartbeatRefresh;
+        // Even an ambiguous acquisition may have committed. Release only
+        // this attempt's durable and local identities, not the live owner.
+        try{await input.durable.release(state.id,state.owner);}
+        catch(error){recoveryFault=`The durable mutation lock could not be released safely: ${error instanceof Error?error.message:String(error)}`;recoveryKind=state.kind;}
+        clearLease(state);
       }
     }
     async function runExclusive<T>(kind:unknown,operation:(authority:MutationAuthority)=>T|PromiseLike<T>):Promise<T>{
       if(typeof operation!=='function')throw new TypeError('Mutation operation is required.');if(active)throw new Error(`Another ${active.kind} operation is already running.`);
       const operationKind=String(kind||'mutation');if(recoveryFault&&!isRecoveryKind(operationKind))throw new Error(recoveryFault);if(!input.identity.canMutate())throw new Error('Study control is required before changing stored data.');if(foreignActive()&&!isRecoveryKind(operationKind))throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');
-      const id=`mutation_${nowMs().toString(36)}_${input.environment.randomIdPart(10)}`,task=(async()=>{
+      const origin=identity();if(!origin.claimId||!Number.isSafeInteger(origin.revision))throw authorityError('Study control could not be verified.');
+      const state:MutationState={kind:operationKind,id:`mutation_${nowMs().toString(36)}_${input.environment.randomIdPart(10)}_${(++sequence).toString(36)}`,origin,owner:ownerIdentity(origin),phase:'pending',expiresAt:0,controller:new input.environment.AbortController(),authorityError:null};
+      active=state;
+      const task=Promise.resolve().then(async()=>{
+        assertOrigin(state);
         const locks=input.environment.locks;
-        if(locks&&typeof locks.request==='function')return locks.request(LOCK_NAME,{mode:'exclusive',ifAvailable:true},lock=>{if(!lock)throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');return execute(operationKind,id,operation);});
-        return execute(operationKind,id,operation);
-      })();activePromise=task.catch(()=>{});return task;
+        if(locks&&typeof locks.request==='function')return locks.request(LOCK_NAME,{mode:'exclusive',ifAvailable:true},lock=>{if(!lock)throw new Error('Another Study Director tab is changing stored data. Wait for it to finish.');return execute(state,operation);});
+        return execute(state,operation);
+      }).finally(()=>{
+        state.phase='retired';if(active===state)active=null;
+        refreshUi();input.hooks.scheduleUpdate(250);
+      });
+      activePromise=task.catch(()=>{});refreshUi();return task;
     }
     function failClosed(message:unknown,kind='restore'){recoveryFault=String(message||'Interrupted recovery must finish before data can be changed.');recoveryKind=String(kind||'data');refreshUi();return false;}
     function clearFault(){recoveryFault='';recoveryKind='';refreshUi();return true;}
     input.environment.addStorageListener(event=>{if(event&&event.key===STORAGE_KEY)refreshUi();});
-    return freeze({format:'study-director.mutation-coordinator',contractVersion:1,runExclusive,assertAuthority,signal:()=>active&&active.controller.signal||null,settled:()=>activePromise,foreignActive,writesBlocked,blocksUi,failClosed,clearFault,status:()=>freeze({active:active&&active.kind||'',foreign:foreignActive(),recoveryFault,recoveryKind,authorityHealthy:!(active&&active.authorityError),authorityDurableProtected:active&&active.authorityError?active.authorityError.durableProtected===true:true})});
+    return freeze({format:'study-director.mutation-coordinator',contractVersion:1,runExclusive,assertAuthority,signal:()=>active?.phase==='active'?active.controller.signal:null,settled:()=>activePromise,foreignActive,writesBlocked,blocksUi,failClosed,clearFault,status:()=>freeze({active:active&&active.kind||'',foreign:foreignActive(),recoveryFault,recoveryKind,authorityHealthy:!(active&&active.authorityError),authorityDurableProtected:active&&active.authorityError?active.authorityError.durableProtected===true:true})});
   }
   return freeze({format:'study-director.mutation-coordinator-module',contractVersion:1,createCoordinator});
 };

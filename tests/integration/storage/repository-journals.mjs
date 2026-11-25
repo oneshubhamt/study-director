@@ -16,7 +16,7 @@ assert.equal(blocked.acquired,false,'a second durable mutation must observe the 
 await clock.advance(60_001);
 const expiredTakeover=await app.mutationLease.acquire(Object.freeze({id:'mutation_qa-journal-0003',owner:'tab_qa-journal-owner-0003',kind:'restore',expiresAt:clock.now()+60_000}));
 assert.equal(expiredTakeover.acquired,true,'lease expiry is decided by the injected clock, not ambient wall time');
-assert.equal(await app.mutationLease.release('mutation_qa-journal-0003'),true);
+assert.equal(await app.mutationLease.release('mutation_qa-journal-0003','tab_qa-journal-owner-0003'),true);
 
 const restoreId='restore_qa-journal-0001';
 const blob=new Blob(['safety-copy']);
@@ -88,8 +88,8 @@ await journalMeta.remove('restoreJournalPayload');
 
 // Invalid and mismatched mutation/journal operations fail closed rather than mutating another operation's state.
 await assert.rejects(()=>app.mutationLease.acquire(Object.freeze({id:'bad',owner:'tab_qa-journal-owner-0004',kind:'restore',expiresAt:clock.now()+1000})),/invalid/u);
-assert.equal(await app.mutationLease.release('bad'),false);
-const held=await app.mutationLease.acquire(Object.freeze({id:'mutation_qa-journal-0004',owner:'tab_qa-journal-owner-0004',kind:'restore',expiresAt:clock.now()+60_000}));assert.equal(held.acquired,true);assert.equal(await app.mutationLease.release('mutation_qa-journal-wrong'),false);assert.equal(await app.mutationLease.release('mutation_qa-journal-0004'),true);
+assert.equal(await app.mutationLease.release('bad','tab_qa-journal-owner-0004'),false);
+const held=await app.mutationLease.acquire(Object.freeze({id:'mutation_qa-journal-0004',owner:'tab_qa-journal-owner-0004',kind:'restore',expiresAt:clock.now()+60_000}));assert.equal(held.acquired,true);assert.equal(await app.mutationLease.release('mutation_qa-journal-wrong','tab_qa-journal-owner-0004'),false);assert.equal(await app.mutationLease.release('mutation_qa-journal-0004','tab_qa-journal-owner-0004'),true);
 await assert.rejects(()=>app.restoreJournal.mark('bad','committing'),/phase is invalid/u);
 await app.restoreJournal.prepare(Object.freeze({id:'restore_qa-journal-0002',blob:new Blob(['rollback']),filename:'qa2.sdbackup'}));
 const original=await app.restoreJournal.read();
@@ -120,3 +120,14 @@ await journalMeta.remove('restoreJournalState');await app.restoreJournal.clear()
 console.log(JSON.stringify({status:'PASS',suite:'read-only-data-diagnostics',headerOnly:true,noPayloadRepair:true,metadataSummary:true},null,2));
 
 {const failures=new Set(['deletionRecovery']),h=createHarness(new Map(),null,{failLocalGetKeys:failures});await assert.rejects(h.app.metadata.diagnostics(),/local recovery read failure/u);}
+
+{
+  const request={id:'mutation_qa-journal-0005',owner:'tab_qa-journal-owner-0005',kind:'restore',expiresAt:clock.now()+1000};
+  assert.equal((await app.mutationLease.acquire(request)).acquired,true);
+  assert.equal((await app.mutationLease.acquire({...request,owner:'tab_qa-journal-owner-other'})).acquired,false,'same ID does not grant a different owner a live lease');
+  assert.equal(await app.mutationLease.release(request.id,'tab_qa-journal-owner-other'),false,'release requires exact owner as well as ID');
+  assert.equal((await app.mutationLease.acquire({...request,renew:true,expiresAt:clock.now()+1000})).acquired,true);
+  assert.equal(await app.mutationLease.release(request.id,request.owner),true);
+  assert.equal((await app.mutationLease.acquire({...request,renew:true,expiresAt:clock.now()+1000})).acquired,false,'retired lease cannot be resurrected by renewal');
+  assert.equal((await app.mutationLease.acquire({...request,expiresAt:clock.now()-1})).acquired,false,'expired request cannot acquire');
+}
