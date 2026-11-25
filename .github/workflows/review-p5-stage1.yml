@@ -83,8 +83,85 @@ jobs:
           function inventory(ref){
             const rows=[],files=paths(ref);
             for(const path of files){
-              const source=eraseTypes(git('show',ref+':'+path),path);
-              const ast=parse(source,{ecmaVersion:'latest',sourceType:'module',locations:true});
+              // Preserve template identities and positions while making bare build tokens legal JS.
+              const raw=git('show',ref+':'+path).replace(/@@SD_[A-Z0-9_]+@@/g,token=>token.replaceAll('@','
+              const visit=(node,parent=null)=>{
+                if(!node||typeof node.type!=='string')return;
+                if(['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(node.type)){
+                  const name=node.id?.name||(parent?.type==='VariableDeclarator'?parent.id?.name:null)||(parent?.type==='Property'||parent?.type==='MethodDefinition'?parent.key?.name||parent.key?.value:null);
+                  if(typeof name==='string'&&name)rows.push({path,name,line:node.loc.start.line,hash:tokenHash(source.slice(node.start,node.end))});
+                }
+                for(const value of Object.values(node)){
+                  if(Array.isArray(value)){for(const child of value)visit(child,node);}
+                  else if(value&&typeof value==='object'&&typeof value.type==='string')visit(value,node);
+                }
+              };
+              visit(ast);
+            }
+            return {files,rows};
+          }
+          const old=inventory(base),current=inventory('HEAD');
+          const index=(rows,key)=>{const map=new Map();for(const row of rows){const k=key(row),list=map.get(k)||[];list.push(row);map.set(k,list);}return map;};
+          const compare=(from,to,direction)=>{
+            const hashes=index(to.rows,row=>row.hash),names=index(to.rows,row=>row.name);
+            let identical=0,relocated=0,changed=0,unmatched=0;
+            const summary={};
+            for(const row of from.rows){
+              const key=row.path,counts=summary[key]??={identical:0,relocated:0,changed:0,unmatched:0};
+              const exact=hashes.get(row.hash)||[],named=names.get(row.name)||[];
+              const kind=exact.some(other=>other.path.replace(/\.ts$/,'.js')===row.path.replace(/\.ts$/,'.js')&&other.name===row.name)?'identical':exact.length?'relocated':named.length?'changed':'unmatched';
+              counts[kind]++;
+              if(kind==='identical')identical++;else if(kind==='relocated')relocated++;else if(kind==='changed')changed++;else unmatched++;
+              if(kind==='changed'||kind==='unmatched')console.log(JSON.stringify({direction,kind,path:row.path,line:row.line,name:row.name,candidates:named.map(other=>other.path+':'+other.line)}));
+            }
+            console.log(JSON.stringify({direction,files:from.files.length,functions:from.rows.length,identical,relocated,changed,unmatched,summary}));
+          };
+          compare(old,current,'baseline-to-current');
+          compare(current,old,'current-to-baseline');
+          console.log('Function-token inventory only: exact matches are not binding/caller equivalence; changed and unmatched entries require semantic review.');
+          JS
+  session-browser:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        file:
+          - tests/browser/app/session-draft-edit.mjs
+          - tests/browser/app/session-merge-timer.mjs
+          - tests/browser/backup/restore-session-safety.mjs
+          - tests/browser/backup/session-handoff-journeys.mjs
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Isolated session transition and recovery journeys
+        env:
+          TEST_FILE: ${{ matrix.file }}
+        run: |
+          repeats=1
+          if [ "$TEST_FILE" = tests/browser/app/session-merge-timer.mjs ]; then repeats=5; fi
+          for ((pass=1; pass<=repeats; pass++)); do
+            echo "=== $TEST_FILE pass $pass/$repeats ==="
+            node "$TEST_FILE"
+          done
+));
+              const source=eraseTypes(raw,path);
+              let ast;
+              try{ast=parse(source,{ecmaVersion:'latest',sourceType:'module',locations:true});}
+              catch(error){throw new Error(`Cannot inventory ${ref}:${path}: ${error.message}`,{cause:error});}
               const visit=(node,parent=null)=>{
                 if(!node||typeof node.type!=='string')return;
                 if(['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(node.type)){
