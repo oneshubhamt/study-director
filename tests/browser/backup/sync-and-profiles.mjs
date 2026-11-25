@@ -77,8 +77,22 @@ try{
   // Profiles on B: a new one is empty, the first keeps its notes, and a
   // removed one leaves nothing behind on this device.
   const original=await b.evaluate(`__PWA6.Profiles.current().id`);
-  await b.evaluate(`setTimeout(()=>__PWA6.Profiles.add(),0)`);
-  await sleep(1500);await reopen(b,'B in the added profile');
+  // The incoming note is visible during reconciliation. Wait for the sync to
+  // commit, then use the same profile controls and writer barrier as the app.
+  await waitFor(async()=>(await sync(b)).catchingUp===false,{label:'B commits the received edit'});
+  const changeProfile=async(selector,label)=>{
+    await b.click('#profile-tag');
+    await waitFor(()=>b.evaluate(`document.getElementById('profile-dialog').open`),{label:'profile controls open'});
+    const previous=await b.evaluate('performance.timeOrigin');
+    await b.click(selector);
+    await waitFor(()=>b.evaluate(`performance.timeOrigin!==${previous}`),{label});
+    await reopen(b,label);
+  };
+  await changeProfile('#profile-add','B in the added profile');
+  await waitFor(()=>b.evaluate(`document.getElementById('first-start-dialog').open`),{label:'new profile setup opens'});
+  await b.evaluate(`document.getElementById('first-start-name').value='Second profile'`);
+  await b.click('[data-action="first-start-continue"]');
+  await waitFor(()=>b.evaluate(`!document.getElementById('first-start-dialog').open`),{label:'new profile setup completes'});
   const added=await b.evaluate(`__PWA6.Profiles.current()`);
   assert.notEqual(added.id,original,'the added profile is open');
   assert.equal(await noteText(b,'ethics'),null,'the added profile is empty');
@@ -86,13 +100,11 @@ try{
   const databases=()=>b.evaluate(`indexedDB.databases().then(rows=>rows.map(row=>row.name))`);
   await waitFor(async()=>(await databases()).some(name=>name.endsWith(added.scope)),{label:'the added profile has its own database'});
 
-  await b.evaluate(`setTimeout(()=>__PWA6.Profiles.switchTo(${JSON.stringify(original)}),0)`);
-  await sleep(1500);await reopen(b,'B back in the first profile');
+  await changeProfile(`#profile-list [data-profile="${original}"]`,'B back in the first profile');
   assert.equal(await b.evaluate(`__PWA6.Profiles.current().id`),original);
   assert.match(await noteText(b,'ethics')||'',/Edited on A/u,'the first profile keeps its notes');
 
-  await b.evaluate(`setTimeout(()=>__PWA6.Profiles.switchTo(${JSON.stringify(added.id)}),0)`);
-  await sleep(1500);await reopen(b,'B in the added profile again');
+  await changeProfile(`#profile-list [data-profile="${added.id}"]`,'B in the added profile again');
   await b.evaluate(`setTimeout(()=>__PWA6.Profiles.remove(),0)`);
   await sleep(1500);await reopen(b,'B after removing the added profile');
   assert.equal(await b.evaluate(`__PWA6.Profiles.current().id`),original,'removing opens the profile it came from');
