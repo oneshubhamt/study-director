@@ -194,6 +194,7 @@ const actions=readScript('source/core/session-actions.ts');
 const sessionHost=readScript('source/core/session-host.ts');
 const sessionHandoff=readScript('source/core/session-handoff.ts');
 const attachments=readScript('source/core/attachments.ts');
+const libraryClear=readScript('source/core/library-clear.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 
 function section(source,start,end){
@@ -210,8 +211,10 @@ assert.match(timer,/clock:freeze\(\['nowMs'\]\)/,'Timer engine clock contract is
 assert.match(timer,/function nowIso\(\)\{return new Date\(\)\.toISOString\(\);\}/,'Timer informational timestamps remain ambient wall clock');
 assert.doesNotMatch(timer,/clockNowIso|ports\.clock\.nowIso/,'Timer engine must not obtain ISO timestamps from DecisionClock');
 
-assert.doesNotMatch(attachments,/\bp\.clock\b|\bclock\.nowIso\b|Attachment reference clock/,'Attachment reference rollback must not depend on DecisionClock');
-assert.match(attachments,/const nowIso=\(\)=>new Date\(\)\.toISOString\(\);/,'Attachment rollback stamps remain ordinary wall-clock metadata');
+assert.doesNotMatch(attachments+libraryClear,/\bp\.clock\b|\bclock\.nowIso\b|DecisionClock|Attachment reference clock/,'Attachment reference rollback must not depend on DecisionClock');
+assert.match(libraryClear,/const nowIso=typeof ports\.nowIso==='function'\?ports\.nowIso:\(\)=>new Date\(\)\.toISOString\(\);/,'The reference rewrite owner defaults to ordinary wall-clock metadata');
+assert.match(section(host,'const LibraryClearState=LibraryClearModule.createState','const validateAttachmentInsertionValue='),/nowIso:\(\)=>new Date\(\)\.toISOString\(\)/,'The actual Library reference timestamp provider is ordinary wall-clock metadata');
+assert.match(libraryClear,/revision:data\.activeSession\.nextRevision\(\),updatedAt:nowIso\(\)/,'Session reference rollback stamps from the wall-clock provider');
 
 assert.match(host,/MutationCoordinatorModule\.createCoordinator\(Object\.freeze\s*\(\{[\s\S]*now:DecisionClock\.nowMs/u,'the extracted mutation coordinator receives the shared DecisionClock as its lease-decision clock');
 assert.match(mutation,/const nowMs=\(\)=>\{const value=Number\(input\.environment\.now\(\)\)/u,'mutation lease decisions use the injected decision clock');

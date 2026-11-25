@@ -451,5 +451,56 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-transaction',faul
     controls.onStorageRead=null;const safety=await state.capture(plan,policy);assert.equal(safety.dailyRecords.mode,'selected');assert.equal(safety.dailyRecords.entries[0].reflection,reference);
     cases.push('selected safety capture rejects unavailable day '+(rescued?'with':'without')+' older rescue');
   }
+
+  // Individual attachment reference surgery must exercise the same repository
+  // implementations used by the app, not merely simulated CAS ports.
+  for(const mode of ['normal','successors','committed-readback','uncommitted-note','lost-owner']){
+    const controls={dailyKeyEnumeration:true},h=createHarness(new Map(),null,controls),date='2026-10-01',stamp='2026-10-01T12:20:00.000Z';
+    const note=noteRow('Biology',reference,stamp),day={version:1,date,savedAt:stamp,updatedAt:stamp,reflection:reference};
+    const session={id:'active',type:'activeSession',version:1,date,status:'suspended',scheduleText:'',suspendedAt:stamp,revision:20,updatedAt:stamp,snapshot:{review:{reflection:reference,studyQuality:null}}};
+    await h.app.notes.replace({[note.key]:note});await h.app.dailyRecords.save(day);h.stores.session.set('active',session);
+    const events=[];let state;
+    const refs=Attachments.createReferenceCoordinator({data:h.app,scan:rich.scanAttachmentReferences,rewriteReferences:(targets,operation)=>state.rewriteReferences(targets,operation),withPersistenceSuppressed:work=>work(),background:{budget:()=>()=>false,yieldTask:async()=>{}},live:{fields:()=>[],reviewDate:()=>date,todayIso:()=>date,noteKey:value=>value}});
+    state=Clear.createState({data:h.app,createRollbackScope:Clear.createRollbackScope,withPersistenceSuppressed:work=>work(),references:{scan:rich.scanAttachmentReferences,remove:rich.removeAttachmentReferences,listSources:()=>refs.sources({includeLive:false})},attachments:{inventory:async()=>[],verifyMetadata:async()=>{},restoreMetadata:async()=>{}},review:{hydrate:options=>events.push(options),invalidateBindings(){}},nowIso:()=> '2026-10-02T12:00:00.000Z'});
+    const assertAuthority=()=>{if(controls.owned===false||Number(controls.ownershipRevision||1)!==1)throw new Error('originating owner lost');};
+    if(mode==='committed-readback'){
+      let fail=false;
+      controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&Array.isArray(stores)&&stores.includes('daily'))fail=true;};
+      controls.onStorageRead=({store,kind})=>{if(fail&&store==='daily'&&kind==='get'){fail=false;throw new Error('injected committed day readback failure');}};
+      await assert.rejects(()=>refs.removeEverywhere(id,assertAuthority),/injected committed day readback failure/);
+      controls.onTransactionComplete=null;controls.onStorageRead=null;
+    }else if(mode==='uncommitted-note'){
+      controls.failNextAreaWrite=true;
+      await assert.rejects(()=>refs.removeEverywhere(id,assertAuthority),/note|Notes|QA_FIXTURE/i);
+      // A later lane flush must not reintroduce the failed operation's edit.
+      await h.app.notes.flush({strict:true});
+    }else{
+      const change=await refs.removeEverywhere(id,assertAuthority);
+      assert.equal(await refs.verifyAbsent(id),true);
+      if(mode==='successors'){
+        const currentNote=(await h.app.notes.readFreshPayload())[note.key];
+        assert.equal(h.app.notes.updateValidatedRich(note.key,note.label,'newer note',currentNote.updatedAt).status,'changed');await h.app.notes.flush({strict:true});
+        const currentDay=await h.app.dailyRecords.get(date,{strict:true});
+        await h.app.dailyRecords.save({...currentDay,reflection:'newer day',updatedAt:'2026-10-03T00:00:00.000Z'},{expectedCanonical:currentDay});
+        const currentSession=(await h.app.activeSession.load(0,{strict:true})).value;
+        const newer={...currentSession,revision:h.app.activeSession.nextRevision(),updatedAt:'2026-10-03T00:00:00.000Z',snapshot:{...currentSession.snapshot,review:{reflection:'newer session',studyQuality:5}}};
+        assert.equal((await h.app.activeSession.save(newer,{expectedCanonical:currentSession})).ok,true);
+        const before=JSON.stringify({note:(await h.app.notes.readFreshPayload())[note.key],day:await h.app.dailyRecords.get(date,{strict:true}),session:(await h.app.activeSession.load(0,{strict:true})).value}),count=events.length;
+        await assert.rejects(()=>change.rollback(),/successor was preserved|Daily Record changed/);
+        const after=JSON.stringify({note:(await h.app.notes.readFreshPayload())[note.key],day:await h.app.dailyRecords.get(date,{strict:true}),session:(await h.app.activeSession.load(0,{strict:true})).value});
+        assert.equal(after,before,'real repositories must preserve every exact successor');assert.equal(events.length,count,'no stale Review hydration');cases.push('individual '+mode);continue;
+      }
+      if(mode==='lost-owner'){
+        controls.ownershipRevision=3;const before=JSON.stringify([h.stores.area.get(note.key),h.stores.daily.get(date),h.stores.session.get('active')]),count=events.length;
+        await assert.rejects(()=>change.rollback(),/originating owner lost/);
+        assert.equal(JSON.stringify([h.stores.area.get(note.key),h.stores.daily.get(date),h.stores.session.get('active')]),before);assert.equal(events.length,count);cases.push('individual '+mode);continue;
+      }
+      await change.rollback();await change.rollback();
+    }
+    assert.equal((await h.app.notes.readFreshPayload())[note.key].text,reference,mode+' must restore note content');
+    assert.equal((await h.app.dailyRecords.get(date,{strict:true})).reflection,reference,mode+' must restore Saved Day');
+    assert.equal((await h.app.activeSession.load(0,{strict:true})).value.snapshot.review.reflection,reference,mode+' must restore Active Session');
+    cases.push('individual '+mode);
+  }
   console.log(JSON.stringify({status:'PASS',suite:'library-clear-storage-contract',cases},null,2));
 }
