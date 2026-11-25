@@ -151,6 +151,52 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   }
 }
 
+// The IndexedDB read callback is a second ownership boundary, even when
+// the canonical precondition still matches. No former owner may mutate it.
+{
+  const date='2026-09-15',timestamp='2026-09-15T12:00:00.000Z';
+  const day={version:1,date,reflection:'keep this reflection',savedAt:timestamp,updatedAt:timestamp};
+  const session={id:'active',version:1,revision:1,date,status:'active',scheduleText:'',snapshot:{date,elapsedMs:1},updatedAt:timestamp};
+  for(const reacquire of [false,true]){
+    for(const action of ['delete-day','save-session']){
+      const authority={ownershipRevision:1};
+      const owned=createHarness(new Map(),null,authority);
+      await owned.app.dailyRecords.save(day);
+      assert.equal((await owned.app.activeSession.save(session)).ok,true);
+      const previousDay=structuredClone(owned.stores.daily.get(date)),previousSession=structuredClone(owned.stores.session.get('active'));
+      let triggered=false;
+      authority.onTransactionRead=({store,key,mode})=>{
+        if(mode!=='readwrite'||(action==='delete-day'?(store!=='daily'||key!==date):(store!=='session'||key!=='active')))return;
+        delete authority.onTransactionRead;triggered=true;authority.owned=false;authority.ownershipRevision++;
+        if(reacquire){authority.owned=true;authority.ownershipRevision++;}
+      };
+      if(action==='delete-day')await assert.rejects(owned.app.dailyRecords.remove(date,{expectedCanonical:previousDay}),error=>error?.code==='OWNERSHIP');
+      else{
+        const saved=await owned.app.activeSession.save({...previousSession,revision:2},{expectedCanonical:previousSession,strictDurability:true});
+        assert.equal(saved.ok,false);assert.equal(saved.error?.code,'OWNERSHIP');assert.equal(saved.storage.idb,false);
+      }
+      assert.equal(triggered,true,'exercise the actual transactional pre-read');
+      assert.deepEqual(owned.stores.daily.get(date),previousDay);
+      assert.deepEqual(owned.stores.session.get('active'),previousSession);
+      assert.equal(owned.sharedLocal.has('deletionRecovery'),false,'conditional mutations must not leave a rejected deletion marker');
+    }
+  }
+  const events=[],authority={ownershipRevision:1,onCanonicalCommit:event=>events.push(event)};
+  const owned=createHarness(new Map(),null,authority);
+  assert.equal((await owned.app.activeSession.save(session)).ok,true);
+  const before=events.length,previous=structuredClone(owned.stores.session.get('active'));
+  authority.onTransactionComplete=({stores,mode})=>{
+    if(mode!=='readwrite'||!Array.isArray(stores)||!stores.includes('session'))return;
+    delete authority.onTransactionComplete;authority.owned=false;authority.ownershipRevision++;
+  };
+  const saved=await owned.app.activeSession.save({...previous,revision:2},{expectedCanonical:previous,strictDurability:true});
+  assert.equal(saved.ok,false,'former owner cannot acknowledge a committed save as a current-owner success');
+  assert.equal(saved.error?.code,'OWNERSHIP');
+  assert.equal(saved.storage.idb,true,'physical commit still reported accurately');
+  assert.equal(owned.stores.session.get('active').revision,2);
+  assert.equal(events.length,before,'former owner must not publish a canonical completion notification');
+}
+
 const beforePlanDraftStrict=strictCount();
 await app.planData.writeDraft('temporary draft');
 assert.equal(strictCount(),beforePlanDraftStrict,'high-frequency Plan draft persistence must remain normal/default durability');

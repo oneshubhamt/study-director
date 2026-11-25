@@ -832,18 +832,21 @@ async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipTo
     let changed=false,revisionState:RevisionState|null=null;
     const req=records.get(date);
     req.onsuccess=()=>{
-      if(conditional){
-        const current=readableDailyRecord(req.result)||null;
-        if(current===null?expected!==null:expected===null||!sameDataValue(current,expected)){
-          try{tx.abort();}catch{}
-          finish(false,Object.assign(new Error('Daily Record changed before this deletion.'),{code:'DAILY_RECORD_CHANGED'}));
-          return;
+      try{
+        if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record deletion callback');
+        if(conditional){
+          const current=readableDailyRecord(req.result)||null;
+          if(current===null?expected!==null:expected===null||!sameDataValue(current,expected)){
+            try{tx.abort();}catch{}
+            finish(false,Object.assign(new Error('Daily Record changed before this deletion.'),{code:'DAILY_RECORD_CHANGED'}));
+            return;
+          }
         }
-      }
-      changed=!!req.result;records.delete(date);summaries.delete(date);
-      stageCanonicalMutationEpoch(tx,[dailyPreparationUnit(date)]);
-      if(trackDeletion){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}else meta.remove('savedDayDeletionPrefix',date);
-      if(changed)revisionState=InsightsDatasetRevision.stage(tx,'daily-record-delete');
+        changed=!!req.result;records.delete(date);summaries.delete(date);
+        stageCanonicalMutationEpoch(tx,[dailyPreparationUnit(date)]);
+        if(trackDeletion){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}else meta.remove('savedDayDeletionPrefix',date);
+        if(changed)revisionState=InsightsDatasetRevision.stage(tx,'daily-record-delete');
+      }catch(error){try{tx.abort();}catch{}finish(false,error);}
     };
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{changed});};
   },'daily record deletion aborted');
@@ -864,13 +867,16 @@ async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:Wri
       const request=store.get(ACTIVE_SESSION_ID);
       request.onerror=()=>finish(false,request.error||new Error('Active Session recovery precondition read failed'));
       request.onsuccess=()=>{
-        const present=ActiveSessionCodec.sanitizeCurrent(request.result);
-        if(!present||!sameDataValue(present,expectedCanonical)){
-          try{tx.abort();}catch{}
-          finish(false,Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'}));
-          return;
-        }
-        put();
+        try{
+          if(ownershipToken)assertWriteToken(ownershipToken,'the conditional active-session write');
+          const present=ActiveSessionCodec.sanitizeCurrent(request.result);
+          if(!present||!sameDataValue(present,expectedCanonical)){
+            try{tx.abort();}catch{}
+            finish(false,Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'}));
+            return;
+          }
+          put();
+        }catch(error){try{tx.abort();}catch{}finish(false,error);}
       };
     }else put();
   },'active session write aborted');
@@ -916,10 +922,11 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
       // Only explicit critical saves, page-exit flushes and suspension need
       // strict disk-commit semantics. Periodic timer snapshots stay default.
       await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected);idbSaved=true;
+      assertWriteToken(ownershipToken,'completing the active-session save');
       clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
-      if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:false}};
+      if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:idbSaved}};
       idbError=e;
       if(!expected&&!localSaved&&writeEpoch===activeSessionMutationEpoch){
         try{checkpoint();}catch(error){if(isOwnershipLostError(error))return {ok:false,value:clean,error,storage:{local:false,idb:false}};throw error;}
