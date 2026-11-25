@@ -304,7 +304,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
-    operations:freeze({canShare:()=>true,assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
+    operations:freeze({captureOrigin:()=>()=>{},canShare:()=>true,assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
     interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);
       if(config.title==='Kept versions'&&Object.prototype.hasOwnProperty.call(state,'draftEditedDuringReview')){
         state.pendingPlanDraft=state.draftEditedDuringReview;delete state.draftEditedDuringReview;

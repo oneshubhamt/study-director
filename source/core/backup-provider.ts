@@ -1601,7 +1601,15 @@ const createModule=(input:ProviderModuleInput)=>{
     for(const entry of manifest.objects||[]){const item=byId.get(entry.objectId);if(!item||item.size&&item.size!==entry.storedBytes||item.digest&&item.digest!==entry.storedChecksum)throw new Error(`Repository object ${entry.objectId} is missing or its metadata no longer matches the selected version.`);}
     return freeze({byId,invalid:Math.max(0,Number(inventory.invalidCount)||0)});
   }
+  function assertImportRequest(operation:import('../../types/backup-provider.ts').ImportOperation){
+    try{operation.assertOrigin?.();}catch{operation.cancel('Study control changed after this backup import was requested. Open the backup again.');}
+    operation.signal?.throwIfAborted();
+  }
+  function beginProviderImport(foreground:ForegroundPort,traceId:string,options:{backgroundPreemptible?:boolean;assertOrigin?:()=>void}){
+    try{return BackupController.beginImport(options);}catch(error){foreground.release();OperationDiagnostics.fail(error,{},traceId);throw error;}
+  }
   async function loadRepositoryProvider(selected:Provider,operation:import('../../types/backup-provider.ts').ImportOperation,{checkpointId='',mode='bring-in',onProgress=null,note='',missingOnly=false,before='',quiet=false,sync=false,review=false,password=false}:ProviderOptions={}){
+    const assertRequest=()=>assertImportRequest(operation);assertRequest();
     if(!['bring-in','restore-version'].includes(mode))throw new TypeError('Unsupported managed repository recovery mode.');
     // Every restore names its version (Version History, sync, recovery at
     // start); only adding what is missing finds its own.
@@ -1609,16 +1617,16 @@ const createModule=(input:ProviderModuleInput)=>{
     const presentationId=foregroundView()?.operationId||'';
     const progress=(stage:string,message:string,details:Progress={})=>{if(operation.signal?.aborted||(foregroundView()?.operationId||'')!==presentationId)return;recoveryStatus(message,true,onProgress,stage,details);};
     OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id});
-    await preemptProviderBackground(selected);
+    await preemptProviderBackground(selected);assertRequest();
     OperationDiagnostics.mark('provider-background-preemption-complete',{provider:selected.id});
     const providerSelected=selected;selected=repositoryOperationSelected(selected,{signal:operation.signal});
-    await synchronizeRepositoryScope(selected);
+    await synchronizeRepositoryScope(selected);assertRequest();
     progress('history',`Reading backup versions from ${selected.label}…`);
     OperationDiagnostics.mark('recovery-history-scan-start',{provider:selected.id});
     let inventory=recentHistory(providerSelected,checkpointId);const reusedHistory=!!inventory;
     if(inventory)OperationDiagnostics.mark('recovery-history-scan-reused',{provider:selected.id,versions:inventory.pairs.length});
     else{inventory=await repositoryProviderInventory(selected,{signal:operation.signal});rememberRecentHistory(providerSelected,inventory);}
-    await observeRepositoryMaintenance(providerSelected,repositoryInventoryObservation(inventory));
+    assertRequest();await observeRepositoryMaintenance(providerSelected,repositoryInventoryObservation(inventory));assertRequest();
     OperationDiagnostics.mark('recovery-history-scan-complete',{provider:selected.id,versions:inventory.pairs.length,invalid:inventory.invalid.length+inventory.ignored+inventory.uncommitted.length+inventory.orphanCommits.length,reused:reusedHistory});
     if(inventory.overflow)throw new Error('Backup history could not be read completely. Recovery was stopped safely.');
     const newest=[...inventory.pairs].reverse();if(!newest.length)throw new Error('No eligible Study Director backups were found.');
@@ -1645,11 +1653,13 @@ const createModule=(input:ProviderModuleInput)=>{
     const inventoryTask=(async()=>{OperationDiagnostics.mark('recovery-object-inventory-start',{provider:selected.id});const value=await repositoryObjectInventory(selected,{signal:operation.signal}).catch(error=>{throw readFailure(error);});OperationDiagnostics.mark('recovery-object-inventory-complete',{provider:selected.id,objects:value.items.length,invalid:value.invalidCount,overflow:value.overflow===true});return value;})();
     const quarantineTask=integrityScrubHooks?integrityScrubHooks!.quarantine(selected.id):Promise.resolve([]);
     const [row,listedObjects,quarantineRows]=await Promise.all([verificationTask,inventoryTask,quarantineTask]),quarantinedObjectIds=repositoryProviderObjectIds(quarantineRows),quarantined=new Set(quarantinedObjectIds);
+    assertRequest();
     // The library's password follows the newest version: one another device
     // set or changed (typed here for this version) is kept for this device's
     // versions; one it removed (its version is plain although it built on an
     // encrypted one) is removed here too.
     if(sync&&sharedHead){const ancestors=new Set(row.manifest.reconciliationAncestorIds||[]),removedElsewhere=row.manifest.encrypted!==true&&inventory.pairs.some(other=>ancestors.has(other.item.id)&&other.item.history?.encrypted===true);await Exports.followProtection(freeze({protectionId:String(row.manifest.protectionId||''),encrypted:row.manifest.encrypted===true,removedElsewhere}));}
+    assertRequest();
     const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest),needed=new Set((row.manifest.objects||[]).map(entry=>entry.objectId)),total=needed.size,totalDownloadBytes=(row.manifest.objects||[]).reduce((sum,entry)=>sum+Math.max(0,Number(entry&&entry.storedBytes)||0),0),downloadSlots=new Map<string,number>(),downloadProgressBytes=new Map<string,number>();let started=0,completed=0;
     if((row.manifest.objects||[]).some(entry=>quarantined.has(entry.objectId)))throw readFailure(new Error('The selected backup version references an object that is quarantined after an integrity check. Choose another version or create a fresh backup.'));
     progress('inventory',`Preparing selected backup data from ${selected.label}…`);
@@ -1668,7 +1678,7 @@ const createModule=(input:ProviderModuleInput)=>{
     const localEmpty=async()=>!!automaticHooks?.ready&&await automaticHooks.ready()===false;
     const runManagedRecovery=(kind:'sync'|'bring-in'|'restore-version',spec:Omit<RecoverySpec<RecoveryOutcome,PresentResult>,'kind'|'createSafety'>&{createSafety():Promise<unknown>})=>managedRecoveryHooks!.run(kind==='sync'?freeze({...spec,kind,createSafety:null}):freeze({...spec,kind}));
     const managedRecovery=(transaction:ManagedTransaction)=>runManagedRecovery(sync?'sync':mode,freeze({
-      label:selected.label,keepsActiveSession:!!note||missingOnly||sync||review,...(sync?{}:{verifyEmpty:localEmpty}),apply:async()=>{applying=true;progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
+      assertRequest,label:selected.label,keepsActiveSession:!!note||missingOnly||sync||review,...(sync?{}:{verifyEmpty:localEmpty}),apply:async()=>{applying=true;progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
       createSafety:async()=>{
         // A positively empty device has nothing to protect externally. The
         // managed coordinator rechecks emptiness and revision before apply.
@@ -1686,7 +1696,7 @@ const createModule=(input:ProviderModuleInput)=>{
       // upload, so the other devices get it too.
       publishPresent:async (result:RecoveryOutcome)=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in'||selected.shared===true,sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
-    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
+    assertRequest();return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
   }
   // A protected safety version before a destructive action (Clear Library).
   // It is written in the foreground, preempting background work.
@@ -1907,10 +1917,10 @@ const createModule=(input:ProviderModuleInput)=>{
   }
   // Every foreground operation starts the same way: background work on this
   // location yields first, then the location prepares and asks for access.
-  async function enterForeground(selected:Provider,foreground:ForegroundPort,traceId:string,{prepare=false,authorizeAs=''}:{prepare?:boolean;authorizeAs?:string}={}){
-    OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id},traceId);await foreground.settled;OperationDiagnostics.mark('provider-background-preemption-complete',{provider:selected.id},traceId);
-    if(prepare)if(selected.prepare){OperationDiagnostics.mark('provider-prepare-start',{provider:selected.id},traceId);await selected.prepare();OperationDiagnostics.mark('provider-prepare-complete',{provider:selected.id},traceId);}
-    if(authorizeAs){OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,authorizeAs);OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);}
+  async function enterForeground(selected:Provider,foreground:ForegroundPort,traceId:string,{prepare=false,authorizeAs='',assertCurrent=()=>{}}:{prepare?:boolean;authorizeAs?:string;assertCurrent?:()=>void}={}){
+    OperationDiagnostics.mark('provider-background-preemption-start',{provider:selected.id},traceId);await foreground.settled;assertCurrent();OperationDiagnostics.mark('provider-background-preemption-complete',{provider:selected.id},traceId);
+    if(prepare)if(selected.prepare){OperationDiagnostics.mark('provider-prepare-start',{provider:selected.id},traceId);await selected.prepare();assertCurrent();OperationDiagnostics.mark('provider-prepare-complete',{provider:selected.id},traceId);}
+    if(authorizeAs){OperationDiagnostics.mark('provider-authorization-start',{provider:selected.id},traceId);await authorize(selected,authorizeAs,assertCurrent);assertCurrent();OperationDiagnostics.mark('provider-authorization-complete',{provider:selected.id},traceId);}
   }
   // The outcome line of a Combine or a restore, and what the other locations
   // still have to do.
@@ -2155,11 +2165,11 @@ const createModule=(input:ProviderModuleInput)=>{
     // An automatic catch-up is already admitted under the suspension-aware
     // provider owner. It must not impersonate a standalone file import and
     // suspend/cancel its own foreground sync through the file-work observer.
-    const operation=BackupController.beginImport({backgroundPreemptible:options&&options.respectBackgroundSuspension===true}),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
+    const operation=beginProviderImport(foreground,traceId,{backgroundPreemptible:options.respectBackgroundSuspension===true,...(options.assertOrigin?{assertOrigin:options.assertOrigin}:{})}),cancelImport=()=>operation.cancel?.('Synchronization was cancelled.');
     if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
     beginForegroundView(selected,'sync',`Syncing with ${selected.label}…`,options.presentation);setBusy(true);
     try{
-      await enterForeground(selected,foreground,traceId,{prepare:true});
+      await enterForeground(selected,foreground,traceId,{prepare:true,assertCurrent:()=>assertImportRequest(operation)});
       let checkpointId=String(options&&options.checkpointId||'');
       if(!checkpointId){
         const inventory=await repositoryProviderInventory(repositoryOperationSelected(selected,{signal:foreground.signal}),{signal:foreground.signal});
@@ -2169,8 +2179,8 @@ const createModule=(input:ProviderModuleInput)=>{
       }
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId,mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable',checkpointId});}
-      const sessionClaim=await sessionClaimForSync(selected,{signal:foreground.signal}),verifiedCheckpointId=String(candidate.preview?.checkpoint?.checkpointId||checkpointId);
-      const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaim});
+      let sessionClaim;try{assertImportRequest(operation);sessionClaim=await sessionClaimForSync(selected,{signal:foreground.signal});assertImportRequest(operation);}catch(error){await candidate.release();throw error;}
+      const verifiedCheckpointId=String(candidate.preview?.checkpoint?.checkpointId||checkpointId),exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaim});
       if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt,checkpointId:verifiedCheckpointId});}
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt,checkpointId:verifiedCheckpointId});
     }catch(error){
@@ -2192,11 +2202,11 @@ const createModule=(input:ProviderModuleInput)=>{
     if(quiet&&!providerConnected(selected))return freeze({cancelled:true,reason:'not-connected'});
     const traceId=OperationDiagnostics.start('provider-combine',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
-    const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Backup recovery was cancelled by the user.');
+    const operation=beginProviderImport(foreground,traceId,options.assertOrigin?{assertOrigin:options.assertOrigin}:{}),cancelImport=()=>operation.cancel?.('Backup recovery was cancelled by the user.');
     if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
     beginForegroundView(selected,'bring-in',`Connecting to ${selected.label}…`,options.presentation);setBusy(true);providerProgress(selected,'authorize',`Connecting to ${selected.label}…`);
     try{
-      await enterForeground(selected,foreground,traceId,{prepare:true,authorizeAs:quiet?'':'import'});
+      await enterForeground(selected,foreground,traceId,{prepare:true,authorizeAs:quiet?'':'import',assertCurrent:()=>assertImportRequest(operation)});
       statusText(`Reading ${selected.label}…`);
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',note,missingOnly,before:String(options?.before||''),quiet,review:!quiet&&!note&&options?.review===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});if(!candidate){const message=missingOnly?'No version saved before browser data was cleared was found. Nothing was changed.':'Combine cancelled.';statusText(message);finishForegroundView(selected,{message,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true},traceId);return freeze({cancelled:true,...(missingOnly?{reason:'needs-decision'}:{})});}
       const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{note,missingOnly,review:!quiet&&!note&&options?.review===true});
@@ -2216,11 +2226,11 @@ const createModule=(input:ProviderModuleInput)=>{
     const selected=providers.get(safeId(id));if(!selected||!selected.repository)throw new Error('Repository backup provider is unavailable.');
     const traceId=OperationDiagnostics.start('provider-restore',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({cancelled:true,reason:'busy'});}
-    const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Backup recovery was cancelled by the user.');
+    const operation=beginProviderImport(foreground,traceId,options.assertOrigin?{assertOrigin:options.assertOrigin}:{}),cancelImport=()=>operation.cancel?.('Backup recovery was cancelled by the user.');
     if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
     beginForegroundView(selected,'restore-version',`Connecting to ${selected.label}…`,options.presentation);setBusy(true);providerProgress(selected,'authorize',`Connecting to ${selected.label}…`);
     try{
-      await enterForeground(selected,foreground,traceId,{authorizeAs:'import'});
+      await enterForeground(selected,foreground,traceId,{authorizeAs:'import',assertCurrent:()=>assertImportRequest(operation)});
       statusText(`Reading ${selected.label}…`);
       const candidate=await loadRepositoryProvider(selected,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'restore-version',onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       const result=await RepositoryCheckpointPipeline.restoreVersion(candidate,{confirmed:options&&options.confirmed===true});

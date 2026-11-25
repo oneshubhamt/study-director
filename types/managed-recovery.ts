@@ -2,7 +2,7 @@ import type {AuthorityOptions} from './mutation-coordinator.ts';
 export type RecoveryKind='bring-in'|'restore-version'|'sync';
 export type VerifiedSafety={verified:true;checkpointId:string;sourceRevision:string};
 export type SafetyProof=VerifiedSafety|{verified:false;skipped:'local-empty'};
-export type RecoverySpec<R extends object,P extends object>={label:string;keepsActiveSession?:boolean;verifyEmpty?:()=>Promise<boolean>;apply():Promise<R>;publishPresent(result:R):Promise<P|null>} & ({kind:'sync';createSafety:null}|{kind:'bring-in'|'restore-version';createSafety():Promise<unknown>});
+export type RecoverySpec<R extends object,P extends object>={label:string;assertRequest?:()=>void;keepsActiveSession?:boolean;verifyEmpty?:()=>Promise<boolean>;apply():Promise<R>;publishPresent(result:R):Promise<P|null>} & ({kind:'sync';createSafety:null}|{kind:'bring-in'|'restore-version';createSafety():Promise<unknown>});
 export interface ManagedRecoveryInput<S>{
  automaticBackup:{suspend(reason:RecoveryKind):Promise<S>;resume(suspension:S):unknown};
  diagnostics:{capture(scope:string,error:unknown,severity:'warn'):void;mark(phase:string,details:Readonly<Record<string,unknown>>):void};

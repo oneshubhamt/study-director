@@ -199,7 +199,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreSessionState:async()=>{events.push('restore-session-state');if(failStartupRollbackOnce){failStartupRollbackOnce=false;throw new Error('injected startup rollback interruption');}return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
-  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:()=>{journalFault='';},failClosed:message=>{journalFault=message;},runExclusive:async(kind,operation)=>{importExclusiveEntries++;changeImportOwner('lease');return operation();}}),
+  operations:freeze({captureOrigin:()=>{const revision=importOwnerRevision;return ()=>{if(revision!==importOwnerRevision)throw new Error('owner changed');};},canShare:()=>true,assertAuthority:()=>true,clearFault:()=>{journalFault='';},failClosed:message=>{journalFault=message;},runExclusive:async(kind,operation)=>{importExclusiveEntries++;changeImportOwner('lease');return operation();}}),
   interactions:freeze({
     choose:async()=>{changeImportOwner('decision');return importDecision;},
     configure:async config=>{

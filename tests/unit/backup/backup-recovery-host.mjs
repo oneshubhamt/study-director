@@ -18,7 +18,7 @@ let attachmentsBusy=false,notesFailure=null,backgroundSettled=null;
 const attachmentSettlementOptions=[];
 let providerRestoreImpl=async()=>freeze({ok:true});
 let driveConnected=false,noteVersionsImpl=async()=>freeze({available:true,entries:freeze([])}),lastProviderBringIn=null;
-let deviceRestoreFailure=null,removalOriginRevision=0,changeRemovalOrigin=false;const removedVersions=[];
+let deviceRestoreFailure=null,removalOriginRevision=0,changeRemovalOrigin=false,changeRecoveryOrigin=false;const removedVersions=[];
 let deviceHistoryReads=0,providerHistoryReads=0,providerBringInCheckpoint='',lastUseBackupOptions=null,deviceCombineResult=freeze({ok:true}),lastDeviceCombine=null,deviceConnected=true,sessionBlocking=false;
 const providerHooks={recovery:null,pending:null};
 const deviceEntry=freeze({logicalId:'state_'+'a'.repeat(64),logicalFingerprint:'a'.repeat(64),exportedAt:'2026-09-20T12:00:00.000Z',counts:freeze({dailyRecord:2,note:1}),location:freeze({sourceId:'device-folder',sourceLabel:'Device Folder',checkpointId:CHECKPOINT('a'),exportedAt:'2026-09-20T12:00:00.000Z',tier:'latest',encrypted:false})});
@@ -38,7 +38,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   document,
   interactions:freeze({choose:async options=>{
     events.push(`choose:${options.title}`);
-    if(options.title==='Use this version'){lastUseBackupOptions=options;return chooseMode;}
+    if(options.title==='Use this version'){lastUseBackupOptions=options;if(changeRecoveryOrigin)removalOriginRevision++;return chooseMode;}
     if(options.title==='Remove safety version?'||options.title==='Remove this version?'){if(changeRemovalOrigin)removalOriginRevision++;return 'remove';}
     return null;
   }}),
@@ -157,6 +157,7 @@ chooseMode='combine';driveConnected=true;await host.history.open();await new Pro
 assert.equal(deviceHistoryReads,3);assert.equal(providerHistoryReads,1,'with Drive connected too, one list reads both');
 assert.deepEqual(host.history.status().entries.map(entry=>[entry.location.sourceId,entry.location.checkpointId]),[['device-folder',CHECKPOINT('a')],['google-drive',CHECKPOINT('b')]],'each version once, read from where it is held');
 const driveButton={dataset:{versionHistorySource:'google-drive',versionHistoryCheckpoint:CHECKPOINT('b')}};
+changeRecoveryOrigin=true;const beforeChoice=events.filter(event=>event.startsWith('bring-in:')).length;assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),false,'a confirmation cannot move to a successor owner');assert.equal(events.filter(event=>event.startsWith('bring-in:')).length,beforeChoice);changeRecoveryOrigin=false;
 assert.equal(await host.history.recover({target:{closest:()=>driveButton}}),true);assert.equal(providerBringInCheckpoint,CHECKPOINT('b'));
 
 

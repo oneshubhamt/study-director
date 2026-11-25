@@ -101,7 +101,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreNotesSnapshot:async payload=>{if(failExactNotes){failExactNotes=false;throw new Error('injected exact note replacement failure');}notes={...payload};return notes;},
     restoreSessionState:async value=>(activeSession=value,true),verifyActiveSessionRuntime:async value=>{assert.deepEqual(activeSession,value);return true;},restoredFromFile:()=>false
   }),
-  operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure,notify:noop}),
+  operations:freeze({captureOrigin:()=>()=>{},canShare:()=>true,assertAuthority:()=>true,clearFault:noop,failClosed:message=>{throw new Error(message);},runExclusive:async(kind,operation)=>operation()}),interactions:freeze({choose:async()=>null,configure,notify:noop}),
   environment:freeze({AbortController,clearTimeout,yieldTask:async()=>{},setTimeout}),diagnostics:freeze({capture:noop,start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false}),
   assets:freeze({
     get:async id=>assets.get(id)||null,put:async(id,blob)=>{assets.set(id,blob);return true;},keys:async()=>[...assets.keys()],

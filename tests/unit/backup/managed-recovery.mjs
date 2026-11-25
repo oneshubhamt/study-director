@@ -24,7 +24,7 @@ function harness(options={}){
       rebuild:async kind=>{events.push(`rebuild:${kind}`);if(options.failRebuild)throw new Error('rebuild failed');},
       revision:()=>revision
     }),
-    mutation:freeze({run:async(name,operation)=>{assert.equal(name,'managed-recovery');assert.equal(activeLock,false);activeLock=true;events.push('mutation:enter');try{return await operation();}finally{events.push('mutation:exit');activeLock=false;}}})
+    mutation:freeze({run:async(name,operation)=>{assert.equal(name,'managed-recovery');assert.equal(activeLock,false);activeLock=true;events.push('mutation:enter');try{options.beforeMutation?.();return await operation();}finally{events.push('mutation:exit');activeLock=false;}}})
   }));
   const spec=freeze({
     kind:options.kind||'restore-version',label:'Device Folder',
@@ -157,3 +157,16 @@ for(const proof of [async()=>false,async()=>null,async()=>{throw new Error('unav
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'managed-recovery-coordinator',orderedTransaction:true,verifiedSafetyBeforeMutation:true,automaticBackupSuspension:true,restoreFailureResumes:true,publishFailureDegradesToPending:true,cancellationSkipsPostPublish:true,singleFlight:true},null,2));
+
+// A delayed lease must not adopt an earlier request after its owner changed.
+{
+  let revision=1;const h=harness({beforeMutation:()=>{revision++;}}),origin=revision;
+  await assert.rejects(h.coordinator.execute(freeze({...h.spec,assertRequest:()=>{if(revision!==origin)throw Error('request owner changed');}})),/request owner changed/);
+  assert.deepEqual(h.events,['mutation:enter','mutation:exit']);assert.deepEqual(h.state(),{suspended:0,activeLock:false});
+}
+// Losing the request during external safety preparation must not apply local changes.
+{
+  let revision=1;const h=harness(),origin=revision;
+  const spec=freeze({...h.spec,assertRequest:()=>{if(revision!==origin)throw Error('request owner changed');},createSafety:async()=>{const proof=await h.spec.createSafety();revision++;return proof;}});
+  await assert.rejects(h.coordinator.execute(spec),/request owner changed/);assert.equal(h.events.includes('apply'),false);assert.deepEqual(h.state(),{suspended:0,activeLock:false});
+}

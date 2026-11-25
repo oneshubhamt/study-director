@@ -109,6 +109,7 @@ export async function explain(devices){
       const diff=(x,y,prefix='')=>{const out=[];if(JSON.stringify(x)===JSON.stringify(y))return out;if(!x||!y||typeof x!=='object'||typeof y!=='object')return [prefix+': '+JSON.stringify(x)?.slice(0,200)+' | '+JSON.stringify(y)?.slice(0,200)];for(const key of new Set([...Object.keys(x),...Object.keys(y)]))out.push(...diff(x[key],y[key],prefix+'.'+key));return out;};
       return rows.map(row=>({origin:row.origin,diffKeptVsCurrent:diff(row.kept,current).slice(0,20)}));})()`).catch(cause=>String(cause?.message||cause))));
     console.error(who,'warnings',JSON.stringify((page.warnings||[]).slice(-12)));
+    console.error(who,'accepted dialogs',JSON.stringify(await page.evaluate('window.__accepted||[]').catch(cause=>String(cause?.message||cause))));
     console.error(who,'session saves',JSON.stringify(await page.evaluate('window.__sessionWrites||[]').catch(cause=>String(cause?.message||cause)),null,1));
     console.error(who,'claim',JSON.stringify(await page.evaluate(`(async()=>({visibility:document.visibilityState,online:navigator.onLine,claim:await __PWA6.BackupProviderRuntime.readSessionClaim('google-drive').catch(error=>({error:String(error?.code||error?.message)}))}))()`).catch(cause=>String(cause?.message||cause))));
   }

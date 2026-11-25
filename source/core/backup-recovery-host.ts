@@ -883,6 +883,7 @@ const createModule=()=>{
       const sourceId=String(button.dataset['versionHistorySource']||''),checkpointId=String(button.dataset['versionHistoryCheckpoint']||''),entry=selectedEntry(sourceId,checkpointId),location=entry&&entry.location,source=sourceDescriptor(sourceId);if(!location||!source)return false;
       // The version is read from the location the list chose for it.
       activeSourceId=source.id;activeSourceLabel=source.label;
+      let assertOrigin:()=>void;try{assertOrigin=input.mutation.captureOrigin('recovering a backup version');}catch(error){input.diagnostics.capture('backup.provider-scoped-recovery',error,'warn');return false;}
       const note=noteTarget,from=fromDevice(entry,lastEntries),reach=typeof presentation.reach==='function'?presentation.reach():'';
       const missingAttachments=Math.max(0,...[location,...(Array.isArray(entry.copies)?entry.copies as readonly {attachmentsMissing?:number}[]:[])].map(at=>Number(at?.attachmentsMissing)||0));
       const partialWarning=/Partial attachment recovery:/u.test(String(location.warning||''))?String(location.warning):missingAttachments?`Partial attachment recovery: ${missingAttachments} attachment${missingAttachments===1?'':'s'} missing. Saved Days and Notes are preserved, but missing files cannot be restored from this backup.`:'';
@@ -894,18 +895,21 @@ const createModule=()=>{
         cancelLabel:'Keep current',
         choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]
       });
-      if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
+      if(!choice||busy||!elements().dialog?.open||noteTarget!==note||selectedEntry(sourceId,checkpointId)!==entry)return false;
+      try{assertOrigin();}catch(error){input.diagnostics.capture('backup.provider-scoped-recovery',error,'warn');return false;}
+      const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{
         // A read that fails before anything changed (repositoryReadFailed) is
         // tried again from the next location that holds the version.
         const sources=[location,...(Array.isArray(entry.copies)?entry.copies as readonly HistoryLocation[]:[])].filter(at=>sourceDescriptor(at.sourceId));let result;
         for(let index=0;;index+=1){
+          assertOrigin();controller.signal.throwIfAborted();
           const at=sources[index]!;activeSourceId=at.sourceId;activeSourceLabel=at.sourceLabel;
-          const options:RecoveryOptions=freeze({presentation:presentationScope,checkpointId:at.checkpointId,confirmed:choice==='replace',note:note?note.id:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted)setHistoryProgress(value);}});
+          const options:RecoveryOptions=freeze({assertOrigin,presentation:presentationScope,checkpointId:at.checkpointId,confirmed:choice==='replace',note:note?note.id:'',missingOnly:choice==='missing',signal:controller.signal,onProgress:value=>{if(activeController===controller&&!controller.signal.aborted){try{assertOrigin();setHistoryProgress(value);}catch{controller.abort();}}}});
           try{result=choice==='replace'?await input.providers.restoreRepositoryProviderVersion(at.sourceId,options):await input.providers.bringInRepositoryProvider(at.sourceId,options);break;}
           catch(error){const next=sources[index+1];if(!next||(error as {repositoryReadFailed?:unknown}|null|undefined)?.repositoryReadFailed!==true||controller.signal.aborted)throw error;input.diagnostics.capture('backup.version-history-other-copy',error,'warn');setHistoryProgress({message:`${at.sourceLabel} could not be read. Reading ${next.sourceLabel} instead…`});}
         }
-        clearHistoryProgress();
+        assertOrigin();clearHistoryProgress();
         const saved=dateLabel(location.exportedAt),noteOutcome=note?({'note-missing':`This note isn’t in the backup from ${saved}.`,'note-unchanged':`The backup from ${saved} has the same text as this note.`,'note-kept':'No changes were made.'} as Record<string,string>)[String(result?.reason||'')]:'';
         if(noteOutcome){setHistoryStatus(noteOutcome,true,'cancelled');return false;}
         if(choice==='missing'&&String(result?.reason||'')==='needs-decision'){setHistoryStatus(presentation.restoreChoices.needsDecision,true,'cancelled');return false;}

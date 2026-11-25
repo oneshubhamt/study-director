@@ -46,7 +46,7 @@ const createModule=(input:BackupModuleInput)=>{
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule','deviceName']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
-    operations:freeze(['assertAuthority','canShare','clearFault','failClosed','runExclusive']),
+    operations:freeze(['assertAuthority','canShare','captureOrigin','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
     environment:freeze(['AbortController','clearTimeout','setTimeout','yieldTask']),
     diagnostics:freeze(['capture','fail','finish','mark','start']),
@@ -181,9 +181,10 @@ const statusListeners=new Set<()=>void>();
 function subscribeStatus(listener:()=>void){if(typeof listener!=='function')throw new TypeError('Backup status listener is invalid.');statusListeners.add(listener);return ()=>statusListeners.delete(listener);}
 function notifyStatus(){for(const listener of statusListeners)try{listener();}catch(error){AppDiagnostics.capture('backup.status-listener',error,'warn');}}
 function beginImport({backgroundPreemptible=false,assertOrigin}:{backgroundPreemptible?:boolean;assertOrigin?:()=>void}={}){
-  if(activeImportOperation)return activeImportOperation;
+  if(activeImportOperation)throw Object.assign(new Error('Another backup import is in progress.'),{code:'FILE_JOB_BUSY'});
+  const origin=assertOrigin||ports.operations.captureOrigin('import a backup');origin();
   const controller=new AbortController(),id=++importSequence;
-  activeImportOperation=freeze({id,backgroundPreemptible:backgroundPreemptible===true,signal:controller.signal,...(assertOrigin?{assertOrigin}:{}),cancel:(reason:string)=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
+  activeImportOperation=freeze({id,backgroundPreemptible:backgroundPreemptible===true,signal:controller.signal,assertOrigin:origin,cancel:(reason:string)=>{if(!controller.signal.aborted)controller.abort(importAbortError(reason));}});
   notifyStatus();return activeImportOperation;
 }
 function cancelImport(reason:string='Backup import was cancelled by the user.',options:{announce?:boolean}={}){

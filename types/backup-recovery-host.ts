@@ -27,7 +27,7 @@ export type NoteVersion={text:string;exportedAt:string;origin?:string;sourceId:s
 export type CoveredNotes={checkpointIds:readonly string[];contents:readonly string[]};
 export type NoteTarget={id:string;label:string;text:string;onRestored(result:{exportedAt:string;sourceLabel:string}):void};
 export type HistoryOptions={interactive:boolean;signal:AbortSignal;presentation:PresentationScope|null};
-export type RecoveryOptions={presentation:PresentationScope|null;checkpointId:string;confirmed:boolean;note:string;missingOnly:boolean;signal:AbortSignal;onProgress(value:Progress):void};
+export type RecoveryOptions={assertOrigin:()=>void;presentation:PresentationScope|null;checkpointId:string;confirmed:boolean;note:string;missingOnly:boolean;signal:AbortSignal;onProgress(value:Progress):void};
 export type RecoveryResult={reason?:string;cancelled?:boolean;ok?:boolean;error?:unknown;convergence?:Convergence;summary?:string};
 export type RecoveryRun=<R extends object,P extends object>(spec:RecoverySpec<R,P>)=>Promise<object>;
 export type Suspension={settled:Promise<unknown>;release():boolean};
