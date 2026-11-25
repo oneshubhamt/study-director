@@ -987,7 +987,14 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
     }
 
     fn disconnect(&self) -> Result<()> {
+        self.disconnect_for(self.generation()?)
+    }
+
+    fn disconnect_for(&self, expected_generation: u64) -> Result<()> {
         let mut state = lock(&self.state)?;
+        if state.generation != expected_generation {
+            return Err(AuthError::CredentialChanged);
+        }
         state.generation = state
             .generation
             .checked_add(1)
@@ -1021,5 +1028,8 @@ mod windows_store;
 
 #[cfg(windows)]
 pub use windows_store::NativeOAuthHost;
+
+#[cfg(windows)]
+pub mod drive;
 #[cfg(test)]
 mod tests;
