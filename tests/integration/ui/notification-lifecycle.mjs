@@ -92,7 +92,7 @@ function createBackupControls({
   });
   return backupActions.createControls(freeze({
     document:{getElementById:id=>nodes.get(id)||null},controller,processing,protection,device:()=>null,providers,presentation:activePresentation,
-    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),resolveFileOpen,
+    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),captureImportAuthority:()=>()=>{},resolveFileOpen,
     foregroundChanged:()=>{},scheduleSyncStatus,renderProfile,firstStartOpen,renderFirstStart,scheduleUpdate,
     connectDevice:()=>false,connectDrive:()=>false,openHistory:()=>false
   }));
@@ -241,8 +241,8 @@ function createBackupControls({
   let failure=Object.assign(new Error('Cancelled'),{name:'AbortError'}),imports=0;
   const field=new Element(),file=new Blob(['backup']);
   const controls=createBackupControls({nodes:new Map([['import-file',field]]),presentation,
-    open:async input=>{assert.equal(input,field);if(failure)throw failure;return file;},
-    importLocal:async event=>{assert.deepEqual(event.target.files,[file]);imports++;},
+    open:async input=>{assert.equal(typeof input.click,'function');if(failure)throw failure;return file;},
+    importLocal:async (event,assertOrigin)=>{assertOrigin();assert.deepEqual(event.target.files,[file]);imports++;},
     resolveFileOpen:()=>n.resolveEvent('file','file-open')
   });
   const handler=controls.pickImportFile;

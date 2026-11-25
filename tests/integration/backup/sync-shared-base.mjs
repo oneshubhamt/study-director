@@ -577,7 +577,7 @@ const fileHarness=createHarness(fileState,{restoredFromFile:()=>{fileConvergence
 const fileBlob=await makeCheckpoint({records:[record('2026-08-30','file reconciliation')],installationId:'inst_file_remote'});
 Object.defineProperty(fileBlob,'name',{value:'file-handoff.sdbackup',configurable:true});
 const fileInput={files:[fileBlob],value:'selected'};
-await fileHarness.runtime.controller.importLocal({target:fileInput});
+await fileHarness.runtime.controller.importLocal({target:fileInput},()=>{});
 assert.equal(fileState.records.get('2026-08-30').reflection,'file reconciliation');
 assert.equal(fileConvergenceCalls,1,'A changed file restore must tell the automatic backup locations exactly once.');assert.ok(fileHarness.statuses.some(message=>/Automatic backups will include it shortly/u.test(message)));
 assert.equal(fileInput.value,'','File input should still be reset after convergence handling.');
@@ -590,7 +590,7 @@ const replaceBlob=await makeCheckpoint({records:[record('2026-08-30','standalone
 Object.defineProperty(replaceBlob,'name',{value:'file-replace.sdbackup',configurable:true});
 const replaceInput={files:[replaceBlob],value:'selected'};
 const localDates=[...replaceState.records.keys()].sort();
-await replaceHarness.runtime.controller.importLocal({target:replaceInput});
+await replaceHarness.runtime.controller.importLocal({target:replaceInput},()=>{});
 const extrasPrompt=replaceHarness.prompts.find(options=>options.title==='Keep what isn’t in this backup?');
 assert.ok(extrasPrompt&&extrasPrompt.message.includes(`${localDates.length} Saved Days`),'Replace asks once about Saved Days the backup neither has nor deleted.');
 assert.deepEqual([...replaceState.records.keys()],['2026-08-30'],'Replace with “Remove them” removes portable Saved Days absent from the selected backup.');
@@ -598,7 +598,7 @@ assert.deepEqual(replaceState.deletions.map(item=>item.date).filter(date=>localD
 // “Keep them” (the default) keeps what the backup neither has nor deleted.
 const extrasKeepState=createState(),extrasKeepHarness=createHarness(extrasKeepState,{fileMode:'replace'}),extrasKeptDates=[...extrasKeepState.records.keys()].sort(),extrasKeepBlob=await makeCheckpoint({records:[record('2026-08-30','standalone exact replacement')],installationId:'inst_file_replace_keep'});
 Object.defineProperty(extrasKeepBlob,'name',{value:'file-replace-keep.sdbackup',configurable:true});
-await extrasKeepHarness.runtime.controller.importLocal({target:{files:[extrasKeepBlob],value:'selected'}});
+await extrasKeepHarness.runtime.controller.importLocal({target:{files:[extrasKeepBlob],value:'selected'}},()=>{});
 assert.deepEqual([...extrasKeepState.records.keys()].sort(),[...extrasKeptDates,'2026-08-30'].sort(),'Replace with “Keep them” keeps Saved Days the backup neither has nor deleted.');
 assert.equal(extrasKeepState.records.get('2026-08-30').reflection,'standalone exact replacement');
 assert.equal(replaceState.records.get('2026-08-30').reflection,'standalone exact replacement');
