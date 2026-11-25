@@ -1,6 +1,7 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {NoteRecord} from '../../types/record-models.ts';
 import type {FlushOptions} from '../../types/pilot.ts';
+import type {WriteToken} from '../../types/ownership.ts';
 import type {DraftNote,NoteDelta,RawNote,NoteConflict,DeltaResult,NoteMetadataSnapshot,NoteSearchSnapshot,NoteUpdate,NoteMove,NoteDeletion,NotesInput} from '../../types/notes-repository.ts';
 const sdNotesRepositoryFactory=(()=>{
 'use strict';
@@ -24,7 +25,7 @@ const createModule=()=>{
     if(typeof codecs.sanitizeCurrentNote!=='function'||!Object.isFrozen(codecs.noteKeys))throw new TypeError('Notes codec port is invalid.');
     if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Notes keyed-record capability must be frozen.');
     const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom'],'Notes helper port');
-    const hooks=functions(input.hooks,['canMutate','ownershipRevision','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Notes hook port');
+    const hooks=functions(input.hooks,['canMutate','ownershipRevision','issueWriteToken','assertWriteToken','isOwnershipLostError','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Notes hook port');
     const canonical=functions(input.canonical,['noteDeletionValue','notePreparationUnit','stageMutationEpoch','normalizeNoteDeletions'],'Notes canonical port');
     const clock=functions(input.clock,['nowMs'],'Notes clock');
     const APP_LIMITS=configuration.limits,DATA_CONTRACT=configuration.dataContract,DB_NOTES_STORE=stores.notes,DB_APP_META_STORE=stores.appMeta;
@@ -294,10 +295,11 @@ const repository=(()=>{
     }
     return out;
   }
-  async function idbReplace(payload:unknown,removedKeys:readonly string[]=[],options:{deletedEntries?:unknown;recordDeletes?:boolean}={}){
+  async function idbReplace(token:WriteToken,payload:unknown,removedKeys:readonly string[]=[],options:{deletedEntries?:unknown;recordDeletes?:boolean}={}){
     const normalized=normalizePayload(payload),deletedEntries=normalizeNoteDeletions(options.deletedEntries||[]),recordDeletes=options.recordDeletes===true;
     const deletedByKey=new Map(deletedEntries.map(entry=>[entry.key,entry]));
     return idbStrictTransaction<void>([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+      hooks.assertWriteToken(token,'replacing canonical Notes');
       const store=tx.objectStore(DB_NOTES_STORE),meta=Meta.view(tx);stageCanonicalMutationEpoch(tx,['*']);store.clear();
       Object.values(normalized).forEach(entry=>{store.put(entry);meta.remove('noteDeletionPrefix',entry.key);});
       if(recordDeletes){const now=new Date().toISOString();for(const rawKey of removedKeys){const key=String(rawKey||'');if(key&&!normalized[key]&&!isTrashKey(key)){const deletion=noteDeletionValue(key,deletedByKey.get(key)?.deletedAt||now)!;meta.put('noteDeletionPrefix',deletion,{suffix:key,updatedAt:deletion.deletedAt});}}}
@@ -317,11 +319,18 @@ const repository=(()=>{
     for(let index=1;index<100;index+=1){const label=`${base} (unsaved copy${index>1?` ${index}`:''})`;if(!taken(normalizeAreaName(label)))return label;}
     for(;;){const label=`${copyLabelBase(entry,36)} (unsaved copy ${uniqueStamp()})`;if(!taken(normalizeAreaName(label)))return label;}
   }
-  async function idbApplyDelta(keys:readonly string[],expectedRevisions:ReadonlyMap<string,string>){
+  async function idbApplyDelta(keys:readonly string[],expectedRevisions:ReadonlyMap<string,string>,token:WriteToken){
     const uniqueKeys=[...new Set((keys||[]).map(key=>String(key||'')).filter(Boolean))];
     const canonical=new Map(uniqueKeys.map(key=>[key,canonicalEntrySnapshot(notes[key],key)]));
     return idbStrictTransaction<DeltaResult>([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+      hooks.assertWriteToken(token,'opening the Notes save transaction');
       const store=tx.objectStore(DB_NOTES_STORE),meta=Meta.view(tx),conflicts:NoteConflict[]=[],committed=KeyedRecord.create<NoteRecord|null>(),evicted:string[]=[],changed=new Set<string>(),deletedAt=new Date().toISOString(),storageLost=storageLossKnown();
+      let stopped=false;
+      const guard=()=>{
+        if(stopped)return false;
+        try{hooks.assertWriteToken(token,'committing the Notes save transaction');return true;}
+        catch(error){stopped=true;try{tx.abort();}catch{}finish(false,error);return false;}
+      };
       const failOn=<T>(request:IDBRequest<T>,message:string)=>{request.onerror=()=>finish(false,request.error||new Error(message));};
       let remaining=uniqueKeys.length;
       // Requests complete in issue order, so these reads observe the state before
@@ -336,6 +345,7 @@ const repository=(()=>{
         const request=store.get(key);
         failOn(request,'note revision read failed');
         request.onsuccess=()=>{
+          if(!guard())return;
           const persistedRaw=(request.result||null) as RawNote|null,persistedRevision=normalizeTimestamp(persistedRaw&&persistedRaw.updatedAt,'')||'';
           const expected=expectedRevisions&&expectedRevisions.has(key)?String(expectedRevisions.get(key)||''):persistedRevision;
           let clash=false;
@@ -360,6 +370,7 @@ const repository=(()=>{
         const stored=store.getAll();
         failOn(stored,'note read failed');
         stored.onsuccess=()=>{
+          if(!guard())return;
           const rows=(stored.result||[]) as RawNote[],trash=rows.filter(row=>isTrashKey(row&&row.key)).sort((a,b)=>String(a.updatedAt||'').localeCompare(String(b.updatedAt||''))).map(row=>String(row.key));
           const takenTitles=new Set([...rows.filter(row=>!isTrashKey(row&&row.key)).map(titleOf),...titles().keys()]),takenIds=new Set(rows.map(row=>String(row&&row.key||'')));
           let room=APP_LIMITS.maxNotes-rows.length;
@@ -376,7 +387,7 @@ const repository=(()=>{
           stageWrites();
         };
       }
-      function stageWrites(){if(changed.size)stageCanonicalMutationEpoch(tx,[...changed].map(notePreparationUnit));}
+      function stageWrites(){if(guard()&&changed.size)stageCanonicalMutationEpoch(tx,[...changed].map(notePreparationUnit));}
       tx.oncomplete=()=>finish(true,{conflicts,committed,evicted,written:changed.size});
     },'note transaction aborted');
   }
@@ -474,9 +485,10 @@ const repository=(()=>{
   // Writes one batch of notes in one transaction. A committed note stays
   // pending while this tab already holds something newer than what was written.
   // Returns the notes whose clash could not be settled yet.
-  async function commitNotes(deltaKeys:readonly string[],options:FlushOptions={}){
+  async function commitNotes(deltaKeys:readonly string[],token:WriteToken,options:FlushOptions={}){
     const expectedRevisions=new Map(deltaKeys.map(key=>[key,dirtyBaseRevisions.has(key)?String(dirtyBaseRevisions.get(key)||''):revision(notes[key])]));
-    const result=await idbApplyDelta(deltaKeys,expectedRevisions);
+    const result=await idbApplyDelta(deltaKeys,expectedRevisions,token);
+    hooks.assertWriteToken(token,'acknowledging the Notes save');
     const conflicts=new Map(result.conflicts.map(item=>[item.key,item]));
     const savedKeys=deltaKeys.filter(key=>!conflicts.has(key));
     let canonicalRefreshNeeded=false,movedEdits=false;const settledKeys:string[]=[],unresolved:string[]=[],reported:{key:string;label:string;copyLabel:string}[]=[];
@@ -524,13 +536,20 @@ const repository=(()=>{
   // stays unsaved, goes to the browser copy, and the lane retries it.
   async function saveDirtyNotes(_value:void,options:FlushOptions={}){
     if(!appCanMutate())return false;
+    const token=hooks.issueWriteToken('saving Notes');
     const keys=[...new Set([...dirtyKeys].map(key=>String(key||'')).filter(Boolean))];dirtyKeys.clear();
     if(!keys.length)return true;
     let unresolved;
-    try{unresolved=await commitNotes(keys,options);}
+    try{unresolved=await commitNotes(keys,token,options);}
     catch(error){
-      keys.forEach(key=>dirtyKeys.add(key));protectUnsaved();
-      recordFailure(error&&(error as {message?:unknown}).message?(error as {message?:unknown}).message:'note database failed');throw error;
+      keys.forEach(key=>dirtyKeys.add(key));
+      // Keep accepted edits pending, but do not publish shared rescue or
+      // completion effects using a newer lease than the failed batch.
+      if(!hooks.isOwnershipLostError(error)){
+        protectUnsaved();
+        recordFailure(error&&(error as {message?:unknown}).message?(error as {message?:unknown}).message:'note database failed');
+      }
+      throw error;
     }
     if(!unresolved.length)return true;
     const error=clashWithoutRoom(unresolved);protectUnsaved();recordFailure(error.message);throw error;
@@ -670,7 +689,9 @@ const repository=(()=>{
   }
   // Writes a whole collection, from a restore or a combine.
   async function commitCollection(payload:unknown,{merge,deletions=[]}:{merge?:boolean;deletions?:unknown}={}){
-    await flush();
+    const token=hooks.issueWriteToken('replacing Notes');
+    await flush({strict:true});
+    hooks.assertWriteToken(token,'preparing the Notes replacement');
     if(saveFailed)throw new Error(saveMessage||'current notes are not safely stored');
     const previous=normalizePayload(notes),imported=normalizePayload(payload,{strictRich:true}),deletedEntries=normalizeNoteDeletions(deletions);
     const next=merge?Object.assign(previous,imported):imported;
@@ -688,14 +709,15 @@ const repository=(()=>{
     const removedKeys=[...previousKeys].filter(key=>!nextKeys.has(key));
     resetPendingNoteWrites();
     try{
-      await idbReplace(next,removedKeys,{deletedEntries});
+      await idbReplace(token,next,removedKeys,{deletedEntries});
+      hooks.assertWriteToken(token,'acknowledging the Notes replacement');
       if(!clearIndependentRescueKeys([...previousKeys,...nextKeys]))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
       replaceNotes(next);touchSnapshot();clearFailure();
       markStorageHealthOk('notes','lastStudyDataSaveAt');
       reportCanonicalCommit('note','upsert');
       return prepareExportPayload(next);
     }catch(e){
-      recordFailure(e&&(e as {message?:unknown}).message?(e as {message?:unknown}).message:'note database failed');
+      if(!hooks.isOwnershipLostError(e))recordFailure(e&&(e as {message?:unknown}).message?(e as {message?:unknown}).message:'note database failed');
       throw e;
     }
   }
@@ -870,14 +892,17 @@ const repository=(()=>{
   }
   async function clearAllNotes(){
     if(!appCanMutate())throw new Error('notes cannot be cleared without write ownership');
+    const token=hooks.issueWriteToken('clearing Notes');
     await flush({strict:true});
+    hooks.assertWriteToken(token,'preparing the Notes clear');
     if(saveFailed)throw new Error(saveMessage||'current notes are not safely stored');
     const removedKeys=Object.keys(normalizePayload(notes));
     if(!removedKeys.length)return Object.freeze({count:0});
     resetPendingNoteWrites();
     try{
       const deletedAt=new Date().toISOString(),deletions=removedKeys.filter(key=>!isTrashKey(key)).map(key=>({key,deletedAt}));
-      await idbReplace(KeyedRecord.create(),removedKeys,{deletedEntries:deletions,recordDeletes:true});
+      await idbReplace(token,KeyedRecord.create(),removedKeys,{deletedEntries:deletions,recordDeletes:true});
+      hooks.assertWriteToken(token,'acknowledging the Notes clear');
       if(!clearIndependentRescueKeys(removedKeys))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
       replaceNotes(KeyedRecord.create());touchSnapshot();clearFailure();
       markStorageHealthOk('notes','lastStudyDataSaveAt');
@@ -885,7 +910,7 @@ const repository=(()=>{
       reportCanonicalCommit('note','delete');
       return Object.freeze({count:removedKeys.length});
     }catch(e){
-      recordFailure(e&&(e as {message?:unknown}).message?(e as {message?:unknown}).message:'note database failed');
+      if(!hooks.isOwnershipLostError(e))recordFailure(e&&(e as {message?:unknown}).message?(e as {message?:unknown}).message:'note database failed');
       throw e;
     }
   }

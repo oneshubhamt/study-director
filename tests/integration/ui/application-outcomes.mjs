@@ -182,7 +182,7 @@ const noop=()=>{};
   vm.runInContext(readCoreScript('internal'),context);
   vm.runInContext(readCoreScript('notes-host'),context);
   const host=context[Symbol.for('studyDirector.internalModules.v1')].require('notes-host',1);
-  let ownershipRevision=1,scheduleRevision=1,savedDrafts=0,lastExpected=null,renameMode='renamed',confirmRename=true,planRenameFails=false,renameCalls=0,confirmGate=null,metadataRevision=1;
+  let ownershipRevision=1,scheduleRevision=1,savedDrafts=0,lastExpected=null,renameMode='renamed',confirmRename=true,planRenameFails=false,renameCalls=0,confirmGate=null,confirmEntered=null,metadataRevision=1;
   let note={id:'n1',key:'core',label:'Core',text:'old',updatedAt:'r1'};
   const repository=Object.freeze({
     get:ref=>note&&(String(ref).toLowerCase()==='core'||ref===note.id)?Object.freeze({...note}):null,
@@ -240,24 +240,24 @@ const noop=()=>{};
   assert.equal(note.text,'rich-current');assert.equal(savedDrafts,1);
 
   const plan=Object.freeze({areaUse:()=>Object.freeze({today:true,savedPlans:1}),renameArea:async()=>{if(planRenameFails)throw new Error('plan write failed');return Object.freeze({blocks:1,savedPlans:1});}});
-  const workflows=host.createLibraryWorkflows(Object.freeze({runtime,repository,plan,ownership:Object.freeze({canMutate:()=>true,revision:()=>ownershipRevision}),interactions:Object.freeze({confirm:async()=>confirmGate?await confirmGate.promise:confirmRename}),mergeText:(existing,moved)=>existing+moved}));
+  const workflows=host.createLibraryWorkflows(Object.freeze({runtime,repository,plan,ownership:Object.freeze({canMutate:()=>true,revision:()=>ownershipRevision}),interactions:Object.freeze({confirm:async()=>{if(confirmGate){confirmEntered.resolve();return await confirmGate.promise;}return confirmRename;}}),mergeText:(existing,moved)=>existing+moved}));
   renameMode='collision';confirmRename=false;
   assert.equal((await workflows.rename(Object.freeze({key:'core',label:'Core'}),'Renamed',{renamePlans:true})).status,'cancelled','declined collision leaves the rename cancelled');
   renameMode='renamed';confirmRename=true;planRenameFails=true;
   const partial=await workflows.rename(Object.freeze({key:'core',label:'Core'}),'Renamed',{renamePlans:true});
   assert.equal(partial.status,'renamed');assert.equal(partial.plan.ok,false,'a failed Plan fan-out is reported separately after the note rename committed');
   for(const change of ['ownership','content']){
-    renameMode='collision';confirmGate=deferred();const prior=renameCalls;
+    renameMode='collision';confirmGate=deferred();confirmEntered=deferred();const prior=renameCalls;
     const pending=workflows.rename(Object.freeze({key:'core',label:'Core'}),'Renamed',{renamePlans:true});
-    await Promise.resolve();await Promise.resolve();
+    await confirmEntered.promise;
     if(change==='ownership')ownershipRevision+=2;else metadataRevision++;
     confirmGate.resolve(true);
     assert.equal((await pending).status,'cancelled');
     assert.equal(renameCalls,prior+1,'stale collision decision never reaches merge');
     confirmGate=null;
   }
-  const read=deferred(),before=note.text,importing=runtime.importFiles([{name:'import.txt',size:10,text:()=>read.promise}]);
-  await Promise.resolve();await Promise.resolve();ownershipRevision+=2;read.resolve('stale file');
+  const read=deferred(),entered=deferred(),before=note.text,importing=runtime.importFiles([{name:'import.txt',size:10,text:()=>{entered.resolve();return read.promise;}}]);
+  await entered.promise;ownershipRevision+=2;read.resolve('stale file');
   await assert.rejects(importing,/superseded/);
   assert.equal(note.text,before,'file read from prior owner does not publish an import');
 }

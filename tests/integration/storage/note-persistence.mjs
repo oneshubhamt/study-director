@@ -418,3 +418,44 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
     }
   }
 }
+
+// Real transaction pre-read and post-commit ownership boundaries.
+{
+  for(const change of ['read-lost','read-reacquired','copy-read-reacquired','commit-reacquired']){
+    const {app,stores,controls,sharedLocal}=await setup();
+    controls.ownershipRevision=1;
+    const events=[];controls.onCanonicalCommit=event=>events.push(event);
+    app.notes.update('transaction note','Transaction Note','before','');await app.notes.flush({strict:true});
+    const id=app.notes.get('transaction note').id;
+    const old=structuredClone(stores.area.get(id));
+    if(change==='copy-read-reacquired')stores.area.set(id,{...old,text:'canonical successor',updatedAt:'2026-09-15T12:10:00.000Z'});
+    const expected=structuredClone(stores.area.get(id));
+    app.notes.update(id,'Transaction Note','accepted local edit',app.notes.get(id).updatedAt);
+    const count=events.length;
+    let triggered=false;
+    const lose=()=>{triggered=true;controls.owned=false;controls.ownershipRevision++;if(change!=='read-lost'){controls.owned=true;controls.ownershipRevision++;}};
+    if(change==='commit-reacquired')controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&stores.includes('area')){delete controls.onTransactionComplete;lose();}};
+    else controls.onTransactionRead=({store,key,mode})=>{if(mode==='readwrite'&&store==='area'&&key===(change==='copy-read-reacquired'?'*':id)){delete controls.onTransactionRead;lose();}};
+    assert.equal(await app.notes.flush(),false);
+    assert.equal(triggered,true,change+' reaches actual transaction boundary');
+    if(change==='commit-reacquired')assert.equal(stores.area.get(id).text,'accepted local edit','physical commit remains intact');
+    else assert.deepEqual(stores.area.get(id),expected,'stale callback preserves canonical record');
+    assert.equal(stores.area.size,1,'no stale conflict copy is created');
+    assert.equal(events.length,count,'stale batch publishes no canonical completion');
+    assert.equal(app.notes.get(id).text,'accepted local edit','accepted user evidence remains in memory');
+    assert.equal(sharedLocal.has('noteRescue'),false,'stale batch does not replace the shared rescue');
+    controls.owned=true;
+    await app.notes.flush({strict:true});
+    assert.ok([...stores.area.values()].some(row=>row.text==='accepted local edit'),'current owner can settle the accepted edit');
+  }
+  for(const action of ['clear','replace','reconcile']){
+    const {app,stores,controls}=await setup();
+    controls.ownershipRevision=1;
+    app.notes.update('collection','Collection','keep canonical','');await app.notes.flush({strict:true});
+    const before=structuredClone([...stores.area]);
+    const pending=action==='clear'?app.notes.clearAll():action==='replace'?app.notes.replace({}):app.notes.reconcile({});
+    controls.ownershipRevision+=2;
+    await assert.rejects(pending,/ownership/i);
+    assert.deepEqual([...stores.area],before,'stale collection operation preserves canonical Notes');
+  }
+}
