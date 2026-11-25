@@ -31,7 +31,7 @@ Name the branch, exact pass (or Phase 7 activity), intended outcome and stop poi
 
 | Assignment | Specify in the command |
 | --- | --- |
-| REVIEW-P5 Stage 1 / Stage 2 | Sol High resumes the current audit, fixes defects and leaves the gate open. Astra Extra High independently reviews the final SHA against the original JavaScript and decides whether Phase 6 may begin. |
+| REVIEW-P5 Stage 1 / Stage 2 | The assigned implementor resumes the current audit, fixes defects and leaves the gate open. Astra Extra High independently reviews the final SHA against the original JavaScript and decides whether Phase 6 may begin. |
 | P6.0, then P6.1–P6.6 individually | Inventory first. For implementation passes name the test/tool owner, the behavior or failure to prove and the evidence to preserve. |
 | Phase 7 | Use the plan's named activities, starting with **Establish the candidate**. Certification ends with an exact artifact and recorded gate decision. |
 | P8.0, then P8.1–P8.6 individually | Pin F33 and the certified Phase 7 SHA, then reconcile the backlog and both source inventories. P8.6 includes SDVC1 packaging and certification. Deployment requires a separate decision. |
