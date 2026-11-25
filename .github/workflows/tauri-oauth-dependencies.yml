@@ -1,9 +1,10 @@
-name: Native OAuth source formatting
+name: Native OAuth targeted source checks
 
 on:
   push:
     branches: [tauri-spike]
     paths: ['src-tauri/src/**', '.github/workflows/tauri-oauth-dependencies.yml']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,3 +27,25 @@ jobs:
           cargo fmt --manifest-path src-tauri/Cargo.toml --all
           git diff -- src-tauri/src
           cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+  native-unit:
+    if: github.ref == 'refs/heads/tauri-spike'
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.13.1'
+          package-manager-cache: false
+      - name: Pin Rust
+        run: |
+          rustup toolchain install 1.100.0 --profile minimal --component clippy
+          rustup override set 1.100.0
+      - name: Stage actual native frontend
+        run: node build/stage-tauri.mjs
+      - name: Locked native library tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features custom-protocol --lib
+      - name: Native Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --features custom-protocol --lib --tests -- -D warnings

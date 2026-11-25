@@ -402,3 +402,41 @@ fn windows_credential_manager_exact_readback_isolation_and_compare_exchange() {
 fn google_client_can_construct_locked_tls_transport_without_live_credentials() {
     assert!(Google::client().is_ok());
 }
+
+#[test]
+fn queued_calls_cannot_acquire_a_successor_generation() {
+    let store = MemoryStore::default();
+    let host = host(store.clone());
+    let old = host.authorize().unwrap();
+    host.disconnect().unwrap();
+    assert!(matches!(host.authorize_for(old.generation), Err(AuthError::CredentialChanged)));
+    assert!(matches!(host.refresh_for(old.generation), Err(AuthError::CredentialChanged)));
+    assert!(store.read().unwrap().is_none());
+    assert!(host.authorize().is_ok());
+}
+
+#[test]
+fn concurrent_refreshes_coalesce_and_external_removal_fences_access() {
+    let store = MemoryStore::default();
+    let host = Arc::new(host(store.clone()));
+    let old = host.authorize().unwrap();
+    expire(&host);
+    let entered = Arc::new(std::sync::Barrier::new(2));
+    let release = Arc::new(std::sync::Barrier::new(2));
+    *lock(&host.google.pause).unwrap() = Some((entered.clone(), release.clone()));
+    let first = host.clone();
+    let a = thread::spawn(move || first.refresh_for(old.generation));
+    entered.wait();
+    let second = host.clone();
+    let b = thread::spawn(move || second.refresh_for(old.generation));
+    release.wait();
+    let a = a.join().unwrap().unwrap();
+    let b = b.join().unwrap().unwrap();
+    assert_eq!(a.access_revision, b.access_revision);
+    assert_eq!(host.google.refreshes.load(Ordering::SeqCst), 1);
+    let bytes = store.read().unwrap().unwrap();
+    store.replace(Some(&bytes), None).unwrap();
+    assert!(matches!(host.refresh(), Err(AuthError::NotAuthorized)));
+    assert_ne!(host.generation().unwrap(), a.generation);
+    assert!(!host.invalidate(a.generation, a.access_revision).unwrap());
+}

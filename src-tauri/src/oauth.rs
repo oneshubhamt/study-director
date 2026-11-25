@@ -613,6 +613,7 @@ struct Credential {
     client_id: String,
     scope: String,
     enrollment: String,
+    permission_scope: String,
     account: Account,
     refresh_token: String,
 }
@@ -726,8 +727,15 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         })
     }
 
-    fn begin(&self, new_identity: bool) -> Result<Operation<'_>> {
+    fn generation(&self) -> Result<u64> {
+        Ok(lock(&self.state)?.generation)
+    }
+
+    fn begin(&self, expected_generation: u64, new_identity: bool) -> Result<Operation<'_>> {
         let mut state = lock(&self.state)?;
+        if state.generation != expected_generation {
+            return Err(AuthError::CredentialChanged);
+        }
         if state.disabled {
             return Err(AuthError::CredentialStore);
         }
@@ -760,7 +768,8 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
             || value.scope != self.scope
             || value.client_id != self.config.id
             || value.enrollment.len() != 43
-            || !visible_ascii(&value.enrollment, 43)
+            || !value.enrollment.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            || value.permission_scope != SCOPE
             || !visible_ascii(&value.refresh_token, 2048)
             || Account::verified(&value.account.email, &value.account.permission_id)?
                 != value.account
@@ -812,6 +821,7 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
             client_id: self.config.id.clone(),
             scope: self.scope.clone(),
             enrollment: enrollment.clone(),
+            permission_scope: SCOPE.to_owned(),
             account: account.clone(),
             refresh_token,
         };
@@ -848,8 +858,12 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
     }
 
     fn authorize(&self) -> Result<AuthorizedAccount> {
+        self.authorize_for(self.generation()?)
+    }
+
+    fn authorize_for(&self, expected_generation: u64) -> Result<AuthorizedAccount> {
         let _serial = lock(&self.serial)?;
-        let op = self.begin(true)?;
+        let op = self.begin(expected_generation, true)?;
         let prior = self.read_record()?;
         {
             let mut state = op.current()?;
@@ -869,18 +883,36 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
     }
 
     fn refresh(&self) -> Result<AuthorizedAccount> {
+        self.refresh_for(self.generation()?)
+    }
+
+    fn fence_access(state: &mut State) -> Result<()> {
+        if state.access.take().is_some() {
+            state.generation = state.generation.checked_add(1).ok_or(AuthError::Unavailable)?;
+            state.active = None;
+        }
+        Ok(())
+    }
+
+    fn refresh_for(&self, expected_generation: u64) -> Result<AuthorizedAccount> {
         let _serial = lock(&self.serial)?;
-        let op = self.begin(false)?;
-        let prior = self.read_record()?;
+        let op = self.begin(expected_generation, false)?;
+        let prior = match self.read_record() {
+            Ok(prior) => prior,
+            Err(error) => {
+                Self::fence_access(&mut op.current()?)?;
+                return Err(error);
+            }
+        };
         let mut state = op.current()?;
         let Some(prior) = prior else {
-            state.access = None;
+            Self::fence_access(&mut state)?;
             state.enrollment = None;
             state.observed = true;
             return Err(AuthError::NotAuthorized);
         };
         if state.observed && state.enrollment.as_ref() != Some(&prior.value.enrollment) {
-            state.access = None;
+            Self::fence_access(&mut state)?;
             return Err(AuthError::CredentialChanged);
         }
         state.enrollment = Some(prior.value.enrollment.clone());
@@ -932,12 +964,9 @@ impl<S: CredentialStore, G: GoogleProtocol> Host<S, G> {
         if state.generation != generation || state.access_revision != access_revision {
             return Ok(false);
         }
-        // A late 401 must not invalidate a new authorization operation.
-        if state.active.is_some() {
-            return Ok(false);
-        }
-        state.access = None;
-        Ok(true)
+        // Invalidation applies only to the exact issued access revision.
+        // If a refresh is in flight, its newly issued revision remains independent.
+        Ok(state.access.take().is_some())
     }
 
     fn cancel(&self) -> Result<bool> {
