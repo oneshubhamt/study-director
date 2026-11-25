@@ -66,6 +66,7 @@ jobs:
           SD_TAURI_EXPECTED_SHA: 693d2fc5a481f01281a3ec8be349414e7316d1ca
         run: node tests/helpers/tauri-smoke.mjs
   windows:
+    needs: baseline-diagnostic
     if: github.ref == 'refs/heads/tauri-spike'
     runs-on: windows-2025
     timeout-minutes: 45

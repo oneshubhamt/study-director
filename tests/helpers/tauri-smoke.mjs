@@ -130,7 +130,7 @@ async function exposeApplication(){
   const remote=await page.evaluate('StudyDirector.ui.goTab',{returnByValue:false});
   assert.ok(remote.objectId);
   const {breakpointId}=await page.send('Debugger.setBreakpointOnFunctionCall',{objectId:remote.objectId});
-  const binding='window.__nativeQA=Object.freeze({AppOwnership,AppData,PlanDraftEditor,PlanData,TimerEngine,TimerState,ReviewEditor,LibraryView,Profiles,AttachmentStorage,AttachmentLibrary,Exports,BackupController,RichTextRuntime,applySchedule,goTab,setStudyQuality})';
+  const binding='window.__nativeQA=Object.freeze({AppOwnership,AppData,PlanDraftEditor,PlanData,PlanRuntime,TimerEngine,TimerState,ReviewEditor,DailyReflectionPersistence,LibraryView,Profiles,AttachmentStorage,AttachmentLibrary,Exports,BackupController,RichTextRuntime,applySchedule,goTab,setStudyQuality})';
   let off;
   const paused=new Promise((resolve,reject)=>{
     off=page.on('Debugger.paused',async event=>{
@@ -153,14 +153,20 @@ async function exposeApplication(){
 }
 const noteKey='tauri qa note',noteText='Native durable note '+sentinel,reflection='Native durable review '+sentinel;
 const pdfText='%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n'+sentinel;
+const diaryDate=new Date(Date.now()-2*864e5).toISOString().slice(0,10),diaryText='Native durable diary '+sentinel,planName='Native reusable plan';
 async function appWrite(){
-  const created=await page.evaluate('('+async function({noteKey,noteText,reflection,pdfText}){
+  const created=await page.evaluate('('+async function({noteKey,noteText,reflection,pdfText,diaryDate,diaryText,planName}){
     const d=__nativeQA;
     const now=new Date(),minutes=now.getHours()*60+now.getMinutes();
     const base=Math.max(240,Math.min(23*60+30,minutes-1));
     const fmt=v=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');
     document.getElementById('plan-input').value=fmt(base)+' | 20 | Native QA study | work | Tauri QA Note | pages | 12';
+    await d.PlanDraftEditor.save();
+    document.getElementById('saved-plan-name').value=planName;
+    await d.PlanRuntime.savedPlans.act('save');
     const applied=await d.applySchedule({skipNotify:true});
+    const diary=await d.DailyReflectionPersistence.commit(diaryDate,diaryText,{expectedCanonical:''});
+    const savedPlan=d.PlanData.library().savedPlans.find(row=>row.name===planName);
     d.AppData.notes.update(noteKey,'Tauri QA Note',noteText);
     await d.AppData.notes.flush();
     await d.goTab('execute');
@@ -182,24 +188,25 @@ async function appWrite(){
     const file=asset&&await d.AttachmentStorage.get(asset.id);
     const backup=await d.BackupController.createCheckpoint();
     const candidate=await d.BackupController.inspect(backup.blob,{filename:backup.filename});
-    try{return {applied,running,paused,saved:!!saved,review:active?.snapshot?.review?.reflection,note:d.AppData.notes.get(noteKey)?.text,assetId:asset?.id,assetHash:asset?.hash,assetText:file&&await file.text(),modes,backupBytes:backup.blob.size,preview:!!candidate.preview};}
+    try{return {applied,running,paused,saved:!!saved,review:active?.snapshot?.review?.reflection,note:d.AppData.notes.get(noteKey)?.text,assetId:asset?.id,assetHash:asset?.hash,assetText:file&&await file.text(),diary:diary.record?.reflection,diaryKind:diary.recordKind,savedPlan:!!savedPlan,modes,backupBytes:backup.blob.size,preview:!!candidate.preview};}
     finally{await candidate.release();await backup.release();}
-  }.toString()+')('+JSON.stringify({noteKey,noteText,reflection,pdfText})+')');
+  }.toString()+')('+JSON.stringify({noteKey,noteText,reflection,pdfText,diaryDate,diaryText,planName})+')');
   console.log('Application write witness:',JSON.stringify(created));
   assert.equal(created.applied,true);assert.equal(created.running,'running');assert.equal(created.paused,true);assert.equal(created.saved,true);
   assert.equal(created.review,reflection);assert.equal(created.note,noteText);assert.equal(created.assetText,pdfText);
   assert.ok(created.assetId&&created.backupBytes>0&&created.preview);
+  assert.equal(created.diary,diaryText);assert.equal(created.diaryKind,'diary');assert.equal(created.savedPlan,true);
   assert.equal(created.assetHash,createHash('sha256').update(pdfText).digest('hex'));
   assert.ok(created.modes.includes('sync'),'attachment worker must witness synchronous OPFS access');
   return created.assetId;
 }
 async function appRead(assetId,canonical){
-  const row=await page.evaluate('('+async function({assetId,noteKey}){
+  const row=await page.evaluate('('+async function({assetId,noteKey,diaryDate,planName}){
     const d=__nativeQA,active=(await d.AppData.activeSession.load()).value;
     const file=await d.AttachmentStorage.get(assetId);
-    return {note:d.AppData.notes.get(noteKey)?.text,review:active?.snapshot?.review?.reflection,plan:active?.scheduleText,asset:file&&await file.text(),catalogue:(await d.AttachmentStorage.list()).some(row=>row.id===assetId)};
-  }.toString()+')('+JSON.stringify({assetId,noteKey})+')');
-  assert.equal(row.note,noteText);assert.equal(row.review,canonical);assert.ok(row.plan?.includes('Native QA study'));assert.equal(row.asset,pdfText);assert.equal(row.catalogue,true);
+    return {note:d.AppData.notes.get(noteKey)?.text,review:active?.snapshot?.review?.reflection,plan:active?.scheduleText,paused:active?.snapshot?.timerRuntime?.paused,diary:(await d.AppData.dailyRecords.get(diaryDate))?.reflection,savedPlan:d.PlanData.library().savedPlans.some(row=>row.name===planName),asset:file&&await file.text(),catalogue:(await d.AttachmentStorage.list()).some(row=>row.id===assetId)};
+  }.toString()+')('+JSON.stringify({assetId,noteKey,diaryDate,planName})+')');
+  assert.equal(row.note,noteText);assert.equal(row.review,canonical);assert.ok(row.plan?.includes('Native QA study'));assert.equal(row.asset,pdfText);assert.equal(row.catalogue,true);assert.equal(row.diary,diaryText);assert.equal(row.savedPlan,true);assert.equal(row.paused,true);
   console.log('Canonical note, review, plan and attachment restart read verified');
 }
 async function editor(){
@@ -220,6 +227,10 @@ async function editor(){
   console.log('Wordgard keyboard edit and canonical save verified');
   return row.value;
 }
+async function pauseDurably(){
+  await page.evaluate('(async()=>{const d=__nativeQA;await d.goTab("execute");d.TimerEngine.startCur(1200);d.TimerEngine.togglePause();await d.goTab("plan");})()');
+  await waitFor(()=>page.evaluate('__nativeQA.AppData.activeSession.load().then(row=>row.value?.snapshot?.timerRuntime?.paused===true)'),{label:'durable paused timer'});
+}
 async function checkpoint(){
   return page.evaluate('(async()=>{const backup=await __nativeQA.BackupController.createCheckpoint();try{return {filename:backup.filename,bytes:Array.from(new Uint8Array(await backup.blob.arrayBuffer()))};}finally{await backup.release();}})()');
 }
@@ -236,12 +247,37 @@ async function profilesAndImport(bootProfile,assetId,canonical){
   await profile('Tauri QA second');
   const second=await page.evaluate('(async()=>({id:StudyDirector.backup.profile.id(),note:__nativeQA.AppData.notes.get('+JSON.stringify(noteKey)+')||null,assets:(await __nativeQA.AttachmentStorage.list()).length}))()');
   assert.notEqual(second.id,bootProfile);assert.equal(second.note,null);assert.equal(second.assets,0);
-  const imported=await page.evaluate('('+async function({backup,assetId,noteKey}){
+  const imported=await page.evaluate('('+async function({backup,assetId,noteKey,diaryDate,planName}){
     const d=__nativeQA,blob=new Blob([Uint8Array.from(backup.bytes)]),candidate=await d.BackupController.inspect(blob,{filename:backup.filename});
-    const result=await d.BackupController.restore(candidate,{missingOnly:true});
+    let done=false,result,error;
+    d.BackupController.restore(candidate).then(value=>{result=value;done=true;},reason=>{error=reason;done=true;});
+    const deadline=Date.now()+60000;
+    while(!done&&Date.now()<deadline){
+      const dialog=document.getElementById('sd-interaction-dialog');
+      if(dialog?.open){
+        const title=dialog.querySelector('.interaction-title')?.textContent||'';
+        if(title==='Different versions found'){
+          for(const group of dialog.querySelectorAll('.interaction-group')){
+            const label=group.querySelector('.interaction-group-title')?.textContent||'';
+            const options=[...group.querySelectorAll('.interaction-option')];
+            const choice=label==='Plan draft and saved plans'?options.find(button=>button.dataset.value==='replace'):
+              label==='Personal and display settings'?options.find(button=>button.dataset.value==='keep'):
+              label==='Active / suspended session'?options.find(button=>button.dataset.value.endsWith('_incoming')):null;
+            if(!choice)throw new Error('Unexpected restore group: '+label);
+            choice.click();
+          }
+          dialog.querySelector('.interaction-actions .primary').click();
+        }else throw new Error('Unexpected restore dialog: '+title);
+      }
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    if(!done)throw new Error('Portable combine did not settle');
+    if(error)throw error;
     const file=await d.AttachmentStorage.get(assetId);
-    return {verified:result.verified,changed:result.changed,note:d.AppData.notes.get(noteKey)?.text,asset:file&&await file.text(),profile:StudyDirector.backup.profile.id()};
-  }.toString()+')('+JSON.stringify({backup,assetId,noteKey})+')');
+    return {verified:result.verified,changed:result.changed,note:d.AppData.notes.get(noteKey)?.text,diary:(await d.AppData.dailyRecords.get(diaryDate))?.reflection,savedPlan:d.PlanData.library().savedPlans.some(row=>row.name===planName),asset:file&&await file.text(),profile:StudyDirector.backup.profile.id(),result};
+  }.toString()+')('+JSON.stringify({backup,assetId,noteKey,diaryDate,planName})+')');
+  console.log('Portable combine witness:',JSON.stringify(imported));
+  assert.equal(imported.diary,diaryText);assert.equal(imported.savedPlan,true);
   assert.equal(imported.verified,true);assert.equal(imported.changed,true);assert.equal(imported.note,noteText);assert.equal(imported.asset,pdfText);assert.equal(imported.profile,second.id);
   await reloadThrough('__nativeQA.Profiles.switchTo('+JSON.stringify(bootProfile)+')');
   assert.equal(await page.evaluate('StudyDirector.backup.profile.id()'),bootProfile);
@@ -269,7 +305,7 @@ async function navigation(){
 try{
   debugPort=await port();installPolicy();
   await start();await profile();await navigation();
-  const assetId=await appWrite(),canonical=await editor();
+  const assetId=await appWrite(),canonical=await editor();await pauseDurably();
   const first=await storage(true);verify(first);
   const bootProfile=JSON.parse(first.profile).active;
   await stop(false);await start();const normal=await storage(false);verify(normal);
@@ -277,7 +313,7 @@ try{
   await stop(true);await start();const killed=await storage(false);verify(killed);
   assert.equal(JSON.parse(killed.profile).active,bootProfile);await appRead(assetId,canonical);
   await navigation();await profilesAndImport(bootProfile,assetId,canonical);await security();await stop(false);
-  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardEdit:true,workerSyncOPFS:true,profileSwitchIsolation:true,portableImport:true,security:true}));
+  console.log(JSON.stringify({status:'PASS',origin,packagedBoot:true,navigation:true,profile:true,indexedDB:true,opfs:true,normalCloseReopen:true,forcedTerminationReopen:true,canonicalAppRecords:true,diary:true,savedPlan:true,pausedTimerRecovery:true,attachmentBytes:true,backupRoundtripInspection:true,wordgardEdit:true,workerSyncOPFS:true,profileSwitchIsolation:true,portableImport:true,security:true}));
 }finally{
   clearTimeout(deadline);
   if(page)page.socket.close();
