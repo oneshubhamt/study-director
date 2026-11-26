@@ -125,7 +125,7 @@ const createModule=()=>{
     const TIERS=freeze(new Set(['result','news','blocking','critical']));
     const STACK_LIMIT=32,HISTORY_LIMIT=64,RECENT_LIMIT=20,NEWS_MS=12000,CHIME_GAP_MS=4000;
     const RECENT_OUTCOMES=freeze(new Set(['open','expired','dismissed','acted','resolved','replaced','ended']));
-    let sequence=0,eventRevision=0,eventTimer:number|null=null,hidden=false,studying=false,lastChimeAt=-Infinity,recentDirty=false;
+    let sequence=0,eventRevision=0,publication=0,eventTimer:number|null=null,hidden=false,studying=false,lastChimeAt=-Infinity,recentDirty=false;
     const stackPauses=new Set<string>(),recentEntries:RecentEntry[]=[];
     function identity(value:unknown,label:string){
       if(typeof value!=='string'||!value.trim()||value.length>120||/[\u0000-\u001f]/u.test(value))throw new TypeError(`Notification ${label} is invalid.`);
@@ -206,7 +206,11 @@ const createModule=()=>{
       for(const row of timed)if(!hidden&&!row.pauses.size&&!(stackPauses.size&&visibleKeys.has(row.key))&&row.event.duration){row.started=now();next=Math.min(next,row.remaining);}
       if(Number.isFinite(next))eventTimer=setTimer(()=>{eventTimer=null;accountTime();publishEvents();},next);
       for(const row of visible)noteShown(row);
-      const state=eventSnapshot();for(const listener of listeners)try{listener(state);}catch(error){if(typeof input.capture==='function')input.capture('notifications.render',error);}
+      const state=eventSnapshot(),published=++publication;
+      for(const listener of listeners){
+        if(published!==publication)break;
+        try{listener(state);}catch(error){if(typeof input.capture==='function')input.capture('notifications.render',error);}
+      }
       flushRecent();
       return state;
     }
@@ -230,7 +234,9 @@ const createModule=()=>{
       // A pop-up raised again after it was closed is a new occurrence.
       if(fresh&&previous){tierSounds.delete(key);settleRecent(previous,'replaced');}
       if(activeSound?.key===key&&(fresh||event.lifecycle!==previous?.event.lifecycle||event.occurrence!==previous?.event.occurrence))stopSound();
-      events.set(key,row);publishEvents();deliverOccurrence(row,previous);return publicEvent(row);
+      events.set(key,row);publishEvents();
+      if(events.get(key)===row)deliverOccurrence(row,previous);
+      return publicEvent(row);
     }
     function publishEvent(raw:NotificationInput,renewDismissed=false){
       const event=normalize(raw),key=eventKey(event.source,event.id),previous=events.get(key);
@@ -242,7 +248,7 @@ const createModule=()=>{
     function emit(raw:NotificationInput){return publishEvent(raw);}
     function begin(raw:NotificationInput){
       const event=normalize({...raw,operationId:raw.operationId||`operation-${sequence+1}`,lifecycle:'running'}),key=eventKey(event.source,event.id);
-      storeEvent(event,{fresh:true});const generation=events.get(key)!.sequence;
+      const generation=Number(storeEvent(event,{fresh:true}).deliveryId);
       function update(patch:NotificationInput){
         const row=events.get(key);
         if(!row||row.sequence!==generation||row.event.lifecycle!=='running')return false;
@@ -460,8 +466,9 @@ const createModule=()=>{
       if(previous?.event.kind==='os'&&previous.event.occurrence===occurrence&&['running','succeeded'].includes(previous.event.lifecycle))return false;
       const createdAt=now();
       const handle=begin({...raw,source,id,occurrence,kind:'os',surface:'quiet',foreground:false,announce:false});
-      const isCurrent=()=>!!(events.get(key)?.event.operationId===handle.operationId&&events.get(key)?.event.lifecycle==='running'&&now()-createdAt<30000&&(!delivery||deliveryContext().owner&&(raw.test||!deliveryContext().foreground)));
+      const isCurrent=()=>!!(handle.read()?.lifecycle==='running'&&now()-createdAt<30000&&(!delivery||deliveryContext().owner&&(raw.test||!deliveryContext().foreground)));
       try{
+        if(!isCurrent())return false;
         const delivered=await deliver(isCurrent);
         if(!isCurrent()){handle.update({lifecycle:'cancelled',outcome:'expired-or-inactive'});return false;}
         handle.update({lifecycle:delivered?'succeeded':'cancelled',outcome:delivered?'delivered':'not-delivered'});

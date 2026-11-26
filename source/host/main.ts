@@ -359,7 +359,7 @@ if(!Object.isFrozen(WorkspaceOverlay)||WorkspaceOverlay.format!=='study-director
   throw new Error('Study Director workspace overlay controller is unavailable or incompatible.');
 }
 const RichTextWorkspaceOverlay=Object.freeze({open:(options:Parameters<typeof WorkspaceOverlay.open>[0])=>WorkspaceOverlay.open(options)});
-const {SystemNotifications}=FoundationHostModule.createSystem({window,document,navigator,location,NoticeCoordinator,Interactions,AppDiagnostics,appCanMutate:()=>appCanMutate(),readPreference:()=>AppData.local.getJson(STORAGE_KEYS.systemAlerts,false),writePreference:value=>AppData.local.setJson(STORAGE_KEYS.systemAlerts,value)});
+const {SystemNotifications}=FoundationHostModule.createSystem({window,document,navigator,location,NoticeCoordinator,Interactions,AppDiagnostics,appCanMutate:()=>appCanMutate(),captureOrigin:reason=>{const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);},readPreference:()=>AppData.local.getJson(STORAGE_KEYS.systemAlerts,false),writePreference:value=>AppData.local.setJson(STORAGE_KEYS.systemAlerts,value)});
 const notifyUser=SystemNotifications.notify;
 /* SOUND DELIVERY */
 const {renderSoundSettings,setAppSoundMode,handleSoundModeChange}=FoundationHostModule.createSound({document,NoticeCoordinator,appCanMutate:()=>appCanMutate(),persistProtectedPreferences});

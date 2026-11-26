@@ -431,4 +431,53 @@ function createBackupControls({
   assert.equal(n.recent().entries.find(entry=>entry.id===id).actionOpens,false,'once resolved, the row opens nothing');
   n.clear();
 }
+
+ // Reentrant subscribers must not let an earlier begin capture a later handle,
+ // deliver its cue, or project an obsolete snapshot to later subscribers.
+{
+  const {notices:n}=coordinator();let replacement=null,trigger=true;
+  const cues=[],snapshots=[];
+  n.configureDelivery({context:()=>({owner:true,foreground:true}),audio:{stop(){},status:()=> 'ready',play:async(cue)=>{cues.push(cue);return true;}}});
+  n.subscribe(state=>{if(trigger&&state.events.some(row=>row.id==='work')){trigger=false;replacement=n.begin({source:'test',id:'work',operationId:'same',cue:'resume',surface:'quiet'});}});
+  n.subscribe(state=>snapshots.push(state.events.find(row=>row.id==='work')?.cue));
+  const old=n.begin({source:'test',id:'work',operationId:'same',cue:'attention',surface:'quiet'});
+  assert.equal(old.read(),null);assert.equal(old.update({message:'late'}),false);assert.equal(old.resolve(),false);
+  assert.equal(replacement.read().cue,'resume');assert.deepEqual(cues,['resume']);assert.equal(snapshots.at(-1),'resume');
+  n.clear();
+  let remove=true;n.subscribe(state=>{if(remove&&state.events.some(row=>row.id==='remove')){remove=false;n.resolveEvent('test','remove');}});
+  const removed=n.begin({source:'test',id:'remove',cue:'attention'});assert.equal(removed.read(),null);assert.equal(removed.resolve(),false);assert.deepEqual(cues,['resume']);
+  n.clear();
+}
+// Caller IDs are metadata, not authority for a delayed native delivery.
+{
+  const {notices:n}=coordinator();let finish,oldCurrent;
+  const old=n.deliverSystem({source:'system',id:'alarm',operationId:'same',occurrence:'first',test:true},current=>{oldCurrent=current;return new Promise(resolve=>finish=resolve);});
+  const next=n.begin({source:'system',id:'alarm',operationId:'same',occurrence:'second',kind:'os',surface:'quiet',foreground:false});
+  assert.equal(oldCurrent(),false);finish(true);assert.equal(await old,false);assert.equal(next.read().lifecycle,'running');
+  n.clear();
+}
+// Exercise the actual native-alert owner with deferred browser permission and
+// registration; the current owner boolean alone must never renew an old intent.
+{
+  let owner=1,preference=false,permission='default',request,registration,shown=0,writes=[],messages=[];
+  const {notices:n}=coordinator();
+  class NativeNotice{static get permission(){return permission;}static requestPermission(){return new Promise(resolve=>request=resolve);}constructor(){shown++;}}
+  const {SystemNotifications:s}=registry.require('foundation-host',1).createSystem({
+    window:{Notification:NativeNotice},document:{getElementById:()=>null},
+    navigator:{serviceWorker:{getRegistration:()=>new Promise(resolve=>registration=resolve)}},location:{href:'https://example.test/'},
+    NoticeCoordinator:n,Interactions:{notify:value=>messages.push(value)},AppDiagnostics:{capture(){}},
+    appCanMutate:()=>true,captureOrigin:()=>{const captured=owner;return ()=>{if(captured!==owner)throw Error('stale owner');};},
+    readPreference:()=>preference,writePreference:value=>{preference=value;writes.push(value);}
+  });
+  const stale=s.toggle();owner++;permission='granted';request('granted');assert.equal(await stale,false);assert.deepEqual(writes,[]);assert.deepEqual(messages,[]);
+  permission='default';const older=s.toggle(),resolveOlder=request;const newer=s.toggle();permission='granted';request('granted');assert.equal(await newer,true);
+  assert.equal(await s.toggle(),false);resolveOlder('granted');assert.equal(await older,false);assert.deepEqual(writes,[true,false]);assert.equal(messages.length,2);
+  assert.equal(await s.toggle(),true);
+  const pending=s.deliver({id:'alarm'});owner++;registration({showNotification:async()=>{shown++;}});assert.equal(await pending,false);assert.equal(shown,0);
+  const prior=s.deliver({id:'alarm'});await s.toggle();await s.toggle();registration({showNotification:async()=>{shown++;}});assert.equal(await prior,false);assert.equal(shown,0);
+  const current=s.deliver({id:'alarm'});registration({showNotification:async()=>{shown++;}});assert.equal(await current,true);assert.equal(shown,1);
+  const fallback=s.deliver({id:'fallback'});registration(null);assert.equal(await fallback,true);assert.equal(shown,2);
+  n.clear();
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'notification-lifecycle',checks:['priority and persistent errors','decision notices persist until resolved','deduplication','hover/focus/hidden expiry','dismissal versus cancellation','recurring notices','stale operation handles','terminal fencing','renderer severity','Device and Drive summaries','study-timer hold','kinds, order and sounds','no hidden queue','banner sounds','recent and unseen','opening cards']},null,2));

@@ -312,7 +312,8 @@ return Object.freeze({NotificationRecent});
 function createSystem(ports:SystemInput){
 const {window,document,navigator,location,NoticeCoordinator,Interactions,AppDiagnostics,appCanMutate}=ports;
 const SystemNotifications=(()=>{
-  let installed=false;
+  let installed=false,preferenceRevision=0;
+  function currentOrigin(assertOrigin:()=>void){try{assertOrigin();return appCanMutate();}catch{return false;}}
   function supported(){return 'Notification' in window&&!!window.Notification;}
   function permission(){return supported()?String(window.Notification.permission||'default'):'unsupported';}
   function preference(){return ports.readPreference()===true;}
@@ -342,6 +343,9 @@ const SystemNotifications=(()=>{
     if(!appCanMutate())return false;
     const before=status();
     if(!before.supported||before.permission==='denied'){render();return false;}
+    let assertOrigin:()=>void;try{assertOrigin=ports.captureOrigin('change system alerts');}catch{return false;}
+    const revision=++preferenceRevision,current=()=>revision===preferenceRevision&&currentOrigin(assertOrigin);
+    if(!current())return false;
     if(before.enabled){
       write(false);render();
       Interactions.notify({source:'system-settings',key:'system-alerts',title:'System alerts off',message:'In-app Pomodoro cues and sounds remain available.'});
@@ -350,9 +354,9 @@ const SystemNotifications=(()=>{
     let result=before.permission;
     if(result==='default'){
       try{result=await window.Notification.requestPermission();}
-      catch(error){AppDiagnostics.capture('system-notifications.permission',error,'warn');result='default';}
+      catch(error){if(current())AppDiagnostics.capture('system-notifications.permission',error,'warn');result='default';}
     }
-    if(!appCanMutate()){render();return false;}
+    if(!current()){render();return false;}
     const accepted=result==='granted';write(accepted);render();
     Interactions.notify(accepted
       ? {source:'system-settings',key:'system-alerts',title:'System alerts enabled',message:'Timer and study reminders may now appear outside Study Director.'}
@@ -360,7 +364,10 @@ const SystemNotifications=(()=>{
     return accepted;
   }
   async function deliver(event:NotificationInput,isCurrent=()=>true,isSilent=()=>NoticeCoordinator.soundStatus().mode==='off'){
-    if(!enabled()||!appCanMutate())return false;
+    if(!enabled()||!appCanMutate()||!isCurrent())return false;
+    let assertOrigin:()=>void;try{assertOrigin=ports.captureOrigin('deliver system alert');}catch{return false;}
+    const revision=preferenceRevision,current=()=>revision===preferenceRevision&&currentOrigin(assertOrigin)&&enabled()&&isCurrent();
+    if(!current())return false;
     const options:NotificationOptions={
       body:String(event.message||''),tag:String(event.id||event.title||'study-director'),
       icon:new URL('./assets/icons/icon-192.png',location.href).href,
@@ -370,13 +377,13 @@ const SystemNotifications=(()=>{
     try{
       if(navigator.serviceWorker&&typeof navigator.serviceWorker.getRegistration==='function'){
         const registration=await navigator.serviceWorker.getRegistration();
-        if(!enabled()||!appCanMutate()||!isCurrent())return false;
+        if(!current())return false;
         options.silent=isSilent();
         if(registration&&typeof registration.showNotification==='function'){
           await registration.showNotification(String(event.title||'Study Director'),options);return true;
         }
       }
-      if(!enabled()||!appCanMutate()||!isCurrent())return false;
+      if(!current())return false;
       options.silent=isSilent();new window.Notification(String(event.title||'Study Director'),options);return true;
     }catch(error){AppDiagnostics.capture('system-notifications.display',error,'warn');return false;}
   }
