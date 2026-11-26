@@ -31,6 +31,7 @@ export interface PlanPreferenceHooks{
 export interface PlanRuntimeHooks{
   canMutate():boolean;
   flushDraft(options?:Readonly<PlanDraftSaveOptions>):boolean|PromiseLike<boolean>;
+  authoredDraft():string|null;
   replaceDraftText(value:string):unknown;
   previewDraft():unknown;
   renderSavedPlans():unknown;

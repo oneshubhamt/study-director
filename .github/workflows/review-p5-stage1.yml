@@ -138,6 +138,8 @@ jobs:
           - tests/browser/library/notes-management.mjs
           - tests/browser/attachments/attachments.mjs
           - tests/browser/app/session-draft-edit.mjs
+          - tests/browser/plans/saved-plans-ui.mjs
+          - tests/browser/backup/session-plan-sync.mjs
           - tests/browser/app/session-merge-timer.mjs
           - tests/browser/backup/restore-session-safety.mjs
           - tests/browser/backup/session-handoff-journeys.mjs

@@ -2263,6 +2263,7 @@ const PlanData=PlanHostModule.createData(Object.freeze<PlanDataInput>({
   runtime:Object.freeze<PlanDataInput['runtime']>({
     canMutate:()=>appCanMutate(),
     flushDraft:options=>PlanDraftEditor.flush(options),
+    authoredDraft:()=>PlanDraftEditor.authoredText(),
     replaceDraftText:value=>PlanRuntime.draft.replaceText(value),
     previewDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
     renderSavedPlans:()=>PlanRuntime.savedPlans.render()

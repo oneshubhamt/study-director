@@ -25,15 +25,16 @@ let canonical=cleanPlans({draft:null,savedPlans:[a,b],defaultId:a.id});
 let canonicalPreferences={...emptyPreferences(),studentName:'Stored Student'};
 let writeDraftCalls=0,writeLibraryCalls=0,replaceCalls=0,replacePortableCalls=0,flushPreferenceCalls=0;
 let revision=1,failLibrary=false,denyToken=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
+let draftMode='normal',readFails=false,authoredDraft=null;
 const token=freeze({format:'study-director.ownership-write-token',contractVersion:1,tabId:'t',pageId:'p',claimId:'c',revision:1,state:'primary',allowHydrating:false,reason:'qa'});
 const data=PlanHostModule.createData(freeze({
   codec,
   repositories:freeze({
     plans:freeze({
-      read:async()=>clone(canonical),
+      read:async()=>{if(readFails)throw new Error('read unavailable');return clone(canonical);},
       replace:async(value,options)=>{options?.assertOrigin?.();assert.equal(options?.ownershipToken?.revision,revision);replaceCalls++;canonical=cleanPlans(value);return true;},
       replacePortable:async(value,options)=>{assert.equal(options?.ownershipToken?.revision,revision);replacePortableCalls++;canonical=cleanPlans(value.plans);canonicalPreferences=clone(value.preferences);return clone({...value.preferences,version:2,updatedAt:'2026-11-10T00:00:00.000Z'});},
-      writeDraft:async value=>{writeDraftCalls++;canonical={...canonical,draft:value};return true;},
+      writeDraft:async value=>{writeDraftCalls++;if(draftMode==='reject')throw new Error('draft rejected');canonical={...canonical,draft:value};if(draftMode==='committed')throw new Error('draft acknowledgement failed');return true;},
       writeLibrary:async value=>{writeLibraryCalls++;if(failLibrary)throw new Error('library unavailable');if(libraryWriteGate)await libraryWriteGate;canonical=cleanPlans({...canonical,...value});return true;}
     }),
     preferences:freeze({read:async()=>clone(canonicalPreferences)})
@@ -51,6 +52,7 @@ const data=PlanHostModule.createData(freeze({
   runtime:freeze({
     canMutate:()=>true,
     flushDraft:async()=>true,
+    authoredDraft:()=>authoredDraft,
     replaceDraftText:value=>{replacedDraftText=value;},
     previewDraft:()=>{previewCalls++;},
     renderSavedPlans:()=>{renderCalls++;}
@@ -120,6 +122,49 @@ assert.deepEqual(data.library(),stableLibrary,'failed saved-plan persistence can
 failLibrary=false;
 assert.equal(await data.writeLibrary(stableLibrary),true,'a later successful write clears the failed Plan-data chain');
 
+// A failed draft is never published as canonical; a successful unrelated
+// library write cannot clear the draft's failure or bless a backup.
+draftMode='reject';
+const failedDraft=data.writeDraft('Rejected replacement',{strictDurability:true});
+assert.equal(data.readDraft(),'Working draft','pending write is not confirmed storage');
+await assert.rejects(failedDraft,/draft rejected/u);
+assert.equal(data.readDraft(),'Working draft');assert.equal(canonical.draft,'Working draft');
+await data.writeLibrary(data.library());
+await assert.rejects(data.settled(),/draft rejected/u);
+draftMode='normal';await data.writeDraft('Working draft',{strictDurability:true});assert.equal(await data.settled(),true);
+
+// A committed-but-unacknowledged write must not be reported as success;
+// read-back aligns the cache but expressly prohibits older-byte rollback.
+draftMode='committed';
+await assert.rejects(data.writeDraft('Committed replacement',{strictDurability:true}),error=>error.planDraftUnconfirmed===true);
+assert.equal(data.readDraft(),'Committed replacement');assert.equal(canonical.draft,'Committed replacement');
+readFails=true;
+await assert.rejects(data.writeDraft('Uncertain replacement',{strictDurability:true}),error=>error.planDraftUnconfirmed===true);
+assert.equal(data.readDraft(),'Committed replacement');assert.equal(canonical.draft,'Uncertain replacement');
+readFails=false;draftMode='normal';
+const retryWrites=writeDraftCalls;
+await data.writeDraft('Committed replacement');
+assert.equal(writeDraftCalls,retryWrites+1,'unknown readback cannot permit an equal-text cache skip');
+assert.equal(canonical.draft,'Committed replacement');
+
+// A queued whole-library save must not erase a preceding change.
+{
+  let release;libraryWriteGate=new Promise(resolve=>{release=resolve;});
+  const c={...a,id:'plan-gamma001',label:'Gamma'};
+  const first=data.writeLibrary({savedPlans:[a,b,c],defaultId:b.id});
+  const second=data.writeLibrary({savedPlans:[a],defaultId:a.id});
+  const rejected=assert.rejects(second,/Saved plans changed before this save/u);
+  release();await first;await rejected;libraryWriteGate=null;
+  assert.equal(canonical.defaultId,b.id);assert.equal(canonical.savedPlans.length,3);
+  await data.writeLibrary(data.library());
+}
+
+// Recovery preserves visible authored text instead of resurrecting a
+// failed optimistic replacement; a null fallback still stays null.
+authoredDraft='Rescued visible unsaved draft';canonical=cleanPlans({draft:null,savedPlans:[],defaultId:null});
+await data.rewriteAfterStorageReset();assert.equal(canonical.draft,authoredDraft);
+assert.equal(data.readDraft(),authoredDraft);authoredDraft=null;
+
 const imported={version:2,plans:{draft:null,savedPlans:[b],defaultId:b.id},preferences:{...emptyPreferences(),studentName:'Imported Student'}};
 assert.equal(await data.importData(imported),true);
 assert.equal(replacePortableCalls,1);
@@ -127,6 +172,9 @@ assert.equal(replacedDraftText,b.scheduleText,'null imported draft projects the 
 assert.equal(previewCalls,1);assert.equal(renderCalls,1);
 assert.equal(acceptedPreferences.studentName,'Imported Student');
 assert.equal(await data.verify(imported),true);
+canonical=cleanPlans({draft:null,savedPlans:[],defaultId:null});
+await data.rewriteAfterStorageReset();assert.equal(canonical.draft,null,'displayed fallback is not a new draft');
+assert.equal(await data.verify(imported),true);
 assert.ok(flushPreferenceCalls>=2,'settlement keeps Plan and protected Preferences in one portable-data barrier');
 
-console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','supplied-stale-token-before-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','supplied-stale-token-before-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification','rejected-draft-not-published','independent-failure-lanes','unconfirmed-commit-readback','unknown-readback-forces-retry','stale-library-queue-refused','visible-draft-storage-recovery']},null,2));

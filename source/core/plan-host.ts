@@ -34,14 +34,17 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   functions(input.ownership,['issueWriteToken','assertWriteToken'],'Plan ownership port');
   functions(input.storage,['markError'],'Plan storage health port');
   functions(input.preferences,['fallback','flush','accept','refreshAppearance','applyRuntime','studentName'],'Plan preference hooks');
-  functions(input.runtime,['canMutate','flushDraft','replaceDraftText','previewDraft','renderSavedPlans'],'Plan runtime hooks');
+  functions(input.runtime,['canMutate','flushDraft','authoredDraft','replaceDraftText','previewDraft','renderSavedPlans'],'Plan runtime hooks');
   if(!objectRecord(input.defaults)||!objectRecord(input.defaults.factory)||typeof input.defaults.factory.studentName!=='string'||typeof input.defaults.factory.scheduleText!=='string')throw new TypeError('Plan factory defaults are invalid.');
 
   const {codec,repositories,ownership,storage,preferences,runtime}=input;
   const factory=freeze({studentName:input.defaults.factory.studentName,scheduleText:input.defaults.factory.scheduleText});
-  let state:SavedPlans={draft:null,savedPlans:[],defaultId:null},persistedDraft:string|null|undefined=null,ready=false,chain:Promise<unknown>=Promise.resolve(),failure:unknown=null;
+  let state:SavedPlans={draft:null,savedPlans:[],defaultId:null},draftKnown=true,libraryKnown=true,ready=false,chain:Promise<unknown>=Promise.resolve();
+  const failures=new Map<'draft'|'library'|'replacement',unknown>();
+  const libraryKey=(value:PlanLibrary)=>JSON.stringify(value);
+  const uncertainDraft=(error:unknown)=>Object.assign(new Error(error instanceof Error?error.message:String(error),{cause:error}),{planDraftUnconfirmed:true as const});
 
-  function enqueue<T>(work:(token:WriteToken)=>Promise<T>,options:Readonly<PlanDataWriteOptions|PlanLibraryWriteOptions>={},preparedToken:WriteToken|null=null):Promise<T>{
+  function enqueue<T>(lane:'draft'|'library'|'replacement',work:(token:WriteToken)=>Promise<T>,options:Readonly<PlanDataWriteOptions|PlanLibraryWriteOptions>={},preparedToken:WriteToken|null=null):Promise<T>{
     const token=preparedToken||options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
     const next=chain.catch(()=>undefined).then(()=>{
       ownership.assertWriteToken(token,'save Plan data');
@@ -50,7 +53,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
     chain=next;
     void next.catch(error=>{
       try{ownership.assertWriteToken(token,'reporting Plan save failure');}catch{return;}
-      failure=error;
+      failures.set(lane,error);
       storage.markError('planDraft.write','Plan data was not saved. Keep this tab open and copy the draft before closing.');
     });
     return next;
@@ -67,62 +70,100 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   async function hydrate(){
     await chain.catch(()=>undefined);
     state=clonePlans(codec.plans(await repositories.plans.read()));
-    persistedDraft=state.draft;
-    failure=null;
+    draftKnown=libraryKnown=true;
+    failures.clear();
     ready=true;
     return true;
   }
   function writeDraft(value:string|null,options:Readonly<PlanDataWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
-    const clean=clonePlans(codec.plans({...state,draft:value}));
-    // Authorization precedes publication to the in-memory Plan view. If the
-    // page lost ownership, readDraft() must not claim an unauthorized value.
+    codec.plans({...state,draft:value});
     const token=options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
-    ownership.assertWriteToken(token,'publishing Plan draft');
-    state=clean;
-    return enqueue(async activeToken=>{
-      if(persistedDraft===value&&options.force!==true&&options.strictDurability!==true){failure=null;return true;}
-      await repositories.plans.writeDraft(value,{
-        ownershipToken:activeToken,
-        allowHydrating:options.allowHydrating===true,
-        backupCapture:options.backupCapture===true,
-        strictDurability:options.strictDurability===true
-      });
-      ownership.assertWriteToken(activeToken,'acknowledging Plan draft');persistedDraft=value;
-      failure=null;
+    ownership.assertWriteToken(token,'admitting Plan draft');
+    return enqueue('draft',async activeToken=>{
+      // A preceding saved-plan write can change the combined 1 MiB allowance.
+      codec.plans({...state,draft:value});
+      const before=state.draft;
+      if(draftKnown&&before===value&&options.force!==true&&options.strictDurability!==true){failures.delete('draft');return true;}
+      try{
+        await repositories.plans.writeDraft(value,{
+          ownershipToken:activeToken,
+          allowHydrating:options.allowHydrating===true,
+          backupCapture:options.backupCapture===true,
+          strictDurability:options.strictDurability===true
+        });
+        ownership.assertWriteToken(activeToken,'acknowledging Plan draft');
+      }catch(error){
+        // A rejection after commit is not permission to restore older bytes.
+        // Read only under the original owner, within the same serial lane.
+        draftKnown=false;
+        let observed:SavedPlans|null=null;
+        try{
+          ownership.assertWriteToken(activeToken,'checking failed Plan draft');
+          const current=codec.plans(await repositories.plans.read());
+          ownership.assertWriteToken(activeToken,'checking failed Plan draft');
+          observed=current;
+        }catch{}
+        if(observed&&observed.draft===before){draftKnown=true;throw error;}
+        if(observed&&observed.draft===value){state={...state,draft:value};draftKnown=true;}
+        throw uncertainDraft(error);
+      }
+      state={...state,draft:value};draftKnown=true;failures.delete('draft');
       return true;
     },options,token);
   }
   function writeLibrary(value:PlanLibrary,options:Readonly<PlanLibraryWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
-    const clean=clonePlans(codec.plans({...state,savedPlans:value.savedPlans,defaultId:value.defaultId}));
-    return enqueue(async token=>{
+    const clean=cloneLibrary(codec.plans({...state,savedPlans:value.savedPlans,defaultId:value.defaultId}));
+    const baseline=libraryKey(cloneLibrary(state));
+    return enqueue('library',async token=>{
+      if(!libraryKnown){
+        const current=codec.plans(await repositories.plans.read());
+        ownership.assertWriteToken(token,'checking saved plans');
+        if(libraryKey(cloneLibrary(current))!==libraryKey(cloneLibrary(state)))throw new Error('Saved plans changed in storage. Reload before editing them.');
+        libraryKnown=true;
+      }
+      if(libraryKey(cloneLibrary(state))!==baseline)throw new Error('Saved plans changed before this save. Review the list and try again.');
       codec.plans({...clean,draft:state.draft});
-      await repositories.plans.writeLibrary({savedPlans:clean.savedPlans,defaultId:clean.defaultId},{
-        ownershipToken:token,allowHydrating:options.allowHydrating===true
-      });
-      ownership.assertWriteToken(token,'acknowledging saved plans');state=clonePlans({...state,savedPlans:clean.savedPlans,defaultId:clean.defaultId});
-      failure=null;
+      try{
+        await repositories.plans.writeLibrary(clean,{
+          ownershipToken:token,allowHydrating:options.allowHydrating===true
+        });
+        ownership.assertWriteToken(token,'acknowledging saved plans');
+      }catch(error){
+        libraryKnown=false;
+        try{
+          ownership.assertWriteToken(token,'checking failed saved plans');
+          const observed=cloneLibrary(codec.plans(await repositories.plans.read()));
+          ownership.assertWriteToken(token,'checking failed saved plans');
+          const key=libraryKey(observed);
+          if(key===libraryKey(clean)){state={...state,...observed};libraryKnown=true;}
+          else if(key===baseline)libraryKnown=true;
+        }catch{}
+        throw error;
+      }
+      state={...state,...clean};libraryKnown=true;failures.delete('library');
       return true;
     },options);
   }
   async function rewriteAfterStorageReset(assertOrigin?:()=>void){
     if(!ready)return false;
     assertOrigin?.();const token=ownership.issueWriteToken('recovering Plan data after storage loss');
-    return enqueue(async activeToken=>{
-      // Read the snapshot in the queue, after preceding writes settle.
-      assertOrigin?.();const snapshot=clonePlans(codec.plans(state));
+    return enqueue('replacement',async activeToken=>{
+      // Recover open authored text, not an optimistic failed replacement.
+      // Read it in the queue after preceding writes settle.
+      assertOrigin?.();const snapshot=clonePlans(codec.plans({...state,draft:runtime.authoredDraft()??state.draft}));
       await repositories.plans.replace(snapshot,{ownershipToken:activeToken,...(assertOrigin?{assertOrigin}:{})});
       assertOrigin?.();ownership.assertWriteToken(activeToken,'acknowledging recovered Plan data');
-      persistedDraft=snapshot.draft;
-      failure=null;
+      state=snapshot;draftKnown=libraryKnown=true;
+      failures.clear();
       return true;
     },{},token);
   }
   async function settled(options:Readonly<{backupCapture?:boolean}>={}){
     await chain;
     await preferences.flush(options);
-    if(failure)throw failure;
+    if(failures.size)throw failures.values().next().value;
     return true;
   }
   async function currentPreferences(){
@@ -139,12 +180,12 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   async function importData(value:unknown){
     const clean=codec.normalize(value),token=ownership.issueWriteToken('importing portable Plan data');
     await settled();ownership.assertWriteToken(token,'importing portable Plan data');
-    await enqueue(async activeToken=>{
+    await enqueue('replacement',async activeToken=>{
       const portable=await repositories.plans.replacePortable(clean,{ownershipToken:activeToken});
       ownership.assertWriteToken(activeToken,'acknowledging portable Plan data');
       state=clonePlans(clean.plans);
-      persistedDraft=clean.plans.draft;
-      failure=null;
+      draftKnown=libraryKnown=true;
+      failures.clear();
       preferences.accept(portable);
       preferences.refreshAppearance(portable);
       preferences.applyRuntime(portable);

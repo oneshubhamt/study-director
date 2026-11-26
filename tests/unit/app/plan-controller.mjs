@@ -52,8 +52,8 @@ const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
 let breakActive=false,breakEnds=0,applyGate=null,finishApplyGate=null,applyRequested=false,safetyClears=0,studyDate='2026-11-26';
-let blockedWrite=null,canonicalDraft=null,canWrite=true,ownerRevision=1;const saveOptions=[];
-const feedback=[],draftResults=[];
+let blockedWrite=null,canonicalDraft=null,canWrite=true,ownerRevision=1,unconfirmedWrite=false;const saveOptions=[];
+const feedback=[],draftResults=[];let savedLibrary={savedPlans:[],defaultId:null},libraryWrites=0;
 const timers=new Map();let nextTimer=0;
 const scheduleTimer=(callback,ms)=>{const id=++nextTimer;timers.set(id,{callback,ms});return id;};
 const clearScheduledTimer=id=>timers.delete(id);
@@ -109,13 +109,15 @@ const ports=Object.freeze({
   persistence:mk(['lastError','readDraft','readLibrary','writeLibrary','writeDraft','reportDraftResult'],{
     lastError:()=>new Error('Injected draft persistence failure'),
     readDraft:()=>canonicalDraft,
-    readLibrary:()=>({savedPlans:[],defaultId:null}),
-    writeLibrary:async()=>true,
+    readLibrary:()=>structuredClone(savedLibrary),
+    writeLibrary:async value=>{libraryWrites++;savedLibrary=structuredClone(value);return true;},
     writeDraft:async(value,options={})=>{
       draftWrites++;saveOptions.push({...options});
       if(blockedWrite)await blockedWrite;
       if(writeFailure)return false;
-      canonicalDraft=value;return true;
+      canonicalDraft=value;
+      if(unconfirmedWrite)throw Object.assign(new Error('Commit acknowledgement failed'),{planDraftUnconfirmed:true});
+      return true;
     },
     reportDraftResult:(ok,error)=>draftResults.push({ok,error})
   }),
@@ -482,6 +484,23 @@ const goodLoad=await plan.loadDraft('Loaded template',{label:'Saved plan'});
 assert.equal(goodLoad.ok,true);assert.equal(canonicalDraft,'Loaded template');
 assert.equal(saveOptions.at(-1).strictDurability,true);
 
+// A committed-but-unconfirmed replacement is not authority to restore older
+// bytes. Preserve the attempted text and report failure until it is confirmed.
+ids['plan-input'].value='Before unconfirmed load';canonicalDraft='Before unconfirmed load';unconfirmedWrite=true;
+const unconfirmedLoad=await plan.loadDraft('Committed template',{label:'Guide'});
+assert.equal(unconfirmedLoad.ok,false);assert.equal(unconfirmedLoad.error,'storage_failed');
+assert.equal(ids['plan-input'].value,'Committed template');assert.equal(canonicalDraft,'Committed template');
+assert.equal(await plan.draft.clear(),false);assert.equal(ids['plan-input'].value,'');assert.equal(canonicalDraft,'');
+unconfirmedWrite=false;assert.equal(await plan.draft.save({strictDurability:true}),true);
+
+// Authored default text remains rescue-worthy even when the canonical draft
+// is null and its explicit write failed after the debounce ended.
+canonicalDraft=null;plan.hydrate();assert.equal(plan.draft.authoredText(),null);
+plan.draft.composerInput();writeFailure=true;
+assert.equal(await plan.draft.flush(),false);assert.equal(canonicalDraft,null);
+assert.equal(plan.draft.authoredText(),'Default');
+writeFailure=false;assert.equal(await plan.draft.save({strictDurability:true}),true);
+
 // A later edit owns the Plan surface while an accepted Guide template is being saved.
 ids['plan-input'].value='';let releaseTemplate;
 blockedWrite=new Promise(resolve=>{releaseTemplate=resolve;});
@@ -637,10 +656,27 @@ assert.equal(ids['plan-input'].value,'Successor composer');
 assert.equal(feedback.length,priorFeedback);assert.equal(safetyClears,priorSafety);
 await plan.draft.flush();
 
+// Renaming a note's Area must not authorize a second saved-plan write after
+// the draft save loses ownership, or when its durability is unconfirmed.
+savedLibrary={savedPlans:[{id:'plan-area',label:'Area',scheduleText:'Area example',createdAt:'0',updatedAt:'0'}],defaultId:null};
+ids['plan-input'].value='Before area rename';plan.draft.composerInput();
+const beforeRenameLibrary=libraryWrites;
+let releaseRename;blockedWrite=new Promise(resolve=>{releaseRename=resolve;});
+const retiredRename=plan.renameArea('Polity','Ethics');
+const renameRejected=assert.rejects(retiredRename,/renamed Plan draft could not be confirmed/u);
+ownerRevision++;releaseRename();blockedWrite=null;await renameRejected;
+assert.equal(libraryWrites,beforeRenameLibrary);
+assert.equal(pendingTimers(300),0,'old draft debounce was cancelled before rename');
+ids['plan-input'].value='Current area rename';
+const result=await plan.renameArea('Polity','Ethics');
+assert.equal(result.savedPlans,1);assert.equal(libraryWrites,beforeRenameLibrary+1);
+assert.match(savedLibrary.savedPlans[0].scheduleText,/Ethics/u);
+assert.match(canonicalDraft,/Ethics/u);
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent','gateway-review-flush-admission','stale-apply-composer-completion']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent','gateway-review-flush-admission','stale-apply-composer-completion','unconfirmed-commit-no-rollback','failed-authored-default-rescue','area-rename-owner-durability']}));
