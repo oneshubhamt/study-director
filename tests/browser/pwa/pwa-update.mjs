@@ -32,10 +32,11 @@ async function waitFor(operation,{timeout=60000,interval=100,label='condition',d
 function variant(label,{corruptPrecache=false}={}){return createPwaVariant(build,label,{corruptAsset:corruptPrecache?'/icon-192.png':''});}
 
 const next=variant('PwaUpdateQA-AUTO-UPDATE-NEXT');
+const profileNext=variant('PwaUpdateQA-PROFILE-AUTHORITY');
 const badPrecache=variant('PwaUpdateQA-BAD-PRECACHE',{corruptPrecache:true});
 const badSyntax=Object.freeze({label:'PwaUpdateQA-BAD-SYNTAX',index:originalIndex,worker:"'use strict';\nthis is not valid service worker javascript {\n"});
 let served='current',swRequests=0;
-const selected=()=>served==='next'?next:served==='bad-precache'?badPrecache:served==='bad-syntax'?badSyntax:null;
+const selected=()=>served==='profile-next'?profileNext:served==='next'?next:served==='bad-precache'?badPrecache:served==='bad-syntax'?badSyntax:null;
 const mime=name=>name.endsWith('.html')?'text/html; charset=utf-8'
   :name.endsWith('.js')?'application/javascript; charset=utf-8'
   :name.endsWith('.css')?'text/css; charset=utf-8'
@@ -67,8 +68,8 @@ const appUrl=`http://127.0.0.1:${server.address().port}/${build.identity.main}`;
 
 const browser=await launchChromium({profilePrefix:'study-director-qa-pwa-'});
 
-async function createPage(url=appUrl){
-  const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>window.__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));const nativeUpdate=ServiceWorkerRegistration.prototype.update;ServiceWorkerRegistration.prototype.update=function(){localStorage.setItem('qa.pwaExplicitChecks',String(Number(localStorage.getItem('qa.pwaExplicitChecks')||0)+1));return nativeUpdate.call(this)};"});
+async function createPage(url=appUrl,extraPreload=''){
+  const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>window.__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));const nativeUpdate=ServiceWorkerRegistration.prototype.update;ServiceWorkerRegistration.prototype.update=function(){localStorage.setItem('qa.pwaExplicitChecks',String(Number(localStorage.getItem('qa.pwaExplicitChecks')||0)+1));return nativeUpdate.call(this)};"+extraPreload});
   await waitForStartup(page);
   await skipFirstStart(page);
   return page;
@@ -107,7 +108,7 @@ async function waitForNoInstalling(page){
 }
 
 const evidence={status:'PASS',release:build.identity.release,checks:{}};
-let page1=null,page2=null;
+let page1=null,page2=null,independent=null;
 try{
   page1=await createPage();
   await waitForStartup(page1);
@@ -236,7 +237,73 @@ try{
   assert.equal(cacheNames.some(name=>name===`study-director-shell-${badPrecache.releaseId}`),false,'failed precache left a partial shell cache');
   evidence.checks.precacheFailure={rejected:true,partialCacheRemoved:true,activePreserved:true};
 
-  const serious=[...page1.events,...page2.events].filter(event=>event.kind==='exception'||event.kind==='console-error');
+
+  // Distinct profiles have separate writer leases but share the worker. Profile
+  // selection normally reloads peers; delay only the registry storage event to
+  // exercise the ordering where controllerchange arrives before that reload.
+  // Seed an established second profile (not a second browser/origin); all
+  // ownership, timers, Plan persistence, worker activation and reload are real.
+  served='next';
+  const secondary=page1Primary?page2:page1;
+  await browser.closePage(secondary);
+  const originalProfile=await updateOwner.evaluate("window[Symbol.for('studyDirector.profileScope.v1')].id||JSON.parse(localStorage.getItem('studyDirector.profiles.v1')).active");
+  assert.ok(originalProfile);
+  const delayRegistry="window.__qaDelayedProfileEvents=0;window.addEventListener('storage',e=>{if(e.key==='studyDirector.profiles.v1'){window.__qaDelayedProfileEvents++;e.stopImmediatePropagation();}},true);";
+  await updateOwner.evaluate(delayRegistry);
+  const otherProfile='prof_pwaqa_mve00000_abcdef02';
+  const seedProfile="(()=>{const key='studyDirector.profiles.v1',list=JSON.parse(localStorage.getItem(key));if(!list.profiles.some(row=>row.id==='"+otherProfile+"')){list.profiles.push({id:'"+otherProfile+"',scope:'"+otherProfile+"',name:'Independent update QA',email:'',folder:'',createdAt:new Date().toISOString(),fresh:false,from:null});list.active='"+otherProfile+"';localStorage.setItem(key,JSON.stringify(list));}})();";
+  independent=await createPage(appUrl,delayRegistry+seedProfile);
+  await independent.send('Page.bringToFront');
+  await waitFor(()=>independent.evaluate("document.documentElement.dataset.studyDirectorUiState==='primary'&&window[Symbol.for('studyDirector.profileScope.v1')].scope==='"+otherProfile+"'"),{label:'independent profile primary'});
+  await waitFor(()=>updateOwner.evaluate("window.__qaDelayedProfileEvents>0"),{label:'profile registry event deliberately delayed'});
+  assert.equal(await updateOwner.evaluate("document.documentElement.dataset.studyDirectorUiState"),'primary','the initiating profile must still own its independent lease');
+  await updateOwner.evaluate("(()=>{const key='studyDirector.profiles.v1',list=JSON.parse(localStorage.getItem(key));list.active='"+originalProfile+"';localStorage.setItem(key,JSON.stringify(list));})()");
+  const independentPlan=await independent.evaluate("(()=>{const d=new Date(),minute=(d.getHours()*60+d.getMinutes()+1439)%1440,hh=String(Math.floor(minute/60)).padStart(2,'0'),mm=String(minute%60).padStart(2,'0');return hh+':'+mm+' | 60 | Independent writer QA | work | Profile authority | pages | 5';})()");
+  await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click();");
+  await independent.evaluate("(()=>{const field=document.getElementById('plan-input');field.value="+JSON.stringify(independentPlan)+";field.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await waitFor(()=>independent.evaluate("document.querySelector('[data-action=\"apply-schedule\"]')?.disabled===false"),{label:'independent Plan preview ready'});
+  await independent.click('[data-action="apply-schedule"]');
+  await waitFor(()=>independent.evaluate("document.getElementById('cd-mode')?.textContent.includes('RUNNING')&&document.getElementById('execute-state-overlay')?.hidden"),{label:'independent live timer'});
+  const draft=independentPlan.replace('Independent writer QA','Independent draft QA');
+  await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click();");
+  await independent.evaluate("(()=>{const field=document.getElementById('plan-input');field.value="+JSON.stringify(draft)+";field.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  const independentOrigin=await independent.evaluate('performance.timeOrigin'),independentLoads=independent.loadCount;
+  await updateOwner.send('Page.bringToFront');
+  const initiatingOrigin=await updateOwner.evaluate('performance.timeOrigin');
+  served='profile-next';
+  await waitFor(()=>updateOwner.evaluate("!document.getElementById('pwa-update-apply').disabled"),{label:'initiator can check next release'});
+  await updateOwner.evaluate("document.getElementById('pwa-update-apply').click()");
+  await waitFor(()=>updateOwner.evaluate("navigator.serviceWorker.getRegistration().then(r=>!!r.waiting||performance.timeOrigin!=="+initiatingOrigin+")"),{label:'independent profile update discovered'});
+  // If not already applying automatically, use the actual update control.
+  await updateOwner.evaluate("(()=>{const button=document.getElementById('pwa-update-apply');if(performance.timeOrigin==="+initiatingOrigin+"&&!button.disabled)button.click();})()");
+  await waitFor(()=>registrationsSettled([updateOwner,independent]),{label:'shared worker activates second release'});
+  await waitFor(()=>updateOwner.evaluate("performance.timeOrigin!=="+initiatingOrigin),{label:'initiator reloads'});
+  assert.equal(await workerIdentity(updateOwner),profileNext.releaseId);
+  await independent.send('Page.bringToFront');
+  await waitFor(()=>independent.evaluate("document.getElementById('pwa-update-message')?.textContent.includes('live timer before updating')"),{label:'independent primary refuses automatic reload'});
+  assert.equal(independent.loadCount,independentLoads,'origin-wide worker activation must not reload a live primary in another profile');
+  assert.equal(await independent.evaluate('performance.timeOrigin'),independentOrigin);
+  assert.equal(await independent.evaluate("document.documentElement.dataset.studyDirectorUiState"),'primary');
+  assert.equal(await workerIdentity(independent),profileNext.releaseId);
+  assert.equal(await independent.evaluate("document.getElementById('plan-input').value"),draft);
+  assert.equal(await independent.evaluate("document.getElementById('pwa-update-apply').textContent"),'Pause & Update');
+  // Restore the normal active-profile selection before the manual reload; the
+  // initiator has finished, so closing it also removes the synthetic delay.
+  await browser.closePage(updateOwner);
+  await independent.evaluate("(()=>{const key='studyDirector.profiles.v1',list=JSON.parse(localStorage.getItem(key));list.active='"+otherProfile+"';localStorage.setItem(key,JSON.stringify(list));})()");
+  await independent.evaluate("document.getElementById('pwa-update-apply').click()");
+  await waitFor(()=>independent.evaluate('performance.timeOrigin!=='+independentOrigin),{label:'independent manual safe reload'});
+  await waitForStartup(independent);
+  await waitFor(()=>independent.evaluate("document.documentElement.dataset.studyDirectorUiState==='primary'&&sessionStorage.getItem('studyDirector.pwaReload.v1')===null"),{label:'independent boot and ownership confirmed'});
+  assert.equal(await independent.evaluate("window[Symbol.for('studyDirector.profileScope.v1')].scope"),otherProfile);
+  await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click()");
+  assert.equal(await independent.evaluate("document.getElementById('plan-input').value"),draft,'independent authored Plan draft must survive the update');
+  await independent.evaluate("document.querySelector('[data-tab=\"execute\"]').click()");
+  await waitFor(()=>independent.evaluate("document.getElementById('execute')?.textContent.includes('Independent writer QA')||document.querySelector('.pane.on')?.textContent.includes('Independent writer QA')"),{label:'independent applied session restored'});
+  assert.equal(independent.loadCount-independentLoads,1);
+  evidence.checks.independentProfileUpdate={delayedRegistryEvent:true,independentPrimaryProtected:true,manualPauseAndUpdate:true,authoredDraftPreserved:true,appliedSessionRestored:true};
+
+  const serious=[...page1.events,...page2.events,...(independent?.events||[])].filter(event=>event.kind==='exception'||event.kind==='console-error');
   // Expected service-worker update failures are reported by Chromium as console errors; app runtime exceptions are not acceptable.
   const unexpected=serious.filter(event=>!/(ServiceWorker|service worker|Failed to update a ServiceWorker|bad-precache|invalid service worker)/i.test(event.text));
   assert.deepEqual(unexpected,[],`Unexpected runtime errors: ${unexpected.map(event=>event.text).join(' | ')}`);
