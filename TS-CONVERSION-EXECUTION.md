@@ -1,5 +1,7 @@
 # TypeScript conversion — execution record
 
+- 2026-11-26 follow-up: [Repository checks](https://github.com/oneshubhamt/study-director/actions/runs/45745455252) on `520fd94f7b97f7d4d8720e3fba8ccc57971fa347` passed strict TypeScript and typed lint; targeted tests identified missing `captureOrigin` in capture-safety and device-backup fixtures. Update both without weakening production validation. Further exact-head repository/fast/browser evidence required. Handoff trace: local timer-resume calls flushLiveDraft then urgent noteChange; failed journey showed running local writes but a paused verified remote checkpoint at next claim, and later normal 20-minute convergence deadline. Root cause still open; do not change causal reconciliation or timing expectations based only on that trace.
+
 - 2026-11-26 follow-up: `221fd0d324b37a2813adb3d779c1420452ef8b28` strict check exposed missing compile-only StorageResetInput.captureOrigin in `types/checks/p5-7c.ts`; `4e1e47d00435581264739d016aa5c4e227adc26f` corrected it. [P5.7](https://github.com/oneshubhamt/study-director/actions/runs/45745283353/job/139659711947) then exposed the same missing contract in the no-backup-location integration fixture. Add an always-valid origin to that deliberately static owner fixture, not a permissive production fallback. All exact-head gates must rerun; no closure claimed.
 
 ## REVIEW-P5 · Stage 1 Device Folder consent and readiness witnesses — CORRECTED / VERIFICATION OPEN · 2026-11-26

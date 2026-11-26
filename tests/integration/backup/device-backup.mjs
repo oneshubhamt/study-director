@@ -18,7 +18,7 @@ await test('storage reset waits for checked Device Folder readiness, handles den
   function scenario({connected=false}={}){
     let allowInstall,timer=null,refreshes=0,installationCalls=0;const gate=new Promise(resolve=>{allowInstall=resolve;}),diagnostics=[],state={lastStudyDataSaveAt:null,browserDataClearedAt:null};
     const controller=Recovery.createStorageReset(freeze({
-      authority:freeze({canMutate:()=>true}),
+      authority:freeze({canMutate:()=>true,captureOrigin:()=>()=>{}}),
       canonical:freeze({dailyRecordsList:async()=>[],notesReadFreshPayload:async()=>({}),activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{idb:true,local:false}}),planDataRead:async()=>({draft:null,savedPlans:[]}),attachmentsList:async()=>[],pendingReviewsList:async()=>[],savedDayDeletions:async()=>[],noteDeletions:async()=>[]}),
       writeback:freeze({installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,writeLiveDraft:async()=>({ok:true,value:null,error:null,storage:{idb:true,local:false}})}),
       provider:freeze({history:async()=>({available:false,entries:[]}),restoreRepositoryProviderVersion:async()=>null,bringInRepositoryProvider:async()=>null,syncRepositoryProvider:async()=>null,list:()=>[],locationStatus:()=>null,suspendBackground:()=>({settled:Promise.resolve(),release:()=>true}),connected:()=>false}),

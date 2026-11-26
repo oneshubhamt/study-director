@@ -229,7 +229,7 @@ function storageResetFixture(options={}){
     rememberAfterStorageReset:async()=>true
   };
   const controller=recoveryHostModule.createStorageReset(freeze({
-    authority:freeze({canMutate:()=>options.primary!==false}),
+    authority:freeze({canMutate:()=>options.primary!==false,captureOrigin:()=>{if(options.primary===false)throw new Error('owner unavailable');return ()=>{if(options.primary===false)throw new Error('owner changed');};}}),
     canonical:freeze({dailyRecordsList:async()=>[],notesReadFreshPayload:async()=>({}),activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:true}}),planDataRead:async()=>({draft:null,savedPlans:[]}),attachmentsList:async()=>[],pendingReviewsList:async()=>[],savedDayDeletions:async()=>[],noteDeletions:async()=>[]}),
     writeback:freeze({installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,writeLiveDraft:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:true}})}),
     provider:freeze(provider),device:freeze(device),
