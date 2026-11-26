@@ -97,4 +97,22 @@ assert.equal(controller.finish(),true);
 assert.equal(controller.completedRuns().length,1);
 assert.equal(controller.completedRuns()[0].unitMs[0]>=59000,true);
 
-console.log(JSON.stringify({status:'PASS',contract:'practice-pacer',model:true,plans:true,pacing:true,controller:true},null,2));
+// The migration map is authoritative even if the replacement schedule
+// happens to reuse an old task ID (IDs are based on index and name).
+controller.restore({active:{taskId:'task-1',targetMs:60000,unitMs:[20000],currentMs:15000,anchorMs:null,pauseCause:model.PRACTICE_PAUSE_CAUSES.MAIN},runs:[{taskId:'task-1',targetMs:60000,unitMs:[33000]},{taskId:'task-other',targetMs:60000,unitMs:[47000]}]});
+assert.equal(controller.remapTaskLinks(new Map([['task-other','new-task-other']])),1);
+assert.equal(controller.status().active,null,'unmatched active Pacer cannot resume on a different block that reused its ID');
+assert.deepEqual(controller.completedRuns(),[
+  {targetMs:60000,unitMs:[33000]},
+  {targetMs:60000,unitMs:[47000],taskId:'new-task-other'},
+  {targetMs:60000,unitMs:[20000,15000],partial:true}
+]);
+assert.equal(controller.remapTaskLinks(new Map()),0);
+assert.equal(controller.completedRuns().length,3);assert.ok(controller.completedRuns().every(run=>!run.taskId));
+controller.restore({active:{taskId:'task-1',targetMs:60000,unitMs:[21000],currentMs:14000,anchorMs:null,pauseCause:model.PRACTICE_PAUSE_CAUSES.MAIN},runs:[{taskId:'task-1',targetMs:60000,unitMs:[31000]}]});
+assert.equal(controller.remapTaskLinks(new Map([['task-1','task-1']])),2);
+assert.equal(controller.status().active.taskId,'task-1');assert.equal(controller.status().active.currentMs,14000);assert.equal(controller.completedRuns()[0].taskId,'task-1');
+assert.equal(controller.remapTaskLinks(new Map()),0);assert.equal(controller.status().active,null);
+assert.deepEqual(controller.completedRuns().at(-1),{targetMs:60000,unitMs:[21000,14000],partial:true});
+
+console.log(JSON.stringify({status:'PASS',contract:'practice-pacer',model:true,plans:true,pacing:true,controller:true,authoritativeMigrationLinks:true,unmatchedPracticeEvidencePreserved:true},null,2));

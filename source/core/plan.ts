@@ -601,9 +601,11 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
   const owner=ownership.revision(),epoch=editEpoch,field=fieldById('plan-input','textarea'),live=scheduleGateway.read();
   const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
-  const canApply=()=>
-    (explicitSchedule!==null||(ownerCurrent(owner)&&editEpoch===epoch&&fieldById('plan-input','textarea')===field&&scheduleGateway.read().fingerprint===live.fingerprint&&scheduleGateway.read().studyDate===live.studyDate))&&
-    (typeof opts.currentEditor!=='function'||opts.currentEditor());
+  const canApply=()=>{
+    const current=scheduleGateway.read();
+    return (explicitSchedule!==null||(ownerCurrent(owner)&&editEpoch===epoch&&fieldById('plan-input','textarea')===field&&current.fingerprint===live.fingerprint&&current.studyDate===live.studyDate&&current.today===live.today))&&
+      (typeof opts.currentEditor!=='function'||opts.currentEditor());
+  };
   const finish=(preparation:Readonly<PlanApplyPreparation>,draft:ImmutablePlanDraft,parsed:readonly ScheduleRow[])=>{
     if(!canApply())return false;
     if(!currentDraft()){
@@ -615,6 +617,10 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
   const apply=()=>{
     if(!canApply())return false;
     if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
+    if(explicitSchedule===null&&TASKS.length&&live.studyDate!==live.today){
+      setPlanStatus('Save or discard the previous study day before applying today’s Plan.',false);
+      return false;
+    }
     if(!currentDraft()){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
       return false;

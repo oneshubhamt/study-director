@@ -527,12 +527,11 @@ function createScheduleGateway(ports:Readonly<ScheduleGatewayInput>){
   const PRACTICE_PAUSE_CAUSES=ports.runtime.PracticePacerModel.PRACTICE_PAUSE_CAUSES;
   const COMPLETION_SOURCES=ports.completionSources;
 function hasProtectedLiveProgress(){
-  const hasTrackedTime=Object.values(TaskSessionState.indexSnapshot('actualTime')).some(value=>Number(value)>0);
+  const hasBlockEvidence=TASKS.some((task,idx)=>isTrackableBlock(task)&&hasBlockProgressAtIndex(idx));
   const activeSeconds=(TimerState.runtime&&TimerState.runtime.startMs!==null)?currentTimerActiveSeconds():0;
   const practice=PracticePacer.status();
-  return hasTrackedTime || activeSeconds>5 || !!practice.active || practice.runs.length>0 || TaskSessionState.resolvedIndices('done').length>0 || TaskSessionState.resolvedIndices('skipped').length>0 ||
-    Object.keys(TaskSessionState.indexSnapshot('completion')).length>0 || Object.keys(TaskSessionState.indexSnapshot('completionSource')).length>0 ||
-    Object.keys(TaskSessionState.indexSnapshot('notes')).length>0 || Object.keys(TimerState.adjustedSchedule||{}).length>0 || !!String(ports.getCarryForward()||'').trim();
+  return hasBlockEvidence || activeSeconds>5 || !!practice.active || practice.runs.length>0 ||
+    Object.keys(TimerState.adjustedSchedule||{}).length>0 || !!String(ports.getCarryForward()||'').trim();
 }
 function cloneProgressData<T>(value:T):T{
   if(value===undefined)return value;
@@ -564,7 +563,7 @@ function hasObjectData(value:unknown){
 }
 function hasBlockProgressAtIndex(idx:number){
   const progress=TaskSessionState.getField(idx,'notes');
-  return TaskSessionState.getField(idx,'completion')!==undefined || TaskSessionState.isResolved(idx) ||
+  return TaskSessionState.getField(idx,'completion')!==undefined || TaskSessionState.getField(idx,'completionSource')!==undefined || TaskSessionState.isResolved(idx) ||
     (progress&&(progress.done!==undefined||progress.total!==undefined)) ||
     TaskSessionState.getField(idx,'actualTime')!==undefined || hasObjectData(TaskSessionState.getField(idx,'actualClock')) || hasObjectData(TaskSessionState.getField(idx,'actualRecords'));
 }
@@ -678,7 +677,7 @@ function snapshotScheduleProgressForMigration(newRows:readonly TaskInput[]){
   const matched=matchProgressEntriesToRows(entries,newRows,sourceRows).length;
   const practiceMatched=matchProgressEntriesToRows(practiceLinks,newRows,sourceRows).length;
   return {
-    date:getReviewDate(),sourceRows,
+    date:TimerState.studyDate||getReviewDate(),sourceRows,
     entries,
     practiceLinks,
     latestCarryForward:clampText(ports.getCarryForward(),APP_LIMITS.maxCarryForwardChars),
@@ -688,7 +687,7 @@ function snapshotScheduleProgressForMigration(newRows:readonly TaskInput[]){
 function restoreMigratedScheduleProgress(snapshot:ScheduleProgressSnapshot|null){
   const total=snapshot&&Array.isArray(snapshot.entries)?snapshot.entries.length:0;
   const practiceTotal=snapshot&&Array.isArray(snapshot.practiceLinks)?snapshot.practiceLinks.length:0;
-  if(!snapshot||snapshot.date!==getReviewDate())return {total,matched:0,areaMatched:0,practiceTotal,practiceMatched:0,practiceRemapped:0};
+  if(!snapshot||snapshot.date!==TimerState.studyDate)return {total,matched:0,areaMatched:0,practiceTotal,practiceMatched:0,practiceRemapped:0};
   const matches=matchProgressEntriesToRows(snapshot.entries||[],TASKS,snapshot.sourceRows);
   matches.forEach(({entry,target,matchType})=>{
     const p=recalcMigratedProgressForNewTarget(entry.progress,target,matchType);
@@ -789,8 +788,14 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
   }
   function apply(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}){
     const opts=options&&typeof options==='object'?options:{};
+    const currentDay=todayISO(),date=typeof opts.studyDate==='string'&&isValidIsoDate(opts.studyDate)?opts.studyDate:currentDay;
+    const userReplacement=!!(opts.liveReplacement||opts.progressMigration)||opts.studyDate===undefined;
     let migration:ScheduleProgressSnapshot|null=null;
     const beforeStart=()=>{
+      // The lifecycle, timer and evidence must use the same admitted date.
+      // Canonical restoration carries its own explicit date; a user Apply
+      // cannot cross the day boundary or overwrite a prior day's evidence.
+      if(userReplacement&&(todayISO()!==currentDay||date!==currentDay||(TASKS.length>0&&TimerState.studyDate!==null&&TimerState.studyDate!==date)))return false;
       if(!opts.liveReplacement&&!opts.progressMigration)return true;
       const activeBreak=breakIdentity();
       if(activeBreak!==null&&activeBreak!==opts.liveReplacement?.breakIdentity)return false;
@@ -801,7 +806,7 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
       // loss set (not just counts); newly unmatched work needs fresh consent.
       checkpointProgressInputs();
       const latest=snapshotScheduleProgressForMigration(rows);
-      if(latest.date!==confirmed.date||
+      if(latest.date!==confirmed.date||latest.date!==date||
         newlyUnmatched(confirmed.entries,latest.entries,confirmed,latest,rows,entry=>entry.idx)||
         newlyUnmatched(confirmed.practiceLinks,latest.practiceLinks,confirmed,latest,rows,entry=>entry.oldTaskId))return false;
       if(activeBreak!==null&&breakState('end')!==true)return false;
@@ -809,9 +814,8 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
       migration=snapshotScheduleProgressForMigration(rows);
       return true;
     };
-    const perform=()=>{opts.beforeApply?.();return applyRows(rows,{...opts,progressMigration:migration,lifecycleManaged:true});};
+    const perform=()=>{opts.beforeApply?.();return applyRows(rows,{...opts,studyDate:date,progressMigration:migration,lifecycleManaged:true});};
     if(opts.lifecycleManaged)return (opts.current&&!opts.current())||!beforeStart()?false:perform();
-    const date=isValidIsoDate(opts.studyDate)?opts.studyDate:todayISO();
     return SessionLifecycle.run<ReturnType<typeof applyRows>|false>(opts.source||'schedule-apply',{
       scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
     },perform,{current:opts.current||(()=>true),beforeStart,cancelled:false});
@@ -828,7 +832,7 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
       tasks:TASKS,
       currentIndex:TimerState.currentIndex,
       anchor:TimerState.scheduleAnchorMin,
-      fingerprint:scheduleFingerprint(),studyDate:getReviewDate(),breakIdentity:breakIdentity(),
+      fingerprint:scheduleFingerprint(),studyDate:TimerState.studyDate||getReviewDate(),today:todayISO(),breakIdentity:breakIdentity(),
       renderDirty:!!ScheduleDerivedState.renderDirty
     });
   }

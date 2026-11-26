@@ -51,7 +51,7 @@ const scheduleTextFromRows=rows=>'ROW:'+JSON.stringify(rows);
 const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
-let breakActive=false,breakEnds=0,breakRevision=1,applyGate=null,finishApplyGate=null,applyRequested=false,safetyClears=0,studyDate='2026-11-26';
+let breakActive=false,breakEnds=0,breakRevision=1,applyGate=null,finishApplyGate=null,applyRequested=false,safetyClears=0,studyDate='2026-11-26',today='2026-11-26';
 let blockedWrite=null,canonicalDraft=null,canWrite=true,ownerRevision=1,unconfirmedWrite=false;const saveOptions=[];
 const feedback=[],draftResults=[];let savedLibrary={savedPlans:[],defaultId:null},libraryWrites=0;
 const timers=new Map();let nextTimer=0;
@@ -95,7 +95,7 @@ const gateway={
   breakState:action=>{if(action==='end'){breakActive=false;breakEnds++;return true;}return breakActive;},
   captureMigration:()=>({preview:{matched:0,total:0,practiceTotal:0,practiceMatched:0}}),
   clearSafety:()=>{safetyClears++;},flush:()=>{},hasLiveState:()=>liveActivity,
-  markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480,studyDate,breakIdentity:breakActive?String(breakRevision):null}),
+  markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480,studyDate,today,breakIdentity:breakActive?String(breakRevision):null}),
   reconcile:()=>{},renameAreas:()=>0,row:()=>({done:false,skipped:false}),
   timeline:()=>({rows:[],realtime:{scheduledIdx:null,first:0,nowEff:490}})
 };
@@ -658,7 +658,8 @@ assert.equal(await staleApply,false);assert.equal(breakEnds,beforeStaleBreak);
 assert.equal(applyCount,beforeStaleApply);assert.equal(breakActive,true);breakActive=false;
 
 // A strict Review flush can hold the real gateway after Plan confirmation.
-for(const change of ['edit','date','owner']){
+for(const change of ['edit','date','owner','rollover']){
+  studyDate=today='2026-11-26';
   ids['plan-input'].value='Apply awaiting Review '+change;plan.draft.enter();composer.open=true;
   let release;applyGate=new Promise(resolve=>{release=resolve;});applyRequested=false;
   const before=applyCount,beforeSafety=safetyClears,pending=plan.draft.confirm();
@@ -666,6 +667,7 @@ for(const change of ['edit','date','owner']){
   assert.equal(applyRequested,true);
   if(change==='edit'){ids['plan-input'].value='Newer working draft';plan.draft.composerInput();}
   if(change==='date')studyDate='2026-11-25';
+  if(change==='rollover')today='2026-11-27';
   if(change==='owner')ownerRevision++;
   release();applyGate=null;
   assert.equal(await pending,false,'retired '+change+' intent must not mutate live schedule');
@@ -673,7 +675,12 @@ for(const change of ['edit','date','owner']){
   assert.equal(composer.open,true);
   assert.equal(plan.draft.active(),true);
 }
-studyDate='2026-11-26';
+studyDate='2026-11-25';today='2026-11-26';
+ids['plan-input'].value='Previous day still loaded';plan.draft.enter();
+const priorDayApplies=applyCount;
+assert.equal(await plan.draft.confirm(),false);
+assert.equal(applyCount,priorDayApplies,'previous day must be closed before applying a new draft');
+studyDate=today='2026-11-26';
 ids['plan-input'].value='Successfully applied before newer editor';plan.draft.enter();
 let releaseCompletion;finishApplyGate=new Promise(resolve=>{releaseCompletion=resolve;});applyRequested=false;
 const beforeApplied=applyCount,pendingCompletion=plan.draft.confirm();

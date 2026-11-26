@@ -19,11 +19,11 @@ const original=[row('Read A','Area A',10),{...row('Read B','Area B',5),start:'08
 state.loadSchedule(model.buildTasks(original),{studyDate:date});schedule.resetScheduleLayers();
 fields.setField(0,'notes',{done:4,total:10});fields.setField(0,'completion',40);fields.setField(0,'completionSource','units');fields.setField(0,'actualTime',300);fields.setField(0,'actualClock',{startedAt:'2026-11-13T08:00:00Z'});fields.setResolved(1,'skipped');
 const oldId=state.taskIdentity.idAt(0);
-let reviewGate=null;const lifecycleEvents=[];
+let reviewGate=null,reviewDate=date,today=date;const lifecycleEvents=[];
 const lifecycle=registry.require('session-lifecycle',1).createCoordinator(Object.freeze({hooks:Object.freeze({canMutate:()=>true,flushPending:()=>reviewGate,prepare:()=>lifecycleEvents.push('prepare'),reconcile:()=>lifecycleEvents.push('reconcile'),complete:()=>lifecycleEvents.push('complete'),capture:()=>{}})}));
 const gateway=owner.createScheduleGateway({runtime,document:{getElementById:()=>null},ScheduleDerivedState:{renderDirty:true},APP_LIMITS:{maxCarryForwardChars:5000},completionSources:domain.COMPLETION_SOURCES,
   getCarryForward:()=>carry,setCarryForward:value=>{carry=value;},taskAreaKey:model.areaKey,taskMeasureValue:model.measureValue,taskTargetValue:model.targetValue,isTrackableBlock:model.isTrackable,clampText:value=>String(value),normalizeCompletionSource:domain.CompletionModel.normalizeSource,makeTaskId:domain.makeTaskId,
-  isLiveTrackableTimer:()=>liveTimer,saveNote(){checkpoints++;},captureReviewInputs(){},syncUnfinishedNoteDraft(){},getReviewDate:()=>date,showEmpty(){},refreshCoreUi(){},showDone(){},isValidIsoDate:time.isValidIsoDate,todayISO:()=>date,buildTasks:model.buildTasks,isValidHHMM:time.isValidHHMM,clockMinuteToStudyMinute:time.clockMinuteToStudyMinute,t2m:time.clockToMinute,
+  isLiveTrackableTimer:()=>liveTimer,saveNote(){checkpoints++;},captureReviewInputs(){},syncUnfinishedNoteDraft(){},getReviewDate:()=>reviewDate,showEmpty(){},refreshCoreUi(){},showDone(){},isValidIsoDate:time.isValidIsoDate,todayISO:()=>today,buildTasks:model.buildTasks,isValidHHMM:time.isValidHHMM,clockMinuteToStudyMinute:time.clockMinuteToStudyMinute,t2m:time.clockToMinute,
   invalidateScheduleDerived(){},applySessionSnapshot(){throw new Error('progress replacement must not restore a stale session');},restoreLiveDraftIfAny(){throw new Error('progress replacement must not restore local rescue');},restoreTimerRuntimeIfAny:()=>false,clearFutureUntouchedProgress(){},flushLiveDraft(){},scheduleFingerprint:()=>'',writeLiveDraftNow(){},advanceTaskNoteScheduleRevision(){},markDayContentChanged(){},clearSessionSafetyMessage(){},SessionLifecycle:lifecycle
 });
 const replacement=[{...original[1],start:'08:00'},{...original[0],name:'Read A revised',target:20,start:'08:40'}];
@@ -102,4 +102,35 @@ assert.equal(await gateway.apply([duplicate[0]],{progressMigration:breakPreview,
 assert.equal(state.paused,true);assert.equal(tasks.length,2);assert.equal(pauseCalls,beforeRefusalPause);
 assert.deepEqual(lifecycleEvents,beforeRefusalEvents);
 
-console.log(JSON.stringify({status:'PASS',suite:'execution-host',progressPreserved:true,ambiguousMatchRejected:true,practiceLinksRemapped:true,reviewOnlyNoTimer:true,recoveryBounded:true,guardedGatewayAdmission:true,pureMigrationPreview:true,latestProgressPreserved:true,newUnmatchedRefused:true,sourceAmbiguityRefused:true,lateActivityRefused:true,refusedBreakStopsApply:true}));
+// Standalone activity-clock and audit records are protected just like
+// numeric time. A source-only completion marker must not be dropped either.
+state.clearSession();state.loadSchedule(model.buildTasks(original),{studyDate:date});schedule.resetScheduleLayers();fields.clear();
+carry='';liveTimer=false;
+for(const [field,value] of [['actualClock',{startedAt:'2026-11-13T08:00:00Z'}],['actualRecords',{idx:1,taskId:state.taskIdentity.idAt(1),activeSeconds:0,pauseCount:1}],['completionSource','time']]){
+  fields.clear();fields.setField(1,field,value);
+  assert.equal(gateway.hasLiveState(),true,field+' independently requires consent');
+  const preview=gateway.captureMigration([original[0]]);
+  assert.equal(preview.preview.total,1);assert.equal(preview.preview.matched,0);
+  const refused=await gateway.apply([original[0]],{liveReplacement:{breakIdentity:null},current:()=>true,reviewOnly:true});
+  assert.equal(refused,false);assert.equal(tasks.length,2);assert.deepEqual(fields.getField(1,field),value);
+}
+// Review browsing is not the canonical session's study date. Migration
+// must carry evidence on the real day, even with a different Review date.
+fields.clear();fields.setField(0,'actualTime',180);reviewDate='2026-11-12';
+const actualDay=gateway.captureMigration(replacement);
+assert.equal(actualDay.date,date);assert.equal(gateway.read().studyDate,date);
+const migrated=await gateway.apply(replacement,{progressMigration:actualDay,reviewOnly:true,current:()=>true});
+assert.equal(migrated.migrationSummary.matched,1);assert.equal(fields.getField(1,'actualTime'),180);assert.equal(state.studyDate,date);
+// At the study-day boundary (04:00, not midnight), the already-admitted
+// replacement cannot clear old evidence while Review flush is pending.
+reviewDate=date;
+const beforeRollover=gateway.captureMigration(replacement),beforeRolloverEvents=[...lifecycleEvents],beforeRolloverPause=pauseCalls;
+reviewGate=new Promise(resolve=>{releaseReview=resolve;});
+const rollover=gateway.apply(replacement,{progressMigration:beforeRollover,reviewOnly:true,current:()=>true});
+today='2026-11-14';releaseReview();reviewGate=null;
+assert.equal(await rollover,false);assert.equal(state.studyDate,date);assert.equal(fields.getField(1,'actualTime'),180);
+assert.equal(pauseCalls,beforeRolloverPause);assert.deepEqual(lifecycleEvents,beforeRolloverEvents);
+assert.equal(await gateway.apply(replacement,{progressMigration:beforeRollover,current:()=>true,reviewOnly:true}),false,'old day must be closed before a new user Plan applies');
+assert.equal(fields.getField(1,'actualTime'),180);
+
+console.log(JSON.stringify({status:'PASS',suite:'execution-host',progressPreserved:true,ambiguousMatchRejected:true,practiceLinksRemapped:true,reviewOnlyNoTimer:true,recoveryBounded:true,guardedGatewayAdmission:true,pureMigrationPreview:true,latestProgressPreserved:true,newUnmatchedRefused:true,sourceAmbiguityRefused:true,lateActivityRefused:true,refusedBreakStopsApply:true,independentActivityEvidenceProtected:true,canonicalSessionDate:true,rolloverRefused:true}));

@@ -689,6 +689,14 @@ PRACTICE_PAUSE_CAUSES,
     const clean=sanitizePracticeState({active,runs});
     return clean.active||clean.runs.length?clean:null;
   }
+  function recoverUnlinkedActive(cutoff:number){
+    if(!active)return false;
+    pauseAt(cutoff,PRACTICE_PAUSE_CAUSES.SESSION);
+    const recovered=sanitizePracticeRun(practiceRunInputFromActive(active,[...active.unitMs,...(active.currentMs>0?[active.currentMs]:[])],{includeTask:false,partial:true}),{unitLimit:Math.min(APP_LIMITS.maxPracticeUnitsPerRun,APP_LIMITS.maxPracticeUnitsPerDay-runs.reduce((sum,row)=>sum+row.unitMs.length,0))});
+    if(recovered&&runs.length<APP_LIMITS.maxPracticeRunsPerDay)runs.push(recovered);
+    active=null;activePlanContext=null;resetPromptArmed=false;
+    return !!recovered;
+  }
   function restore(payload:unknown,{forcePaused=false,pauseCause=PRACTICE_PAUSE_CAUSES.SESSION,savedAtMs=null}:{forcePaused?:boolean;pauseCause?:PracticePause;savedAtMs?:number|null}={}){
     clearCueDelivery();
     const clean=sanitizePracticeState(payload);active=clean.active;runs=clean.runs;message='';lastPaintKey='';resetPromptArmed=false;
@@ -697,10 +705,7 @@ PRACTICE_PAUSE_CAUSES,
       const idx=TaskIdentity.indexForId(active.taskId);
       if(idx===null){
         const cutoff=Number.isFinite(Number(savedAtMs))?Math.max(active.anchorMs||0,Number(savedAtMs)):nowMs();
-        pauseAt(cutoff,PRACTICE_PAUSE_CAUSES.SESSION);
-        const recovered=sanitizePracticeRun(practiceRunInputFromActive(active,[...active.unitMs,...(active.currentMs>0?[active.currentMs]:[])],{includeTask:false,partial:true}),{unitLimit:Math.min(APP_LIMITS.maxPracticeUnitsPerRun,APP_LIMITS.maxPracticeUnitsPerDay-runs.reduce((sum,row)=>sum+row.unitMs.length,0))});
-        if(recovered&&runs.length<APP_LIMITS.maxPracticeRunsPerDay)runs.push(recovered);
-        active=null;activePlanContext=null;
+        recoverUnlinkedActive(cutoff);
       }else if(forcePaused||isTaskResolved(idx)){
         const cutoff=Number.isFinite(Number(savedAtMs))?Math.max(active.anchorMs||0,Number(savedAtMs)):nowMs();
         pauseAt(cutoff,isTaskResolved(idx)?PRACTICE_PAUSE_CAUSES.BLOCK:pauseCause);
@@ -724,14 +729,24 @@ PRACTICE_PAUSE_CAUSES,
   function completedRuns(){return sanitizePracticeRuns(runs);}
   function status(){return {active:active?JSON.parse(JSON.stringify(active)) as PracticeActive:null,runs:completedRuns(),running:running(),currentMs:currentMsAt(),sessionMs:sessionMsAt()};}
   function remapTaskLinks(taskIdMap:ReadonlyMap<string,string>){
-    if(!(taskIdMap instanceof Map)||!taskIdMap.size)return 0;
-    let changed=0;
-    if(active&&taskIdMap.has(active.taskId)){active.taskId=(taskIdMap as ReadonlyMap<string,string>).get(active.taskId)!;changed++;}
+    if(!(taskIdMap instanceof Map))return 0;
+    let remapped=0,changed=false;
+    // The old IDs are schedule-local (index + name), so even an ID present
+    // in the new schedule is not a valid link unless the matcher admitted it.
+    if(active){
+      const next=taskIdMap.get(active.taskId);
+      if(next){active.taskId=next;remapped++;changed=true;}
+      else{recoverUnlinkedActive(nowMs());message='The linked block changed. Practice results were kept without a block link.';changed=true;}
+    }
     runs.forEach(run=>{
-      if(run.taskId&&taskIdMap.has(run.taskId)){run.taskId=(taskIdMap as ReadonlyMap<string,string>).get(run.taskId)!;changed++;}
+      if(!run.taskId)return;
+      const next=taskIdMap.get(run.taskId);
+      if(next){run.taskId=next;remapped++;}
+      else delete run.taskId;
+      changed=true;
     });
-    if(changed)lastPaintKey='';
-    return changed;
+    if(changed){lastPaintKey='';render();}
+    return remapped;
   }
   /* 6. Timer integration */
   function mainCanRun(){return TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused&&!TimerState.inactiveGap&&TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.runtime.taskIdx===TimerState.currentIndex&&TimerState.currentIndex<TASKS.length&&isWorkBlock(TASKS[TimerState.currentIndex]);}
