@@ -99,6 +99,56 @@ function protocolContext(extra={}){
   assert.equal(successor.terminated,undefined,'late old worker events must not terminate the successor');
   await assert.rejects(first,error=>error?.name==='AbortError');
 }
+
+/* A failed worker clears active before a yielded transfer resumes. A later
+   cancellation or a small main-thread successor must still retire that
+   originating request, rather than let it compute an obsolete fallback. */
+for(const action of ['cancel','release','dispose','successor','timeout','failure']){
+  const workers=[],timers=new Map();let timerId=0,releaseYield,fallBacks=0;
+  class WorkerStub{
+    constructor(){this.messages=[];workers.push(this);}
+    postMessage(message){this.messages.push(message);}
+    terminate(){this.terminated=true;}
+  }
+  function HTMLScriptElement(){}
+  const script=Object.assign(new HTMLScriptElement(),{src:'https://example.test/insights.js'});
+  const context=protocolContext({
+    document:{currentScript:script},HTMLScriptElement,Worker:WorkerStub,
+    location:{origin:'https://example.test',href:'https://example.test/'},
+    performance:{now:()=>0},
+    setTimeout:(fn,ms)=>{const id=++timerId;timers.set(id,{fn,ms});return id;},
+    clearTimeout:id=>timers.delete(id)
+  });
+  vm.runInContext(computeSource,context);
+  const gate=new Promise(resolve=>{releaseYield=resolve;});
+  const logic=Object.freeze({classifyTaskOutcome:()=> 'untouched',summarizePracticeRuns:()=>({})});
+  const engine={buildPrepared(records){fallBacks++;return {count:records.length};}};
+  const computation=context.StudyDirectorInsightsComputeBridge.create({logic},engine,{yieldTask:()=>gate});
+  const records=Array.from({length:320},()=>({date:'2026-03-01'}));
+  const request=computation.build(records,{records,revision:'yield-r1'},{});
+  const worker=workers[0];
+  assert.equal(worker.messages.length,1,'transfer must be paused after the first chunk');
+  if(action==='timeout'){
+    const deadline=[...timers.values()].find(timer=>timer.ms===30000);
+    assert.ok(deadline,'worker timeout must remain armed');
+    deadline.fn();
+  }else worker.onerror({message:'failed during yield',preventDefault(){}});
+  const superseded=!['timeout','failure'].includes(action);
+  const expected=superseded?assert.rejects(request,error=>error?.name==='AbortError'):request;
+  if(action==='successor'){
+    const newer=[{date:'2026-03-02'}];
+    const result=await computation.build(newer,{records:newer,revision:'newer'},{});
+    assert.equal(result.model.count,1);
+  }else if(superseded)computation[action]();
+  releaseYield();
+  const result=await expected;
+  assert.equal(worker.terminated,true,'failed or timed-out worker must retire');
+  assert.equal(worker.messages.length,1,'retired worker must receive neither another chunk nor a build');
+  assert.equal(fallBacks,action==='successor'||!superseded?1:0,'only a still-current request may run the fallback');
+  if(!superseded)assert.equal(result.mode,'main-thread-worker-failure','genuine failure or timeout must still recover through the model engine');
+  assert.equal(timers.size,0,'each request must clear its own deadline');
+}
+
 {
   function HTMLScriptElement(){}
   const script=Object.assign(new HTMLScriptElement(),{src:'https://example.test/insights.js'});

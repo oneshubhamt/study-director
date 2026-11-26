@@ -66,7 +66,7 @@ function processingError(cause:unknown){
 }
 function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultYield}:{yieldTask?:()=>Promise<unknown>}={}):Readonly<InsightsComputation>{
   if(!api||!Object.isFrozen(api.logic)||typeof api.logic.classifyTaskOutcome!=='function'||typeof api.logic.summarizePracticeRuns!=='function')throw new TypeError('Insights compute logic adapters are unavailable.');
-  let active:ActiveRequest|null=null,nextId=0,worker:Worker|null=null,heldRevision='',retireTimer:number|null=null,workerDisabled=false;
+  let active:ActiveRequest|null=null,nextId=0,generation=0,worker:Worker|null=null,heldRevision='',retireTimer:number|null=null,workerDisabled=false;
   const supported=()=>!!(runtimeUrl&&typeof Worker==='function'&&!workerDisabled);
   const cancelRetire=()=>{if(retireTimer!==null){clearTimeout(retireTimer);retireTimer=null;}};
   const retireWorker=(target:Worker|null=worker)=>{
@@ -131,9 +131,10 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
     if(rewarm&&!workerDisabled)warm();
     return true;
   };
-  const cancel=()=>abortActive(true);
-  const dispose=()=>{const changed=abortActive(false)||!!worker;retireWorker();return changed;};
+  const cancel=()=>{generation+=1;return abortActive(true);};
+  const dispose=()=>{generation+=1;const changed=abortActive(false)||!!worker;retireWorker();return changed;};
   const release=()=>{
+    generation+=1;
     if(abortActive(false))return true;
     const idleWorker=worker;if(!idleWorker)return false;
     cancelRetire();retireTimer=setTimeout(()=>{
@@ -162,10 +163,15 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
   };
   const build=async(records:readonly InsightRecord[],prepared:PreparedInsights,options:InsightsBuildOptions):Promise<InsightsComputeResult>=>{
     const started=performance.now();
+    // Invalidate even a failed worker request whose rejection is waiting on a
+    // yielded transfer, and even when the successor uses the main thread.
+    cancel();
+    const requestGeneration=generation;
+    const assertCurrent=()=>{if(requestGeneration!==generation)throw abortError();};
     if(Math.max(records.length,prepared.records.length)<MIN_RECORDS||!supported()){
       return fallback(records,prepared,options,started,supported()?'main-thread-small':workerDisabled?'main-thread-worker-failure':'main-thread-unavailable');
     }
-    cancel();cancelRetire();
+    cancelRetire();
     const id=++nextId,revision=String(prepared.revision||'');
     let timeout:number|null=null,currentWorker:Worker|null=null,sentRecords=0;
     try{
@@ -175,7 +181,7 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
         active={id,revision,worker:currentWorker!,resolve,reject};
         timeout=setTimeout(()=>{
           const current=active;
-          if(current&&current.id===id&&current.worker===currentWorker)current.reject(new Error('Insights processing timed out. Retry the report.'));
+          if(current&&current.id===id&&current.worker===currentWorker)failWorker(current.worker,new Error('Insights processing timed out. Retry the report.'));
         },WORKER_TIMEOUT_MS);
       });
       response.catch(()=>{});
@@ -185,6 +191,7 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
         for(let part=0;part<parts;part+=1){
           if(part>0){
             await yieldTask();
+            assertCurrent();
             if(worker!==currentWorker||!active||active.id!==id||active.worker!==currentWorker){await response;throw abortError();}
           }
           const slice=all.slice(part*Protocol.recordsPerMessage,(part+1)*Protocol.recordsPerMessage);
@@ -194,9 +201,11 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
       }
       currentWorker.postMessage({type:'SD_INSIGHTS_BUILD',id,revision,window:view,options});
       const result=await response;
+      assertCurrent();
       const model=Object.defineProperty(result.model,'getLabEvidence',{enumerable:false,value:()=>engine.getLabEvidence(prepared,options)}) as InsightsResult;
       return {model,mode:'worker',computeMs:result.computeMs,roundTripMs:performance.now()-started,sentRecords};
     }catch(error){
+      assertCurrent();
       if(error instanceof Error&&error.name==='AbortError')throw error;
       if(currentWorker&&worker===currentWorker){workerDisabled=true;retireWorker(currentWorker);}
       return fallback(records,prepared,options,started,'main-thread-worker-failure');
