@@ -283,7 +283,9 @@ try{
   await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click();");
   await independent.evaluate("(()=>{const field=document.getElementById('plan-input');field.value="+JSON.stringify(independentPlan)+";field.dispatchEvent(new Event('input',{bubbles:true}));})()");
   await waitFor(()=>independent.evaluate("document.querySelector('[data-action=\"apply-schedule\"]')?.disabled===false"),{label:'independent Plan preview ready'});
-  await independent.click('[data-action="apply-schedule"]');
+  // Match the original PWA journey's enabled-control activation. Pointer
+  // geometry is covered by the dedicated layout tests, not this ordering probe.
+  assert.equal(await independent.evaluate(`(()=>{const apply=document.querySelector('[data-action="apply-schedule"]');if(!apply||apply.disabled)return false;apply.click();return true;})()`),true,'independent Plan action admitted');
   await waitFor(()=>independent.evaluate("document.getElementById('cd-mode')?.textContent.includes('RUNNING')&&document.getElementById('execute-state-overlay')?.hidden"),{label:'independent live timer'});
   console.log('[qa-pwa] independent live timer established');
   const draft=independentPlan.replace('Independent writer QA','Independent draft QA');

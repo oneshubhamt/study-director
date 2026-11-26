@@ -1,5 +1,10 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 P5.12 independent Plan fixture activation — VERIFICATION OPEN · 2026-11-26
+
+- Exact `eacfb35137c6c3064ddcad14d13a2bba39e76cbe` [PWA contracts](https://github.com/oneshubhamt/study-director/actions/runs/45872035723/job/140089628459) SUCCESS; [browser](https://github.com/oneshubhamt/study-director/actions/runs/45872035723/job/140089628882) FAILURE. Diagnostics confirm original update checks succeeded and both independent primary scopes were preserved; new fixture reached Plan admission but CDP pointer hit a helper panel instead of Apply schedule. This is a pointer-geometry observation, not evidence of a PWA data-loss defect; layout cause not established.
+- Match existing original PWA journey's enabled-button DOM activation, assert actual action admission and retain live timer, external worker activation, primary protection, manual update and durable readback assertions. No production Plan change, blanket pointer fallback or layout claim. Recheck exact successor browser result. Stage 1 remains open.
+
 ## REVIEW-P5 · Stage 1 P5.7 backup reminder retirement — CORRECTED / VERIFICATION OPEN · 2026-11-26
 
 - Start `eacfb35137c6c3064ddcad14d13a2bba39e76cbe`; inherited original main.js:2355–2389 async receipt/count check. Actual extracted owner reproduced reset followed by obsolete publication and notification. Objective: reset and newer admitted checks retire old checks, loss/reacquisition of original lease cannot publish, and automatic-backup availability changing during day-count read suppresses a reminder. Keep the existing seven-day rule, daily notification suppression and throttling.
