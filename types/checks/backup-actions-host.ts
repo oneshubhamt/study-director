@@ -34,7 +34,7 @@ const protectionHost=host.createProtectionHost(protectionInput);
 
 const controlsInput=Object.freeze({
   document,controller:backupRuntime.controller,processing,protection:protectionHost,device:()=>device,providers:backupRuntime.providers,presentation,
-  verifiedAt:(_source:'device-folder'|'google-drive')=>'',timeLabel:(value:string)=>value,capture:(_scope:string,_error:unknown)=>{},captureImportAuthority:()=>()=>{},resolveFileOpen:()=>{},foregroundChanged:()=>{},scheduleSyncStatus:()=>{},renderProfile:()=>{},firstStartOpen:()=>false,renderFirstStart:()=>{},scheduleUpdate:(_delay:number)=>{},connectDevice:()=>{},connectDrive:()=>{},openHistory:()=>{}
+  verifiedAt:(_source:'device-folder'|'google-drive')=>'',timeLabel:(value:string)=>value,capture:(_scope:string,_error:unknown)=>{},captureActionAuthority:(_reason:string)=>()=>{},resolveFileOpen:()=>{},foregroundChanged:()=>{},scheduleSyncStatus:()=>{},renderProfile:()=>{},firstStartOpen:()=>false,renderFirstStart:()=>{},scheduleUpdate:(_delay:number)=>{},connectDevice:()=>{},connectDrive:()=>{},openHistory:()=>{}
 }) satisfies Readonly<BackupControlsInput>;
 host.createControls(controlsInput);
 

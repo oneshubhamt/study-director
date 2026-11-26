@@ -74,7 +74,7 @@ export interface BackupControlsInput{
   verifiedAt(source:'device-folder'|'google-drive'):string;
   timeLabel(value:string):string;
   capture(scope:string,error:unknown):unknown;
-  captureImportAuthority():()=>void;
+  captureActionAuthority(reason:string):()=>void;
   resolveFileOpen():unknown;
   foregroundChanged():unknown;
   scheduleSyncStatus():unknown;

@@ -101,7 +101,7 @@ function createProtectionHost<Token>(input:Readonly<BackupProtectionHostInput<To
 }
 
 function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupControls>{
-  exactObject(input,['document','controller','processing','protection','device','providers','presentation','verifiedAt','timeLabel','capture','captureImportAuthority','resolveFileOpen','foregroundChanged','scheduleSyncStatus','renderProfile','firstStartOpen','renderFirstStart','scheduleUpdate','connectDevice','connectDrive','openHistory'],'Backup controls input');
+  exactObject(input,['document','controller','processing','protection','device','providers','presentation','verifiedAt','timeLabel','capture','captureActionAuthority','resolveFileOpen','foregroundChanged','scheduleSyncStatus','renderProfile','firstStartOpen','renderFirstStart','scheduleUpdate','connectDevice','connectDrive','openHistory'],'Backup controls input');
   if(!Object.isFrozen(input.controller)||!Object.isFrozen(input.processing)||!Object.isFrozen(input.protection)||!Object.isFrozen(input.providers)||!Object.isFrozen(input.presentation))throw new TypeError('Backup controls providers must be frozen.');
   const {document,controller,processing,protection,providers,presentation}=input;
   let installed=false,fileWorkHold:ReturnType<typeof providers.suspendBackground>|null=null;
@@ -147,10 +147,16 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
     if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
   }
   async function backUpEverywhere(){
+    let assertOrigin:()=>void;
+    try{assertOrigin=input.captureActionAuthority('back up to connected locations');}catch{return false;}
+    if(!current(assertOrigin))return false;
     let done=false;const device=input.device();
     if(device?.status().connected)done=await device.backupNow()!==false||done;
+    // A second provider must not acquire fresh authority on behalf of the
+    // retired click, even if the tab already regained control.
+    if(!current(assertOrigin))return false;
     if(providers.connected('google-drive'))done=await providers.backup('google-drive')!==false||done;
-    return done;
+    return current(assertOrigin)&&done;
   }
   function renderDevice(state:DeviceStatus){
     input.scheduleSyncStatus();
@@ -199,7 +205,12 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
     renderFile();return true;
   }
   function withPassword<T>(open:()=>T|PromiseLike<T>):Promise<Awaited<T>>{return protection.withPassword(open);}
-  const openHistory=()=>withPassword(()=>input.openHistory());
+  async function openHistory(){
+    let assertOrigin:()=>void;
+    try{assertOrigin=input.captureActionAuthority('open backup version history');}catch{return false;}
+    if(!current(assertOrigin))return false;
+    return withPassword(()=>current(assertOrigin)?input.openHistory():false);
+  }
   const manageProtection=()=>protection.manage();
   const exportLocal=()=>controller.exportLocal();
   function importLocal(event:Event){
@@ -214,7 +225,7 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
     if(!(inputNode instanceof HTMLInputElement)){presentation.condition('file','file-open','Could not open backup: the file input is unavailable.');return false;}
     const revision=++pickerRevision;fallback=null;
     let assertOrigin:()=>void;
-    try{assertOrigin=input.captureImportAuthority();}catch{return false;}
+    try{assertOrigin=input.captureActionAuthority('import a backup');}catch{return false;}
     const stillCurrent=()=>revision===pickerRevision&&current(assertOrigin);
     try{
       // Exports invokes click only for the fallback picker. Its later change

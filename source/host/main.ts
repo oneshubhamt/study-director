@@ -3231,7 +3231,7 @@ BackupActions=BackupActionsHostModule.createControls(Object.freeze<BackupControl
   device:()=>DeviceBackup,providers:BackupProviderRuntime,presentation:BackupPresentation,
   verifiedAt:source=>VerifiedRecovery.verified(source)?.at||'',timeLabel:storageHealthTime,
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
-  captureImportAuthority:()=>{if(!appCanMutate())throw new Error('Study control is required before importing a backup.');const token=AppOwnership.issueWriteToken('import a backup');return ()=>AppOwnership.assertWriteToken(token,'import a backup');},
+  captureActionAuthority:reason=>{if(!appCanMutate())throw new Error('Study control is required to '+reason+'.');const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);},
   resolveFileOpen:()=>NoticeCoordinator.resolveEvent('file','file-open'),
   foregroundChanged,scheduleSyncStatus,renderProfile:()=>renderProfile(),
   firstStartOpen:()=>FirstStart.isOpen(),renderFirstStart:()=>FirstStart.render(),

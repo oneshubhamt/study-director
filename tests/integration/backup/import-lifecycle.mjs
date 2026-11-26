@@ -57,15 +57,20 @@ console.log(JSON.stringify({
   const original=Object.getOwnPropertyDescriptor(globalThis,'HTMLInputElement');
   Object.defineProperty(globalThis,'HTMLInputElement',{configurable:true,value:FileInput});
   try{
-    const file=new Blob(['fixture']),node=new FileInput(),calls=[];let revision=1,mode='native',resolvePicker;
+    const file=new Blob(['fixture']),node=new FileInput(),calls=[];let revision=1,mode='native',resolvePicker,releaseDevice,releasePassword,deviceConnected=true,deviceBackups=0,driveBackups=0,historyOpens=0;
     const freeze=Object.freeze,noop=()=>{},controller=freeze({importLocal:async(event,assertOrigin)=>{assertOrigin();calls.push(event.target.files[0]);return {verified:true};},cancelStandalone:()=>true});
-    const controls=Host.createControls(freeze({document:{getElementById:id=>id==='import-file'?node:null},controller,processing:freeze({open:input=>mode==='fallback'?(input.click(),Promise.resolve(null)):new Promise(resolve=>{resolvePicker=resolve;})}),protection:freeze({}),device:()=>null,providers:freeze({}),presentation:freeze({condition:noop}),verifiedAt:()=>'',timeLabel:()=>'',capture:noop,captureImportAuthority:()=>{const owner=revision;return()=>{if(owner!==revision)throw Error('owner changed');};},resolveFileOpen:noop,foregroundChanged:noop,scheduleSyncStatus:noop,renderProfile:noop,firstStartOpen:()=>false,renderFirstStart:noop,scheduleUpdate:noop,connectDevice:noop,connectDrive:noop,openHistory:noop}));
+    const controls=Host.createControls(freeze({document:{getElementById:id=>id==='import-file'?node:null},controller,processing:freeze({open:input=>mode==='fallback'?(input.click(),Promise.resolve(null)):new Promise(resolve=>{resolvePicker=resolve;})}),protection:freeze({withPassword:async open=>{await new Promise(resolve=>{releasePassword=resolve;});return open();}}),device:()=>({status:()=>({connected:deviceConnected}),backupNow:()=>{deviceBackups++;return new Promise(resolve=>{releaseDevice=resolve;});}}),providers:freeze({connected:id=>id==='google-drive',backup:async id=>{assert.equal(id,'google-drive');driveBackups++;return true;}}),presentation:freeze({condition:noop}),verifiedAt:()=>'',timeLabel:()=>'',capture:noop,captureActionAuthority:()=>{const owner=revision;return()=>{if(owner!==revision)throw Error('owner changed');};},resolveFileOpen:noop,foregroundChanged:noop,scheduleSyncStatus:noop,renderProfile:noop,firstStartOpen:()=>false,renderFirstStart:noop,scheduleUpdate:noop,connectDevice:noop,connectDrive:noop,openHistory:()=>{historyOpens++;return true;}}));
     let pick=controls.pickImportFile();revision+=2;resolvePicker(file);assert.equal(await pick,false);assert.equal(calls.length,0);
     pick=controls.pickImportFile();resolvePicker(file);assert.equal(await pick,true);assert.deepEqual(calls,[file]);
     mode='fallback';await controls.pickImportFile();assert.equal(node.clicks,1);revision+=2;node.files=[file];node.value='selected';assert.equal(controls.importLocal({target:node}),false);assert.equal(node.value,'');assert.equal(calls.length,1);
     await controls.pickImportFile();node.files=[file];assert.equal((await controls.importLocal({target:node})).verified,true);assert.equal(calls.length,2);
     assert.equal(controls.importLocal({target:node}),false,'fallback ticket is single-use');
     pick=controls.pickImportFile();controls.cancelStandalone();node.files=[file];await pick;assert.equal(controls.importLocal({target:node}),false);
-    console.log('PASS: actual BackupActions native/fallback picker origin authority and single-use ticket');
+    let backup=controls.backUpEverywhere();assert.equal(deviceBackups,1);revision+=2;releaseDevice(true);assert.equal(await backup,false);assert.equal(driveBackups,0,'retired Device Folder completion cannot start a Drive backup under its successor');
+    backup=controls.backUpEverywhere();releaseDevice(true);assert.equal(await backup,true);assert.equal(driveBackups,1,'both connected locations are backed up by the current click');
+    deviceConnected=false;assert.equal(await controls.backUpEverywhere(),true);assert.equal(deviceBackups,2);assert.equal(driveBackups,2);
+    let history=controls.openHistory();revision+=2;releasePassword();assert.equal(await history,false);assert.equal(historyOpens,0,'retired password prompt cannot open successor history');
+    history=controls.openHistory();releasePassword();assert.equal(await history,true);assert.equal(historyOpens,1);
+    console.log('PASS: actual BackupActions native/fallback picker, sequential backup, and password-history origin authority');
   }finally{if(original)Object.defineProperty(globalThis,'HTMLInputElement',original);else delete globalThis.HTMLInputElement;}
 }
