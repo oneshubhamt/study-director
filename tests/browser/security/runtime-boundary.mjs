@@ -10,11 +10,35 @@ if(process.env.SD_MINIFIED_TEST==='1'){
  html=instrumentedMinifiedHtml(server,path.resolve('dist',deploymentDirectoryName,'public'),html);
 }
 
-server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({BackupProtectionStorage,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
+server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({WorkspaceOverlay,NavigationController,BackupProtectionStorage,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 let page;
 try{
  page=await browser.createPage(server.url('deployment','runtime-security.html'),{preload,bypassServiceWorker:true});await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
+ // Use the shipped editor, shared navigation router and actual workspace owner.
+ // A Forward-style replay waits on an attachment read; a newer route must win.
+ await page.evaluate(`(async()=>{
+   await __PWA6.goTab('plan');
+   const host=document.createElement('div');host.id='qa-workspace-replay';document.getElementById('pane-plan').append(host);
+   const id='att-12345678901234567890',b=new Uint8Array(16044),v=new DataView(b.buffer);
+   b.set(new TextEncoder().encode('RIFF'));v.setUint32(4,b.length-8,true);b.set(new TextEncoder().encode('WAVEfmt '),8);
+   v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);b.set(new TextEncoder().encode('data'),36);v.setUint32(40,b.length-44,true);
+   const blob=new Blob([b],{type:'audio/wav'}),qa=window.__workspaceReplayQA={held:false,retained:0,released:0,resolve:null,pending:null};
+   const assets={retain:async()=>{qa.retained++;return ()=>qa.released++;},get:async()=>qa.held?new Promise(resolve=>{qa.resolve=()=>resolve(blob)}):blob,put:async()=>{},remove:async()=>{}};
+   const value=StudyDirectorRichText.insertAttachmentReference('History witness',{id,name:'History audio',mode:'inline-audio'}).value;
+   StudyDirectorRichText.renderRichText({container:host,value,label:'History witness',assets,workspaceOverlay:Object.freeze({open:options=>__PWA6.WorkspaceOverlay.open(options)})});
+ })()`);
+ await waitFor(()=>page.evaluate(`document.querySelector('#qa-workspace-replay .sd-rte-audio-player')?.src.startsWith('blob:')`),{label:'initial read-only audio hydration'});
+ await page.evaluate(`document.querySelector('#qa-workspace-replay .sd-rte-audio-expand').click()`);
+ await waitFor(()=>page.evaluate(`__PWA6.WorkspaceOverlay.historyDescriptor()?.kind==='audio'`),{label:'real expanded audio workspace'});
+ await page.evaluate(`window.__workspaceReplayQA.descriptor=__PWA6.WorkspaceOverlay.historyDescriptor();history.back()`);
+ await waitFor(()=>page.evaluate(`!__PWA6.WorkspaceOverlay.historyDescriptor()&&!document.querySelector('dialog.workspace-overlay-audio')&&window.__workspaceReplayQA.released===1`),{label:'audio Back releases its own reader'});
+ await page.evaluate(`(()=>{const qa=window.__workspaceReplayQA;qa.held=true;qa.pending=__PWA6.NavigationController.request('plan',{source:'qa-forward-replay',workspaceSpecified:true,workspace:qa.descriptor,normalize:true});})()`);
+ await waitFor(()=>page.evaluate(`!!window.__workspaceReplayQA.resolve`),{label:'audio history replay held inside actual asset read'});
+ await page.evaluate(`__PWA6.goTab('review')`);
+ const retiredReplay=await page.evaluate(`(async()=>{const qa=window.__workspaceReplayQA;const before=location.href,state=JSON.stringify(history.state);qa.resolve();const result=await qa.pending;return {ok:result.ok,tab:document.querySelector('.pane.on')?.id,routeUnchanged:before===location.href,stateUnchanged:state===JSON.stringify(history.state),workspace:__PWA6.WorkspaceOverlay.historyDescriptor(),dialogs:document.querySelectorAll('dialog.workspace-overlay-audio').length,retained:qa.retained,released:qa.released};})()`);
+ assert.deepEqual(retiredReplay,{ok:false,tab:'pane-review',routeUnchanged:true,stateUnchanged:true,workspace:null,dialogs:0,retained:3,released:2});
+ await page.evaluate(`document.getElementById('qa-workspace-replay').remove();delete window.__workspaceReplayQA;__PWA6.goTab('plan')`);
  const imageWorkerName=html.match(/sd\.image-worker\.[a-f0-9]+\.js/)[0];
  assert.equal(await page.evaluate(`new Promise((resolve,reject)=>{const w=new Worker(__PWA6.trustedAssetURL(${JSON.stringify(imageWorkerName)}));w.onmessage=({data})=>{w.terminate();resolve(data.result?.width)};w.onerror=()=>{w.terminate();reject(Error('Image worker failed under Trusted Types'))};w.postMessage({file:new Blob([Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'),c=>c.charCodeAt(0))],{type:'image/gif'}),mimeType:'image/gif'})})`),1);
 

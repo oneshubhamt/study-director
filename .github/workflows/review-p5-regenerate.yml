@@ -1,0 +1,57 @@
+name: REVIEW-P5 temporary pinned runtime regeneration
+on:
+  push:
+    branches: [ts-exp]
+    paths:
+      - '.github/workflows/review-p5-regenerate.yml'
+      - 'rich-text/editor.ts'
+permissions:
+  contents: read
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Compile and run checked owners
+        run: |
+          npm run check:types
+          node tests/unit/app/navigation.mjs
+          node tests/integration/rich-text/workspace-overlay-behavior.mjs
+          node tests/integration/attachments/pdf-reader-lifetime.mjs
+      - name: Execute negative witness on starting source
+        run: |
+          cp source/core/navigation.ts "$RUNNER_TEMP/corrected-navigation.ts"
+          git show 4cf82947c358140659551af6a40903273c37cee9:source/core/navigation.ts > source/core/navigation.ts
+          set +e
+          node tests/unit/app/navigation.mjs > "$RUNNER_TEMP/baseline-navigation.log" 2>&1
+          status=$?
+          set -e
+          cp "$RUNNER_TEMP/corrected-navigation.ts" source/core/navigation.ts
+          cat "$RUNNER_TEMP/baseline-navigation.log"
+          test "$status" -ne 0
+          grep -F "true !== false" "$RUNNER_TEMP/baseline-navigation.log"
+      - name: Regenerate declared runtime inputs
+        run: npm run build:runtime
+      - name: Export reproducible rich-text output to connector
+        run: |
+          git hash-object generated/runtime/rich-text.js
+          git diff --stat -- generated/runtime
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const b64=fs.readFileSync('generated/runtime/rich-text.js').toString('base64');
+          for(let i=0;i<b64.length;i+=6000) console.log('SD_RUNTIME_CHUNK '+(i/6000)+' '+b64.slice(i,i+6000));
+          JS
+      - name: Fresh build and verify
+        run: |
+          node build/build.mjs
+          npm run verify
+          node tests/architecture/build/rich-text-bundle.mjs

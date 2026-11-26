@@ -148,7 +148,7 @@ for(const mode of ['overlay-busy','overlay-throws']){
 
 // Reopening from history must check its original route after every delayed
 // reader stage, release that reader, and never create a stale Blob URL/dialog.
-for(const stage of ['retain','list','get','success']){
+for(const stage of ['retain','list','get','success','overlay-throws']){
   let current=true,releases=0,resolve,enteredResolve;
   const gate=new Promise(r=>resolve=r),entered=new Promise(r=>enteredResolve=r);
   const row={id:'att-pdf',type:'application/pdf',name:'Study.pdf'};
@@ -159,11 +159,12 @@ for(const stage of ['retain','list','get','success']){
   }});
   h.setMode('open');h.open();
   const history=h.overlay().history;h.handle().close();
+  if(stage==='overlay-throws')h.setMode('overlay-throws');
   const pending=history.reopen({kind:'pdf',token:'ws:pdf:replay'},()=>current);
-  if(stage!=='success'){await entered;current=false;resolve();}
+  if(!['success','overlay-throws'].includes(stage)){await entered;current=false;resolve();}
   assert.equal(await pending,stage==='success');
   if(stage==='success')h.handle().close();
-  assert.equal(releases,1);assert.equal(h.stats().revoked,stage==='success'?2:1);
+  assert.equal(releases,1);assert.equal(h.stats().revoked,['success','overlay-throws'].includes(stage)?2:1);
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'pdf-reader-lifetime',owner:'document-host.ts',embedded:true,native:true,fallback:true,boundedHandoffs:true}));
