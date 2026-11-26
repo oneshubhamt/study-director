@@ -154,8 +154,8 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   async function writeSnapshot(value:SessionSnapshot|null,options:Readonly<LiveDraftWriteOptions>={}):Promise<SessionResult|null>{
     if(blocked(options))return null;
     const session=payload(value);if(!session)return null;
-    try{return report(await repository.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}),'save');}
-    catch(error){const failed:SessionResult={ok:false,value:session,error,storage:{local:false,idb:false}};report(failed,'save');return failed;}
+    try{options.assertOrigin?.();const saved=await repository.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true,...(options.assertOrigin?{assertOrigin:options.assertOrigin}:{})});options.assertOrigin?.();return report(saved,'save');}
+    catch(error){options.assertOrigin?.();const failed:SessionResult={ok:false,value:session,error,storage:{local:false,idb:false}};report(failed,'save');return failed;}
   }
   type TransitionAuthority={owner:number;life:number};
   type LocalTransition={authority:TransitionAuthority;before:ActiveSession|null;rollback:ActiveSession|null;attempted:ActiveSession|null|undefined;runtimeChanged:boolean};
@@ -239,13 +239,13 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   async function writeNow(options:Readonly<LiveDraftWriteOptions>={}):Promise<SessionResult|null>{
     if(blocked(options))return null;
-    if(options.markChanged!==false)persistence.markContentChanged();
+    options.assertOrigin?.();if(options.markChanged!==false)persistence.markContentChanged();
     const value=persistence.snapshotForWrite();lastTimerSnapshotMs=clock.nowMs();
     try{
       const saved=await writeSnapshot(value,options);
       if(saved&&saved.ok===false)persistence.warn(`Live session could not be saved (${String((saved.error as {message?:unknown}|null)?.message||saved.error||'browser storage unavailable')}). Keep this tab open.`);
       return saved;
-    }catch(error){persistence.warn(`Live session could not be saved (${String((error as {message?:unknown}|null)?.message||error)}). Keep this tab open.`);throw error;}
+    }catch(error){options.assertOrigin?.();persistence.warn(`Live session could not be saved (${String((error as {message?:unknown}|null)?.message||error)}). Keep this tab open.`);throw error;}
   }
   function cancelPendingLiveDraftSave(){
     const pending=liveDraftSaveTimer!==null;
@@ -280,14 +280,13 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     if(!readBack||readBack.ok!==true||readBack.error||readBack.storage.idb!==true||!readBack.value||!canonical.same(readBack.value,intended))throw readBack?.error||new Error(`The Active Session could not be verified after ${operation}.`);
     return saved;
   }
-  async function saveCanonicalSession(session:ActiveSession,operation:string,options:Readonly<{backupCapture?:boolean;expectedCanonical?:ActiveSession|null}>={},authority?:TransitionAuthority):Promise<SessionResult>{
+  async function saveCanonicalSession(session:ActiveSession,operation:string,options:Readonly<{backupCapture?:boolean;expectedCanonical?:ActiveSession|null;assertOrigin?:()=>void}>={},authority?:TransitionAuthority):Promise<SessionResult>{
     const intended=codec.sanitizeCurrent(session);if(!intended)throw new Error(`The Active Session is invalid while ${operation}.`);
-    const repositoryOptions={strictDurability:true,backupCapture:options.backupCapture===true,...(Object.prototype.hasOwnProperty.call(options,'expectedCanonical')?{expectedCanonical:options.expectedCanonical??null}:{})};
-    if(authority)assertTransition(authority);
-    const saved=await repository.save(intended,repositoryOptions);
-    if(authority)assertTransition(authority);
-    const verified=await requireCanonicalWrite(saved,intended,operation);
-    if(authority)assertTransition(authority);
+    const assertOrigin=()=>{options.assertOrigin?.();if(authority)assertTransition(authority);};
+    const repositoryOptions={strictDurability:true,backupCapture:options.backupCapture===true,...(Object.prototype.hasOwnProperty.call(options,'expectedCanonical')?{expectedCanonical:options.expectedCanonical??null}:{}),...(options.assertOrigin||authority?{assertOrigin}:{})};
+    assertOrigin();const saved=await repository.save(intended,repositoryOptions);
+    assertOrigin();const verified=await requireCanonicalWrite(saved,intended,operation);
+    assertOrigin();
     return report(verified,'save');
   }
   async function writeCanonicalNow(operation:string,options:Readonly<Omit<LiveDraftWriteOptions,'strictDurability'>>={}):Promise<SessionResult>{

@@ -317,9 +317,14 @@ async function confirmSessionTakeover(session:ActiveSession,{replace=false}:{rep
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
-async function transferSessionOwnershipHere(session:ActiveSession,{onStep,preread=null}:SessionHandoffTransferOptions={}){
+function captureSessionActionOrigin(){
+  const owner=ports.ownershipRevision();
+  return ()=>{if(!appCanMutate()||ports.ownershipRevision()!==owner)throw new Error('Study control changed. Start the session action again.');};
+}
+function sessionActionCurrent(assertOrigin:()=>void){try{assertOrigin();return true;}catch{return false;}}
+async function transferSessionOwnershipHere(session:ActiveSession,{onStep,preread=null,assertOrigin}:SessionHandoffTransferOptions={}){
   if(!ports.SessionHandoffRuntime)throw new Error('Session handoff runtime is unavailable.');
-  return ports.SessionHandoffRuntime.transferHere(session,{...(onStep?{onStep}:{}),preread});
+  return ports.SessionHandoffRuntime.transferHere(session,{...(onStep?{onStep}:{}),preread,...(assertOrigin?{assertOrigin}:{})});
 }
 function setSessionHandoff(step='',error=''){
   state.sessionHandoff={step:String(step||''),error:String(error||'')};
@@ -347,14 +352,15 @@ function sessionHandoffProblem(error:unknown){
   if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
   return errorMessage(error)||'Something went wrong.';
 }
-async function continueSessionHere():Promise<boolean>{
+async function continueSessionHere(origin?:()=>void):Promise<boolean>{
   if(!appCanMutate()||state.sessionHandoff.step)return false;
+  const assertOrigin=origin||captureSessionActionOrigin();if(!sessionActionCurrent(assertOrigin))return false;
   // The "Today’s session is ready" pop-up has done its job.
   ports.NoticeCoordinator.resolveEvent('session','session-handoff');
   setSessionHandoff('Checking today’s session…');
   try{
     const loaded=await ports.ActiveSessionRuntime.load(),session=loaded&&loaded.value||null;
-    if(!session){setSessionPanelMode('none');return false;}
+    assertOrigin();if(!session){setSessionPanelMode('none');return false;}
     // Classify the date before any today-only continuation, restoration or
     // ownership operation.
     if(isPreviousActiveSessionRecord(session)){
@@ -367,18 +373,20 @@ async function continueSessionHere():Promise<boolean>{
     // waits only on the claim when Drive has not moved on. Nothing is written.
     const preread=ports.SessionHandoffRuntime?.prefetchSource()||Promise.resolve(null);
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
-    if(!appCanMutate())return false;
+    assertOrigin();
     // From here Execute shows the session moving here; its timer starts only
     // once Google Drive confirms the claim.
     state.sessionMovingHere=session;setSessionHandoff('Moving the session here…');
-    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text),preread});
-    setSessionHandoff('Starting here…');
-    if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
+    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text),preread,assertOrigin});
+    assertOrigin();setSessionHandoff('Starting here…');
+    if(moved.previous.status==='suspended')return restoreSuspendedTodaySession(assertOrigin);
     // The timer runs here now: Resume, as Restore Session plays.
     const restored=await attemptAutoRestoreActiveSession();
+    if(!sessionActionCurrent(assertOrigin))return false;
     if(restored)ports.NoticeCoordinator.emit({source:'session',id:'session-continued',surface:'quiet',foreground:false,cue:'resume',occurrence:String(Date.now())});
     return restored;
   }catch(error){
+    if(!sessionActionCurrent(assertOrigin))return false;
     const problem=sessionHandoffProblem(error);
     setPlanStatus('Could not continue today’s session here: '+problem,false);
     // Catch-up may legitimately have advanced or ended the session before a
@@ -386,21 +394,22 @@ async function continueSessionHere():Promise<boolean>{
     // storage; never redraw the stale object captured before Continue Here.
     try{
       const loaded=await ports.ActiveSessionRuntime.load(),current=loaded&&loaded.value||null;
-      if(!current)setSessionPanelMode('none');
+      assertOrigin();if(!current)setSessionPanelMode('none');
       else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
       else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
       else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
       else setSessionPanelMode('active',current);
     }catch(renderError){ports.AppDiagnostics.capture('session.continue-failure-refresh',renderError,'warn');}
+    if(!sessionActionCurrent(assertOrigin))return false;
     setSessionHandoff('','Couldn’t continue here. '+problem);
     ports.Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
     return false;
   }finally{state.sessionMovingHere=null;if(state.sessionHandoff.step)setSessionHandoff('',state.sessionHandoff.error);}
 }
 async function continueSessionOnExecute(source:string){
-  if(state.sessionHandoff.step)return false;
-  await goTab('execute',{source});
-  return continueSessionHere();
+  if(!appCanMutate()||state.sessionHandoff.step)return false;
+  const assertOrigin=captureSessionActionOrigin();await goTab('execute',{source});
+  return sessionActionCurrent(assertOrigin)?continueSessionHere(assertOrigin):false;
 }
 async function yieldSessionToOtherDevice(options:{deferReview?:boolean}={}){
   if(!ports.SessionHandoffRuntime)return false;
@@ -416,24 +425,27 @@ async function yieldSessionToOtherDevice(options:{deferReview?:boolean}={}){
     action:{label:'Review',opens:true,run:()=>void ports.KeptVersions.review()}});
   return true;
 }
-async function restoreSuspendedTodaySession():Promise<boolean>{
+async function restoreSuspendedTodaySession(origin?:()=>void):Promise<boolean>{
   if(!appCanMutate())return false;
+  const assertOrigin=origin||captureSessionActionOrigin();
   try{
+    assertOrigin();
     const loaded=await ports.AppData.activeSession.load(),session=loaded&&loaded.value||null;
-    if(isPreviousActiveSessionRecord(session)){
+    assertOrigin();if(isPreviousActiveSessionRecord(session)){
       setSessionPanelMode('previous',session);
       setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
       return false;
     }
     if(!session||!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
-    if(sessionFromElsewhere(session))return continueSessionHere();
+    if(sessionFromElsewhere(session))return continueSessionHere(assertOrigin);
     const restored=await ports.ActiveSessionRuntime.restoreSuspendedLocal(session);
-    setSessionPanelMode('active',restored);
+    assertOrigin();setSessionPanelMode('active',restored);
     setPlanStatus('✓ Suspended session restored.');
     ports.Interactions.notify({source:'session',kind:'success',key:'session-restore',cue:'resume',title:'Session restored',message:'Today’s suspended session is active again.'});
     await goTab('execute',{source:'session-restore'});
     return true;
   }catch(error){
+    if(!sessionActionCurrent(assertOrigin))return false;
     setPlanStatus('Could not restore today’s suspended session: '+(errorMessage(error)),false);
     return false;
   }
@@ -611,16 +623,18 @@ function uploadSoonAfterPlanApply(result:boolean|PromiseLike<boolean>){
   return typeof result==='boolean'?done(result):Promise.resolve(result).then(done);
 }
 async function applyScheduleAction(){
-  let takeover=null;
+  if(!appCanMutate())return false;
+  const assertOrigin=captureSessionActionOrigin();let takeover=null;
   if(state.sessionPanelMode==='elsewhere'&&!TASKS.length){
     const session=state.sessionPanelSession;
-    if(!session||!await confirmSessionTakeover(session,{replace:true}))return false;
-    try{takeover=await transferSessionOwnershipHere(session);}
-    catch(error){setPlanStatus('Could not move today’s session here: '+errorMessage(error),false);return false;}
+    if(!session||!await confirmSessionTakeover(session,{replace:true})||!sessionActionCurrent(assertOrigin))return false;
+    try{takeover=await transferSessionOwnershipHere(session,{assertOrigin});}
+    catch(error){if(!sessionActionCurrent(assertOrigin))return false;setPlanStatus('Could not move today’s session here: '+errorMessage(error),false);return false;}
   }
   try{
+    if(!sessionActionCurrent(assertOrigin))return false;
     const result=await uploadSoonAfterPlanApply(ports.applySchedule(takeover?{source:'ownership-takeover'}:{}));
-    if(result===false&&takeover)await attemptAutoRestoreActiveSession();
+    if(result===false&&takeover&&sessionActionCurrent(assertOrigin))await attemptAutoRestoreActiveSession();
     return result;
   }finally{ports.schedulePwaUpdateEvaluation(250);}
 }

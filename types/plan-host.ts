@@ -10,8 +10,8 @@ export interface PlanDataCodecPort{
 }
 export interface PlanDocumentsRepositoryPort{
   read():PromiseLike<SavedPlans>;
-  replace(value:SavedPlans):PromiseLike<unknown>;
-  replacePortable(value:PersonalData):PromiseLike<PortablePreferences>;
+  replace(value:SavedPlans,options?:WriteOptions):PromiseLike<unknown>;
+  replacePortable(value:PersonalData,options?:WriteOptions):PromiseLike<PortablePreferences>;
   writeDraft(value:string|null,options?:WriteOptions):PromiseLike<unknown>;
   writeLibrary(value:Omit<SavedPlans,'draft'>,options?:WriteOptions):PromiseLike<unknown>;
 }
@@ -61,7 +61,7 @@ export interface PlanDataController{
   hydrate():Promise<boolean>;
   writeDraft(value:string|null,options?:Readonly<PlanDataWriteOptions>):Promise<boolean>;
   writeLibrary(value:PlanLibrary,options?:Readonly<PlanLibraryWriteOptions>):Promise<boolean>;
-  rewriteAfterStorageReset():Promise<boolean>;
+  rewriteAfterStorageReset(assertOrigin?:()=>void):Promise<boolean>;
   settled(options?:Readonly<PlanDataSettleOptions>):Promise<boolean>;
   exportData(options?:Readonly<{flush?:boolean;backupCapture?:boolean}>):Promise<PersonalData>;
   importData(value:unknown):Promise<boolean>;

@@ -15,7 +15,7 @@ export interface SessionCodecPort{
   sanitizeSessionSnapshot(value:unknown,date:string,fingerprint:string,revision:number):SessionSnapshot|null;
 }
 export interface SessionRepositoryPort{
-  save(value:ActiveSession,options?:Readonly<{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null;recoveryFallback?:boolean}>):PromiseLike<SessionResult>;
+  save(value:ActiveSession,options?:Readonly<{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null;recoveryFallback?:boolean;assertOrigin?:()=>void}>):PromiseLike<SessionResult>;
   load(retry?:number,options?:Readonly<{strict?:boolean}>):PromiseLike<SessionResult>;
   clear(options?:Readonly<{expectedCanonical?:ActiveSession|null}>):PromiseLike<SessionResult>;
   readLocal():ActiveSession|null;
@@ -131,6 +131,7 @@ export interface LiveDraftWriteOptions{
   readonly strictDurability?:boolean;
   readonly emergency?:boolean;
   readonly delayMs?:number;
+  readonly assertOrigin?:()=>void;
 }
 export interface ActiveSessionPayloadOptions{
   readonly revision?:number;
@@ -157,7 +158,7 @@ export interface SessionHostController{
   cancelPendingLiveDraftSave():boolean;
   maybeSnapshotRunningTimer():boolean;
   requireCanonicalWrite(saved:SessionResult|null|undefined,expected:ActiveSession|null|undefined,operation:string):Promise<SessionResult>;
-  saveCanonicalSession(session:ActiveSession,operation:string,options?:Readonly<{backupCapture?:boolean;expectedCanonical?:ActiveSession|null}>):Promise<SessionResult>;
+  saveCanonicalSession(session:ActiveSession,operation:string,options?:Readonly<{backupCapture?:boolean;expectedCanonical?:ActiveSession|null;assertOrigin?:()=>void}>):Promise<SessionResult>;
   clearCanonical(operation:string):Promise<SessionResult>;
   settled():PromiseLike<unknown>;
   persistenceSuppressed():boolean;

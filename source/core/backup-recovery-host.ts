@@ -483,15 +483,15 @@ const createModule=()=>{
       if(input.storage.health().browserDataClearedAt!==next.clearedAt)input.storage.updateHealth({browserDataClearedAt:next.clearedAt});
       return next;
     }
-    const steps:Readonly<Record<StepName,()=>boolean|PromiseLike<boolean>>>=freeze({
-      device:()=>input.writeback.installationKeep(),notes:()=>input.writeback.notesRecover(),plans:()=>input.writeback.planRewrite(),settings:()=>input.writeback.settingsFlush(),
-      session:async()=>{if(!input.writeback.hasTasks())return true;const result=await input.writeback.writeLiveDraft();return !!(result&&result.ok&&result.storage?.idb===true);}
+    const steps:Readonly<Record<StepName,(assertOrigin:()=>void)=>boolean|PromiseLike<boolean>>>=freeze({
+      device:()=>input.writeback.installationKeep(),notes:()=>input.writeback.notesRecover(),plans:assertOrigin=>input.writeback.planRewrite(assertOrigin),settings:assertOrigin=>input.writeback.settingsFlush(assertOrigin),
+      session:async assertOrigin=>{if(!input.writeback.hasTasks())return true;const result=await input.writeback.writeLiveDraft(assertOrigin);return !!(result&&result.ok&&result.storage?.idb===true);}
     });
     async function writeBack(active:Hold,assertOrigin:()=>void){
       let pending=Object.keys(steps) as StepName[];
       for(let attempt=0;;attempt+=1){
         const failed:StepName[]=[];
-        for(const name of pending){assertOrigin();let saved=false;try{saved=await steps[name]()===true;}catch(error){input.diagnostics.capture(`storage-reset.${name}`,error,'error');}assertOrigin();if(!saved)failed.push(name);}
+        for(const name of pending){assertOrigin();let saved=false;try{saved=await steps[name](assertOrigin)===true;}catch(error){input.diagnostics.capture(`storage-reset.${name}`,error,'error');}assertOrigin();if(!saved)failed.push(name);}
         if(!failed.length||attempt>=RETRY.length||hold!==active||!input.authority.canMutate())return failed;
         pending=failed;showDecision({unsaved:failed,retrying:true});
         await new Promise<void>(resolve=>input.environment.setTimeout(resolve,RETRY[attempt]!));

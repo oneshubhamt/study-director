@@ -1536,25 +1536,28 @@ async function hydrateProtectedPreferences({force=false}:Readonly<{force?:boolea
   refreshAppearanceMirrors(accepted);applyPortablePreferencesToRuntime(accepted);
   return accepted;
 }
-async function flushProtectedPreferences(options:Readonly<{backupCapture?:boolean}>={}){
+async function flushProtectedPreferences(options:Readonly<{backupCapture?:boolean;assertOrigin?:()=>void}>={}){
   if(protectedPreferencesWriteTimer!==null){clearTimeout(protectedPreferencesWriteTimer);protectedPreferencesWriteTimer=null;}
   if(!appCanMutate())return false;
+  options.assertOrigin?.();const token=AppOwnership.issueWriteToken('saving personal preferences');
+  const assertOrigin=()=>{options.assertOrigin?.();AppOwnership.assertWriteToken(token,'saving personal preferences');};
   while(protectedPreferencesDirty){
-    const snapshot=protectedPreferencesState;
+    assertOrigin();const snapshot=protectedPreferencesState;
     protectedPreferencesDirty=false;
-    const run=protectedPreferencesWriteChain.catch(()=>true).then(()=>AppData.personalPreferences.write(snapshot,{backupCapture:options.backupCapture===true}));
+    const run=protectedPreferencesWriteChain.catch(()=>true).then(()=>{assertOrigin();return AppData.personalPreferences.write(snapshot,{ownershipToken:token,assertOrigin,backupCapture:options.backupCapture===true});});
     protectedPreferencesWriteChain=run;
     try{
-      const saved=await run;
+      const saved=await run;assertOrigin();
       protectedPreferencesWriteFailure=null;
       if(protectedPreferencesState===snapshot){acceptProtectedPreferences(saved);refreshAppearanceMirrors(saved);}
     }catch(error){
+      assertOrigin();
       protectedPreferencesDirty=true;protectedPreferencesWriteFailure=error;
       AppDiagnostics.capture('preferences.write',error,'error');markStorageHealthError('personalPreferences','Personal settings could not be saved.');
       throw error;
     }
   }
-  await protectedPreferencesWriteChain.catch(error=>{throw error;});
+  await protectedPreferencesWriteChain;assertOrigin();
   if(protectedPreferencesWriteFailure)throw protectedPreferencesWriteFailure;
   return true;
 }
@@ -2227,8 +2230,8 @@ const PlanData=PlanHostModule.createData(Object.freeze<PlanDataInput>({
   repositories:Object.freeze<PlanDataInput['repositories']>({
     plans:Object.freeze<PlanDataInput['repositories']['plans']>({
       read:()=>AppData.planData.read(),
-      replace:value=>AppData.planData.replace(value),
-      replacePortable:value=>AppData.planData.replacePortable(value),
+      replace:(value,options)=>AppData.planData.replace(value,options),
+      replacePortable:(value,options)=>AppData.planData.replacePortable(value,options),
       writeDraft:(value,options)=>AppData.planData.writeDraft(value,options),
       writeLibrary:(value,options)=>AppData.planData.writeLibrary(value,options)
     }),
@@ -3157,7 +3160,7 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Sessio
     claimSaveWarning:'The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.'
   }),
   authority:Object.freeze<SessionHandoffInput['authority']>({
-    canMutate:()=>appCanMutate(),startupReady:()=>StartupLifecycle.status().fullyInitialized,
+    canMutate:()=>appCanMutate(),captureOrigin:reason=>{const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);},startupReady:()=>StartupLifecycle.status().fullyInitialized,
     visible:()=>document.visibilityState==='visible',online:()=>navigator.onLine!==false,
     hasTasks:()=>TASKS.length>0,panelElsewhere:()=>sessionPanelMode==='elsewhere'
   }),
@@ -3165,10 +3168,10 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Sessio
     connected:id=>BackupProviderRuntime.connected(id),
     readHandoffSource:async id=>normalizeSessionHandoffSource(await BackupProviderRuntime.readSessionHandoffSource(id)),
     claimOwnership:async(id,request)=>normalizeSessionClaimResult(await BackupProviderRuntime.claimSessionOwnership(id,{
-      date:request.date,handoffToken:request.handoffToken,onWrite:request.onWrite,
+      date:request.date,handoffToken:request.handoffToken,onWrite:request.onWrite,assertOrigin:request.assertOrigin,
       decide:async source=>({...await request.decide(normalizeSessionHandoffSource(source))})
     })),
-    releaseClaim:(id,claim)=>BackupProviderRuntime.releaseSessionClaim(id,claim),
+    releaseClaim:(id,claim,assertOrigin)=>BackupProviderRuntime.releaseSessionClaim(id,claim,assertOrigin),
     readClaim:async id=>normalizeSessionClaimProjection(await BackupProviderRuntime.readSessionClaim(id)),
     scheduleSync:(id,reason)=>BackupProviderRuntime.scheduleSharedSync(id,reason),
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),
@@ -3329,9 +3332,9 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<S
     savedDayDeletions:()=>AppData.deletionRecovery.savedDays(),noteDeletions:()=>AppData.deletionRecovery.notes()
   }),
   writeback:Object.freeze<StorageResetInput['writeback']>({
-    installationKeep:()=>InstallationIdentity.keep(),notesRecover:()=>AppData.notes.recoverAfterStorageLoss(),planRewrite:()=>PlanData.rewriteAfterStorageReset(),
-    settingsFlush:()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();},hasTasks:()=>TASKS.length>0,
-    writeLiveDraft:async()=>{const result=await writeLiveDraftNow({markChanged:false});if(!result)throw new Error('Active Session write did not return a canonical result.');return result;}
+    installationKeep:()=>InstallationIdentity.keep(),notesRecover:()=>AppData.notes.recoverAfterStorageLoss(),planRewrite:assertOrigin=>PlanData.rewriteAfterStorageReset(assertOrigin),
+    settingsFlush:assertOrigin=>{assertOrigin();protectedPreferencesDirty=true;return flushProtectedPreferences({assertOrigin});},hasTasks:()=>TASKS.length>0,
+    writeLiveDraft:async assertOrigin=>{const result=await writeLiveDraftNow({markChanged:false,assertOrigin});if(!result)throw new Error('Active Session write did not return a canonical result.');return result;}
   }),
   provider:Object.freeze({
     history:(id,options)=>BackupProviderRuntime.history(id,options),

@@ -438,30 +438,30 @@ const idbGet=IndexedDb.get;
 const idbGetAll=IndexedDb.getAll;
 const idbGetAllIfPresent=IndexedDb.getAllIfPresent;
 const idbHasStore=IndexedDb.hasStore;
-function writePlanMeta(family:string,value:unknown,{strictDurability=false,ownershipToken=null,allowHydrating=false,backupCapture=false}:WriteOptions={}){
-  const token=ownershipToken||issueWriteToken('save plan documents',{allowHydrating});
+function writePlanMeta(family:string,value:unknown,{strictDurability=false,ownershipToken=null,allowHydrating=false,backupCapture=false,assertOrigin}:WriteOptions={}){
+  assertOrigin?.();const token=ownershipToken||issueWriteToken('save plan documents',{allowHydrating});
   if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
   return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{
-    assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
-    request.onsuccess=()=>{try{assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+    assertOrigin?.();assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
+    request.onsuccess=()=>{try{assertOrigin?.();assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
     tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true,settingsOnly:family==='personalPreferences'});finish(true,undefined);};
   },{strict:strictDurability,abortMessage:'plan document write aborted'});
 }
 const planData=freeze({
-  replace:(value:SavedPlans)=>{
-    const token=issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
-    return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,undefined);};},{strict:true,abortMessage:'Plan document restore aborted'});
+  replace:(value:SavedPlans,{ownershipToken=null,assertOrigin}:WriteOptions={})=>{
+    assertOrigin?.();const token=ownershipToken||issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
+    return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{assertOrigin?.();assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,undefined);};},{strict:true,abortMessage:'Plan document restore aborted'});
   },
   // Save the three existing portable Personal Data records in one strict
   // transaction. Neither a failed import nor a kept review can split them.
-  replacePortable:(value:PersonalData)=>{
-    const token=issueWriteToken('restore portable Plans and Preferences');
+  replacePortable:(value:PersonalData,{ownershipToken=null,assertOrigin}:WriteOptions={})=>{
+    assertOrigin?.();const token=ownershipToken||issueWriteToken('restore portable Plans and Preferences');
     const clean=PersonalDataCodec.normalize(value),now=new Date().toISOString(),
       portable=PersonalDataCodec.portablePreferences({...clean.preferences,version:2,updatedAt:now});
     if(new TextEncoder().encode(JSON.stringify(clean.plans)).length>1024*1024)
       throw new RangeError('Plan data exceeds its storage allowance.');
     return Meta.transaction<PortablePreferences>('readwrite',(meta,tx,finish)=>{
-      assertWriteToken(token,'restore portable Plans and Preferences');
+      assertOrigin?.();assertWriteToken(token,'restore portable Plans and Preferences');
       stageCanonicalMutationEpoch(tx,['personalData']);
       meta.put('planDraft',clean.plans.draft,{updatedAt:now});
       meta.put('planLibrary',{savedPlans:clean.plans.savedPlans,defaultId:clean.plans.defaultId},{updatedAt:now});
@@ -860,14 +860,15 @@ function assertExpectedSessionRecord(raw:unknown,expected:ActiveSession|null){
   if((raw!=null&&!present)||!sameDataValue(present,expected))throw Object.assign(new Error('Active Session changed before this mutation.'),{code:'ACTIVE_SESSION_CHANGED'});
   assertExpectedSessionRecovery(expected);
 }
-async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:WriteToken|null=null,strictDurability:boolean=false,expectedCanonical:ActiveSession|null|undefined=undefined){
+async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:WriteToken|null=null,strictDurability:boolean=false,expectedCanonical:ActiveSession|null|undefined=undefined,assertOrigin?:()=>void){
   const current=ActiveSessionCodec.sanitizeCurrent(session);if(!current)throw canonicalRuntimeError('Active Session write requires the current canonical schema.');session=current;
   return (strictDurability?idbStrictTransaction:idbTransaction)<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
-    if(ownershipToken)assertWriteToken(ownershipToken,'the active-session transaction');
+    assertOrigin?.();if(ownershipToken)assertWriteToken(ownershipToken,'the active-session transaction');
     const put=()=>{
-      stageCanonicalMutationEpoch(tx,['activeSession']);
+      assertOrigin?.();stageCanonicalMutationEpoch(tx,['activeSession']);
       const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
+      if(assertOrigin)request.onsuccess=()=>{try{assertOrigin();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
     };
     tx.oncomplete=()=>finish(true,undefined);
     if(expectedCanonical!==undefined){
@@ -908,9 +909,9 @@ async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expect
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical,recoveryFallback=false}:{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null;recoveryFallback?:boolean}={}):Promise<SessionResult>{
+async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical,recoveryFallback=false,assertOrigin}:{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null;recoveryFallback?:boolean;assertOrigin?:()=>void}={}):Promise<SessionResult>{
   let ownershipToken:WriteToken;
-  try{ownershipToken=issueWriteToken('saving the active session');}
+  try{assertOrigin?.();ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
   // Live snapshots are normalized only after the current record's write
   // metadata is stamped. Exact stored-record validation belongs after that.
@@ -926,7 +927,7 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
   const writeEpoch=++activeSessionMutationEpoch;
   let localSaved=false;
   function checkpoint(){
-    assertWriteToken(ownershipToken,'the local recovery-envelope write');
+    assertOrigin?.();assertWriteToken(ownershipToken,'the local recovery-envelope write');
     const envelope=activeSessionRecoveryEnvelope(clean);
     localSaved=!!(envelope&&LocalStorageContract.setJson(STORAGE_KEYS.recovery,envelope));
   }
@@ -938,11 +939,12 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
     try{
       // Only explicit critical saves, page-exit flushes and suspension need
       // strict disk-commit semantics. Periodic timer snapshots stay default.
-      await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected);idbSaved=true;
-      assertWriteToken(ownershipToken,'completing the active-session save');
+      assertOrigin?.();await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected,assertOrigin);idbSaved=true;
+      assertOrigin?.();assertWriteToken(ownershipToken,'completing the active-session save');
       if(writeEpoch===activeSessionMutationEpoch)clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
+      try{assertOrigin?.();}catch(error){return {ok:false,value:clean,error,storage:{local:localSaved,idb:idbSaved}};}
       if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:idbSaved}};
       idbError=e;
       if(!localSaved&&writeEpoch===activeSessionMutationEpoch){
@@ -960,7 +962,7 @@ async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapt
       }
     }
     if(idbSaved&&writeEpoch===activeSessionMutationEpoch){
-      try{assertWriteToken(ownershipToken,'clearing committed session recovery');LocalStorageContract.remove(STORAGE_KEYS.recovery);}catch(error){if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.recovery-cleanup',error);}
+      try{assertOrigin?.();assertWriteToken(ownershipToken,'clearing committed session recovery');LocalStorageContract.remove(STORAGE_KEYS.recovery);}catch(error){if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.recovery-cleanup',error);}
     }
     if(localSaved||idbSaved){
       return {ok:true,value:clean,error:idbError,storage:{local:localSaved,idb:idbSaved}};

@@ -6,7 +6,7 @@ import type {PresentationScope,PresentationEvent,PresentationPatch,PresentationL
 import type {MaintenanceState,MaintenanceCleanup,RepositoryObservation,IntegrityTarget,IntegrityResult,BackgroundScope} from '../../types/repository-background.ts';
 import type {Job,WorkBudget} from '../../types/lifecycle.ts';
 import type {ExportOptions} from '../../types/exports.ts';
-type SessionClaimRequest={date?:string;observedOwner?:string;observedRevision?:number;observedContentFingerprint?:string;expectedCheckpointId?:string;handoffToken?:string;revision?:number;signal?:AbortSignal|null;onWrite?:()=>void;decide?:(source:unknown)=>Promise<Record<string,unknown>>};
+type SessionClaimRequest={date?:string;observedOwner?:string;observedRevision?:number;observedContentFingerprint?:string;expectedCheckpointId?:string;handoffToken?:string;revision?:number;signal?:AbortSignal|null;onWrite?:()=>void;assertOrigin?:()=>void;decide?:(source:unknown)=>Promise<Record<string,unknown>>};
 const sdBackupProviderFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'backup-provider','study-director.backup-provider-module',1,[ProviderModuleInput]>|undefined;
@@ -1271,15 +1271,17 @@ const createModule=(input:ProviderModuleInput)=>{
       await lease.release().catch(()=>{});
     }
   }
-  async function writeRepositorySessionClaim(selected:Provider,claim:SessionClaim,{signal=null,interactive=false}:{signal?:AbortSignal|null;interactive?:boolean}={}){
+  async function writeRepositorySessionClaim(selected:Provider,claim:SessionClaim,{signal=null,interactive=false,assertOrigin,onWrite}:{signal?:AbortSignal|null;interactive?:boolean;assertOrigin?:()=>void;onWrite?:()=>void}={}){
     const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION)throw new TypeError('Active-session ownership claim is invalid.');
     const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
     try{
-      protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});
+      assertOrigin?.();protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});
       if(!protectedFile||!(protectedFile.blob instanceof Blob)||protectedFile.blob.size<=0||protectedFile.blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
-      await protectedFile.checkProtection?.();
-      const digest=await Exports.run('checksum',{value:protectedFile.blob},{signal}),item=repositoryProviderItem(await selected.repository.uploadSessionClaim!(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob:protectedFile.blob,size:protectedFile.blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true,checkProtection:protectedFile.checkProtection})),'session-claim');
-      await protectedFile.checkProtection?.();
+      const checkProtection=async()=>{assertOrigin?.();signal?.throwIfAborted();await protectedFile!.checkProtection?.();assertOrigin?.();signal?.throwIfAborted();};
+      await checkProtection();
+      const digest=await Exports.run('checksum',{value:protectedFile.blob},{signal});await checkProtection();onWrite?.();
+      const item=repositoryProviderItem(await selected.repository.uploadSessionClaim!(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob:protectedFile.blob,size:protectedFile.blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true,checkProtection})),'session-claim');
+      await checkProtection();
       if(item.digest!==digest||item.serverDigest&&item.serverDigest!==digest)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The shared repository did not verify the active-session ownership claim.');
       // Every claim is written under the publication lease. Continue Here
       // does not wait for another device, so another claim can, rarely,
@@ -1292,7 +1294,7 @@ const createModule=(input:ProviderModuleInput)=>{
       if(Math.max(0,Number(listMetadata(listed).ignored)||0)||listMetadata(listed).overflow===true)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state in the shared repository could not be verified safely.');
       let newest=null,newestEpoch=0;for(const raw of rows){const row=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(row.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>newestEpoch){newest=row;newestEpoch=epoch;}}
       if(!newest||newest.id!==id||(newest.serverDigest||newest.digest)!==digest||newest.size&&newest.size!==protectedFile.blob.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
-      const identity=sessionClaimIdentity(newest);if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim:normalized}));
+      assertOrigin?.();signal?.throwIfAborted();const identity=sessionClaimIdentity(newest);if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim:normalized}));
       return freeze({item:newest,claim:normalized});
     }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
   }
@@ -2045,11 +2047,13 @@ const createModule=(input:ProviderModuleInput)=>{
     if(!repositorySessionClaimCapable(selected))return freeze({status:'unavailable',reason:'unavailable'});
     const decide=typeof request?.decide==='function'?request.decide:null;
     if(!decide)claimRequestFields(request);
+    requireBackupMutationControl('claiming shared session ownership');request.assertOrigin?.();
     const foreground=beginForeground(selected,request&&request.signal||null);if(!foreground)return freeze({status:'busy',reason:'busy'});
     setBusy(true);let publicationLease=null;
+    const assertRequest=()=>{request.assertOrigin?.();foreground.signal.throwIfAborted();};
     try{
-      await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
-      publicationLease=await beginRepositoryPublication(scoped);
+      await foreground.settled;assertRequest();const scoped=repositoryOperationSelected(selected,{signal:foreground.signal,checkProtection:async()=>assertRequest()});await synchronizeRepositoryScope(scoped);assertRequest();
+      publicationLease=await beginRepositoryPublication(scoped);assertRequest();
       // Continue Here is the person's own action: it does not wait for
       // another device's upload (a late upload from the old owner cannot
       // take the session back; sync takes in, or keeps for review, its extra
@@ -2059,14 +2063,14 @@ const createModule=(input:ProviderModuleInput)=>{
       // reconciled), the current claim and, for decide, the stored objects.
       const objectListing=decide?repositoryObjectInventory(scoped,{signal:foreground.signal}):null;objectListing?.catch(()=>{});
       const [inventory,current]=await Promise.all([repositoryProviderInventory(scoped,{signal:foreground.signal}),readRepositorySessionClaim(scoped,{signal:foreground.signal})]);
-      if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive changed or could not be read completely while Continue Here was confirming ownership.');
+      assertRequest();if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive changed or could not be read completely while Continue Here was confirming ownership.');
       let source=null;
       if(decide){
         source=await handoffSource(selected,scoped,inventory,objectListing,projectSessionClaim(current,{signal:foreground.signal}),foreground.signal);
-        if(source.status!=='completed')throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The latest Google Drive session could not be verified before ownership transfer.');
+        assertRequest();if(source.status!=='completed')throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The latest Google Drive session could not be verified before ownership transfer.');
       }
       const fields=claimRequestFields(decide?{...await decide(source!),date:request.date,handoffToken:request.handoffToken,expectedCheckpointId:source!.checkpointId}:request);
-      const {date,observedOwner,observedRevision,observedContentFingerprint,expectedCheckpointId,handoffToken,revision,owner}=fields;
+      assertRequest();const {date,observedOwner,observedRevision,observedContentFingerprint,expectedCheckpointId,handoffToken,revision,owner}=fields;
       const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',date,{signal:foreground.signal}),sessionClaimToken('owner',owner,{signal:foreground.signal}),sessionClaimToken('owner',observedOwner,{signal:foreground.signal})]);
       const head=sharedRepositoryHead(inventory);
       if(!head||head.item.id!==expectedCheckpointId)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Google Drive received a newer Study Director version before this takeover could be confirmed. Sync it, then continue here again.');
@@ -2076,8 +2080,7 @@ const createModule=(input:ProviderModuleInput)=>{
       // new claim then records what this device observes now.
       if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&current.claim.ownerToken!==ownerToken&&(current.claim.ownerToken!==observedOwnerToken||current.claim.revision>observedRevision))throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
       const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date().toISOString()});
-      request?.onWrite?.();
-      const verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
+      assertRequest();const verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true,assertOrigin:assertRequest,...(request.onWrite?{onWrite:request.onWrite}:{})});
       return freeze({status:'completed',claim:verified.claim,...(source?{source}:{})});
     }finally{
       // The claim is written and verified; ending the lease need not hold up
@@ -2087,18 +2090,19 @@ const createModule=(input:ProviderModuleInput)=>{
       await release(selected,'session-claim');setBusy(false);foreground.release();
     }
   }
-  async function releaseSessionClaim(id='google-drive',claim:unknown=null){
+  async function releaseSessionClaim(id='google-drive',claim:unknown=null,assertOrigin?:()=>void){
     if(busy)return false;
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return false;
     const expected=normalizeSessionClaim(claim);if(!expected||expected.state!=='owned')return false;
-    const foreground=beginForeground(selected);if(!foreground)return false;setBusy(true);let publicationLease=null;
+    assertOrigin?.();const foreground=beginForeground(selected);if(!foreground)return false;setBusy(true);let publicationLease=null;
+    const assertRequest=()=>{assertOrigin?.();foreground.signal.throwIfAborted();};
     try{
-      await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
-      publicationLease=await beginRepositoryPublication(scoped);
-      const current=await readRepositorySessionClaim(scoped,{signal:foreground.signal});
+      await foreground.settled;assertRequest();const scoped=repositoryOperationSelected(selected,{signal:foreground.signal,checkProtection:async()=>assertRequest()});await synchronizeRepositoryScope(scoped);assertRequest();
+      publicationLease=await beginRepositoryPublication(scoped);assertRequest();
+      const current=await readRepositorySessionClaim(scoped,{signal:foreground.signal});assertRequest();
       if(!current||current.item.id!==sessionClaimId(expected.epoch)||current.claim.ownerToken!==expected.ownerToken||current.claim.state!=='owned'||JSON.stringify(current.claim)!==JSON.stringify(expected))return false;
       const rollback=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken:expected.sessionToken,epoch:expected.epoch+1,state:'owned',ownerToken:expected.observedOwnerToken,revision:expected.observedRevision,observedOwnerToken:expected.ownerToken,observedRevision:expected.revision,observedContentFingerprint:'',handoffToken:expected.handoffToken,claimedAt:new Date().toISOString()});
-      await writeRepositorySessionClaim(scoped,rollback,{signal:foreground.signal,interactive:true});return true;
+      await writeRepositorySessionClaim(scoped,rollback,{signal:foreground.signal,interactive:true,assertOrigin:assertRequest});return true;
     }catch(error){AppDiagnostics.capture('backup-provider.session-claim-release',error,'warn');return false;}
     finally{if(publicationLease)await endRepositoryPublication(selected,publicationLease);await release(selected,'session-claim-release');setBusy(false);foreground.release();}
   }

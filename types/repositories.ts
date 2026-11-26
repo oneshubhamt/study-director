@@ -23,7 +23,7 @@ export type DeletionEntry={key:string;kind:'dailyRecord'|'activeSession';id:stri
 export type DayDeletion={date:string;deletedAt:string};
 export type NoteDeletion={key:string;deletedAt:string};
 export type AttachmentDeletion={assetId:string;deletedAt:string};
-export type WriteOptions={strictDurability?:boolean;ownershipToken?:WriteToken|null;allowHydrating?:boolean;backupCapture?:boolean};
+export type WriteOptions={strictDurability?:boolean;ownershipToken?:WriteToken|null;allowHydrating?:boolean;backupCapture?:boolean;assertOrigin?:()=>void};
 export type BatchOptions={bumpRevision?:boolean;ownershipToken?:WriteToken|null;preserveNewer?:boolean;markDirty?:boolean};
 export type MaintenanceOptions={force?:boolean;check?:()=>void;workBudget?:{check():void;advance():void}|undefined};
 export type MaintenanceResult={status:'skipped';reason:string;lastRun?:string}|{status:'completed';version:number;completedAt:string}|{status:'yielded';reason:unknown;phase:number}|{status:'failed';reason:unknown};

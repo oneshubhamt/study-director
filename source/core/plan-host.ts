@@ -49,6 +49,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
     });
     chain=next;
     void next.catch(error=>{
+      try{ownership.assertWriteToken(token,'reporting Plan save failure');}catch{return;}
       failure=error;
       storage.markError('planDraft.write','Plan data was not saved. Keep this tab open and copy the draft before closing.');
     });
@@ -86,7 +87,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
         backupCapture:options.backupCapture===true,
         strictDurability:options.strictDurability===true
       });
-      persistedDraft=value;
+      ownership.assertWriteToken(activeToken,'acknowledging Plan draft');persistedDraft=value;
       failure=null;
       return true;
     },options,token);
@@ -99,21 +100,23 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
       await repositories.plans.writeLibrary({savedPlans:clean.savedPlans,defaultId:clean.defaultId},{
         ownershipToken:token,allowHydrating:options.allowHydrating===true
       });
-      state=clonePlans({...state,savedPlans:clean.savedPlans,defaultId:clean.defaultId});
+      ownership.assertWriteToken(token,'acknowledging saved plans');state=clonePlans({...state,savedPlans:clean.savedPlans,defaultId:clean.defaultId});
       failure=null;
       return true;
     },options);
   }
-  async function rewriteAfterStorageReset(){
+  async function rewriteAfterStorageReset(assertOrigin?:()=>void){
     if(!ready)return false;
-    await chain.catch(()=>undefined);
-    const snapshot=clonePlans(codec.plans(state));
-    return enqueue(async()=>{
-      await repositories.plans.replace(snapshot);
+    assertOrigin?.();const token=ownership.issueWriteToken('recovering Plan data after storage loss');
+    return enqueue(async activeToken=>{
+      // Read the snapshot in the queue, after preceding writes settle.
+      assertOrigin?.();const snapshot=clonePlans(codec.plans(state));
+      await repositories.plans.replace(snapshot,{ownershipToken:activeToken,...(assertOrigin?{assertOrigin}:{})});
+      assertOrigin?.();ownership.assertWriteToken(activeToken,'acknowledging recovered Plan data');
       persistedDraft=snapshot.draft;
       failure=null;
       return true;
-    });
+    },{},token);
   }
   async function settled(options:Readonly<{backupCapture?:boolean}>={}){
     await chain;
@@ -133,10 +136,11 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
     return codec.normalize({version:2,plans:await repositories.plans.read(),preferences:await currentPreferences()});
   }
   async function importData(value:unknown){
-    const clean=codec.normalize(value);
-    await settled();
-    await enqueue(async()=>{
-      const portable=await repositories.plans.replacePortable(clean);
+    const clean=codec.normalize(value),token=ownership.issueWriteToken('importing portable Plan data');
+    await settled();ownership.assertWriteToken(token,'importing portable Plan data');
+    await enqueue(async activeToken=>{
+      const portable=await repositories.plans.replacePortable(clean,{ownershipToken:activeToken});
+      ownership.assertWriteToken(activeToken,'acknowledging portable Plan data');
       state=clonePlans(clean.plans);
       persistedDraft=clean.plans.draft;
       failure=null;
@@ -144,8 +148,8 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
       preferences.refreshAppearance(portable);
       preferences.applyRuntime(portable);
       return true;
-    });
-    runtime.replaceDraftText(String(clean.plans.draft??activeDefaults().scheduleText));
+    },{},token);
+    ownership.assertWriteToken(token,'projecting portable Plan data');runtime.replaceDraftText(String(clean.plans.draft??activeDefaults().scheduleText));
     runtime.previewDraft();
     runtime.renderSavedPlans();
     return true;

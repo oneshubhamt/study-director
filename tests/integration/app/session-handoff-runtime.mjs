@@ -9,7 +9,7 @@ const DATE='2026-10-27',LOCAL='inst_local',REMOTE='inst_remote',CHECKPOINT='cp_'
 const sessionBase={id:'active',type:'activeSession',version:1,revision:10,date:DATE,status:'active',runningOn:LOCAL,scheduleText:'07:00 | 30 | Work | work | Ethics | units | 1',snapshot:{version:1,date:DATE,fingerprint:'x',contentRevision:1,savedRevision:0,currentTaskId:null,taskState:{},scheduleAdjustments:{},timerRuntime:{token:'timer'},latestCarryForward:'',updatedAt:'2026-10-27T08:00:00.000Z',review:{reflection:'',studyQuality:null},practice:{token:'practice'}},suspendedAt:null,updatedAt:'2026-10-27T08:00:00.000Z'};
 const result=value=>({ok:true,value,storage:{idb:true,local:false}});
 function makeHarness(options={}){
-  let now=100000,current=structuredClone(options.current||sessionBase),claim=Object.prototype.hasOwnProperty.call(options,'claim')?options.claim:{epoch:2,applies:true,state:'owned',ownedHere:false},tasks=options.tasks!==false;
+  let owner=1,now=100000,current=structuredClone(options.current||sessionBase),claim=Object.prototype.hasOwnProperty.call(options,'claim')?options.claim:{epoch:2,applies:true,state:'owned',ownedHere:false},tasks=options.tasks!==false;
   let captureNo=0,claimWrites=0,releaseWorks=options.releaseWorks!==false,source=structuredClone(options.source||current),remoteClaim=claim;
   const calls={stops:0,resumes:0,syncs:[],writes:[],captures:[],evidence:0,warnings:[],status:[],notices:0,notes:0,releases:0,resets:0,pauses:0,lifecycles:[],claimReads:0,sessionLoads:0};
   const strictQueue=[];
@@ -18,7 +18,7 @@ function makeHarness(options={}){
       captureNo++;const snap=structuredClone(current.snapshot);snap.token=captureNo;snap.review={reflection:options.reflection?.()||'',studyQuality:null};if(evidence)snap.evidence=evidence;calls.captures.push(snap);return snap;
     },
     writeSnapshot:async(snapshot,writeOptions)=>{
-      calls.writes.push({kind:'snapshot',snapshot:structuredClone(snapshot),options:writeOptions});
+      writeOptions.assertOrigin?.();calls.writes.push({kind:'snapshot',snapshot:structuredClone(snapshot),options:writeOptions});
       if(strictQueue.length){const next=strictQueue.shift();if(next instanceof Error)throw next;if(next===null)return null;if(next.storage?.idb===false)return next;}
       current={...current,revision:current.revision+1,snapshot:structuredClone(snapshot),updatedAt:'2026-10-27T08:00:01.000Z'};return result(structuredClone(current));
     },
@@ -28,7 +28,7 @@ function makeHarness(options={}){
       return saved;
     },
     saveCanonicalSession:async(value,_operation,saveOptions={})=>{
-      calls.writes.push({kind:'canonical',value:structuredClone(value),options:saveOptions});
+      saveOptions.assertOrigin?.();calls.writes.push({kind:'canonical',value:structuredClone(value),options:saveOptions});
       if(saveOptions.expectedCanonical&&JSON.stringify(current)!==JSON.stringify(saveOptions.expectedCanonical)){
         const error=Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'});throw error;
       }
@@ -43,19 +43,19 @@ function makeHarness(options={}){
   };
   const controller=module.createController(Object.freeze({
     configuration:Object.freeze({providerId:'google-drive',claimWatchMs:15000,claimSyncRetryMs:30000,claimSaveWarning:'SAVE WARNING'}),
-    authority:Object.freeze({canMutate:()=>true,startupReady:()=>true,visible:()=>true,online:()=>true,hasTasks:()=>tasks,panelElsewhere:()=>false}),
+    authority:Object.freeze({canMutate:()=>true,captureOrigin:()=>{const revision=owner;return ()=>{if(owner!==revision)throw new Error('origin changed');};},startupReady:()=>true,visible:()=>true,online:()=>true,hasTasks:()=>tasks,panelElsewhere:()=>false}),
     provider:Object.freeze({
       connected:()=>true,
       readHandoffSource:async()=>({status:'completed',checkpointId:CHECKPOINT,session:source,priorClaim:remoteClaim,sharedContentFingerprint:options.shared||''}),
       claimOwnership:async(_id,ask)=>{
         const decision=await ask.decide({status:'completed',checkpointId:CHECKPOINT,session:source,priorClaim:remoteClaim,sharedContentFingerprint:options.shared||''});
-        claimWrites++;ask.onWrite();
+        if(options.beforeClaim)await options.beforeClaim();ask.assertOrigin();ask.onWrite();claimWrites++;
         if(options.claimFailure==='before')throw new Error('claim response failed');
         remoteClaim={epoch:(remoteClaim?.epoch||0)+1,state:'owned',applies:true,ownedHere:true,ownerToken:'mine',observedOwnerToken:'old',observedRevision:decision.observedRevision,observedContentFingerprint:decision.observedContentFingerprint,revision:decision.revision};
         if(options.claimFailure==='after')throw new Error('claim response lost');
-        return {status:'completed',claim:{revision:decision.revision,epoch:remoteClaim.epoch,state:'owned'}};
+        if(options.afterClaim)await options.afterClaim();return {status:'completed',claim:{revision:decision.revision,epoch:remoteClaim.epoch,state:'owned'}};
       },
-      releaseClaim:async()=>{calls.releases++;return releaseWorks;},
+      releaseClaim:async(_id,_claim,assertOrigin)=>{assertOrigin();calls.releases++;return releaseWorks;},
       readClaim:async()=>{calls.claimReads++;const observed=claim;if(options.readClaimGate)await options.readClaimGate;return observed;},
       scheduleSync:(_id,reason)=>{calls.syncs.push(reason);return true;},
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>true}),
@@ -69,7 +69,7 @@ function makeHarness(options={}){
       assetIds:value=>value.snapshot?.assets||[]
     }),
     plan:Object.freeze({
-      flushDraft:()=>true,settled:()=>Promise.resolve(),readDraft:()=>null,readCanonicalDraft:async()=>null,
+      flushDraft:()=>options.flushDraft?.()??true,settled:()=>Promise.resolve(),readDraft:()=>null,readCanonicalDraft:async()=>null,
       displayedDraft:()=> 'DEFAULT',defaultScheduleText:()=> 'DEFAULT'
     }),
     runtime:Object.freeze({
@@ -89,7 +89,7 @@ function makeHarness(options={}){
     clock:Object.freeze({nowMs:()=>now,nowIso:()=> '2026-10-27T08:00:03.000Z'}),
     identity:Object.freeze({uuid:()=> '00000000-0000-4000-8000-000000000001'})
   }));
-  return {controller,calls,strictQueue,setNow:value=>{now=value;},setClaim:value=>{claim=value;},setCurrent:value=>{current=structuredClone(value);},setSource:value=>{source=structuredClone(value);},setTasks:value=>{tasks=value;},current:()=>structuredClone(current),claims:()=>claimWrites,setReleaseWorks:value=>{releaseWorks=value;}};
+  return {controller,calls,strictQueue,changeOwner:()=>{owner++;},setNow:value=>{now=value;},setClaim:value=>{claim=value;},setCurrent:value=>{current=structuredClone(value);},setSource:value=>{source=structuredClone(value);},setTasks:value=>{tasks=value;},current:()=>structuredClone(current),claims:()=>claimWrites,setReleaseWorks:value=>{releaseWorks=value;}};
 }
 
 // Continue Here prefetch uses the same provider boundary and stays read-only.
@@ -169,6 +169,26 @@ function makeHarness(options={}){
   assert.equal(t.calls.stops,0,'old remote claim must not stop the new owner');
   assert.equal(t.calls.writes.length,writes,'old poll must not persist stale evidence');
   assert.equal(t.controller.frozen(),false);assert.equal(t.controller.snapshotForWrite().timerRuntime.token,'new-running-timer');
+}
+// Delayed handoff work must never borrow a successor's local authority.
+for(const stage of ['draft','before-claim','after-claim']){
+  const remote={...structuredClone(sessionBase),runningOn:REMOTE};
+  let t;const change=async()=>{t.changeOwner();return true;};
+  t=makeHarness({current:remote,source:remote,...(stage==='draft'?{flushDraft:change}:stage==='before-claim'?{beforeClaim:change}:{afterClaim:change})});
+  await assert.rejects(t.controller.transferHere(remote),stage==='after-claim'?/Couldn’t finish moving/u:/origin changed/u);
+  assert.equal(t.claims(),stage==='after-claim'?1:0);assert.equal(t.current().runningOn,REMOTE);
+  assert.equal(t.calls.writes.length,0);assert.equal(t.calls.releases,0,'successor must not compensate the old operation');
+  assert.equal(t.calls.notes,0);assert.deepEqual(t.calls.syncs,[]);
+}
+{
+  const remote={...structuredClone(sessionBase),runningOn:REMOTE},t=makeHarness({current:remote,source:remote});
+  await assert.rejects(t.controller.transferHere(remote,{assertOrigin:()=>{throw new Error('stale consent');}}),/stale consent/u);
+  assert.equal(t.claims(),0);assert.equal(t.calls.writes.length,0);
+}
+{
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const t=makeHarness({readClaimGate:gate}),poll=t.controller.checkClaim();t.changeOwner();release();
+  assert.equal(await poll,false);assert.equal(t.calls.stops,0);assert.equal(t.calls.writes.length,0);
 }
 // A genuinely advanced, unproven source starts ordinary sync and writes no ownership claim.
 {

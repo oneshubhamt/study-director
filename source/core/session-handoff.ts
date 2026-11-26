@@ -34,7 +34,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
   exactObject(input,['configuration','authority','provider','session','plan','runtime','presentation','installation','clock','identity'],'Session handoff input');
   const {configuration,authority,provider,session,plan,runtime,presentation,installation,clock,identity}=input;
   exactObject(configuration,['providerId','claimWatchMs','claimSyncRetryMs','claimSaveWarning'],'Session handoff configuration');
-  functions(authority,['canMutate','startupReady','visible','online','hasTasks','panelElsewhere'],'Session authority port');
+  functions(authority,['canMutate','captureOrigin','startupReady','visible','online','hasTasks','panelElsewhere'],'Session authority port');
   functions(provider,['connected','readHandoffSource','claimOwnership','releaseClaim','readClaim','scheduleSync','suspendBackground','wakeBackground'],'Session provider port');
   functions(session,['sanitize','same','nextRevision','contentFingerprint','assetIds'],'Session handoff data port');
   if(!session.host)throw new TypeError('Session host port is unavailable.');
@@ -77,17 +77,18 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
     try{return await provider.readHandoffSource(configuration.providerId);}
     catch(error){presentation.capture('session.handoff-prefetch',error,'warn');return null;}
   }
-  async function verifyFrozenClaim(){
+  async function verifyFrozenClaim(assertOwner:()=>void){
     const current=claimFreeze;
     const pending=(async()=>{try{
       if(!current?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
-      const saved=await session.host.writeSnapshot(snapshotForWrite(),{emergency:true,strictDurability:true});
+      assertOwner();const saved=await session.host.writeSnapshot(snapshotForWrite(),{emergency:true,strictDurability:true,assertOrigin:assertOwner});
       await session.host.requireCanonicalWrite(saved,saved?.value,'yielding a transferred session');
-      if(claimFreeze!==current)return false;
+      assertOwner();if(claimFreeze!==current)return false;
       claimFreeze=freeze({...current,localVerified:true});
       presentation.clearStorageWarning(configuration.claimSaveWarning);
       return true;
     }catch(error){
+      try{assertOwner();}catch{return false;}
       presentation.capture('session.claim-flush',error,'warn');
       presentation.warnStorage(configuration.claimSaveWarning);
       presentation.setStatus('CRITICAL: Session handoff is waiting for a verified local save. Keep this tab open.',false);
@@ -107,11 +108,12 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
     }catch(error){presentation.capture('session.claim-resume',error,'warn');return false;}
   }
   async function checkClaim():Promise<boolean>{
-    if(claimCheckActive||transferActive||!authority.visible()||!authority.startupReady())return false;
+    if(claimCheckActive||transferActive||!authority.canMutate()||!authority.visible()||!authority.startupReady())return false;
     if(!authority.hasTasks()&&!claimFreeze&&!authority.panelElsewhere())return false;
     if(!provider.connected(configuration.providerId)||!authority.online())return false;
+    let assertOwner:()=>void;try{assertOwner=authority.captureOrigin('checking shared session ownership');}catch{return false;}
     lastAttemptAt=clock.nowMs();claimCheckActive=true;
-    const generation=claimGeneration,currentPoll=()=>generation===claimGeneration&&!transferActive;
+    const generation=claimGeneration,currentPoll=()=>{try{assertOwner();return generation===claimGeneration&&!transferActive&&authority.canMutate();}catch{return false;}};
     try{
       const [claim,loaded]=await Promise.all([provider.readClaim(configuration.providerId),session.host.load({strict:true})]);
       if(!currentPoll())return false;
@@ -135,7 +137,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
         const activeFreeze=claimFreeze;
         if(!activeFreeze)return true;
         if(!activeFreeze.localVerified){
-          const verified=await verifyFrozenClaim();if(!currentPoll())return false;if(!verified)return true;
+          const verified=await verifyFrozenClaim(assertOwner);if(!currentPoll())return false;if(!verified)return true;
           if(claim.newer)presentation.notifyNewerClaim();
           else presentation.setStatus('Today’s session moved to another device. Syncing its latest state…');
         }
@@ -150,7 +152,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
       }
       if(claimFreeze){
         if(!mine||!authority.hasTasks()){claimFreeze=null;return false;}
-        if(!claimFreeze.localVerified){const verified=await verifyFrozenClaim();if(!currentPoll())return false;if(!verified)return true;}
+        if(!claimFreeze.localVerified){const verified=await verifyFrozenClaim(assertOwner);if(!currentPoll())return false;if(!verified)return true;}
         if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeClaimedBack(current as ActiveSession);
         const now=clock.nowMs(),frozen=claimFreeze;
         if(!frozen.lastSyncAt||now-frozen.lastSyncAt>=configuration.claimSyncRetryMs){
@@ -172,6 +174,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
   async function transferHere(value:unknown,options:SessionHandoffTransferOptions={}){
     const step=(text:string)=>{try{options.onStep?.(text);}catch{}};
     if(!authority.canMutate())throw new Error('Study Director does not currently have write control.');
+    const assertOwner=authority.captureOrigin('continuing the shared session'),assertOrigin=()=>{options.assertOrigin?.();assertOwner();};assertOrigin();
     if(!provider.connected(configuration.providerId))throw handoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
     const requested=session.sanitize(value);
     if(!requested)throw new Error('the transferred session state is invalid');
@@ -183,25 +186,25 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
     let previous:ActiveSession|null=null,next:ActiveSession|null=null,ownershipClaim:SessionOwnershipClaim|null=null;
     let backgroundHold:Readonly<{settled:PromiseLike<unknown>;release():unknown}>|null=null,claimAttempted=false,localVerified=false,localBefore=requested;
     try{
-      if(freezeWrite)await freezeWrite;
+      if(freezeWrite)await freezeWrite;assertOrigin();
       const displayedDraft=plan.displayedDraft(),draftFlushed=await Promise.resolve(plan.flushDraft());
-      if(draftFlushed===false)throw handoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
-      await plan.settled();
+      assertOrigin();if(draftFlushed===false)throw handoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
+      await plan.settled();assertOrigin();
       const savedDraft=plan.readDraft(),canonicalDraft=await plan.readCanonicalDraft(),expectedDisplay=savedDraft===null?plan.defaultScheduleText():savedDraft;
-      if(canonicalDraft!==savedDraft||displayedDraft!==expectedDisplay)throw handoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
-      if(options.preread)await options.preread;
+      assertOrigin();if(canonicalDraft!==savedDraft||displayedDraft!==expectedDisplay)throw handoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
+      if(options.preread)await options.preread;assertOrigin();
       step('Moving the session here…');
-      backgroundHold=provider.suspendBackground('session-continue');await backgroundHold.settled;
+      backgroundHold=provider.suspendBackground('session-continue');await backgroundHold.settled;assertOrigin();
       let planned:ActiveSession|null=null;
       const decide=async(source:SessionHandoffSource)=>{
-        const expectedCheckpointId=String(source?.checkpointId||'');
+        assertOrigin();const expectedCheckpointId=String(source?.checkpointId||'');
         if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw handoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
         previous=source.session?session.sanitize(source.session):null;
         if(!previous||previous.date!==requested.date)throw handoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
         if(previous.runningOn!==requested.runningOn)throw handoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
         if(Number(previous.revision)<Number(requested.revision))throw handoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
         const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([session.contentFingerprint(requested),session.contentFingerprint(previous)]);
-        if(requestedContentFingerprint!==observedContentFingerprint){
+        assertOrigin();if(requestedContentFingerprint!==observedContentFingerprint){
           const priorClaim:SessionClaimProjection|null=source.priorClaim||null;
           const causalContinuation=!!(priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&priorClaim.observedContentFingerprint===requestedContentFingerprint&&Number(priorClaim.revision)<=Number(previous.revision));
           const sharedContinuation=!!source.sharedContentFingerprint&&source.sharedContentFingerprint===requestedContentFingerprint;
@@ -210,9 +213,9 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
             provider.scheduleSync(configuration.providerId,'session-handoff-source-advanced');
             throw handoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
           }
-          try{await session.host.saveCanonicalSession(previous,'advancing the handoff source',{expectedCanonical:requested});}
+          try{await session.host.saveCanonicalSession(previous,'advancing the handoff source',{expectedCanonical:requested,assertOrigin});}
           catch(error){if(errorCode(error)==='ACTIVE_SESSION_CHANGED')throw handoffError('SESSION_CONTINUE_CHANGED','Today’s session changed on this device while Continue Here was starting.');throw error;}
-          localBefore=previous;
+          assertOrigin();localBefore=previous;
         }
         planned=session.sanitize({...previous,runningOn:installation.id(),revision:session.nextRevision(previous.revision),updatedAt:clock.nowIso()});
         if(!planned)throw new Error('the transferred session state is invalid');
@@ -220,18 +223,18 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
         presentation.setStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
         return freeze({observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision});
       };
-      const claimed=await provider.claimOwnership(configuration.providerId,freeze({date:requested.date,handoffToken:identity.uuid(),decide,onWrite:()=>{claimAttempted=true;}}));
+      const claimed=await provider.claimOwnership(configuration.providerId,freeze({date:requested.date,handoffToken:identity.uuid(),decide,assertOrigin,onWrite:()=>{assertOrigin();claimAttempted=true;}}));
       if(claimed?.status==='busy')throw handoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
       if(claimed?.status==='unavailable')throw handoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
       if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
-      ownershipClaim=claimed.claim;
+      ownershipClaim=claimed.claim;assertOrigin();
       const plannedSession=session.sanitize(planned),previousSession=session.sanitize(previous);
       if(!plannedSession||!previousSession)throw new Error('Google Drive confirmed ownership without a verified Active Session source.');
       previous=previousSession;
       next=session.sanitize({...plannedSession,revision:Math.max(plannedSession.revision,Number(ownershipClaim.revision)||0),updatedAt:clock.nowIso()});
       if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
-      const saved=await session.host.saveCanonicalSession(next,'claiming Active Session ownership',{expectedCanonical:localBefore});
-      localVerified=true;
+      const saved=await session.host.saveCanonicalSession(next,'claiming Active Session ownership',{expectedCanonical:localBefore,assertOrigin});
+      localVerified=true;assertOrigin();
       // This snapshot belonged to the previous ownership. The verified new
       // session's timer and practice state must be the sole source for saves.
       claimFreeze=null;presentation.clearStorageWarning(configuration.claimSaveWarning);
@@ -243,17 +246,17 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
       let compensated=false;
       if(ownershipClaim&&!localVerified&&previous&&next){
         try{
-          const loaded=await session.host.load({strict:true});
-          const current=loaded?.ok&&loaded.storage.idb===true?session.sanitize(loaded.value):null;
+          assertOrigin();const loaded=await session.host.load({strict:true});
+          assertOrigin();const current=loaded?.ok&&loaded.storage.idb===true?session.sanitize(loaded.value):null;
           let localReverted=!!current&&session.same(current,previous);
           if(!localReverted&&current&&session.same(current,next)){
-            await session.host.saveCanonicalSession(previous,'compensating a failed ownership transfer',{expectedCanonical:current});
-            localReverted=true;
+            await session.host.saveCanonicalSession(previous,'compensating a failed ownership transfer',{expectedCanonical:current,assertOrigin});
+            assertOrigin();localReverted=true;
           }
-          if(localReverted)compensated=await provider.releaseClaim(configuration.providerId,ownershipClaim);
+          if(localReverted){assertOrigin();compensated=await provider.releaseClaim(configuration.providerId,ownershipClaim,assertOrigin);}
         }catch(rollbackError){presentation.capture('session.takeover-compensation',rollbackError,'warn');}
       }
-      try{provider.wakeBackground('session-watch');}catch{}
+      try{assertOrigin();provider.wakeBackground('session-watch');}catch{}
       if(claimAttempted&&!compensated)throw Object.assign(handoffError('SESSION_CONTINUE_INCOMPLETE',RETRY_MESSAGE),{cause:error});
       throw error;
     }finally{backgroundHold?.release();transferActive=false;}

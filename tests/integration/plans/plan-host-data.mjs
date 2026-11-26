@@ -24,21 +24,21 @@ const b={id:'plan-beta0001',label:'Beta',scheduleText:'08:00 | 45 | Beta | work 
 let canonical=cleanPlans({draft:null,savedPlans:[a,b],defaultId:a.id});
 let canonicalPreferences={...emptyPreferences(),studentName:'Stored Student'};
 let writeDraftCalls=0,writeLibraryCalls=0,replaceCalls=0,replacePortableCalls=0,flushPreferenceCalls=0;
-let failLibrary=false,denyToken=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
+let revision=1,failLibrary=false,denyToken=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
 const token=freeze({format:'study-director.ownership-write-token',contractVersion:1,tabId:'t',pageId:'p',claimId:'c',revision:1,state:'primary',allowHydrating:false,reason:'qa'});
 const data=PlanHostModule.createData(freeze({
   codec,
   repositories:freeze({
     plans:freeze({
       read:async()=>clone(canonical),
-      replace:async value=>{replaceCalls++;canonical=cleanPlans(value);return true;},
-      replacePortable:async value=>{replacePortableCalls++;canonical=cleanPlans(value.plans);canonicalPreferences=clone(value.preferences);return clone({...value.preferences,version:2,updatedAt:'2026-11-10T00:00:00.000Z'});},
+      replace:async(value,options)=>{options?.assertOrigin?.();assert.equal(options?.ownershipToken?.revision,revision);replaceCalls++;canonical=cleanPlans(value);return true;},
+      replacePortable:async(value,options)=>{assert.equal(options?.ownershipToken?.revision,revision);replacePortableCalls++;canonical=cleanPlans(value.plans);canonicalPreferences=clone(value.preferences);return clone({...value.preferences,version:2,updatedAt:'2026-11-10T00:00:00.000Z'});},
       writeDraft:async value=>{writeDraftCalls++;canonical={...canonical,draft:value};return true;},
       writeLibrary:async value=>{writeLibraryCalls++;if(failLibrary)throw new Error('library unavailable');if(libraryWriteGate)await libraryWriteGate;canonical=cleanPlans({...canonical,...value});return true;}
     }),
     preferences:freeze({read:async()=>clone(canonicalPreferences)})
   }),
-  ownership:freeze({issueWriteToken:()=>{if(denyToken)throw new Error('ownership unavailable');return token;},assertWriteToken:()=>true}),
+  ownership:freeze({issueWriteToken:()=>{if(denyToken)throw new Error('ownership unavailable');return freeze({...token,revision});},assertWriteToken:issued=>{if(issued.revision!==revision)throw new Error('ownership changed');return true;}}),
   storage:freeze({markError:()=>true}),
   preferences:freeze({
     fallback:()=>emptyPreferences(),
@@ -100,6 +100,15 @@ await queuedReset;
 libraryWriteGate=null;
 assert.equal(canonical.defaultId,a.id,'storage-reset rewrite includes the library state committed immediately before its snapshot');
 
+// A queued rewrite may not borrow the next owner's token after waiting.
+{
+  let release;libraryWriteGate=new Promise(resolve=>{release=resolve;});
+  const pending=data.writeLibrary({savedPlans:[a,b],defaultId:b.id});await Promise.resolve();
+  const rewrite=data.rewriteAfterStorageReset();const before=replaceCalls;
+  revision++;release();await assert.rejects(pending,/ownership changed/u);await assert.rejects(rewrite,/ownership changed/u);
+  assert.equal(replaceCalls,before,'successor lease cannot authorize an earlier reset');libraryWriteGate=null;
+  await data.hydrate();
+}
 const stableLibrary=data.library();
 failLibrary=true;
 await assert.rejects(data.writeLibrary({savedPlans:[a],defaultId:a.id}),/library unavailable/);

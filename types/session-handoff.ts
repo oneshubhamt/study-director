@@ -35,6 +35,7 @@ export type SessionClaimRequest=Readonly<{
   handoffToken:string;
   decide:(source:SessionHandoffSource)=>Promise<SessionClaimDecision>;
   onWrite:()=>void;
+  assertOrigin:()=>void;
 }>;
 export type SessionClaimResult=Readonly<{status:string;reason?:string;claim?:SessionOwnershipClaim;source?:SessionHandoffSource}>;
 
@@ -47,6 +48,7 @@ export interface SessionHandoffInput{
   };
   authority:{
     canMutate():boolean;
+    captureOrigin(reason:string):()=>void;
     startupReady():boolean;
     visible():boolean;
     online():boolean;
@@ -57,7 +59,7 @@ export interface SessionHandoffInput{
     connected(id:string):boolean;
     readHandoffSource(id:string):Promise<SessionHandoffSource>;
     claimOwnership(id:string,request:SessionClaimRequest):Promise<SessionClaimResult>;
-    releaseClaim(id:string,claim:SessionOwnershipClaim):Promise<boolean>;
+    releaseClaim(id:string,claim:SessionOwnershipClaim,assertOrigin:()=>void):Promise<boolean>;
     readClaim(id:string):Promise<SessionClaimProjection|null>;
     scheduleSync(id:string,reason:string):boolean;
     suspendBackground(reason:string):Readonly<{settled:PromiseLike<unknown>;release():unknown}>;
@@ -109,6 +111,7 @@ export interface SessionHandoffStatus{
 export interface SessionHandoffTransferOptions{
   readonly onStep?:(text:string)=>unknown;
   readonly preread?:PromiseLike<unknown>|null;
+  readonly assertOrigin?:()=>void;
 }
 export interface SessionHandoffTransferResult{
   readonly previous:ActiveSession;
