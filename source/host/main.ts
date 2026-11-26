@@ -1597,7 +1597,7 @@ PresentationRuntime=PresentationHostModule.createController(Object.freeze<Presen
     hydrated:()=>protectedPreferencesHydrated,current:()=>protectedPreferencesState,
     persist:value=>persistProtectedPreferences(value)
   }),
-  ownership:Object.freeze<PresentationHostInput['ownership']>({require:reason=>requirePrimaryTab(null,reason)}),
+  ownership:Object.freeze<PresentationHostInput['ownership']>({require:reason=>requirePrimaryTab(null,reason),captureOrigin:reason=>{const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);}}),
   diagnostics:Object.freeze<PresentationHostInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   popovers:Object.freeze<PresentationHostInput['popovers']>({create:menu=>RichTextApi.createAnchoredPopover(menu,{align:'end',side:'top'})})
 }));

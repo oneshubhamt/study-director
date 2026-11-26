@@ -20,7 +20,7 @@ export interface PresentationHostInput{
     current():Readonly<PersonalPreferences>;
     persist(value:AppearancePreferenceOverrides):boolean;
   }>;
-  readonly ownership:Readonly<{require(reason:string):boolean}>;
+  readonly ownership:Readonly<{require(reason:string):boolean;captureOrigin(reason:string):()=>void}>;
   readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'warn'|'error'):unknown}>;
   readonly popovers:Readonly<{create(menu:HTMLElement):AnchoredPopoverPort}>;
 }

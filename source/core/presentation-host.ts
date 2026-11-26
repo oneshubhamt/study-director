@@ -72,13 +72,23 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     if(restoreFocus)[...document.querySelectorAll<HTMLElement>('.theme-btn[data-theme-id]')].find(button=>button.dataset['themeId']===clean)?.focus();
     return clean;
   }
+  // A native View Transition may invoke its callback after control has been
+  // transferred away and back. The current primary is not the originating lease.
+  function captureAppearanceIntent():null|(()=>boolean){
+    const reason='change appearance settings';
+    if(!ownership.require(reason))return null;
+    try{
+      const assertOrigin=ownership.captureOrigin(reason);
+      return ()=>{try{assertOrigin();return ownership.require(reason);}catch{return false;}};
+    }catch{return null;}
+  }
   function setTheme(themeId:unknown,{restoreFocus=false,origin=null}:Readonly<{restoreFocus?:boolean;origin?:HTMLElement|null}>={}):string{
-    if(!ownership.require('change appearance settings'))return kernel.activeThemeId();
+    const currentOrigin=captureAppearanceIntent();if(!currentOrigin)return kernel.activeThemeId();
     const clean=kernel.normalizeThemeId(themeId);
-    if(clean===kernel.activeThemeId())return applyTheme(clean,{persist:true,restoreFocus});
+    if(clean===kernel.activeThemeId())return currentOrigin()?applyTheme(clean,{persist:true,restoreFocus}):kernel.activeThemeId();
     const revision=++themeRevision;
     runAppearanceChange(origin,()=>{
-      if(revision===themeRevision&&ownership.require('change appearance settings'))applyTheme(clean,{persist:true,restoreFocus});
+      if(revision===themeRevision&&currentOrigin())applyTheme(clean,{persist:true,restoreFocus});
     });
     return clean;
   }
@@ -109,12 +119,12 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     return clean;
   }
   function setPresentation(presentationId:unknown,{restoreFocus=false,origin=null}:Readonly<{restoreFocus?:boolean;origin?:HTMLElement|null}>={}):string{
-    if(!ownership.require('change appearance settings'))return kernel.activePresentationId();
+    const currentOrigin=captureAppearanceIntent();if(!currentOrigin)return kernel.activePresentationId();
     const clean=kernel.normalizePresentationId(presentationId);
-    if(clean===kernel.activePresentationId())return applyPresentation(clean,{persist:true,restoreFocus});
+    if(clean===kernel.activePresentationId())return currentOrigin()?applyPresentation(clean,{persist:true,restoreFocus}):kernel.activePresentationId();
     const revision=++presentationRevision;
     runAppearanceChange(origin,()=>{
-      if(revision===presentationRevision&&ownership.require('change appearance settings'))applyPresentation(clean,{persist:true,restoreFocus});
+      if(revision===presentationRevision&&currentOrigin())applyPresentation(clean,{persist:true,restoreFocus});
     });
     return clean;
   }
