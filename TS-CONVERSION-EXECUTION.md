@@ -1,5 +1,11 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 P5.7 backup reminder retirement — CORRECTED / VERIFICATION OPEN · 2026-11-26
+
+- Start `eacfb35137c6c3064ddcad14d13a2bba39e76cbe`; inherited original main.js:2355–2389 async receipt/count check. Actual extracted owner reproduced reset followed by obsolete publication and notification. Objective: reset and newer admitted checks retire old checks, loss/reacquisition of original lease cannot publish, and automatic-backup availability changing during day-count read suppresses a reminder. Keep the existing seven-day rule, daily notification suppression and throttling.
+- Use checked host AppOwnership write-token capture and operation generation; recheck after both awaits and before publication, ignore retired receipt diagnostics. Extend real erased-owner backup-reminder integration suite with deferred receipt reset, deferred count loss/reacquisition and fresh retry, out-of-order forced checks, and automatic availability during count. No storage/schema/timing change.
+- Hosted exact verification required; PWA witness remains separate. Stage 1 OPEN; Phase 6 not started.
+
 ## REVIEW-P5 · Stage 1 P5.12 cross-profile fixture event-order correction — VERIFICATION OPEN · 2026-11-26
 
 - Exact `65e850c2cde224ef50ebdcdb9cb6907863078617` [PWA browser job](https://github.com/oneshubhamt/study-director/actions/runs/45871595308/job/140088233535) terminal FAILURE, first offline pass succeeded, original update checks all succeeded (startup Trusted Types, cooldown, offline deferred/online retry/single primary check, automatic Plan-end and idle guard, same-profile hidden-secondary immediate single reload, corrupt worker and precache rejection). New distinct-profile witness failed before exercising a second activation: "Timed out waiting for profile registry event deliberately delayed"; diagnostic proved initiator page1 reloaded to the independent profile scope (secondary) while page2 closed and independent primary. The prior hidden diagnostic failure is now explained; no underlying PWA safety verdict can be inferred from this fixture failure.

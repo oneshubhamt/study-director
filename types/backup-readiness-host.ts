@@ -87,7 +87,7 @@ export interface BackupNudgeInput{
   readonly verified:Pick<VerifiedRecoveryController,'read'|'entries'|'lastBackupTime'>;
   readonly storageHealth:Pick<StorageHealthController,'snapshot'>;
   readonly dueMs:number;readonly checkMs:number;
-  canMutate():boolean;now():number;automaticActive():boolean;dailySummaryCount():Promise<number>;todayIso():string;
+  canMutate():boolean;captureOrigin(reason:string):()=>void;now():number;automaticActive():boolean;dailySummaryCount():Promise<number>;todayIso():string;
   publishMessage(message:string):unknown;notify(title:string,message:string,tag:string):unknown;
   capture(scope:string,error:unknown,level:'warn'):unknown;
 }

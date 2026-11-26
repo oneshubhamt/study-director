@@ -1266,7 +1266,7 @@ if(!Object.isFrozen(VerifiedRecovery)||VerifiedRecovery.format!=='study-director
 
 BackupNudge=BackupReadinessHostModule.createBackupNudge(Object.freeze<Parameters<typeof BackupReadinessHostModule.createBackupNudge>[0]>({
   verified:VerifiedRecovery,storageHealth:requireStorageHealthController(),dueMs:7*24*60*60*1000,checkMs:60*60*1000,
-  canMutate:()=>appCanMutate(),now:()=>Date.now(),automaticActive:()=>BackupProviderRuntime.automaticActive(),
+  canMutate:()=>appCanMutate(),captureOrigin:reason=>{const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);},now:()=>Date.now(),automaticActive:()=>BackupProviderRuntime.automaticActive(),
   dailySummaryCount:async()=>{const summaries=await AppData.dailyRecords.summaries();return Array.isArray(summaries)?summaries.length:0;},
   todayIso:()=>todayISO(),publishMessage:()=>refreshStorageFallbackWarning(),
   notify:(title,message,tag)=>notifyUser(title,message,tag),capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)

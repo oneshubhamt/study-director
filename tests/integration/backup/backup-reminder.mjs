@@ -23,7 +23,7 @@ async function reminder({file=null,providers={},lastLocalSaveAt=null,device=fals
   }));
   const nudge=Readiness.createBackupNudge(freeze({
     verified,storageHealth:freeze({snapshot:()=>health}),dueMs:7*DAY,checkMs:60*60*1000,
-    canMutate:()=>true,now:()=>now,automaticActive:()=>device||drive,dailySummaryCount:async()=>savedDays,todayIso:()=> '2026-10-06',
+    canMutate:()=>true,captureOrigin:()=>()=>{},now:()=>now,automaticActive:()=>device||drive,dailySummaryCount:async()=>savedDays,todayIso:()=> '2026-10-06',
     publishMessage:()=>{},notify:(...args)=>notified.push(args),capture:()=>{}
   }));
   await nudge.run(true);
@@ -74,5 +74,46 @@ for(const [label,options] of [['Device Folder',{device:true}],['Drive while sign
 {
   assert.match((await reminder({savedDays:7})).message,/over a week old/u);assert.equal((await reminder({savedDays:3})).message,'');
   cases.push('never backed up: reminded once a week of days is saved');
+}
+// Exercise the actual owner across each deferred boundary, not a copied rule.
+const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
+const empty=freeze({version:3,file:null,providers:freeze({})});
+function raceFixture({read=async()=>empty,count=async()=>7}={}){
+  let lease=1,owner=true,automatic=false;
+  const published=[],notified=[];
+  const nudge=Readiness.createBackupNudge(freeze({
+    verified:freeze({read,entries:state=>[state.file,...Object.values(state.providers)].filter(Boolean),lastBackupTime:state=>state.file?Date.parse(state.file.at):-Infinity}),
+    storageHealth:freeze({snapshot:()=>({lastLocalSaveAt:iso(now-1000)})}),dueMs:7*DAY,checkMs:60*60*1000,
+    canMutate:()=>owner,captureOrigin:()=>{const origin=lease;return ()=>{if(origin!==lease||!owner)throw Error('retired');};},
+    now:()=>now,automaticActive:()=>automatic,dailySummaryCount:count,todayIso:()=> '2026-10-06',
+    publishMessage:value=>published.push(value),notify:(...args)=>notified.push(args),capture:()=>{}
+  }));
+  return {nudge,published,notified,retire:()=>{owner=false;lease++;owner=true;},activateAutomatic:()=>{automatic=true;}};
+}
+{
+  const receipt=deferred(),f=raceFixture({read:()=>receipt.promise});
+  const pending=f.nudge.run(true);f.nudge.reset();receipt.resolve(empty);
+  assert.equal(await pending,false);assert.deepEqual(f.published,['']);assert.equal(f.notified.length,0);assert.equal(f.nudge.message(),'');
+  cases.push('reset retires deferred receipt check');
+}
+{
+  const count=deferred(),entered=deferred(),f=raceFixture({count:()=>{entered.resolve();return count.promise;}});
+  const pending=f.nudge.run(true);await entered.promise;f.retire();count.resolve(7);
+  assert.equal(await pending,false);assert.deepEqual(f.published,[]);assert.equal(f.notified.length,0);
+  assert.equal(await f.nudge.run(true),true);assert.equal(f.notified.length,1);
+  cases.push('ownership loss and reacquisition retire deferred day count; fresh check works');
+}
+{
+  const receipt=deferred();let reads=0;
+  const f=raceFixture({read:()=>++reads===1?receipt.promise:Promise.resolve(freeze({...empty,file:copy(iso(now-1000))}))});
+  const pending=f.nudge.run(true);assert.equal(await f.nudge.run(true),false);receipt.resolve(empty);
+  assert.equal(await pending,false);assert.deepEqual(f.published,['']);assert.equal(f.notified.length,0);
+  cases.push('newer forced check supersedes deferred check');
+}
+{
+  const count=deferred(),entered=deferred(),f=raceFixture({count:()=>{entered.resolve();return count.promise;}});
+  const pending=f.nudge.run(true);await entered.promise;f.activateAutomatic();count.resolve(7);
+  assert.equal(await pending,false);assert.deepEqual(f.published,['']);assert.equal(f.notified.length,0);
+  cases.push('automatic backup becoming available during deferred count suppresses reminder');
 }
 console.log(JSON.stringify({status:'PASS',suite:'backup-reminder',productionOwner:'backup-readiness-host',cases},null,2));

@@ -225,14 +225,19 @@ function createAutomaticBackupPolicy(input:Readonly<AutomaticBackupPolicyInput>)
 }
 
 function createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudgeController>{
-  exactObject(input,['verified','storageHealth','dueMs','checkMs','canMutate','now','automaticActive','dailySummaryCount','todayIso','publishMessage','notify','capture'],'Backup nudge input');
-  let message='',checkedAt=0,notifiedDate='';
+  exactObject(input,['verified','storageHealth','dueMs','checkMs','canMutate','captureOrigin','now','automaticActive','dailySummaryCount','todayIso','publishMessage','notify','capture'],'Backup nudge input');
+  let message='',checkedAt=0,notifiedDate='',generation=0;
   async function run(force:boolean=false){
     if(!input.canMutate())return false;
-    const now=input.now();if(!force&&now-checkedAt<input.checkMs)return false;checkedAt=now;
+    const now=input.now();if(!force&&now-checkedAt<input.checkMs)return false;
+    let assertOrigin:()=>void;
+    try{assertOrigin=input.captureOrigin('check backup reminder');}catch{return false;}
+    checkedAt=now;const revision=++generation;
+    const current=()=>{if(revision!==generation||!input.canMutate())return false;try{assertOrigin();return true;}catch{return false;}};
     let backups;
     try{backups=await input.verified.read();}
-    catch(error){input.capture('backup.nudge-receipt-read',error,'warn');return false;}
+    catch(error){if(current())input.capture('backup.nudge-receipt-read',error,'warn');return false;}
+    if(!current())return false;
     const entries=input.verified.entries(backups),last=input.verified.lastBackupTime(backups);
     const covered=Math.max(-Infinity,...entries.map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
     const changed=Date.parse(input.storageHealth.snapshot().lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
@@ -240,6 +245,8 @@ function createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudg
     if(!Number.isFinite(last)&&!automatic){
       try{due=(await input.dailySummaryCount())>=7;}catch{}
     }
+    if(!current())return false;
+    if(input.automaticActive())due=false;
     const drive=!!backups.providers['google-drive'];
     message=due?(drive?'Backup reminder: your changes have not reached Google Drive for over a week. Sign in again in Library → Data.':'Backup reminder: the last backup is over a week old. Open Library → Data.'):'';
     input.publishMessage(message);
@@ -250,7 +257,7 @@ function createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudg
     }
     return due;
   }
-  function reset(){message='';checkedAt=input.now();notifiedDate='';input.publishMessage('');return true;}
+  function reset(){generation++;message='';checkedAt=input.now();notifiedDate='';input.publishMessage('');return true;}
   return freeze({format:'study-director.backup-nudge' as const,contractVersion:1 as const,run,reset,message:()=>message,checkedAt:()=>checkedAt});
 }
 
