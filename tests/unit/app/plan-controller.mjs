@@ -51,7 +51,7 @@ const scheduleTextFromRows=rows=>'ROW:'+JSON.stringify(rows);
 const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
-let breakActive=false,breakEnds=0;
+let breakActive=false,breakEnds=0,applyGate=null,finishApplyGate=null,applyRequested=false,safetyClears=0,studyDate='2026-11-26';
 let blockedWrite=null,canonicalDraft=null,canWrite=true,ownerRevision=1;const saveOptions=[];
 const feedback=[],draftResults=[];
 const timers=new Map();let nextTimer=0;
@@ -87,11 +87,15 @@ const clockFunctions={
 };
 const gateway={
   act:()=>true,
-  apply:(rows)=>{applyCount++;tasks.splice(0,tasks.length,...rows);currentFingerprint=fingerprint(rows);return {migrationSummary:null};},
+  apply:(rows,options)=>{
+    applyRequested=true;
+    const perform=()=>{if(options.current&&!options.current())return false;options.beforeApply?.();applyCount++;tasks.splice(0,tasks.length,...rows);currentFingerprint=fingerprint(rows);const result={migrationSummary:null};return finishApplyGate?finishApplyGate.then(()=>result):result;};
+    return applyGate?applyGate.then(perform):perform();
+  },
   breakState:action=>{if(action==='end'){breakActive=false;breakEnds++;return true;}return breakActive;},
   captureMigration:()=>({preview:{matched:0,total:0,practiceTotal:0,practiceMatched:0}}),
-  clearSafety:()=>{},flush:()=>{},hasLiveState:()=>liveActivity,
-  markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480}),
+  clearSafety:()=>{safetyClears++;},flush:()=>{},hasLiveState:()=>liveActivity,
+  markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480,studyDate}),
   reconcile:()=>{},renameAreas:()=>0,row:()=>({done:false,skipped:false}),
   timeline:()=>({rows:[],realtime:{scheduledIdx:null,first:0,nowEff:490}})
 };
@@ -602,10 +606,41 @@ assert.equal(confirmRequested,true);ownerRevision++;releaseConfirm(true);confirm
 assert.equal(await staleApply,false);assert.equal(breakEnds,beforeStaleBreak);
 assert.equal(applyCount,beforeStaleApply);assert.equal(breakActive,true);breakActive=false;
 
+// A strict Review flush can hold the real gateway after Plan confirmation.
+for(const change of ['edit','date','owner']){
+  ids['plan-input'].value='Apply awaiting Review '+change;plan.draft.enter();composer.open=true;
+  let release;applyGate=new Promise(resolve=>{release=resolve;});applyRequested=false;
+  const before=applyCount,beforeSafety=safetyClears,pending=plan.draft.confirm();
+  for(let i=0;i<30&&!applyRequested;i++)await Promise.resolve();
+  assert.equal(applyRequested,true);
+  if(change==='edit'){ids['plan-input'].value='Newer working draft';plan.draft.composerInput();}
+  if(change==='date')studyDate='2026-11-25';
+  if(change==='owner')ownerRevision++;
+  release();applyGate=null;
+  assert.equal(await pending,false,'retired '+change+' intent must not mutate live schedule');
+  assert.equal(applyCount,before);assert.equal(safetyClears,beforeSafety);
+  assert.equal(composer.open,true);
+  assert.equal(plan.draft.active(),true);
+}
+studyDate='2026-11-26';
+ids['plan-input'].value='Successfully applied before newer editor';plan.draft.enter();
+let releaseCompletion;finishApplyGate=new Promise(resolve=>{releaseCompletion=resolve;});applyRequested=false;
+const beforeApplied=applyCount,pendingCompletion=plan.draft.confirm();
+for(let i=0;i<30&&applyCount===beforeApplied;i++)await Promise.resolve();
+assert.equal(applyCount,beforeApplied+1);
+ids['plan-input'].value='Successor composer';plan.draft.composerInput();composer.open=true;
+const priorFeedback=feedback.length,priorSafety=safetyClears;
+releaseCompletion();finishApplyGate=null;
+assert.equal(await pendingCompletion,true,'the actual live mutation is not undone');
+assert.equal(plan.draft.active(),true);assert.equal(composer.open,true);
+assert.equal(ids['plan-input'].value,'Successor composer');
+assert.equal(feedback.length,priorFeedback);assert.equal(safetyClears,priorSafety);
+await plan.draft.flush();
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent','gateway-review-flush-admission','stale-apply-composer-completion']}));

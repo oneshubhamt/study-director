@@ -1,5 +1,5 @@
 import type {PilotRegistry} from '../../types/pilot.ts';
-import type {SessionHooks,SessionOptions,SessionContext,SessionCompletion} from '../../types/session-lifecycle.ts';
+import type {SessionHooks,SessionOptions,SessionContext,SessionCompletion,SessionAdmission} from '../../types/session-lifecycle.ts';
 (()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:PilotRegistry|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -64,15 +64,6 @@ registry.define('session-lifecycle',1,()=>{
       }
       return start(name,normalized);
     }
-    async function begin(kind:unknown,options:SessionOptions={}){
-      requireIdle();
-      const normalized=normalizedOptions(options),name=normalizedKind(kind),token=++flushToken;
-      const ticket=freeze({token,kind:name});pendingFlush=ticket;
-      try{await hooks.flushPending(name,normalized);}
-      finally{if(pendingFlush===ticket)pendingFlush=null;}
-      if(token!==flushToken)throw new LifecycleBusyError(`${name} was superseded before its pending Review flush settled.`);
-      return start(name,normalized);
-    }
     function isCurrent(ctx:SessionContext){return !!(active&&active.id===ctx.id);}
     function supersedeActive(reason:unknown='lifecycle invalidation'){
       const superseded=active;
@@ -111,14 +102,23 @@ registry.define('session-lifecycle',1,()=>{
         throw error;
       }
     }
-    async function run<T>(kind:unknown,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>{
+    async function run<T>(kind:unknown,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>,admission?:SessionAdmission<T>):Promise<T>{
       if(typeof operation!=='function')throw new TypeError('Lifecycle transition requires an operation.');
-      const ctx=await begin(kind,options);
+      requireIdle();
+      const normalized=normalizedOptions(options),name=normalizedKind(kind),token=++flushToken;
+      const ticket=freeze({token,kind:name});pendingFlush=ticket;
+      try{await hooks.flushPending(name,normalized);}
+      finally{if(pendingFlush===ticket)pendingFlush=null;}
+      // Guard after the flush, before prepare invalidates the old Review. Start
+      // and dispatch in this same turn: no gap in which another ticket can win.
+      if(admission&&(token!==flushToken||!admission.current()))return admission.cancelled;
+      if(token!==flushToken)throw new LifecycleBusyError(`${name} was superseded before its pending Review flush settled.`);
+      const ctx=start(name,normalized);
       try{
         const result=await operation(ctx);
-        if(!isCurrent(ctx))return result;
+        if(!isCurrent(ctx))return admission?admission.cancelled:result;
         const reconciled=ctx.options.reconcile===false?false:(await hooks.reconcile(ctx,result),true);
-        if(!isCurrent(ctx))return result;
+        if(!isCurrent(ctx))return admission?admission.cancelled:result;
         finish(ctx,{reconciled});
         return result;
       }catch(error){

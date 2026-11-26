@@ -618,8 +618,12 @@ function restoreSessionAction(){
     ? (TASKS.some(isTrackableBlock)?goTab('review',{source:'previous-day-review'}):revisitPreviousStoredSession())
     : state.sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession();
 }
-function uploadSoonAfterPlanApply(result:boolean|PromiseLike<boolean>){
-  const done=(applied:boolean)=>{if(applied)void Promise.resolve(ports.ActiveSessionRuntime.flushLiveDraft()).catch(error=>ports.AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
+function uploadSoonAfterPlanApply(result:boolean|PromiseLike<boolean>,assertOrigin=captureSessionActionOrigin()){
+  const done=(applied:boolean)=>{
+    if(!sessionActionCurrent(assertOrigin))return false;
+    if(applied)void Promise.resolve(ports.ActiveSessionRuntime.flushLiveDraft()).catch(error=>ports.AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>{if(sessionActionCurrent(assertOrigin))notifyBackupChange({urgent:true,reason:'plan-apply'});});
+    return applied;
+  };
   return typeof result==='boolean'?done(result):Promise.resolve(result).then(done);
 }
 async function applyScheduleAction(){
@@ -633,7 +637,7 @@ async function applyScheduleAction(){
   }
   try{
     if(!sessionActionCurrent(assertOrigin))return false;
-    const result=await uploadSoonAfterPlanApply(ports.applySchedule(takeover?{source:'ownership-takeover'}:{}));
+    const result=await uploadSoonAfterPlanApply(ports.applySchedule(takeover?{source:'ownership-takeover'}:{}),assertOrigin);
     if(result===false&&takeover&&sessionActionCurrent(assertOrigin))await attemptAutoRestoreActiveSession();
     return result;
   }finally{ports.schedulePwaUpdateEvaluation(250);}

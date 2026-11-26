@@ -775,11 +775,12 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
 
   function apply(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}){
     const opts=options&&typeof options==='object'?options:{};
-    if(opts.lifecycleManaged)return applyRows(rows,opts);
+    const perform=()=>{opts.beforeApply?.();return applyRows(rows,{...opts,lifecycleManaged:true});};
+    if(opts.lifecycleManaged)return opts.current&&!opts.current()?false:perform();
     const date=isValidIsoDate(opts.studyDate)?opts.studyDate:todayISO();
-    return SessionLifecycle.run(opts.source||'schedule-apply',{
+    return SessionLifecycle.run<ReturnType<typeof applyRows>|false>(opts.source||'schedule-apply',{
       scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
-    },()=>applyRows(rows,{...opts,lifecycleManaged:true}));
+    },perform,opts.current?{current:opts.current,cancelled:false}:undefined);
   }
   function reconcile(source='schedule-reapply'){
     return SessionLifecycle.reconcile(source,{
@@ -793,7 +794,7 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
       tasks:TASKS,
       currentIndex:TimerState.currentIndex,
       anchor:TimerState.scheduleAnchorMin,
-      fingerprint:scheduleFingerprint(),
+      fingerprint:scheduleFingerprint(),studyDate:getReviewDate(),
       renderDirty:!!ScheduleDerivedState.renderDirty
     });
   }

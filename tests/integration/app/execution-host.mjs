@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readScript} from '../../../build/source-script.mts';
-for(const file of ['internal','domain','timer-state','execution-host','execution-views'])vm.runInThisContext(readScript(`source/core/${file}.ts`),{filename:file});
+for(const file of ['internal','domain','timer-state','execution-host','execution-views','session-lifecycle'])vm.runInThisContext(readScript(`source/core/${file}.ts`),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:100,maxDurationMinutes:1440,maxScheduleChars:10000,maxScheduleRows:100,maxTaskNameChars:100,maxTasksPerDay:100,maxUnitChars:50}));
 const {ScheduleModel:model,TimeModel:time}=domain,owner=registry.require('execution-host',1);
@@ -19,14 +19,25 @@ const original=[row('Read A','Area A',10),{...row('Read B','Area B',5),start:'08
 state.loadSchedule(model.buildTasks(original),{studyDate:date});schedule.resetScheduleLayers();
 fields.setField(0,'notes',{done:4,total:10});fields.setField(0,'completion',40);fields.setField(0,'completionSource','units');fields.setField(0,'actualTime',300);fields.setField(0,'actualClock',{startedAt:'2026-11-13T08:00:00Z'});fields.setResolved(1,'skipped');
 const oldId=state.taskIdentity.idAt(0);
+let reviewGate=null;const lifecycleEvents=[];
+const lifecycle=registry.require('session-lifecycle',1).createCoordinator(Object.freeze({hooks:Object.freeze({canMutate:()=>true,flushPending:()=>reviewGate,prepare:()=>lifecycleEvents.push('prepare'),reconcile:()=>lifecycleEvents.push('reconcile'),complete:()=>lifecycleEvents.push('complete'),capture:()=>{}})}));
 const gateway=owner.createScheduleGateway({runtime,document:{getElementById:()=>null},ScheduleDerivedState:{renderDirty:true},APP_LIMITS:{maxCarryForwardChars:5000},completionSources:domain.COMPLETION_SOURCES,
   getCarryForward:()=>carry,setCarryForward:value=>{carry=value;},taskAreaKey:model.areaKey,taskMeasureValue:model.measureValue,taskTargetValue:model.targetValue,isTrackableBlock:model.isTrackable,clampText:value=>String(value),normalizeCompletionSource:domain.CompletionModel.normalizeSource,makeTaskId:domain.makeTaskId,
   isLiveTrackableTimer:()=>false,saveNote(){},captureReviewInputs(){},syncUnfinishedNoteDraft(){},getReviewDate:()=>date,showEmpty(){},refreshCoreUi(){},showDone(){},isValidIsoDate:time.isValidIsoDate,todayISO:()=>date,buildTasks:model.buildTasks,isValidHHMM:time.isValidHHMM,clockMinuteToStudyMinute:time.clockMinuteToStudyMinute,t2m:time.clockToMinute,
-  invalidateScheduleDerived(){},applySessionSnapshot(){throw new Error('progress replacement must not restore a stale session');},restoreLiveDraftIfAny(){throw new Error('progress replacement must not restore local rescue');},restoreTimerRuntimeIfAny:()=>false,clearFutureUntouchedProgress(){},flushLiveDraft(){},scheduleFingerprint:()=>'',writeLiveDraftNow(){},advanceTaskNoteScheduleRevision(){},markDayContentChanged(){},clearSessionSafetyMessage(){},SessionLifecycle:{run:async(_source,_options,operation)=>operation(),runSync:(_source,_options,operation)=>operation(),reconcile:()=>true}
+  invalidateScheduleDerived(){},applySessionSnapshot(){throw new Error('progress replacement must not restore a stale session');},restoreLiveDraftIfAny(){throw new Error('progress replacement must not restore local rescue');},restoreTimerRuntimeIfAny:()=>false,clearFutureUntouchedProgress(){},flushLiveDraft(){},scheduleFingerprint:()=>'',writeLiveDraftNow(){},advanceTaskNoteScheduleRevision(){},markDayContentChanged(){},clearSessionSafetyMessage(){},SessionLifecycle:lifecycle
 });
 const replacement=[{...original[1],start:'08:00'},{...original[0],name:'Read A revised',target:20,start:'08:40'}];
 const captured=gateway.captureMigration(replacement);assert.equal(captured.preview.matched,2);assert.equal(pauseCalls,1);
-const applied=await gateway.apply(replacement,{progressMigration:captured,reviewOnly:true});
+let releaseReview,current=true,entered=0;
+reviewGate=new Promise(resolve=>{releaseReview=resolve;});
+const beforeTasks=JSON.stringify(tasks),beforeFields=fields.getField(0,'completion'),beforeEvents=[...lifecycleEvents];
+const cancelled=gateway.apply(replacement,{progressMigration:captured,reviewOnly:true,current:()=>current,beforeApply:()=>entered++});
+current=false;releaseReview();reviewGate=null;
+assert.equal(await cancelled,false);assert.equal(entered,0);
+assert.equal(JSON.stringify(tasks),beforeTasks);assert.equal(fields.getField(0,'completion'),beforeFields);
+assert.deepEqual(lifecycleEvents,beforeEvents,'obsolete intent never starts the lifecycle');
+const applied=await gateway.apply(replacement,{progressMigration:captured,reviewOnly:true,current:()=>true,beforeApply:()=>entered++});
+assert.equal(entered,1);
 assert.equal(applied.migrationSummary.matched,2);assert.equal(applied.migrationSummary.areaMatched,1);
 assert.equal(fields.getField(1,'completion'),20,'new target recalculates preserved unit progress');assert.deepEqual(fields.getField(1,'notes'),{done:4});
 assert.equal(fields.getField(1,'actualTime'),300);assert.equal(fields.getField(1,'actualClock').startedAt,'2026-11-13T08:00:00Z');
@@ -41,4 +52,4 @@ assert.equal(shift.adjustments.length,1);assert.equal(shift.adjustments[0].idx,1
 fields.setResolved(0,null);
 const bounded=recovery.deriveRecoveryShiftPlan(0,1390);assert.equal(bounded.adjustments.length,1);assert.deepEqual(bounded.overflow,[1]);
 assert.ok(bounded.adjustments.every(item=>item.endMin<=1440),'recovery never schedules focus beyond the study-day boundary');
-console.log(JSON.stringify({status:'PASS',suite:'execution-host',progressPreserved:true,ambiguousMatchRejected:true,practiceLinksRemapped:true,reviewOnlyNoTimer:true,recoveryBounded:true}));
+console.log(JSON.stringify({status:'PASS',suite:'execution-host',progressPreserved:true,ambiguousMatchRejected:true,practiceLinksRemapped:true,reviewOnlyNoTimer:true,recoveryBounded:true,guardedGatewayAdmission:true}));

@@ -61,6 +61,24 @@ assert.equal(asyncBlocked.transitioning,false);
 assert.equal(asyncBlocked.canWrite(),true,'a rejected pre-transition flush preserves the valid prior lifecycle state');
 assert.deepEqual(asyncBlockedEvents,['flush']);
 
+// A guarded transition must stop before prepare if the user intent changes
+// while Review is flushing. The existing Review binding/readiness is retained.
+{
+  const events=[];let release,valid=true;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const subject=LifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
+    canMutate:()=>true,flushPending:()=>{events.push('flush');return gate;},
+    prepare:()=>events.push('prepare'),reconcile:()=>events.push('reconcile'),
+    complete:()=>events.push('complete'),capture:()=>{}
+  })}));
+  subject.reconcile('initial');events.length=0;
+  const prior=subject.status();
+  const pending=subject.run('schedule-apply',{},()=>{events.push('mutate');return true;},{current:()=>valid,cancelled:false});
+  valid=false;release();
+  assert.equal(await pending,false);
+  assert.deepEqual(events,['flush']);assert.deepEqual(subject.status(),prior);
+}
+
 // Recovery-owned note lifecycle transitions may checkpoint the pending Review
 // through recovery quiescence; unrelated lifecycle transitions may not.
 {

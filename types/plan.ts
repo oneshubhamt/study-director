@@ -55,7 +55,7 @@ export interface PlanRealtimeState{
   scheduledIdx:number|null;currentIdx?:number|null;nowEff:number;first:number|null;driftKind?:string;match?:boolean;
 }
 export interface PlanGatewayRead{
-  tasks:readonly import('./domain.ts').Task[];fingerprint:string;anchor:number;currentIndex?:number;renderDirty?:boolean;
+  tasks:readonly import('./domain.ts').Task[];fingerprint:string;anchor:number;studyDate:string;currentIndex?:number;renderDirty?:boolean;
 }
 export interface PlanMigrationPreview{matched?:number;total?:number;practiceTotal?:number;practiceMatched?:number}
 export type PlanMigration=import('./execution-host.ts').ScheduleProgressSnapshot;

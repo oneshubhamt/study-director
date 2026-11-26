@@ -554,19 +554,26 @@ function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraf
     : '✓ Schedule loaded — ' + parsed.filter(isWorkBlock).length + ' work blocks' + migrationText + ' · switch to Execute tab';
   return {text:warningText?baseStatus+' · '+warningText:baseStatus,state:warningText?'warn':true};
 }
-function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly import('../../types/domain.ts').ScheduleRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft){
+function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly import('../../types/domain.ts').ScheduleRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft,current:()=>boolean){
   if(preparation.handled)return preparation.result===true&&keepAppliedScheduleOnReapply(parsed,rawOriginal,opts);
   if(preparation.cancelled)return false;
-  setParsedScheduleDraft(parsed);
-  PlanDraftEditor.deactivate();
-  lastAppliedScheduleText='';
+  const owner=ownership.revision(),field=fieldById('plan-input','textarea');
+  let appliedEpoch:number|null=null;
+  const beforeApply=()=>{
+    setParsedScheduleDraft(parsed);
+    PlanDraftEditor.deactivate();
+    lastAppliedScheduleText='';
+    appliedEpoch=editEpoch;
+  };
   const applyResult=scheduleGateway.apply(parsed,{
     ...(opts.studyDate===undefined?{}:{studyDate:opts.studyDate}),...(opts.source===undefined?{}:{source:opts.source}),
     progressMigration:preparation.progressMigration||null,reviewOnly:!!opts.reviewOnly,
-    sessionSnapshot:opts.sessionSnapshot||null,lifecycleManaged:!!opts.lifecycleManaged
+    sessionSnapshot:opts.sessionSnapshot||null,lifecycleManaged:!!opts.lifecycleManaged,current,beforeApply
   });
   const finishApply=(result:import('../../types/plan.ts').PlanGatewayApplyResult|boolean|null)=>{
-    if(result===false)return false;
+    if(result===false||appliedEpoch===null||ownership.revision()!==owner)return false;
+    // The session was applied, but a later draft owns its own composer and feedback.
+    if(editEpoch!==appliedEpoch||fieldById('plan-input','textarea')!==field)return true;
     renderSched();
     setPlanComposerOpen(false);
     const migrationSummary=result&&typeof result==='object'?result.migrationSummary:undefined;
@@ -585,10 +592,10 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
   const rawOriginal=explicitSchedule===null?getPlanDraftText():explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
-  const owner=ownership.revision(),epoch=editEpoch,field=fieldById('plan-input','textarea');
+  const owner=ownership.revision(),epoch=editEpoch,field=fieldById('plan-input','textarea'),live=scheduleGateway.read();
   const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
   const canApply=()=>
-    (explicitSchedule!==null||(ownerCurrent(owner)&&editEpoch===epoch&&fieldById('plan-input','textarea')===field))&&
+    (explicitSchedule!==null||(ownerCurrent(owner)&&editEpoch===epoch&&fieldById('plan-input','textarea')===field&&scheduleGateway.read().fingerprint===live.fingerprint&&scheduleGateway.read().studyDate===live.studyDate))&&
     (typeof opts.currentEditor!=='function'||opts.currentEditor());
   const finish=(preparation:Readonly<PlanApplyPreparation>,draft:ImmutablePlanDraft,parsed:readonly ScheduleRow[])=>{
     if(!canApply())return false;
@@ -596,7 +603,7 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
       return false;
     }
-    return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft);
+    return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft,()=>canApply()&&currentDraft());
   };
   const apply=()=>{
     if(!canApply())return false;
