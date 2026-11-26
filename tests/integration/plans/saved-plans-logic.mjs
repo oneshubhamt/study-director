@@ -58,7 +58,7 @@ document.add('pane-plan');
 document.add('sched-list');
 const liveTasks=[];
 
-let library={savedPlans:[],defaultId:null},renameAnswer={value:'Renamed plan'},renameMutation=null,timerCallback=null,canMutate=true,draftWriteCalls=[];
+let library={savedPlans:[],defaultId:null},renameAnswer={value:'Renamed plan'},renameMutation=null,timerCallback=null,canMutate=true,ownerRevision=1,draftWriteCalls=[],confirmMutation=null,libraryWrites=0;
 const freeze=Object.freeze,fn=()=>false;
 let notificationTime=0,notificationTimer=null;
 const {coordinator,port:notifications}=createNotifications('plan',{now:()=>notificationTime,setTimeout:callback=>{notificationTimer=callback;return 1;},clearTimeout:()=>{notificationTimer=null;}});
@@ -66,15 +66,15 @@ coordinator.subscribe(state=>{const event=state.events.filter(event=>event.surfa
 const ports=freeze({
   notifications,
   configuration:freeze({limits:freeze({maxStatusMessageChars:2000,maxDurationMinutes:1440,maxTaskNameChars:160,maxAreaNameChars:160,maxUnitChars:40})}),
-  persistence:freeze({lastError:()=>null,readDraft:()=>draft.value,readLibrary:()=>structuredClone(library),writeLibrary:async value=>{library=structuredClone(value);return true;},writeDraft:async(value,options={})=>{draftWriteCalls.push({value,options:{...options}});return true;},reportDraftResult:()=>{}}),
+  persistence:freeze({lastError:()=>null,readDraft:()=>draft.value,readLibrary:()=>structuredClone(library),writeLibrary:async value=>{libraryWrites++;library=structuredClone(value);return true;},writeDraft:async(value,options={})=>{draftWriteCalls.push({value,options:{...options}});return true;},reportDraftResult:()=>{}}),
   defaults:freeze({active:()=>freeze({studentName:'QA',scheduleText:''}),applyStudentName:()=>{},factory:freeze({studentName:'QA',scheduleText:''})}),
   domain:freeze(Object.fromEntries(['clampText','fmtDur','fmtS','hasOngoingTaskNotes','isFixedBlock','isSupportBlock','isTrackableBlock','isWorkBlock','makeScheduleRow','normalizeScheduleKind','normalizeScheduleTarget','positiveMinutes','scheduleFingerprintForRows','scheduleToken','scheduleWarningsMessage','taskAreaKey','taskAreaValue','taskMeasureValue','taskTargetValue','noteTextForKey'].map(key=>[key,key==='clampText'?(v=>String(v??'')):fn]))),
   parser:freeze({isCanonicalScheduleText:()=>true,parseScheduleDraftText:()=>({ok:true,kind:'valid',parsed:[],errors:[],warnings:[]}),scheduleTextFromRows:()=>''}),
   clock:freeze(Object.fromEntries(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso'].map(key=>[key,fn]))),
   view:freeze({document,on:()=>{},textEl:()=>{},updateRealTimeAwareness:()=>{},window:{}}),
   scheduleGateway:freeze({act:fn,apply:fn,breakState:fn,captureMigration:fn,clearSafety:fn,flush:fn,hasLiveState:fn,markRender:fn,read:()=>({tasks:liveTasks,currentIndex:0,renderDirty:false}),reconcile:fn,renameAreas:fn,row:()=>({}),timeline:()=>({rows:[],realtime:{scheduledIdx:null,nowEff:0,first:0}})}),
-  ownership:freeze({canMutate:()=>canMutate,requirePrimary:()=>canMutate}),
-  interactions:freeze({confirm:async()=>true,input:async()=>{renameMutation?.();renameMutation=null;return renameAnswer;}}),
+  ownership:freeze({canMutate:()=>canMutate,requirePrimary:()=>canMutate,revision:()=>ownerRevision}),
+  interactions:freeze({confirm:async()=>{confirmMutation?.();confirmMutation=null;return true;},input:async()=>{renameMutation?.();renameMutation=null;return renameAnswer;}}),
   overlays:freeze({createAnchoredPopover:popup=>{popup.hidden=true;let trigger=null;return {show:target=>{trigger=target;target.popoverTargetElement=popup;popup.hidden=false;},hide:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;},destroy:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;}};}}),
   environment:freeze({clearTimeout:()=>{timerCallback=null;},setTimeout:callback=>{timerCallback=callback;return 1;}})
 });
@@ -156,6 +156,25 @@ assert.equal(typeof notificationTimer,'function');
 notificationTime+=2601;notificationTimer();
 assert.equal(status.textContent,'','coordinator expires transient inline feedback');
 
+// Confirmation names a specific record, not whatever later has the same ID.
+for(const action of ['rename','delete','update','load']){
+  const before=libraryWrites,beforeDraft=draft.value,beforeDraftWrites=draftWriteCalls.length;
+  const replace=()=>{const selected=library.savedPlans.find(plan=>plan.id===id);selected.label='Sync replacement '+action;selected.scheduleText='Newer '+action;};
+  if(action==='rename')renameMutation=replace;
+  else confirmMutation=replace;
+  assert.equal(await runtime.savedPlans.act(action,id),false,'stale '+action+' must be refused');
+  assert.equal(libraryWrites,before,'stale consent must not mutate the saved library');
+  assert.equal(draftWriteCalls.length,beforeDraftWrites,'stale load must not write a draft');
+  assert.equal(draft.value,beforeDraft);
+  assert.equal(library.savedPlans.find(plan=>plan.id===id).label,'Sync replacement '+action);
+}
+const beforeLostRename=libraryWrites;
+renameMutation=()=>{ownerRevision++;};
+assert.equal(await runtime.savedPlans.act('rename',id),false,'new primary authority does not inherit old rename consent');
+assert.equal(libraryWrites,beforeLostRename);
+const beforeMissingDelete=libraryWrites;
+assert.equal(await runtime.savedPlans.act('delete','missing-plan'),false,'missing explicit target must never fall back to another saved plan');
+assert.equal(libraryWrites,beforeMissingDelete);
 assert.equal(await runtime.savedPlans.act('delete',id),true);
 assert.equal(library.savedPlans.length,1);
 assert.equal(library.savedPlans[0].id,'plan-concurrent');
@@ -178,4 +197,4 @@ assert.equal(draftWriteCalls.length,writesBeforeCancel+1,'Cancel commits the ind
 assert.equal(draftWriteCalls.at(-1).value,preservedText,'Cancel saves the independent working draft rather than copying live Plan rows');
 assert.equal(draftWriteCalls.at(-1).options.strictDurability,true,'Cancel waits for a strict IndexedDB Plan draft write');
 
-console.log(JSON.stringify({status:'PASS',suite:'saved-plans-logic',checks:['empty state','save/load/update row behavior','empty update rejection','ellipsis menu survives native popover default action and ownership heartbeat sync','default badge and redundant action omission','rename preserves concurrent library change','rename dialog contract keeps new-plan field independent','coordinator-owned success expiry','delete cleans default reference without deleting unrelated plans','backup flush is dirty-only and backupCapture-tagged']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'saved-plans-logic',checks:['empty state','save/load/update row behavior','empty update rejection','ellipsis menu survives native popover default action and ownership heartbeat sync','default badge and redundant action omission','rename preserves concurrent library change','rename dialog contract keeps new-plan field independent','coordinator-owned success expiry','delete cleans default reference without deleting unrelated plans','backup flush is dirty-only and backupCapture-tagged','exact saved-plan consent','stale owner consent','explicit missing target rejection']},null,2));

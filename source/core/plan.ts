@@ -2,7 +2,7 @@ import type {ScheduleRow} from '../../types/domain.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {
   PlanModule as PlanModuleContract,PlanModuleInput,PlanRow,PlanParseResult,ImmutablePlanDraft,PlanDraftProjection,
-  PlanTone,PlanElement,PlanRealtimeState,PlanMigration,PlanTimelineRow,PlanHydrateOptions,PlanLoadDraftOptions,
+  SavedPlan,PlanTone,PlanElement,PlanRealtimeState,PlanMigration,PlanTimelineRow,PlanHydrateOptions,PlanLoadDraftOptions,
   PlanDraftSaveOptions,PlanDraftPreviewOptions,PlanApplyOptions,PlanApplyPreparation,PlanMigrationSummary
 } from '../../types/plan.ts';
 const sdPlanFactory=(()=>{
@@ -23,7 +23,7 @@ const createModule=():PlanModuleContract=>{
     clock:freeze(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso']),
     view:freeze(['document','on','textEl','updateRealTimeAwareness','window']),
     scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','renameAreas','row','timeline']),
-    ownership:freeze(['canMutate','requirePrimary']),
+    ownership:freeze(['canMutate','requirePrimary','revision']),
     interactions:freeze(['confirm','input']),
     notifications:freeze(['begin','feedback']),
     overlays:freeze(['createAnchoredPopover']),
@@ -55,6 +55,7 @@ const createModule=():PlanModuleContract=>{
     const {document,on,textEl,updateRealTimeAwareness,window}=ports.view;
     const scheduleGateway=ports.scheduleGateway;
     const ownership=ports.ownership;
+    const ownerCurrent=(revision:number)=>ownership.canMutate()&&ownership.revision()===revision;
     const {confirm,input:requestInput}=ports.interactions;
     const {clearTimeout,setTimeout}=ports.environment;
     function fieldById<K extends keyof HTMLElementTagNameMap>(id:string,tag:K):HTMLElementTagNameMap[K]|null{
@@ -73,7 +74,7 @@ const createModule=():PlanModuleContract=>{
       const active=fallback?DefaultStore.factory:DefaultStore.active();
       const saved=fallback?null:persistence.readDraft();
       DefaultStore.applyStudentName(active.studentName);
-      if(input)input.value=typeof saved==='string'?saved:active.scheduleText;
+      if(input)PlanDraftEditor.replaceText(typeof saved==='string'?saved:active.scheduleText);
       return true;
     }
 function loadDefaultPlan(){return loadScheduleIntoDraft(DefaultStore.active().scheduleText,{label:'Default',allowIncomplete:true});}
@@ -92,23 +93,25 @@ async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanL
   }
   const ta=fieldById('plan-input','textarea');
   if(!ta)return {ok:false,error:'missing_plan_input'};
-  const previous=ta.value,confirmedEpoch=editEpoch;
+  const previous=ta.value,confirmedEpoch=editEpoch,owner=ownership.revision();
   if(previous&&previous!==text){
     const yes=await confirm({title:'Replace current draft?',message:'The current draft will be replaced with a working copy. Saved plans and the live timer are unchanged.',confirmLabel:'Load into draft',cancelLabel:'Keep current draft'});
     if(!yes)return {ok:false,error:'cancelled'};
     if(editEpoch!==confirmedEpoch||ta.value!==previous||fieldById('plan-input','textarea')!==ta)return {ok:false,error:'draft_changed'};
   }
-  if(!ownership.requirePrimary(null,'load a plan'))return {ok:false,error:'ownership_unavailable'};
+  if(!ownerCurrent(owner)||!ownership.requirePrimary(null,'load a plan'))return {ok:false,error:'ownership_unavailable'};
+  if(opts.currentTemplate&&!opts.currentTemplate())return {ok:false,error:'template_changed'};
   const revision=++editEpoch;
   ta.value=text;
   const saved=await PlanDraftEditor.save({strictDurability:true});
   if(revision!==editEpoch||fieldById('plan-input','textarea')!==ta||ta.value!==text)return {ok:false,error:'draft_changed'};
-  if(!ownership.canMutate())return {ok:false,error:'ownership_unavailable'};
+  if(!ownerCurrent(owner))return {ok:false,error:'ownership_unavailable'};
   if(!saved){ta.value=previous;PlanDraftEditor.preview({silent:true});return {ok:false,error:'storage_failed'};}
   PlanDraftEditor.preview({source:'guide-template',enterDraft:true});
   setPlanStatus(opts.label?`${opts.label} loaded into Draft. Review, reorder, then Apply.`:'Template loaded into Draft. Review, reorder, then Apply.');
   return {ok:true};
 }
+const sameSavedPlan=(a:Readonly<SavedPlan>|undefined,b:Readonly<SavedPlan>)=>!!a&&a.id===b.id&&a.label===b.label&&a.scheduleText===b.scheduleText&&a.createdAt===b.createdAt&&a.updatedAt===b.updatedAt;
 const SavedPlans=(()=>{
   let installed=false,busy=false,selectedId='',operationNotice:ReturnType<typeof notifications.begin>|null=null,menuControllers:{popup:PlanElement;controller:ReturnType<typeof ports.overlays.createAnchoredPopover>}[]=[];
   const node=(id:string)=>document.getElementById(id);
@@ -158,44 +161,47 @@ const SavedPlans=(()=>{
   }
   async function act(action:string,planId=''){
     if(busy||!ownership.requirePrimary(null,'manage saved plans'))return false;
+    const owner=ownership.revision(),current=()=>ownerCurrent(owner);
     busy=true;render(planId);
     operationNotice=notifications.begin({id:'saved-plan-operation',kind:action,surfaceId:'saved-plan-status',title:'Saved plans',message:'',announce:false});
     try{
       let library=persistence.readLibrary();
+      if(action!=='save'&&planId&&!library.savedPlans.some(plan=>plan.id===planId))throw new Error('That saved plan no longer exists. Review the list and try again.');
       const id=library.savedPlans.some(plan=>plan.id===planId)?planId:(library.savedPlans.some(plan=>plan.id===selectedId)?selectedId:library.savedPlans[0]?.id||'');
       let selected=library.savedPlans.find(plan=>plan.id===id);
-      const draft=getPlanDraftText(),now=new Date().toISOString();
+      const expected=selected?{...selected}:null;
+      const draft=getPlanDraftText(),draftEpoch=editEpoch,now=new Date().toISOString();
       selectedId=id;
-      if(action==='load'){if(!selected)return false;const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true});status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);return result.ok;}
+      if(action==='load'){if(!selected||!expected)return false;const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true,currentTemplate:()=>sameSavedPlan(persistence.readLibrary().savedPlans.find(plan=>plan.id===id),expected)});if(!current())return false;status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);return result.ok;}
       if(action==='save'){
         const name=fieldById('saved-plan-name','input')!.value.trim();
         if(!name)throw new Error('Enter a name for the plan.');
         if(!draft.trim())throw new Error('Add something to the draft first.');
         if(library.savedPlans.length>=100)throw new Error('You have 100 saved plans. Delete one before saving another.');
         const next={id:'plan-'+crypto.randomUUID(),label:name,scheduleText:draft,createdAt:now,updatedAt:now};
-        library.savedPlans.push(next);await persistence.writeLibrary(library);selectedId=next.id;status('Plan saved.');return true;
+        library.savedPlans.push(next);await persistence.writeLibrary(library);if(!current())return false;selectedId=next.id;status('Plan saved.');return true;
       }
-      if(!selected)throw new Error('Choose a saved plan first.');
+      if(!selected||!expected)throw new Error('Choose a saved plan first.');
       if(action==='rename'){
         const answer=await requestInput({title:'Rename saved plan',inputLabel:'Plan name',defaultValue:selected.label,maxLength:80,required:true,confirmLabel:'Rename',cancelLabel:'Cancel'});
-        if(!answer)return false;if(!ownership.requirePrimary(null,'rename a saved plan'))return false;
+        if(!answer||!current()||!ownership.requirePrimary(null,'rename a saved plan'))return false;
         library=persistence.readLibrary();selected=library.savedPlans.find(plan=>plan.id===id);
-        if(!selected)throw new Error('That saved plan changed while the rename dialog was open. Review the list and try again.');
+        if(!selected||!sameSavedPlan(selected,expected))throw new Error('That saved plan changed while the rename dialog was open. Review the list and try again.');
         const name=String(answer.value||'').trim();if(!name)throw new Error('Enter a name for the plan.');selected.label=name;selected.updatedAt=now;
       }else if(action==='delete'||action==='update'){
         if(action==='update'&&!draft.trim())throw new Error('Add something to the draft first.');
         const yes=await confirm({title:action==='delete'?'Delete saved plan?':'Update saved plan?',message:action==='delete'?'Delete “'+selected.label+'”? Your current draft and live plan will stay available.':'Replace “'+selected.label+'” with the current draft?',confirmLabel:action==='delete'?'Delete plan':'Update plan',cancelLabel:'Cancel'});
-        if(!yes)return false;if(!ownership.requirePrimary(null,'change saved plans'))return false;
-        if(action==='update'&&getPlanDraftText()!==draft)throw new Error('The draft changed while confirming. Review it and try again.');
+        if(!yes||!current()||!ownership.requirePrimary(null,'change saved plans'))return false;
+        if(action==='update'&&(editEpoch!==draftEpoch||getPlanDraftText()!==draft))throw new Error('The draft changed while confirming. Review it and try again.');
         library=persistence.readLibrary();selected=library.savedPlans.find(plan=>plan.id===id);
-        if(!selected)throw new Error('That saved plan changed while the confirmation was open. Review the list and try again.');
+        if(!selected||!sameSavedPlan(selected,expected))throw new Error('That saved plan changed while the confirmation was open. Review the list and try again.');
         if(action==='update'){selected.scheduleText=draft;selected.updatedAt=now;}
         else{library.savedPlans=library.savedPlans.filter(plan=>plan.id!==id);if(library.defaultId===id)library.defaultId=null;selectedId='';}
       }else if(action==='default')library.defaultId=selected.id;
       else return false;
-      await persistence.writeLibrary(library);status(action==='default'?'Default plan selected.':'Saved plans updated.');return true;
-    }catch(error){status(error instanceof Error?error.message:'Saved plans could not be updated.',false);return false;}
-    finally{if(operationNotice?.read()?.lifecycle==='running')operationNotice.finish('cancelled','',{announce:false});operationNotice=null;busy=false;render(selectedId);}
+      await persistence.writeLibrary(library);if(!current())return false;status(action==='default'?'Default plan selected.':'Saved plans updated.');return true;
+    }catch(error){if(current())status(error instanceof Error?error.message:'Saved plans could not be updated.',false);return false;}
+    finally{if(operationNotice?.read()?.lifecycle==='running')operationNotice.finish('cancelled','',{announce:false});operationNotice=null;busy=false;render(current()?selectedId:'');}
   }
   return freeze({render,syncAccess,act});
 })();
@@ -578,9 +584,10 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
   const rawOriginal=explicitSchedule===null?getPlanDraftText():explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
+  const owner=ownership.revision(),epoch=editEpoch,field=fieldById('plan-input','textarea');
   const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
   const canApply=()=>
-    (explicitSchedule!==null||ownership.canMutate())&&
+    (explicitSchedule!==null||(ownerCurrent(owner)&&editEpoch===epoch&&fieldById('plan-input','textarea')===field))&&
     (typeof opts.currentEditor!=='function'||opts.currentEditor());
   const finish=(preparation:Readonly<PlanApplyPreparation>,draft:ImmutablePlanDraft,parsed:readonly ScheduleRow[])=>{
     if(!canApply())return false;
@@ -598,7 +605,7 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
       return false;
     }
     const draft=projection.draft,parsed=draft.parsed;
-    const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
+    const preparation=prepareScheduleApply(parsed,rawOriginal,{...opts,currentEditor:()=>canApply()&&currentDraft()});
     return isPromiseLike(preparation)
       ?preparation.then((result:Readonly<PlanApplyPreparation>)=>finish(result,draft,parsed))
       :finish(preparation,draft,parsed);
@@ -608,7 +615,7 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
   // committed. Preserve invalid text in storage too, even when Apply rejects
   // its syntax. Never silently continue after a failed asynchronous save.
   return Promise.resolve(PlanDraftEditor.save({strictDurability:true})).then((saved:boolean)=>{
-    if(saved!==true||!ownership.canMutate())return false;
+    if(saved!==true||!canApply())return false;
     return apply();
   });
 }
@@ -620,6 +627,7 @@ const PlanDraftEditor=(()=>{
   let draftDragIndex:number|null=null;
   let draftSaveTimer:number|null=null;
   let draftPreviewTimer:number|null=null;
+  let saveGeneration=0,previewGeneration=0,saveOwner=0,writeGeneration=0;
   let openedEpoch=0;
   let draftSaveWarningActive=false;
 
@@ -640,12 +648,16 @@ const PlanDraftEditor=(()=>{
   }
   function clearTimer(name:'preview'|'save'){
     const timer=name==='preview'?draftPreviewTimer:draftSaveTimer;
-    if(timer)clearTimeout(timer);
-    if(name==='preview')draftPreviewTimer=null;else draftSaveTimer=null;
+    if(timer!==null)clearTimeout(timer);
+    if(name==='preview'){draftPreviewTimer=null;previewGeneration++;}else{draftSaveTimer=null;saveGeneration++;}
+  }
+  function replaceText(value:string){
+    editEpoch++;openedEpoch=editEpoch;clearTimer('save');clearTimer('preview');clearDragState();draftSaveWarningActive=false;
+    const input=fieldById('plan-input','textarea');if(input)input.value=value;
   }
   async function persistNow(options:Readonly<PlanDraftSaveOptions>={}){
     if(!ownership.canMutate())return false;
-    const revision=editEpoch;
+    const revision=editEpoch,owner=ownership.revision(),write=++writeGeneration;
     let ok=false,error=null;
     try{
       const input=boundDraftInput();
@@ -653,8 +665,9 @@ const PlanDraftEditor=(()=>{
       ok=await persistence.writeDraft(input.value,options);
       if(!ok)error=persistence.lastError()||new Error('Browser storage is unavailable.');
     }catch(e){error=e;ok=false;}
+    if(!ownerCurrent(owner)||write!==writeGeneration)return false;
     persistence.reportDraftResult(ok,error);
-    if(revision!==editEpoch||!ownership.canMutate())return ok;
+    if(revision!==editEpoch)return ok;
     if(!ok){
       draftSaveWarningActive=true;
       const message=error instanceof Error?error.message:'';
@@ -674,10 +687,19 @@ const PlanDraftEditor=(()=>{
   function queueSave(delay:number=SAVE_DELAY_MS){
     if(!ownership.canMutate())return false;
     clearTimer('save');
-    draftSaveTimer=setTimeout(()=>{draftSaveTimer=null;void persistNow();},Math.max(0,Number(delay)||SAVE_DELAY_MS));
+    const generation=saveGeneration,owner=ownership.revision();saveOwner=owner;
+    draftSaveTimer=setTimeout(()=>{
+      if(generation!==saveGeneration)return;
+      draftSaveTimer=null;saveGeneration++;
+      if(ownerCurrent(owner))void persistNow();
+    },Math.max(0,Number(delay)||SAVE_DELAY_MS));
     return true;
   }
-  function flush(options:Readonly<PlanDraftSaveOptions>={}){return draftSaveTimer?save(options):true;}
+  function flush(options:Readonly<PlanDraftSaveOptions>={}){
+    if(draftSaveTimer===null)return true;
+    if(!ownerCurrent(saveOwner)){clearTimer('save');return false;}
+    return save(options);
+  }
   // The Plan box's text when it is the person's draft: null with no box, or
   // when it shows the default plan over no stored draft. That is not a draft
   // anyone wrote, and saving it would invent a change on this device that
@@ -710,8 +732,8 @@ const PlanDraftEditor=(()=>{
     }
     setParsedScheduleDraft(projection.draft.parsed);
     renderSched(projection);
-    const epoch=editEpoch;
-    const stillCurrent=()=>editEpoch===epoch&&draftMode===editing&&(editing||TASKS.length===0);
+    const epoch=editEpoch,owner=ownership.revision(),field=fieldById('plan-input','textarea');
+    const stillCurrent=()=>ownerCurrent(owner)&&editEpoch===epoch&&fieldById('plan-input','textarea')===field&&getPlanDraftText()===draftText&&draftMode===editing&&(editing||TASKS.length===0);
     if(!await save({strictDurability:true}))return false;
     if(!stillCurrent())return false;
     if(!ownership.canMutate()||getPlanDraftText()!==draftText){
@@ -733,7 +755,7 @@ const PlanDraftEditor=(()=>{
     // Close immediately; only actual authored content needs a strict commit.
     // A pending debounced write is subsumed by this one.
     deactivate();
-    const epoch=editEpoch;
+    const epoch=editEpoch,owner=ownership.revision();
     setPlanComposerOpen(false);
     renderSched();
     if(untouchedFallback){
@@ -743,6 +765,7 @@ const PlanDraftEditor=(()=>{
     setPlanStatus('Edit closed. Saving the working draft…');
     const saved=await save({strictDurability:true});
     // Do not overwrite feedback belonging to an edit/import begun meanwhile.
+    if(!ownerCurrent(owner))return false;
     if(editEpoch!==epoch||draftMode||getPlanDraftText()!==draftText)return saved===true;
     setPlanStatus(saved===true
       ?'Edit closed. Live plan kept; working draft saved in this browser.'
@@ -778,9 +801,11 @@ const PlanDraftEditor=(()=>{
     clearTimer('preview');
     // Read the textarea when the timer fires. A captured earlier projection
     // could replace a newer row edit or imported draft.
+    const generation=previewGeneration,owner=ownership.revision();
     draftPreviewTimer=setTimeout(()=>{
-      draftPreviewTimer=null;
-      if(draftMode)preview({silent:true});
+      if(generation!==previewGeneration)return;
+      draftPreviewTimer=null;previewGeneration++;
+      if(draftMode&&ownerCurrent(owner))preview({silent:true});
     },PREVIEW_DELAY_MS);
     return true;
   }
@@ -1103,10 +1128,10 @@ const PlanDraftEditor=(()=>{
     if(!input)return false;
     const previous=input.value;
     clearTimer('save');clearTimer('preview');clearDragState();
-    const revision=++editEpoch;
+    const revision=++editEpoch,owner=ownership.revision();
     input.value='';lastParsed=[];draftMode=true;renderSched();
     const ok=await save({strictDurability:true});
-    if(revision!==editEpoch||fieldById('plan-input','textarea')!==input||input.value!==''||!ownership.canMutate())return false;
+    if(revision!==editEpoch||fieldById('plan-input','textarea')!==input||input.value!==''||!ownerCurrent(owner))return false;
     if(ok){setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return true;}
     input.value=previous;preview({silent:true});
     return false;
@@ -1115,7 +1140,7 @@ const PlanDraftEditor=(()=>{
     deactivate();
     setParsedScheduleDraft([]);
   }
-  return Object.freeze({active,deactivate,enter,confirm,cancel,preview,composerInput,renderRows,save,flush,authoredText,clear,reset,install});
+  return Object.freeze({active,deactivate,enter,confirm,cancel,preview,composerInput,renderRows,save,flush,authoredText,clear,replaceText,reset,install});
 })();
 
     function isPlanPaneVisible(){return !!document.getElementById('pane-plan')?.classList.contains('on');}

@@ -76,6 +76,10 @@ assert.throws(()=>data.writeDraft('Unauthorized draft'),/ownership unavailable/)
 assert.equal(data.readDraft(),'Working draft','failed token acquisition cannot publish an unauthorized in-memory draft');
 assert.equal(canonical.draft,'Working draft');
 denyToken=false;
+// A supplied stale token must fail before optimistic state becomes visible.
+revision++;
+assert.throws(()=>data.writeDraft('Stale token draft',{ownershipToken:token}),/ownership changed/u);
+assert.equal(data.readDraft(),'Working draft');assert.equal(canonical.draft,'Working draft');assert.equal(writeDraftCalls,1);
 
 const beforeReset={writeDraftCalls,writeLibraryCalls,replaceCalls};
 canonical=cleanPlans({draft:null,savedPlans:[],defaultId:null});
@@ -125,4 +129,4 @@ assert.equal(acceptedPreferences.studentName,'Imported Student');
 assert.equal(await data.verify(imported),true);
 assert.ok(flushPreferenceCalls>=2,'settlement keeps Plan and protected Preferences in one portable-data barrier');
 
-console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','supplied-stale-token-before-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification']},null,2));

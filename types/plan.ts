@@ -3,7 +3,7 @@ export type PlanDraftStatus='valid'|'empty'|'incomplete'|'invalid';
 export type PlanBoardMode='empty'|'live'|'draft'|'invalid';
 export type PlanTimerHandle=number;
 export interface PlanHydrateOptions{fallback?:boolean}
-export interface PlanLoadDraftOptions{allowIncomplete?:boolean;label?:string}
+export interface PlanLoadDraftOptions{allowIncomplete?:boolean;label?:string;currentTemplate?:()=>boolean}
 export interface PlanDraftSaveOptions{strictDurability?:boolean;backupCapture?:boolean}
 export interface PlanDraftPreviewOptions{enterDraft?:boolean;silent?:boolean;source?:string}
 export interface PlanApplyOptions{
@@ -101,7 +101,7 @@ export interface PlanModuleInput{
     }>;
     view:Readonly<{document:PlanDocument;on<K extends keyof HTMLElementEventMap>(target:PlanElement,type:K,handler:(event:HTMLElementEventMap[K])=>unknown):unknown;textEl(tag:string,className:string,text:string):PlanElement;updateRealTimeAwareness(...args:unknown[]):unknown;window:Readonly<{matchMedia?(query:string):Readonly<{matches:boolean}>;requestAnimationFrame(callback:()=>void):number}>}>;
     scheduleGateway:Readonly<PlanScheduleGateway>;
-    ownership:Readonly<{canMutate():boolean;requirePrimary(event:PlanEvent|null,reason:string):boolean}>;
+    ownership:Readonly<{canMutate():boolean;requirePrimary(event:PlanEvent|null,reason:string):boolean;revision():number}>;
     interactions:Readonly<{
       confirm(options:Readonly<Record<string,unknown>>):PromiseLike<boolean>;
       input(options:Readonly<Record<string,unknown>>):PromiseLike<Readonly<{value?:unknown}>|null>|Readonly<{value?:unknown}>|null;
@@ -118,7 +118,7 @@ export interface PlanDraftController{
   active():boolean;deactivate():boolean;enter():boolean;confirm():Promise<boolean>;cancel():Promise<boolean>;
   preview(options?:Readonly<PlanDraftPreviewOptions>):boolean;composerInput():boolean;renderRows(container:PlanElement):void;
   save(options?:Readonly<PlanDraftSaveOptions>):boolean|Promise<boolean>;flush(options?:Readonly<PlanDraftSaveOptions>):boolean|Promise<boolean>;
-  authoredText():string|null;clear():Promise<boolean>;reset():void;install():boolean;
+  authoredText():string|null;clear():Promise<boolean>;replaceText(value:string):void;reset():void;install():boolean;
 }
 export interface SavedPlansController{render(selected?:string):void;syncAccess():boolean;act(action:string,planId?:string):Promise<boolean>}
 export interface PlanController{

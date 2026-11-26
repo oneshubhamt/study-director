@@ -52,7 +52,7 @@ const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
 let breakActive=false,breakEnds=0;
-let blockedWrite=null,canonicalDraft=null,canWrite=true;const saveOptions=[];
+let blockedWrite=null,canonicalDraft=null,canWrite=true,ownerRevision=1;const saveOptions=[];
 const feedback=[],draftResults=[];
 const timers=new Map();let nextTimer=0;
 const scheduleTimer=(callback,ms)=>{const id=++nextTimer;timers.set(id,{callback,ms});return id;};
@@ -130,7 +130,7 @@ const ports=Object.freeze({
     updateRealTimeAwareness:viewFunctions.updateRealTimeAwareness,
     window:{matchMedia:()=>({matches:false})}}),
   scheduleGateway:mk(Object.keys(gateway),gateway),
-  ownership:Object.freeze({canMutate:()=>canWrite,requirePrimary:()=>canWrite}),
+  ownership:Object.freeze({canMutate:()=>canWrite,requirePrimary:()=>canWrite,revision:()=>ownerRevision}),
   interactions:Object.freeze({
     confirm:()=>{confirmRequested=true;return confirmGate||Promise.resolve(true);},
     input:async()=>({value:'Plan'})
@@ -551,10 +551,57 @@ assert.equal(canonicalDraft,'Before ownership loss');
 assert.equal(feedback.length,beforeLostFeedback,'a former owner cannot publish stale Clear feedback');
 canWrite=true;writeFailure=false;
 
+// A retired callback is invoked deliberately even after clearTimeout.
+// It may neither write early nor consume the successor timer.
+ids['plan-input'].value='First queued edit';plan.draft.composerInput();
+const oldSave=[...timers.values()].find(entry=>entry.ms===300).callback;
+const oldPreview=[...timers.values()].find(entry=>entry.ms===220).callback;
+ids['plan-input'].value='Successor queued edit';plan.draft.composerInput();
+const beforeRetiredWrites=draftWrites;
+oldSave();oldPreview();await Promise.resolve();
+assert.equal(draftWrites,beforeRetiredWrites);
+assert.equal(pendingTimers(300),1);assert.equal(pendingTimers(220),1);
+assert.equal(await plan.draft.flush(),true);assert.equal(canonicalDraft,'Successor queued edit');
+
+// Loss and reacquisition are distinguishable even when canMutate is true again.
+ids['plan-input'].value='Former owner draft';plan.draft.composerInput();
+const [staleSaveId,staleSave]=[...timers].find(([,entry])=>entry.ms===300);
+const beforeFormerOwnerWrites=draftWrites;ownerRevision++;
+timers.delete(staleSaveId);staleSave.callback();await Promise.resolve();
+assert.equal(draftWrites,beforeFormerOwnerWrites,'old debounce must not borrow new ownership');
+assert.equal(await plan.draft.flush(),true);
+
+// Same text hydration supersedes the previous authoring intent.
+canonicalDraft='Hydrated canonical';ids['plan-input'].value='Hydrated canonical';
+plan.draft.composerInput();
+const beforeHydrateWrites=draftWrites;
+const hydratedSave=[...timers.values()].find(entry=>entry.ms===300).callback;
+plan.hydrate();hydratedSave();await Promise.resolve();
+assert.equal(await plan.draft.flush(),true);
+assert.equal(draftWrites,beforeHydrateWrites);
+assert.equal(ids['plan-input'].value,'Hydrated canonical');
+
+// A new owner must not authorize an earlier consent even with identical text.
+ids['plan-input'].value='Before delayed template';
+confirmGate=new Promise(resolve=>{releaseConfirm=resolve;});confirmRequested=false;
+const beforeStaleTemplate=draftWrites,staleTemplate=plan.loadDraft('Template from prior owner');
+assert.equal(confirmRequested,true);ownerRevision++;releaseConfirm(true);confirmGate=null;
+assert.equal((await staleTemplate).error,'ownership_unavailable');
+assert.equal(draftWrites,beforeStaleTemplate);assert.equal(ids['plan-input'].value,'Before delayed template');
+
+// Direct Apply, not just Done, must not end a break on obsolete consent.
+breakActive=true;ids['plan-input'].value='Direct apply before break confirmation';
+confirmGate=new Promise(resolve=>{releaseConfirm=resolve;});confirmRequested=false;
+const beforeStaleBreak=breakEnds,beforeStaleApply=applyCount,staleApply=plan.apply();
+for(let i=0;i<30&&!confirmRequested;i++)await Promise.resolve();
+assert.equal(confirmRequested,true);ownerRevision++;releaseConfirm(true);confirmGate=null;
+assert.equal(await staleApply,false);assert.equal(breakEnds,beforeStaleBreak);
+assert.equal(applyCount,beforeStaleApply);assert.equal(breakActive,true);breakActive=false;
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent']}));

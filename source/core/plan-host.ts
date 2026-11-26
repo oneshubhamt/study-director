@@ -78,6 +78,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
     // Authorization precedes publication to the in-memory Plan view. If the
     // page lost ownership, readDraft() must not claim an unauthorized value.
     const token=options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
+    ownership.assertWriteToken(token,'publishing Plan draft');
     state=clean;
     return enqueue(async activeToken=>{
       if(persistedDraft===value&&options.force!==true&&options.strictDurability!==true){failure=null;return true;}

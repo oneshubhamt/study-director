@@ -2263,7 +2263,7 @@ const PlanData=PlanHostModule.createData(Object.freeze<PlanDataInput>({
   runtime:Object.freeze<PlanDataInput['runtime']>({
     canMutate:()=>appCanMutate(),
     flushDraft:options=>PlanDraftEditor.flush(options),
-    replaceDraftText:value=>{const input=document.getElementById('plan-input');if(input instanceof HTMLTextAreaElement)input.value=value;},
+    replaceDraftText:value=>PlanRuntime.draft.replaceText(value),
     previewDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
     renderSavedPlans:()=>PlanRuntime.savedPlans.render()
   }),
@@ -2302,7 +2302,7 @@ const PlanRuntime=PlanHostModule.createController(Object.freeze<PlanControllerIn
     view:Object.freeze<PlanControllerInput['ports']['view']>({document,on:(target,type,handler)=>{target.addEventListener(type,handler);return target;},textEl,updateRealTimeAwareness,window}),
     notifications:NoticeCoordinator.presentation('plan'),
     scheduleGateway:PlanScheduleGateway,
-    ownership:Object.freeze<PlanControllerInput['ports']['ownership']>({canMutate:()=>appCanMutate(),requirePrimary:(event,reason)=>!requireMutationCoordinator().blocksUi()&&requirePrimaryTab(event,reason)}),
+    ownership:Object.freeze<PlanControllerInput['ports']['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision,requirePrimary:(event,reason)=>!requireMutationCoordinator().blocksUi()&&requirePrimaryTab(event,reason)}),
     interactions:Object.freeze<PlanControllerInput['ports']['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,input:options=>Interactions.input(options)}),
     overlays:Object.freeze<PlanControllerInput['ports']['overlays']>({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
     environment:Object.freeze<PlanControllerInput['ports']['environment']>({
