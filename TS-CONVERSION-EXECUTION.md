@@ -1,5 +1,7 @@
 # TypeScript conversion — execution record
 
+- 2026-11-26 follow-up: `221fd0d324b37a2813adb3d779c1420452ef8b28` strict check exposed missing compile-only StorageResetInput.captureOrigin in `types/checks/p5-7c.ts`; `4e1e47d00435581264739d016aa5c4e227adc26f` corrected it. [P5.7](https://github.com/oneshubhamt/study-director/actions/runs/45745283353/job/139659711947) then exposed the same missing contract in the no-backup-location integration fixture. Add an always-valid origin to that deliberately static owner fixture, not a permissive production fallback. All exact-head gates must rerun; no closure claimed.
+
 ## REVIEW-P5 · Stage 1 Device Folder consent and readiness witnesses — CORRECTED / VERIFICATION OPEN · 2026-11-26
 
 - Start `10150515c95ddcddf1d5177c6f9a92a9d5acef59`. [Repository](https://github.com/oneshubhamt/study-director/actions/runs/45744876307) SUCCESS: pinned strict/lint, targeted tests, source build, generated verification/syntax. [Stage 1 fast](https://github.com/oneshubhamt/study-director/actions/runs/45744876289/job/139658393268) strict/negative/build/deployment/minified gates passed, 168/169 fast files passed; sync-shared-base fixture deep equality failed because newly forwarded assertRequest callback was not part of its expected policy payload. Assert callback presence and execute it, then retain exact metadata equality. No changed production encryption source in this checkpoint. Other hosted runs not yet terminal at inspection.

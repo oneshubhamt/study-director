@@ -25,7 +25,7 @@ const started=w.clock.now();await background.flush('app-update');assert.equal(w.
 
 let health={lastStudyDataSaveAt:'2026-10-06T06:00:00.000Z',browserDataClearedAt:null};
 const reset=Recovery.createStorageReset(freeze({
-  authority:freeze({canMutate:()=>true}),
+  authority:freeze({canMutate:()=>true,captureOrigin:()=>()=>{}}),
   canonical:freeze({
     dailyRecordsList:async()=>freeze([]),notesReadFreshPayload:async()=>freeze({}),
     activeSessionLoad:async()=>freeze({ok:true,value:null,error:null,storage:freeze({idb:true})}),
