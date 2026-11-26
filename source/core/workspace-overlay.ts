@@ -22,9 +22,9 @@ const createModule=()=>{
     if(historyPort&&(['closed','opened','requestClose'] as const).some(key=>typeof historyPort[key]!=='function'))throw new TypeError('Workspace overlay history port must contain functions only.');
     const {document}=environment;
     const stack:{handle:OverlayHandle;descriptor:WorkspaceDescriptor|null}[]=[];
-    const replay=new Map<string,{descriptor:WorkspaceDescriptor;parentToken:string;reopen:(descriptor:WorkspaceDescriptor)=>unknown;valid:(()=>boolean)|null}>();
+    const replay=new Map<string,{descriptor:WorkspaceDescriptor;parentToken:string;reopen:NonNullable<OverlayHistory['reopen']>;valid:(()=>boolean)|null}>();
     const nonce=String(globalThis.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,'').slice(0,24)||'session';
-    let sequence=0,historySequence=0,baseOverflow='',physicalDialogs=0;
+    let sequence=0,historySequence=0,baseOverflow='',physicalDialogs=0,reconcileGeneration=0;
     const closingByToken=new Map<string,Promise<boolean>>();
 
     function supportsDialog(dialog:HTMLDialogElement){return !!(dialog&&typeof dialog.showModal==='function'&&typeof dialog.close==='function');}
@@ -107,6 +107,7 @@ const createModule=()=>{
       };
       const requestClose=()=>{
         if(closing||closed)return false;
+        reconcileGeneration+=1;
         const historyPending=!!(historyDescriptorValue&&historyPort?.requestClose(historyDescriptorValue));
         return beginClose({historyPending});
       };
@@ -115,6 +116,7 @@ const createModule=()=>{
       dialog.addEventListener('cancel',onCancel);
       try{dialog.showModal()}catch(error){dialog.removeEventListener('cancel',onCancel);dialog.remove();throw error}
       if(!physicalDialogs)baseOverflow=document.body.style.overflow;
+      if(!fromHistory)reconcileGeneration+=1;
       physicalDialogs+=1;document.body.style.overflow='hidden';
       handle=freeze({dialog,close:requestClose,closeFromHistory,whenClosed,historyToken:historyDescriptorValue?.token||'',forget:()=>historyDescriptorValue?forget(historyDescriptorValue.token):false});
       stack.push({handle,descriptor:historyDescriptorValue});
@@ -123,27 +125,30 @@ const createModule=()=>{
       return handle;
     }
     function close(){const top=currentEntry();return top?top.handle.close():false;}
-    async function closeToIndex(index:number){
-      while(stack.length-1>index){const top=currentEntry();if(!top)break;top.handle.closeFromHistory();await top.handle.whenClosed;}
+    async function closeToIndex(index:number,current:()=>boolean){
+      while(current()&&stack.length-1>index){const top=currentEntry();if(!top)break;top.handle.closeFromHistory();await top.handle.whenClosed;}
     }
-    async function ensureToken(token:string,seen=new Set<string>()):Promise<boolean>{
-      const key=cleanToken(token);if(!key||seen.has(key))return false;seen.add(key);
+    async function ensureToken(token:string,current:()=>boolean,seen=new Set<string>()):Promise<boolean>{
+      const key=cleanToken(token);if(!current()||!key||seen.has(key))return false;seen.add(key);
       const closing=closingByToken.get(key);if(closing)await closing;
+      if(!current())return false;
       const existing=stack.findIndex(item=>item.descriptor?.token===key);
-      if(existing>=0){await closeToIndex(existing);return true;}
+      if(existing>=0){await closeToIndex(existing,current);return current()&&historyDescriptor()?.token===key;}
       const record=replay.get(key);if(!record)return false;
       if(record.valid){let valid=false;try{valid=record.valid()===true}catch{}if(!valid){replay.delete(key);return false;}}
-      if(record.parentToken&&!await ensureToken(record.parentToken,seen))return false;
-      let opened=false;try{opened=await record.reopen(record.descriptor)===true}catch{opened=false;}
-      return opened&&historyDescriptor()?.token===key;
+      if(record.parentToken&&!await ensureToken(record.parentToken,current,seen))return false;
+      if(!current()||replay.get(key)!==record)return false;
+      const canOpen=()=>current()&&replay.get(key)===record;
+      let opened=false;try{opened=await record.reopen(record.descriptor,canOpen)===true}catch{opened=false;}
+      return current()&&opened&&historyDescriptor()?.token===key;
     }
-    async function reconcile(rawDesired:WorkspaceDescriptor|null){
+    async function reconcile(rawDesired:WorkspaceDescriptor|null,originCurrent:()=>boolean=()=>true){
+      if(!originCurrent())return historyDescriptor();
+      const revision=++reconcileGeneration,current=()=>originCurrent()&&reconcileGeneration===revision;
       const desired=rawDesired&&typeof rawDesired==='object'&&HISTORY_KINDS.has(String(rawDesired.kind||'').toLowerCase())?rawDesired:null;
-      if(!desired){await closeToIndex(-1);return historyDescriptor();}
-      const targetToken=cleanToken(desired.token);if(!targetToken){await closeToIndex(-1);return historyDescriptor();}
-      const existing=stack.findIndex(item=>item.descriptor?.token===targetToken);
-      if(existing>=0){await closeToIndex(existing);return historyDescriptor();}
-      await ensureToken(targetToken);return historyDescriptor();
+      if(!desired){await closeToIndex(-1,current);return historyDescriptor();}
+      const targetToken=cleanToken(desired.token);if(!targetToken){await closeToIndex(-1,current);return historyDescriptor();}
+      await ensureToken(targetToken,current);return historyDescriptor();
     }
     return freeze({format:'study-director.workspace-overlay',contractVersion:1,open,close,reconcile,historyDescriptor});
   }

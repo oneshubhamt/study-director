@@ -98,8 +98,9 @@ function harness(options={}){
         current:()=>workspace,
         reconcile:async (desired,context)=>{
           workspaceReconciles.push({desired,context});
-          workspace=options.reconcileWorkspace?await options.reconcileWorkspace(desired,context,workspace):desired;
-          return workspace;
+          const value=options.reconcileWorkspace?await options.reconcileWorkspace(desired,context,workspace):desired;
+          if(context.current())workspace=value;
+          return value;
         }
       })
     })
@@ -400,6 +401,41 @@ for(const native of [false,true]){
   assert.ok(intercepted,'Legal Center traversal must be owned by the shared navigation controller');
   await intercepted.handler();
   assert.equal(h.workspace.kind,'legal');assert.equal(h.workspace.key,'privacy');
+}
+
+// A stale same-tab normalization may not replace the successor's route or workspace.
+for(const successor of ['route','workspace']){
+  const gate=deferred(),entered=deferred(),focus={kind:'focus',token:'ws:held'},newer={kind:'pdf',token:'ws:newer'};
+  const h=harness({reconcileWorkspace:desired=>{if(desired?.token===focus.token){entered.resolve();return gate.promise;}return desired;}});
+  h.controller.install();await h.controller.hydrate({explicitOnly:true});
+  const first=h.controller.request('plan',{source:'held-same-tab',workspaceSpecified:true,workspace:focus,normalize:true});
+  await entered.promise;
+  if(successor==='route')assert.equal((await h.controller.request('library')).ok,true);
+  else{h.workspace=newer;h.controller.workspace.open(newer);}
+  const href=h.win.location.href,state=JSON.stringify(h.win.history.state),position=h.controller.status().position;
+  gate.resolve(null);const stale=await first;
+  assert.equal(stale.ok,false);assert.equal(stale.reason,'superseded');
+  assert.equal(h.win.location.href,href);assert.equal(JSON.stringify(h.win.history.state),state);
+  assert.equal(h.controller.status().position,position);
+  assert.equal(h.workspace?.token,successor==='workspace'?newer.token:undefined);
+}
+// The completed but no-longer-current commit must not roll back newer history.
+{
+  const gate=deferred(),entered=deferred();
+  const h=harness({commit:context=>{if(context.to==='library'){entered.resolve();return gate.promise;}return true;}});
+  h.controller.install();await h.controller.hydrate({explicitOnly:true});
+  const first=h.controller.request('library');await entered.promise;
+  assert.equal((await h.controller.request('execute')).ok,true);
+  const href=h.win.location.href,state=JSON.stringify(h.win.history.state);
+  gate.resolve(false);assert.equal((await first).ok,false);
+  assert.equal(h.active,'execute');assert.equal(h.win.location.href,href);assert.equal(JSON.stringify(h.win.history.state),state);
+}
+// A rejected legal descriptor may not be reintroduced by an explicit URL.
+{
+  const h=harness({active:'guide',url:'https://study-director.web.app/?tab=guide#legal/invalid',reconcileWorkspace:()=>null});
+  h.controller.install();await h.controller.hydrate({explicitOnly:true});
+  assert.equal(new URL(h.win.location.href).hash,'');
+  assert.equal(h.win.history.state.studyDirectorWorkspace,undefined);
 }
 
 // The host's presentation wait must settle even if a hidden tab receives no frames.

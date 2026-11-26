@@ -19,7 +19,7 @@ function element(tag='div'){
     querySelectorAll(){return []}
   };
 }
-function lifetimeHarness({coarse=true}={}){
+function lifetimeHarness({coarse=true,replayStore=null}={}){
   const timeouts=new Map(),intervals=new Map(),pageHandlers=new Map(),elements=[],windows=[];
   let now=0,timerId=0,overlayOptions=null,overlayHandle=null,openMode='blocked',readerReleases=0,revoked=0,createdUrls=0;
   const setTimeout=(callback,delay=0)=>{const id=++timerId;timeouts.set(id,{callback,due:now+delay});return id;};
@@ -53,7 +53,7 @@ function lifetimeHarness({coarse=true}={}){
   const controller=documentHost.createPdfController(Object.freeze({
     document,window,
     urls:Object.freeze({createObjectURL:()=> 'blob:handoff-'+(++createdUrls),revokeObjectURL:()=>{revoked++;}}),
-    store:Object.freeze({retain:async()=>()=>{},list:async()=>[],get:async()=>null}),
+    store:Object.freeze(replayStore||{retain:async()=>()=>{},list:async()=>[],get:async()=>null}),
     overlay:Object.freeze(overlay),notifications:Object.freeze(notifications),
     diagnostics:Object.freeze({capture(){}})
   }));
@@ -144,6 +144,26 @@ for(const mode of ['overlay-busy','overlay-throws']){
   const h=lifetimeHarness();h.open();
   const download=h.nodes('a')[1],event=download.click();assert.equal(event.defaultPrevented,false);assert.equal(download.download,'Study.pdf');
   h.advance(0);assert.equal(h.stats().readerReleases,0);h.advance(2*60*1000);assert.equal(h.stats().readerReleases,1);h.pagehide();assert.equal(h.stats().revoked,1);
+}
+
+// Reopening from history must check its original route after every delayed
+// reader stage, release that reader, and never create a stale Blob URL/dialog.
+for(const stage of ['retain','list','get','success']){
+  let current=true,releases=0,resolve,enteredResolve;
+  const gate=new Promise(r=>resolve=r),entered=new Promise(r=>enteredResolve=r);
+  const row={id:'att-pdf',type:'application/pdf',name:'Study.pdf'};
+  const delayed=async(name,value)=>{if(stage===name){enteredResolve();await gate;}return value;};
+  const h=lifetimeHarness({coarse:false,replayStore:{
+    retain:()=>delayed('retain',()=>releases++),list:()=>delayed('list',[row]),
+    get:()=>delayed('get',new Blob(['test'],{type:'application/pdf'}))
+  }});
+  h.setMode('open');h.open();
+  const history=h.overlay().history;h.handle().close();
+  const pending=history.reopen({kind:'pdf',token:'ws:pdf:replay'},()=>current);
+  if(stage!=='success'){await entered;current=false;resolve();}
+  assert.equal(await pending,stage==='success');
+  if(stage==='success')h.handle().close();
+  assert.equal(releases,1);assert.equal(h.stats().revoked,stage==='success'?2:1);
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'pdf-reader-lifetime',owner:'document-host.ts',embedded:true,native:true,fallback:true,boundedHandoffs:true}));

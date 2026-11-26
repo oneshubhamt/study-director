@@ -164,16 +164,19 @@ const WorkspaceRouteCoordinator=(()=>{
     return typeof ports.overlay()?.historyDescriptor==='function'?ports.overlay().historyDescriptor():null;
   }
   async function reconcile(desired:WorkspaceDescriptor|null,context:NavigationContext){
+    if(!context.current())return current();
     const target=desired&&typeof desired==='object'?desired:null;
     const prompt=typeof ports.interactions()?.historyDescriptor==='function'?ports.interactions().historyDescriptor():null;
     if(prompt){if(same(prompt,target))return prompt;ports.interactions().reconcileHistory(null);}
     if(target?.kind==='prompt')return current();
     for(const [kind,handler] of handlers){
+      if(!context.current())return current();
       const active=handler.current();if(active&&!(target&&target.kind===kind&&same(active,target)))await handler.reconcile(null,context);
     }
+    if(!context.current())return current();
     const overlayTarget=target&&overlayKinds.has(target.kind)?target:null;
-    if(typeof ports.overlay()?.reconcile==='function')await ports.overlay().reconcile(overlayTarget);
-    if(target&&!overlayKinds.has(target.kind)){
+    if(typeof ports.overlay()?.reconcile==='function')await ports.overlay().reconcile(overlayTarget,context.current);
+    if(context.current()&&target&&!overlayKinds.has(target.kind)){
       const handler=handlers.get(target.kind);if(handler)await handler.reconcile(target,context);
     }
     return current();
@@ -660,7 +663,9 @@ function commitTabView(context:NavigationContext){
 async function waitForTabReady(context:NavigationContext){
   const ready=navigationReadyByGeneration.get(context.generation);
   try{
+    if(!context.current())return false;
     if(ready)await ready;
+    if(!context.current())return false;
     await UiTabRegistry.readyTab(context.to,context);
     if(!context.current())return false;
     if(context.restoreScroll!==false&&!FEATURE_SCROLL_OWNERS.has(context.to)){

@@ -145,4 +145,37 @@ await replayedHandle.whenClosed;
 assert.equal(animatedDocument.body.children.filter(node=>node.tagName==='DIALOG').length,0);
 assert.equal(animatedDocument.body.style.overflow,'auto','original body overflow must restore after animated close/reopen cycle');
 
+// The real overlay loop must stop closing the stack after its originating
+// route or a newer user workspace supersedes a yielded close.
+{
+  const parent=animatedController.open({label:'Parent',content:new FakeElement('div',animatedDocument),history:{kind:'focus'}});
+  const child=animatedController.open({label:'Child',content:new FakeElement('div',animatedDocument),history:{kind:'pdf'}});
+  const closing=animatedController.reconcile(null);
+  const newer=animatedController.open({label:'Newer',content:new FakeElement('div',animatedDocument),history:{kind:'audio'}});
+  child.dialog.dispatchEvent({type:'transitionend'});await closing;
+  assert.equal(newer.dialog.open,true);assert.equal(parent.dialog.open,true);
+  assert.equal(animatedController.historyDescriptor().token,newer.historyToken);
+  for(const handle of [newer,parent]){handle.close();handle.dialog.dispatchEvent({type:'transitionend'});await handle.whenClosed;}
+  assert.equal(animatedDocument.body.style.overflow,'auto');
+}
+// An in-flight token replay gets a current predicate and cannot open after a
+// successor, including a newer reconcile of the same token.
+for(const successor of ['clear','same-token','forget','new-workspace']){
+  let resolve,enteredResolve,first=true,reopens=0;
+  const entered=new Promise(r=>enteredResolve=r),gate=new Promise(r=>resolve=r);
+  const openReplay=token=>controller.open({label:'Deferred reader',content:new FakeElement('div',document),history:{kind:'pdf',token,
+    reopen:async(descriptor,current)=>{if(first){first=false;enteredResolve();await gate;}if(!current())return false;reopens++;return !!openReplay(descriptor.token);}}});
+  const initial=openReplay(),descriptor=controller.historyDescriptor();initial.close();
+  const stale=controller.reconcile(descriptor);await entered;
+  let expected=null;
+  if(successor==='clear')await controller.reconcile(null);
+  if(successor==='same-token'){await controller.reconcile(descriptor);expected=descriptor.token;}
+  if(successor==='forget')initial.forget();
+  if(successor==='new-workspace')expected=controller.open({label:'Newer',content:new FakeElement('div',document),history:{kind:'focus'}}).historyToken;
+  resolve();await stale;
+  assert.equal(controller.historyDescriptor()?.token??null,expected);
+  assert.equal(reopens,successor==='same-token'?1:0);
+  await controller.reconcile(null);assert.equal(document.body.style.overflow,'auto');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'workspace-overlay-behavior',checks:['nested workspace stack','top-only close','scroll-lock lifetime','focus restoration','showModal rollback','token replay','nested Forward restore','single cleanup','animated close/Forward serialization','animated scroll-lock restoration']},null,2));

@@ -89,11 +89,12 @@ const createModule=()=>{
     for(const key of ['currentTab','prepare','present','commit','ready','report'] as const)if(typeof host[key]!=='function')throw new TypeError('Navigation host adapter is incomplete.');
     const workspaceHost=host.workspace&&Object.isFrozen(host.workspace)?host.workspace:null;
     if(workspaceHost&&(['current','reconcile'] as const).some(key=>typeof workspaceHost[key]!=='function'))throw new TypeError('Navigation workspace host adapter is incomplete.');
-    let generation=0;
+    let generation=0,workspaceRevision=0;
     let installed=false;
     let driver='none';
     let position=statePosition(win.history?.state)??0;
-    let reconciliation:{tab:TabId;position:number;workspace:WorkspaceDescriptor|null}|null=null;
+    type Reconciliation={tab:TabId;position:number;workspace:WorkspaceDescriptor|null;generation:number;workspaceRevision:number};
+    let reconciliation:Reconciliation|null=null;
     let lastResult:NavigationResult=freeze({ok:true,tab:cleanTab(host.currentTab()),changed:false,reason:'initial',generation:0,source:'initial'});
     const native=win.navigation&&typeof win.navigation!.addEventListener==='function';
     const location=()=>win.location;
@@ -118,22 +119,25 @@ const createModule=()=>{
     }
     function takeReconciliation(url:string,state:unknown){
       if(!reconciliation)return null;
+      if(reconciliation.generation!==generation||reconciliation.workspaceRevision!==workspaceRevision){reconciliation=null;return null;}
       const parsed=parseUrl(url,location().href);
       const targetPosition=statePosition(state);
       const targetWorkspace=workspaceFromState(state,url,location().href);
       if(parsed.tab!==reconciliation.tab||targetPosition!==reconciliation.position||!sameWorkspace(targetWorkspace,reconciliation.workspace))return null;
       const match=reconciliation;reconciliation=null;position=match.position;return match;
     }
-    async function replayReconciliation(match:{tab:TabId;position:number;workspace:WorkspaceDescriptor|null},source:string){
+    async function replayReconciliation(match:Reconciliation,source:string){
+      const current=()=>match.generation===generation&&match.workspaceRevision===workspaceRevision;
+      if(!current())return false;
       if(!workspaceHost)return true;
-      try{await workspaceHost.reconcile(match.workspace,freeze({from:activeTab(),to:match.tab,source,generation,traversal:true,reconciliation:true,current:()=>true}));}
+      try{await workspaceHost.reconcile(match.workspace,freeze({from:activeTab(),to:match.tab,source,generation:match.generation,traversal:true,reconciliation:true,current}));}
       catch(error){host.report('navigation.workspace-reconcile',error);}
-      return true;
+      return current();
     }
     function restoreAfterFailedTraversal(tab:unknown,originPosition:number,targetPosition:number|null,originWorkspace:WorkspaceDescriptor|null=null){
       const history=win.history,descriptor=cleanWorkspace(originWorkspace);
       if(targetPosition!==null&&Number.isSafeInteger(originPosition)&&Number.isSafeInteger(targetPosition)&&originPosition!==targetPosition&&typeof history?.go==='function'){
-        reconciliation=freeze({tab:cleanTab(tab),position:originPosition,workspace:descriptor});
+        reconciliation=freeze({tab:cleanTab(tab),position:originPosition,workspace:descriptor,generation,workspaceRevision});
         position=originPosition;
         history.go(originPosition-targetPosition);
         return true;
@@ -143,16 +147,19 @@ const createModule=()=>{
     }
     async function reconcileWorkspace(desired:WorkspaceDescriptor|null,context:NavigationContext,{normalize=false}={}){
       const target=cleanWorkspace(desired);
-      if(!workspaceHost)return freeze({matched:!target,actual:null});
+      const revision=workspaceRevision,current=()=>context.current()&&revision===workspaceRevision;
+      if(!current())return freeze({matched:false,actual:activeWorkspace(),superseded:true});
+      if(!workspaceHost)return freeze({matched:!target,actual:null,superseded:false});
       let actual=activeWorkspace();
-      if(sameWorkspace(actual,target))return freeze({matched:true,actual});
-      try{actual=cleanWorkspace(await workspaceHost.reconcile(target,context));}
+      if(sameWorkspace(actual,target))return freeze({matched:true,actual,superseded:false});
+      try{actual=cleanWorkspace(await workspaceHost.reconcile(target,freeze({...context,current})));}
       catch(error){host.report('navigation.workspace',error);actual=activeWorkspace();}
+      if(!current())return freeze({matched:false,actual:activeWorkspace(),superseded:true});
       const matched=sameWorkspace(actual,target);
       if(!matched&&normalize){
         write('replace',context.to,workspaceUrl(location().href,context.to,actual),position,actual);
       }
-      return freeze({matched,actual});
+      return freeze({matched,actual,superseded:false});
     }
     async function settleAndCommit(tab:unknown,options:NavigationOptions={}){
       const source=String(options.source||'programmatic');
@@ -177,14 +184,12 @@ const createModule=()=>{
         let workspaceMatch=true;
         if(workspaceSpecified){
           const reconciled=await reconcileWorkspace(desiredWorkspace,context,{normalize:options.traversal===true||options.normalize===true});
+          if(reconciled.superseded||!context.current())return publish(result(false,target,false,'superseded',revision,source));
           workspaceMatch=reconciled.matched;
         }
-        if(options.normalize===true){
+        if(options.normalize===true||options.ensureEntry===true){
           const actual=workspaceSpecified?activeWorkspace():null;
-          write('replace',target,options.url||workspaceUrl(location().href,target,actual),traversalPosition??position,actual);
-        }else if(options.ensureEntry===true){
-          const actual=workspaceSpecified?activeWorkspace():null;
-          write('replace',target,options.url||workspaceUrl(location().href,target,actual),position,actual);
+          write('replace',target,workspaceUrl(options.url||location().href,target,actual),options.normalize===true?traversalPosition??position:position,actual);
         }
         return publish(result(true,target,false,workspaceMatch?'same-tab':'workspace-normalized',revision,source));
       }
@@ -198,7 +203,7 @@ const createModule=()=>{
       }
       if(workspaceHost&&originWorkspace){
         const cleared=await reconcileWorkspace(null,context);
-        if(revision!==generation)return publish(result(false,target,false,'superseded',revision,source));
+        if(cleared.superseded||revision!==generation)return publish(result(false,target,false,'superseded',revision,source));
         if(!cleared.matched){
           if(options.traversal===true)restoreAfterFailedTraversal(from,originPosition,traversalPosition,originWorkspace);
           return publish(result(false,from,false,'workspace-departure-blocked',revision,source));
@@ -226,7 +231,12 @@ const createModule=()=>{
         if(!commitAttempted&&revision===generation)await commit();
         else if(commitPromise)await commitPromise;
       }
-      if(revision!==generation&&!commitAttempted)return publish(result(false,target,false,'superseded',revision,source));
+      if(revision!==generation){
+        // Release the committed generation's readiness bookkeeping without
+        // allowing its failure or traversal to rewrite a successor's route.
+        if(committed)try{await host.ready(context);}catch(error){host.report('navigation.ready',error);}
+        return publish(result(false,target,committed,committed?'superseded-after-commit':'superseded',revision,source));
+      }
       if(committed===false){
         if(options.traversal===true)restoreAfterFailedTraversal(from,originPosition,traversalPosition,originWorkspace);
         else if(historyWritten&&(options.history||'push')==='push')restoreAfterFailedTraversal(from,originPosition,position,originWorkspace);
@@ -243,6 +253,7 @@ const createModule=()=>{
       let workspaceMatched=true;
       if(workspaceSpecified){
         const reconciled=await reconcileWorkspace(desiredWorkspace,context,{normalize:true});
+        if(reconciled.superseded)return publish(result(false,target,true,'superseded-after-workspace',revision,source));
         workspaceMatched=reconciled.matched;
       }
       if(revision!==generation)return publish(result(false,target,true,'superseded-after-workspace',revision,source));
@@ -311,16 +322,18 @@ const createModule=()=>{
       const descriptor=cleanWorkspace(raw);
       if(!descriptor)return false;
       const tab=activeTab(),mode=options.replace===true?'replace':'push';
+      workspaceRevision+=1;
       return write(mode,tab,options.url||workspaceUrl(location().href,tab,descriptor),null,descriptor);
     }
     function workspaceClose(raw:WorkspaceDescriptor){
       const descriptor=cleanWorkspace(raw),current=workspaceFromState(win.history?.state,location().href,location().href),history=win.history;
       if(!descriptor||!sameWorkspace(descriptor,current)||position<=0||typeof history?.back!=='function')return false;
-      history.back();return true;
+      workspaceRevision+=1;history.back();return true;
     }
     function workspaceDrop(raw:WorkspaceDescriptor){
       const descriptor=cleanWorkspace(raw),current=workspaceFromState(win.history?.state,location().href,location().href);
       if(!descriptor||!sameWorkspace(descriptor,current))return false;
+      workspaceRevision+=1;
       return write('replace',activeTab(),workspaceUrl(location().href,activeTab(),null),position,null);
     }
     function status(){
