@@ -72,7 +72,7 @@ assert.equal(noticeRechecks,1,'no redundant coverage read after the reminder is 
   });
   const nudge=module.createBackupNudge(Object.freeze({
     verified,storageHealth:Object.freeze({snapshot:()=>health}),dueMs:7*DAY,checkMs:60*60*1000,
-    canMutate:()=>true,now:()=>now,automaticActive:()=>automatic,dailySummaryCount:async()=>summaryCount,todayIso:()=> '2026-11-15',
+    canMutate:()=>true,captureOrigin:()=>()=>{},now:()=>now,automaticActive:()=>automatic,dailySummaryCount:async()=>summaryCount,todayIso:()=> '2026-11-15',
     publishMessage:value=>{message=value;},notify:(title,body,tag)=>notices.push({title,body,tag}),capture:()=>{}
   }));
   assert.equal(await nudge.run(true),false,'a new profile with fewer than seven Saved Days is not nagged before its first backup');

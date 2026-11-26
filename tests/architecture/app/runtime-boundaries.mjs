@@ -21,7 +21,9 @@ for(const stale of ['function mutateBackupProtection(','async function refreshDe
 assert.match(host,/richText:Object\.freeze\s*\(\{assetIds:value=>RichTextApi\.assetIds\(value\),exportDocument:value=>RichTextApi\.exportDocument\(value\)\}\)/,'actual note-export host provider uses exportDocument');
 assert.match(documentHost,/function createPdfController/);assert.match(documentHost,/function createPrinter/);assert.match(documentHost,/function createIntegration/);
 assert.match(richHost,/function createRuntime/);assert.match(noteExport,/function createExporter/);
-assert.match(richHost,/const sameDocument=fieldRichDocumentId\(record\.field\)===record\.documentId&&fieldRichRevision\(record\.field\)===record\.revision;/u,'a disposed rich editor may restore conflict state only while its original document and revision still own the textarea');
+assert.match(richHost,/const sameDocument=record\.bindingCurrent\(\)&&fieldRichRevision\(record\.field\)===record\.revision;/u,'a disposed rich editor may restore conflict state only while its original binding and revision still own the textarea');
+assert.match(richHost,/JSON\.stringify\(\[fieldRichDocumentId\(field\),\.\.\.keys\.map\(key=>field\.dataset\[key\]\|\|''\)\]\)/u,'binding identity retains the original document and lifecycle/ownership identity');
+assert.match(richHost,/bindingCurrent=\(\)=>field\.isConnected&&fieldBinding\(field\)===binding/u,'editor publication is bound to the connected original field identity');
 assert.match(richHost,/function closeField\(field[\s\S]{0,420}clearExternalConflict\(field\);return existed/u,'closing a rich editor clears its conflict marker synchronously before the textarea can be rebound');
 assert.doesNotMatch(documentHost,/WG1:|Wordgard|indexedDB|dailyRecords/,'document owner orchestrates checked providers instead of duplicating rich-text/storage codecs or Saved-Day storage');
 assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note export remains read-only and cannot mutate Saved-Day evidence');
