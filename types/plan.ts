@@ -10,7 +10,7 @@ export interface PlanApplyOptions{
   scheduleText?:string;projection?:PlanDraftProjection;currentEditor?:()=>boolean;forceReload?:boolean;reviewOnly?:boolean;
   persistDraft?:boolean;source?:string;studyDate?:string;sessionSnapshot?:import('./record-models.ts').SessionSnapshot|null;lifecycleManaged?:boolean;skipNotify?:boolean;
 }
-export interface PlanApplyPreparation{handled?:boolean;result?:boolean;cancelled?:boolean;scheduleChanged?:boolean;progressMigration?:PlanMigration|null}
+export interface PlanApplyPreparation{handled?:boolean;result?:boolean;cancelled?:boolean;scheduleChanged?:boolean;progressMigration?:PlanMigration|null;liveReplacement?:Readonly<{breakIdentity:string|null}>}
 export interface PlanMigrationSummary{total?:number;matched?:number;practiceTotal?:number;practiceMatched?:number}
 
 export interface PlanRow{
@@ -55,7 +55,7 @@ export interface PlanRealtimeState{
   scheduledIdx:number|null;currentIdx?:number|null;nowEff:number;first:number|null;driftKind?:string;match?:boolean;
 }
 export interface PlanGatewayRead{
-  tasks:readonly import('./domain.ts').Task[];fingerprint:string;anchor:number;studyDate:string;currentIndex?:number;renderDirty?:boolean;
+  tasks:readonly import('./domain.ts').Task[];fingerprint:string;anchor:number;studyDate:string;breakIdentity:string|null;currentIndex?:number;renderDirty?:boolean;
 }
 export interface PlanMigrationPreview{matched?:number;total?:number;practiceTotal?:number;practiceMatched?:number}
 export type PlanMigration=import('./execution-host.ts').ScheduleProgressSnapshot;

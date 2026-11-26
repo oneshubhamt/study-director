@@ -169,8 +169,8 @@ export interface TimerRestorationInput{
 export type ScheduleProgressMatch={primaryKey:string;areaKey:string};
 export type ScheduleProgressFields={[K in keyof RuntimeTaskSessionFields]?:RuntimeTaskSessionFields[K]|undefined}&{target?:number|null;done?:boolean;skipped?:boolean};
 export type ScheduleProgressEntry=ScheduleProgressMatch&{idx:number;progress:ScheduleProgressFields};
-export type ScheduleProgressSnapshot={date:string;entries:ScheduleProgressEntry[];practiceLinks:(ScheduleProgressMatch&{oldTaskId:string})[];latestCarryForward:string;preview:{total:number;matched:number;practiceTotal:number;practiceMatched:number}};
-export type ScheduleGatewayOptions={studyDate?:string;source?:string;progressMigration?:ScheduleProgressSnapshot|null;sessionSnapshot?:import('./record-models.ts').SessionSnapshot|null;reviewOnly?:boolean;lifecycleManaged?:boolean;current?:()=>boolean;beforeApply?:()=>void};
+export type ScheduleProgressSnapshot={date:string;sourceRows:ScheduleProgressMatch[];entries:ScheduleProgressEntry[];practiceLinks:(ScheduleProgressMatch&{oldTaskId:string})[];latestCarryForward:string;preview:{total:number;matched:number;practiceTotal:number;practiceMatched:number}};
+export type ScheduleGatewayOptions={studyDate?:string;source?:string;progressMigration?:ScheduleProgressSnapshot|null;liveReplacement?:Readonly<{breakIdentity:string|null}>;sessionSnapshot?:import('./record-models.ts').SessionSnapshot|null;reviewOnly?:boolean;lifecycleManaged?:boolean;current?:()=>boolean;beforeApply?:()=>void};
 export type ScheduleStartupDecision={kind:'done'|'forward-complete'}|{kind:'start';idx:number;seconds:number}|{kind:'wait';idx:number};
 export interface ScheduleGatewayInput{
   runtime:ExecutionRuntime;document:Document;ScheduleDerivedState:{renderDirty:boolean};APP_LIMITS:{maxCarryForwardChars:number};

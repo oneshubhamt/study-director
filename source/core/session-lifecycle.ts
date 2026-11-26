@@ -113,6 +113,7 @@ registry.define('session-lifecycle',1,()=>{
       // and dispatch in this same turn: no gap in which another ticket can win.
       if(admission&&(token!==flushToken||!admission.current()))return admission.cancelled;
       if(token!==flushToken)throw new LifecycleBusyError(`${name} was superseded before its pending Review flush settled.`);
+      if(admission?.beforeStart&&!admission.beforeStart())return admission.cancelled;
       const ctx=start(name,normalized);
       try{
         const result=await operation(ctx);

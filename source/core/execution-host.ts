@@ -568,14 +568,14 @@ function hasBlockProgressAtIndex(idx:number){
     (progress&&(progress.done!==undefined||progress.total!==undefined)) ||
     TaskSessionState.getField(idx,'actualTime')!==undefined || hasObjectData(TaskSessionState.getField(idx,'actualClock')) || hasObjectData(TaskSessionState.getField(idx,'actualRecords'));
 }
+function checkpointProgressInputs(){
+  if(isTrackableBlock(TASKS[TimerState.currentIndex]))saveNote();
+  captureReviewInputs();
+  syncUnfinishedNoteDraft();
+}
 function captureProgressBeforeScheduleChange(){
   PracticePacer.pauseFromMain(PRACTICE_PAUSE_CAUSES.MAIN);
-  try{
-    if(isLiveTrackableTimer())recordCurrentActiveToTask(TimerState.currentIndex,'partial');
-  }catch(e){}
-  try{if(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))saveNote();}catch(e){}
-  try{captureReviewInputs();}catch(e){}
-  try{syncUnfinishedNoteDraft();}catch(e){}
+  if(isLiveTrackableTimer())recordCurrentActiveToTask(TimerState.currentIndex,'partial');
 }
 function buildProgressMatchIndex(rows:readonly TaskInput[]){
   const primary=new Map<string,number[]>(),area=new Map<string,number[]>();
@@ -594,13 +594,18 @@ function uniqueIndex(map:ReadonlyMap<string,number[]>,key:string){
   const rows=map.get(key)||[];
   return rows.length===1?rows[0]!:null;
 }
-function matchProgressEntriesToRows<T extends ScheduleProgressMatch>(entries:readonly T[],rows:readonly TaskInput[]){
+function matchProgressEntriesToRows<T extends ScheduleProgressMatch>(entries:readonly T[],rows:readonly TaskInput[],sourceRows:readonly ScheduleProgressMatch[]){
   const idx=buildProgressMatchIndex(rows);
-  const oldAreaCounts=new Map<string,number>();
-  (entries||[]).forEach(entry=>oldAreaCounts.set(entry.areaKey,(oldAreaCounts.get(entry.areaKey)||0)+1));
+  const oldAreaCounts=new Map<string,number>(),oldPrimaryCounts=new Map<string,number>();
+  // Evidence is sparse. Count all original blocks, not just the ones with
+  // progress or Pacer links, so a removed duplicate cannot borrow another block.
+  sourceRows.forEach(entry=>{
+    oldAreaCounts.set(entry.areaKey,(oldAreaCounts.get(entry.areaKey)||0)+1);
+    oldPrimaryCounts.set(entry.primaryKey,(oldPrimaryCounts.get(entry.primaryKey)||0)+1);
+  });
   const used=new Set();
   return (entries||[]).map(entry=>{
-    let target=uniqueIndex(idx.primary,entry.primaryKey);
+    let target=oldPrimaryCounts.get(entry.primaryKey)===1?uniqueIndex(idx.primary,entry.primaryKey):null;
     let matchType:'exact'|'area'='exact';
     if(target===null&&oldAreaCounts.get(entry.areaKey)===1){
       target=uniqueIndex(idx.area,entry.areaKey);
@@ -647,14 +652,15 @@ function recalcMigratedProgressForNewTarget(p:ScheduleProgressFields,targetIdx:n
   return out;
 }
 function snapshotScheduleProgressForMigration(newRows:readonly TaskInput[]){
-  captureProgressBeforeScheduleChange();
-  const entries:ScheduleProgressEntry[]=[];
+  const entries:ScheduleProgressEntry[]=[],sourceRows:ScheduleProgressMatch[]=[];
   TASKS.forEach((t,idx)=>{
-    if(!isTrackableBlock(t)||!hasBlockProgressAtIndex(idx))return;
+    if(!isTrackableBlock(t))return;
+    const identity={primaryKey:taskProgressPrimaryKey(t),areaKey:taskProgressAreaKey(t)};
+    sourceRows.push(identity);
+    // A running timer counts even before the first durable progress entry.
+    if(!hasBlockProgressAtIndex(idx)&&!(idx===TimerState.currentIndex&&isLiveTrackableTimer()))return;
     entries.push({
-      idx,
-      primaryKey:taskProgressPrimaryKey(t),
-      areaKey:taskProgressAreaKey(t),
+      idx,...identity,
       progress:{
         completion:TaskSessionState.getField(idx,'completion'),
         completionSource:TaskSessionState.getField(idx,'completionSource'),
@@ -669,10 +675,10 @@ function snapshotScheduleProgressForMigration(newRows:readonly TaskInput[]){
     });
   });
   const practiceLinks=snapshotPracticeTaskLinksForMigration();
-  const matched=matchProgressEntriesToRows(entries,newRows).length;
-  const practiceMatched=matchProgressEntriesToRows(practiceLinks,newRows).length;
+  const matched=matchProgressEntriesToRows(entries,newRows,sourceRows).length;
+  const practiceMatched=matchProgressEntriesToRows(practiceLinks,newRows,sourceRows).length;
   return {
-    date:getReviewDate(),
+    date:getReviewDate(),sourceRows,
     entries,
     practiceLinks,
     latestCarryForward:clampText(ports.getCarryForward(),APP_LIMITS.maxCarryForwardChars),
@@ -683,7 +689,7 @@ function restoreMigratedScheduleProgress(snapshot:ScheduleProgressSnapshot|null)
   const total=snapshot&&Array.isArray(snapshot.entries)?snapshot.entries.length:0;
   const practiceTotal=snapshot&&Array.isArray(snapshot.practiceLinks)?snapshot.practiceLinks.length:0;
   if(!snapshot||snapshot.date!==getReviewDate())return {total,matched:0,areaMatched:0,practiceTotal,practiceMatched:0,practiceRemapped:0};
-  const matches=matchProgressEntriesToRows(snapshot.entries||[],TASKS);
+  const matches=matchProgressEntriesToRows(snapshot.entries||[],TASKS,snapshot.sourceRows);
   matches.forEach(({entry,target,matchType})=>{
     const p=recalcMigratedProgressForNewTarget(entry.progress,target,matchType);
     if(p.completion!==undefined)TaskSessionState.setField(target,'completion',Number(p.completion));
@@ -700,7 +706,7 @@ function restoreMigratedScheduleProgress(snapshot:ScheduleProgressSnapshot|null)
     if(p.done)TaskSessionState.setResolved(target,'done');
     if(p.skipped)TaskSessionState.setResolved(target,'skipped');
   });
-  const practiceMatches=matchProgressEntriesToRows(snapshot.practiceLinks||[],TASKS);
+  const practiceMatches=matchProgressEntriesToRows(snapshot.practiceLinks||[],TASKS,snapshot.sourceRows);
   const taskIdMap=new Map<string,string>();
   practiceMatches.forEach(({entry,target})=>{
     const nextTaskId=TaskIdentity.idAt(target);
@@ -773,14 +779,42 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
   return restored;
 }
 
+  function newlyUnmatched<T extends ScheduleProgressMatch>(confirmed:readonly T[],latest:readonly T[],before:ScheduleProgressSnapshot,after:ScheduleProgressSnapshot,rows:readonly TaskInput[],key:(entry:T)=>string|number){
+    const unmatched=(entries:readonly T[],snapshot:ScheduleProgressSnapshot)=>{
+      const matched=new Set(matchProgressEntriesToRows(entries,rows,snapshot.sourceRows).map(match=>key(match.entry)));
+      return entries.filter(entry=>!matched.has(key(entry))).map(key);
+    };
+    const allowed=new Set(unmatched(confirmed,before));
+    return unmatched(latest,after).some(id=>!allowed.has(id));
+  }
   function apply(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}){
     const opts=options&&typeof options==='object'?options:{};
-    const perform=()=>{opts.beforeApply?.();return applyRows(rows,{...opts,lifecycleManaged:true});};
-    if(opts.lifecycleManaged)return opts.current&&!opts.current()?false:perform();
+    let migration:ScheduleProgressSnapshot|null=null;
+    const beforeStart=()=>{
+      if(!opts.liveReplacement&&!opts.progressMigration)return true;
+      const activeBreak=breakIdentity();
+      if(activeBreak!==null&&activeBreak!==opts.liveReplacement?.breakIdentity)return false;
+      const confirmed=opts.progressMigration;
+      if(!confirmed)return !hasLiveState();
+      // Strict Review flush has settled, but its old DOM is still bound.
+      // Capture current input before invalidation, then check the confirmed
+      // loss set (not just counts); newly unmatched work needs fresh consent.
+      checkpointProgressInputs();
+      const latest=snapshotScheduleProgressForMigration(rows);
+      if(latest.date!==confirmed.date||
+        newlyUnmatched(confirmed.entries,latest.entries,confirmed,latest,rows,entry=>entry.idx)||
+        newlyUnmatched(confirmed.practiceLinks,latest.practiceLinks,confirmed,latest,rows,entry=>entry.oldTaskId))return false;
+      if(activeBreak!==null&&breakState('end')!==true)return false;
+      captureProgressBeforeScheduleChange();
+      migration=snapshotScheduleProgressForMigration(rows);
+      return true;
+    };
+    const perform=()=>{opts.beforeApply?.();return applyRows(rows,{...opts,progressMigration:migration,lifecycleManaged:true});};
+    if(opts.lifecycleManaged)return (opts.current&&!opts.current())||!beforeStart()?false:perform();
     const date=isValidIsoDate(opts.studyDate)?opts.studyDate:todayISO();
     return SessionLifecycle.run<ReturnType<typeof applyRows>|false>(opts.source||'schedule-apply',{
       scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
-    },perform,opts.current?{current:opts.current,cancelled:false}:undefined);
+    },perform,{current:opts.current||(()=>true),beforeStart,cancelled:false});
   }
   function reconcile(source='schedule-reapply'){
     return SessionLifecycle.reconcile(source,{
@@ -794,7 +828,7 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
       tasks:TASKS,
       currentIndex:TimerState.currentIndex,
       anchor:TimerState.scheduleAnchorMin,
-      fingerprint:scheduleFingerprint(),studyDate:getReviewDate(),
+      fingerprint:scheduleFingerprint(),studyDate:getReviewDate(),breakIdentity:breakIdentity(),
       renderDirty:!!ScheduleDerivedState.renderDirty
     });
   }
@@ -822,8 +856,12 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
     const hasTimer=!!(TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]));
     return hasTimer||TimerState.paused||!!TimerState.activeBreak||hasProtectedLiveProgress();
   }
+  function breakIdentity(){
+    if(!TimerState.paused||!TimerState.activeBreak||TimerState.runtime.startMs===null)return null;
+    return JSON.stringify([TaskIdentity.idAt(TimerState.currentIndex),TimerState.runtime.startMs,TimerState.breakStartMs??TimerState.runtime.pausedStartedMs??TimerState.activeBreak.startedAtMs]);
+  }
   function breakState(action='status'){
-    const active=!!(TimerState.paused&&TimerState.activeBreak&&TimerState.runtime&&TimerState.runtime.startMs!==null);
+    const active=breakIdentity()!==null;
     if(action==='status')return active;
     if(action!=='end')throw new TypeError('Unknown Plan schedule break action.');
     if(!active||resolveActivePauseBeforeTimerSwitch()!==true)return false;

@@ -486,16 +486,17 @@ function renderInvalidScheduleApply(projection:PlanDraftProjection){
   setPlanComposerOpen(true);
   setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
 }
-function closeActiveBreakForScheduleChange(stillCurrent:()=>boolean=()=>true){
-  if(!scheduleGateway.breakState())return true;
+function confirmScheduleChangeWillEndBreak(breakIdentity:string|null,stillCurrent:()=>boolean){
+  if(breakIdentity===null)return true;
   return confirm({
     title:'End the current break?',
     message:'The revised Plan can be applied after the active timer break ends.',
     details:['Choose Keep break to return to Execute without changing the live Plan.'],
     confirmLabel:'End break and continue',cancelLabel:'Keep break'
   }).then(ok=>{
-    if(!ok||!stillCurrent())return false;
-    return scheduleGateway.breakState('end')===true;
+    // Consent is not the end of the break. The gateway acts only after
+    // replacement is also confirmed and the lifecycle admits this identity.
+    return ok&&stillCurrent();
   });
 }
 function confirmScheduleChangeWillMigrateProgress(newRows:readonly ScheduleRow[],stillCurrent:()=>boolean=()=>true){
@@ -526,14 +527,16 @@ function prepareScheduleApply(parsed:readonly ScheduleRow[],rawOriginal:unknown,
     // Preparation must be side-effect free: the editor fence is checked again before reapply.
     return {handled:true,result:true,scheduleChanged:false,progressMigration:null};
   }
-  if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null};
+  const liveReplacement=freeze({breakIdentity:scheduleGateway.read().breakIdentity});
+  if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null,
+    ...(hasApplied&&!opts.forceReload&&!opts.reviewOnly?{liveReplacement}:{})};
   const finish=():Readonly<PlanApplyPreparation>|PromiseLike<Readonly<PlanApplyPreparation>>=>{
     const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed,stillCurrent);
     if(progressMigration)return Promise.resolve(progressMigration).then((value:false|PlanMigration)=>
-      value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
-    return {handled:false,cancelled:false,scheduleChanged:true,progressMigration:null};
+      value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value,liveReplacement});
+    return {handled:false,cancelled:false,scheduleChanged:true,progressMigration:null,liveReplacement};
   };
-  const breakDecision=closeActiveBreakForScheduleChange(stillCurrent);
+  const breakDecision=confirmScheduleChangeWillEndBreak(liveReplacement.breakIdentity,stillCurrent);
   if(typeof breakDecision!=='boolean')return Promise.resolve(breakDecision).then((ok:boolean)=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
@@ -567,11 +570,15 @@ function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed
   };
   const applyResult=scheduleGateway.apply(parsed,{
     ...(opts.studyDate===undefined?{}:{studyDate:opts.studyDate}),...(opts.source===undefined?{}:{source:opts.source}),
-    progressMigration:preparation.progressMigration||null,reviewOnly:!!opts.reviewOnly,
+    progressMigration:preparation.progressMigration||null,...(preparation.liveReplacement?{liveReplacement:preparation.liveReplacement}:{}),reviewOnly:!!opts.reviewOnly,
     sessionSnapshot:opts.sessionSnapshot||null,lifecycleManaged:!!opts.lifecycleManaged,current,beforeApply
   });
   const finishApply=(result:import('../../types/plan.ts').PlanGatewayApplyResult|boolean|null)=>{
-    if(result===false||appliedEpoch===null||ownership.revision()!==owner)return false;
+    if(result===false){
+      if(current())setPlanStatus('Session progress changed while applying. Review the draft and try again.',false);
+      return false;
+    }
+    if(appliedEpoch===null||ownership.revision()!==owner)return false;
     // The session was applied, but a later draft owns its own composer and feedback.
     if(editEpoch!==appliedEpoch||fieldById('plan-input','textarea')!==field)return true;
     renderSched();

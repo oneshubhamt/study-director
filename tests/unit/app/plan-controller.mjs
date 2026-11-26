@@ -51,7 +51,7 @@ const scheduleTextFromRows=rows=>'ROW:'+JSON.stringify(rows);
 const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
-let breakActive=false,breakEnds=0,applyGate=null,finishApplyGate=null,applyRequested=false,safetyClears=0,studyDate='2026-11-26';
+let breakActive=false,breakEnds=0,breakRevision=1,applyGate=null,finishApplyGate=null,applyRequested=false,safetyClears=0,studyDate='2026-11-26';
 let blockedWrite=null,canonicalDraft=null,canWrite=true,ownerRevision=1,unconfirmedWrite=false;const saveOptions=[];
 const feedback=[],draftResults=[];let savedLibrary={savedPlans:[],defaultId:null},libraryWrites=0;
 const timers=new Map();let nextTimer=0;
@@ -89,13 +89,13 @@ const gateway={
   act:()=>true,
   apply:(rows,options)=>{
     applyRequested=true;
-    const perform=()=>{if(options.current&&!options.current())return false;options.beforeApply?.();applyCount++;tasks.splice(0,tasks.length,...rows);currentFingerprint=fingerprint(rows);const result={migrationSummary:null};return finishApplyGate?finishApplyGate.then(()=>result):result;};
+    const perform=()=>{if(options.current&&!options.current())return false;if(options.liveReplacement&&breakActive){if(options.liveReplacement.breakIdentity!==String(breakRevision))return false;breakActive=false;breakEnds++;}options.beforeApply?.();applyCount++;tasks.splice(0,tasks.length,...rows);currentFingerprint=fingerprint(rows);const result={migrationSummary:null};return finishApplyGate?finishApplyGate.then(()=>result):result;};
     return applyGate?applyGate.then(perform):perform();
   },
   breakState:action=>{if(action==='end'){breakActive=false;breakEnds++;return true;}return breakActive;},
   captureMigration:()=>({preview:{matched:0,total:0,practiceTotal:0,practiceMatched:0}}),
   clearSafety:()=>{safetyClears++;},flush:()=>{},hasLiveState:()=>liveActivity,
-  markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480,studyDate}),
+  markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480,studyDate,breakIdentity:breakActive?String(breakRevision):null}),
   reconcile:()=>{},renameAreas:()=>0,row:()=>({done:false,skipped:false}),
   timeline:()=>({rows:[],realtime:{scheduledIdx:null,first:0,nowEff:490}})
 };
@@ -364,6 +364,38 @@ assert.equal(applyCount,beforeBreakApply);
 assert.equal(breakEnds,beforeBreakEnds,'Cancel cannot end a break from a stale confirmation');
 assert.equal(breakActive,true);
 breakActive=false;
+
+// Both confirmations are required before ending a break. Cancelling the
+// replacement after consenting to the break must still leave the timer alone.
+liveActivity=true;breakActive=true;breakRevision++;
+ids['plan-input'].value='Break then replace';plan.draft.enter();
+confirmRequested=false;
+let allowBreak,allowReplace;
+confirmGate=new Promise(resolve=>{allowBreak=resolve;});
+const beforeTwoPrompts=breakEnds,beforeTwoApplies=applyCount,twoPrompts=plan.draft.confirm();
+for(let n=0;n<30&&!confirmRequested;n++)await Promise.resolve();
+assert.equal(confirmRequested,true);confirmRequested=false;
+confirmGate=new Promise(resolve=>{allowReplace=resolve;});allowBreak(true);
+for(let n=0;n<30&&!confirmRequested;n++)await Promise.resolve();
+assert.equal(confirmRequested,true,'replacement consent follows break consent');
+assert.equal(breakActive,true,'break remains active until the full transition is admitted');
+allowReplace(false);confirmGate=null;
+assert.equal(await twoPrompts,false);assert.equal(breakEnds,beforeTwoPrompts);assert.equal(applyCount,beforeTwoApplies);
+assert.equal(breakActive,true);
+
+// A different break cannot borrow the earlier break's confirmed identity.
+confirmRequested=false;confirmGate=new Promise(resolve=>{allowBreak=resolve;});
+const retiredBreak=plan.draft.confirm();
+for(let n=0;n<30&&!confirmRequested;n++)await Promise.resolve();
+assert.equal(confirmRequested,true);confirmRequested=false;
+confirmGate=new Promise(resolve=>{allowReplace=resolve;});allowBreak(true);
+for(let n=0;n<30&&!confirmRequested;n++)await Promise.resolve();
+assert.equal(confirmRequested,true);breakRevision++;allowReplace(true);confirmGate=null;
+assert.equal(await retiredBreak,false);assert.equal(breakEnds,beforeTwoPrompts);assert.equal(applyCount,beforeTwoApplies);
+assert.equal(breakActive,true);
+assert.equal(await plan.draft.confirm(),true,'both current confirmations admit one break ending and one replacement');
+assert.equal(breakEnds,beforeTwoPrompts+1);assert.equal(applyCount,beforeTwoApplies+1);assert.equal(breakActive,false);
+liveActivity=false;
 
 // An untouched default is only a visible fallback, not an authored draft.
 // Cancel must not convert canonical null to the default text, causing an
@@ -679,4 +711,4 @@ console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent','gateway-review-flush-admission','stale-apply-composer-completion','unconfirmed-commit-no-rollback','failed-authored-default-rescue','area-rename-owner-durability']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','load-preserves-newer-edit','load-detects-identical-text-reedit','superseded-draft-write-feedback','clear-strict-rollback','clear-preserves-newer-empty-edit','clear-rejects-stale-success','clear-rejects-lost-ownership','retired-debounce-callbacks','owner-revision-debounce','hydrate-invalidates-pending-draft','template-consent-owner','direct-apply-break-consent','gateway-review-flush-admission','stale-apply-composer-completion','unconfirmed-commit-no-rollback','failed-authored-default-rescue','area-rename-owner-durability','two-stage-break-consent','successor-break-identity']}));

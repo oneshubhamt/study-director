@@ -79,6 +79,21 @@ assert.deepEqual(asyncBlockedEvents,['flush']);
   assert.deepEqual(events,['flush']);assert.deepEqual(subject.status(),prior);
 }
 
+// A final evidence checkpoint can refuse the replacement before old editor
+// invalidation, just as an obsolete intent can.
+{
+  const events=[];
+  const subject=LifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
+    canMutate:()=>true,flushPending:()=>events.push('flush'),
+    prepare:()=>events.push('prepare'),reconcile:()=>events.push('reconcile'),
+    complete:()=>events.push('complete'),capture:()=>{}
+  })}));
+  subject.reconcile('initial');events.length=0;
+  const prior=subject.status();
+  const outcome=await subject.run('schedule-apply',{},()=>{events.push('mutate');return true;},{current:()=>true,beforeStart:()=>{events.push('checkpoint');return false;},cancelled:false});
+  assert.equal(outcome,false);assert.deepEqual(events,['flush','checkpoint']);assert.deepEqual(subject.status(),prior);
+}
+
 // Recovery-owned note lifecycle transitions may checkpoint the pending Review
 // through recovery quiescence; unrelated lifecycle transitions may not.
 {
