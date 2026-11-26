@@ -85,8 +85,8 @@ assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verifi
 
 assert.match(app,/BackupProviderRuntime\.createProtectedSafety\(location\.id,purpose\)/u,'Clear Library must require a verified protected safety version at the connected backup location');
 assert.match(app,/Clear Library stopped because the \$\{location\.label\} safety version could not be verified/u);
-assert.match(app,/'backup-now': \(\)=>BackupActions\.backUpEverywhere\(\)/u);assert.match(actions,/async function backUpEverywhere\(\)\{[\s\S]*device\.backupNow\(\)[\s\S]*providers\.backup\('google-drive'\)/u,'one Back up now: the Device Folder first, so Drive can take its version');
-assert.match(app,/'open-version-history': \(\)=>BackupActions\.openHistory\(\)/u);assert.match(actions,/const openHistory=\(\)=>withPassword\(\(\)=>input\.openHistory\(\)\)/u);
+assert.match(app,/'backup-now': \(\)=>BackupActions\.backUpEverywhere\(\)/u);assert.match(actions,/async function backUpEverywhere\(\)\{[\s\S]*captureActionAuthority\('back up to connected locations'\)[\s\S]*device\.backupNow\(\)[\s\S]*if\(!current\(assertOrigin\)\)return false;[\s\S]*providers\.backup\('google-drive'\)/u,'one Back up now: the Device Folder first, so Drive can take its version');
+assert.match(app,/'open-version-history': \(\)=>BackupActions\.openHistory\(\)/u);assert.match(actions,/async function openHistory\(\)\{[\s\S]*captureActionAuthority\('open backup version history'\)[\s\S]*return withPassword\(\(\)=>current\(assertOrigin\)\?input\.openHistory\(\):false\)/u);
 assert.match(app,/'recover-managed-version': ev=>BackupRecoveryHost\.history\.recover\(ev\)/u);
 assert.doesNotMatch(app,/'restore-latest-backup'|'recover-device-backup'|'recover-provider-backup'|'bring-in-managed-backup'|'restore-managed-version'/u);
 assert.match(host,/reconcileNotes:\(importedNotes,deletions=\[\]\)=>input\.recoveryNotes\.lifecycle\.run\('reconciled-notes',[\s\S]*allowDuringRecoveryQuiescence:true/u,'note recovery must checkpoint Review state through managed-recovery quiescence before canonical note mutation.');

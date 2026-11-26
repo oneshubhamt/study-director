@@ -122,11 +122,11 @@ for(const stale of ['let fileBackupRowReady=false;','const BackupProtection=Expo
 }
 assert.match(owner,/controller\.subscribeStatus\(\(\)=>\{renderFile\(\);syncFileHold\(\);\}\)/u,'standalone file work keeps background-location exclusion behind the checked owner');
 const filePicker=owner.slice(owner.indexOf('async function pickImportFile('),owner.indexOf('const cancelStandalone='));
-assert.match(filePicker,/assertOrigin=input\.captureImportAuthority\(\)/u,'file picker captures original ownership before presenting the native dialog');
+assert.match(filePicker,/assertOrigin=input\.captureActionAuthority\('import a backup'\)/u,'file picker captures original ownership before presenting the native dialog');
 const nativeOpen=filePicker.indexOf('await processing.open(');
 assert.ok(nativeOpen>0&&!/\bawait\b/.test(filePicker.slice(0,nativeOpen)),'native file-open entry remains synchronous at the checked host boundary');
 assert.match(filePicker,/processing\.open\(\{click:\(\)=>\{if\(stillCurrent\(\)\)\{fallback=freeze\(\{node:inputNode,assertOrigin\}\);inputNode\.click\(\);/u,'fallback selection carries its original authority before opening the input');
-assert.match(host,/captureImportAuthority:\(\)=>\{[^\n]*AppOwnership\.issueWriteToken\('import a backup'\);return \(\)=>AppOwnership\.assertWriteToken\(token,'import a backup'\)/u,'actual host captures and checks the same write token');
+assert.match(host,/captureActionAuthority:reason=>\{[^\n]*AppOwnership\.issueWriteToken\(reason\);return \(\)=>AppOwnership\.assertWriteToken\(token,reason\)/u,'actual host captures and checks the same write token');
 assert.match(owner,/protection\.ask\(\)/u,'locked backup flows retain password prompting');
 assert.match(ownerTypes,/readonly environment:DeviceBackupInput\['environment'\]/u,'Device Folder composition consumes the actual checked environment contract');
 assert.match(deviceTypes,/showDirectoryPicker:\(\(options:[^\n]+\)\|undefined/u,'the actual Device Backup environment contract represents folder-picker capability explicitly');
