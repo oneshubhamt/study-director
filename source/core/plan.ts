@@ -508,6 +508,7 @@ function confirmScheduleChangeWillMigrateProgress(newRows:readonly ScheduleRow[]
   const practiceMatched=snapshot.preview?snapshot.preview.practiceMatched:0;
   const details=[`${matched}/${total} current progress entries match the revised Plan.`];
   if(practiceTotal)details.push(`${practiceMatched}/${practiceTotal} Practice Pacer links match.`);
+  if(practiceMatched<practiceTotal)details.push('Unmatched practice results are kept without block links.');
   details.push('Removed or renamed unmatched blocks will no longer appear in today’s Review.','Notes for each Area remain separate and are preserved.');
   return confirm({
     title:'Replace today’s live Plan?',

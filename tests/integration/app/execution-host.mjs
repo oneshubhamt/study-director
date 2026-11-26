@@ -19,8 +19,8 @@ const original=[row('Read A','Area A',10),{...row('Read B','Area B',5),start:'08
 state.loadSchedule(model.buildTasks(original),{studyDate:date});schedule.resetScheduleLayers();
 fields.setField(0,'notes',{done:4,total:10});fields.setField(0,'completion',40);fields.setField(0,'completionSource','units');fields.setField(0,'actualTime',300);fields.setField(0,'actualClock',{startedAt:'2026-11-13T08:00:00Z'});fields.setResolved(1,'skipped');
 const oldId=state.taskIdentity.idAt(0);
-let reviewGate=null,reviewDate=date,today=date;const lifecycleEvents=[];
-const lifecycle=registry.require('session-lifecycle',1).createCoordinator(Object.freeze({hooks:Object.freeze({canMutate:()=>true,flushPending:()=>reviewGate,prepare:()=>lifecycleEvents.push('prepare'),reconcile:()=>lifecycleEvents.push('reconcile'),complete:()=>lifecycleEvents.push('complete'),capture:()=>{}})}));
+let reviewGate=null,reviewDate=date,today=date;const lifecycleEvents=[],reviewOptions=[];
+const lifecycle=registry.require('session-lifecycle',1).createCoordinator(Object.freeze({hooks:Object.freeze({canMutate:()=>true,flushPending:()=>reviewGate,prepare:()=>lifecycleEvents.push('prepare'),reconcile:context=>{lifecycleEvents.push('reconcile');reviewOptions.push(context.options);},complete:()=>lifecycleEvents.push('complete'),capture:()=>{}})}));
 const gateway=owner.createScheduleGateway({runtime,document:{getElementById:()=>null},ScheduleDerivedState:{renderDirty:true},APP_LIMITS:{maxCarryForwardChars:5000},completionSources:domain.COMPLETION_SOURCES,
   getCarryForward:()=>carry,setCarryForward:value=>{carry=value;},taskAreaKey:model.areaKey,taskMeasureValue:model.measureValue,taskTargetValue:model.targetValue,isTrackableBlock:model.isTrackable,clampText:value=>String(value),normalizeCompletionSource:domain.CompletionModel.normalizeSource,makeTaskId:domain.makeTaskId,
   isLiveTrackableTimer:()=>liveTimer,saveNote(){checkpoints++;},captureReviewInputs(){},syncUnfinishedNoteDraft(){},getReviewDate:()=>reviewDate,showEmpty(){},refreshCoreUi(){},showDone(){},isValidIsoDate:time.isValidIsoDate,todayISO:()=>today,buildTasks:model.buildTasks,isValidHHMM:time.isValidHHMM,clockMinuteToStudyMinute:time.clockMinuteToStudyMinute,t2m:time.clockToMinute,
@@ -50,6 +50,7 @@ releaseReview();reviewGate=null;
 const applied=await applying;liveTimer=false;
 assert.equal(entered,1);assert.equal(pauseCalls,1);assert.equal(recordCalls,1);assert.equal(checkpoints,1);
 assert.equal(applied.migrationSummary.matched,2);assert.equal(applied.migrationSummary.areaMatched,1);
+assert.equal(Object.hasOwn(reviewOptions.at(-1),'snapshotReview'),false,'ordinary Plan application lets the date-bound Review owner preserve its settled state');
 assert.equal(fields.getField(1,'completion'),30,'new target recalculates the latest preserved unit progress');assert.deepEqual(fields.getField(1,'notes'),{done:6});
 assert.equal(fields.getField(1,'actualTime'),540,'timer checkpoint and progress during flush are carried forward');assert.equal(fields.getField(1,'actualClock').startedAt,'2026-11-13T08:00:00Z');
 assert.equal(fields.isSkipped(0),true);assert.equal(carry,'Later carry-forward evidence');assert.equal(links.get(oldId),state.taskIdentity.idAt(1));assert.equal(starts,0,'review-only recovery never starts a timer');

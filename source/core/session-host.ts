@@ -80,11 +80,14 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
       }
       if(Object.keys(state).length)taskState[taskId]=state;
     }
-    const practice=snapshot.practiceSnapshot();
+    const practice=snapshot.practiceSnapshot(),reviewDate=snapshot.getReviewDate(),date=snapshot.timerState.studyDate||reviewDate;
+    // A schedule is loaded before its Review editor is reconciled. Never
+    // publish the new Active Session under another day's date or reflection.
+    const review=reviewDate===date?snapshot.reviewSnapshot():{reflection:'',studyQuality:null};
     return snapshot.timerState.projectSessionSnapshot({
-      version:configuration.sessionSnapshotVersion,date:snapshot.getReviewDate(),fingerprint:snapshot.scheduleFingerprint(),taskState,
+      version:configuration.sessionSnapshotVersion,date,fingerprint:snapshot.scheduleFingerprint(),taskState,
       timerRuntime:snapshot.timerPayload(),latestCarryForward:domain.clampText(snapshot.getCarryForward(),configuration.maxCarryForwardChars),
-      review:snapshot.reviewSnapshot(),...(practice?{practice}:{}),updatedAt:clock.nowIso()
+      review,...(practice?{practice}:{}),updatedAt:clock.nowIso()
     }) as SessionSnapshot|null;
   }
   function applySnapshot(value:SessionSnapshot|null):boolean{
@@ -144,7 +147,8 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   function restoreLocalRecovery():boolean{
     const session=repository.readLocal();
-    if(!session||session.date!==snapshot.getReviewDate()||snapshot.sessionFingerprint(session)!==snapshot.scheduleFingerprint())return false;
+    const date=snapshot.timerState.studyDate||snapshot.getReviewDate();
+    if(!session||session.date!==date||snapshot.sessionFingerprint(session)!==snapshot.scheduleFingerprint())return false;
     const value=sessionSnapshot(session);
     const restored=!!value&&applySnapshot(value);
     if(restored)runtimeConflicted=false;

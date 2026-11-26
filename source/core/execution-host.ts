@@ -817,7 +817,10 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
     const perform=()=>{opts.beforeApply?.();return applyRows(rows,{...opts,studyDate:date,progressMigration:migration,lifecycleManaged:true});};
     if(opts.lifecycleManaged)return (opts.current&&!opts.current())||!beforeStart()?false:perform();
     return SessionLifecycle.run<ReturnType<typeof applyRows>|false>(opts.source||'schedule-apply',{
-      scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
+      // The strict flush already settled the date-bound Review. Omit an
+      // explicit blank snapshot: its owner keeps same-day data and clears
+      // mismatched dates; a restored rescue snapshot is also retained.
+      scheduleIdentity:true,date,autoDate:date===currentDay,
     },perform,{current:opts.current||(()=>true),beforeStart,cancelled:false});
   }
   function reconcile(source='schedule-reapply'){
