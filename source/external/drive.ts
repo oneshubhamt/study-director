@@ -209,6 +209,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     });
   }
   function invalidateFolderIdentity():void{folderId='';boundFolder='';seenFolder=null;deletionChecked='';folderEpoch+=1;}
+  function repositoryChanged(){return noRetry(Object.assign(new Error('The Google Drive repository changed during the operation. Start a new operation.'),{code:'DRIVE_REPOSITORY_CHANGED'}));}
   function folderReceipt(id:string,profile:ProfileSnapshot):FolderReceipt{
     return Object.freeze({id,epoch:folderEpoch,profile});
   }
@@ -217,7 +218,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
   }
   function assertFolderReceipt(receipt:FolderReceipt):void{
     assertProfileCurrent(receipt.profile);
-    if(!folderReceiptCurrent(receipt)||boundFolder!==receipt.id+'\n'+receipt.profile.id)throw noRetry(new Error('The Google Drive repository changed during the operation.'));
+    if(!folderReceiptCurrent(receipt)||boundFolder!==receipt.id+'\n'+receipt.profile.id)throw repositoryChanged();
   }
   function rememberVerifiedFolder(context:DriveOperation,receipt:FolderReceipt):string{
     assertDriveIdentity(context);
@@ -569,7 +570,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
       assertProfileCurrent(expected);deletionChecked=expected.id;
     }
     let found=await findFolder(context);assertProfileCurrent(expected);
-    if(requiredFolder&&found!==requiredFolder)throw noRetry(new Error('The Google Drive repository changed during the operation. Start a new operation.'));
+    if(requiredFolder&&found!==requiredFolder)throw repositoryChanged();
     if(!found){found=await createFolder(context,expected);assertProfileCurrent(expected);}
     return bindFolder(found,context,expected);
   }
@@ -578,9 +579,9 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     if(observedProfileId===null){observedProfileId=id;profileGeneration=1;}else if(id!==observedProfileId){observedProfileId=id;profileGeneration+=1;invalidateFolderIdentity();}
     return Object.freeze({id,generation:profileGeneration});
   }
-  function assertProfileCurrent(expected:ProfileSnapshot):ProfileSnapshot{
+  function assertProfileCurrent(expected:ProfileSnapshot,message='The active Study Director profile changed while Google Drive was working. Retry the Drive action.'):ProfileSnapshot{
     const current=profileSnapshot();
-    if(current.id!==expected.id||current.generation!==expected.generation){throw noRetry(new Error('The active Study Director profile changed while Google Drive was working. Retry the Drive action.'));}
+    if(current.id!==expected.id||current.generation!==expected.generation){throw noRetry(new Error(message));}
     return current;
   }
   function expectedProfile():string{return profileSnapshot().id;}
@@ -602,10 +603,11 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     // fresh snapshot of whatever happens to be active when it completes.
     const settled=adopted?current:expected;assertProfileCurrent(settled);assertDriveIdentity(context);
     if(adopted){folderId=id;seenFolder=metadata;}
-    if(folderId!==id)throw noRetry(new Error('The Google Drive repository changed during the operation.'));
+    if(folderId!==id)throw repositoryChanged();
     boundFolder=id+'\n'+settled.id;
     const receipt=folderReceipt(id,settled),verifiedContext=driveOperationContext({signal:context.signal,folderState:{authorization,profile:settled,receipt}});
     const name=libraryName();if(name&&metadata.name!==name)await renameFolder(id,name,verifiedContext).catch(()=>{});
+    assertProfileCurrent(settled,'The active Study Director profile changed while Google Drive was settling its library. Retry the Drive action.');
     assertDriveIdentity(verifiedContext);return receipt;
   }
   function libraryName():string{try{const name=String(profilePort?.name()||'').trim();return name&&name.length<=200?name:FOLDER_NAME;}catch{return FOLDER_NAME;}}
@@ -739,7 +741,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     if(previous&&folderReceiptCurrent(previous)){await assertDriveOperationCurrent(operation);assertDriveIdentity(operation);return previous.id;}
     // Keep the original receipt on the caller. A stale receipt can reverify
     // the same folder, but failure must not turn it into an unscoped caller.
-    if(previous&&folderId&&folderId!==previous.id)throw noRetry(new Error('The Google Drive repository changed during the operation. Start a new operation.'));
+    if(previous&&folderId&&folderId!==previous.id)throw repositoryChanged();
     const revalidation=previous&&operation.folderState
       ?Object.freeze({...operation,folderState:{...operation.folderState,receipt:null}})
       :operation;
@@ -749,7 +751,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     const resolved=await awaitFolderResolution(flight,revalidation);
     assertDriveIdentity(revalidation);assertFolderReceipt(resolved);
     if(previous&&(resolved.id!==previous.id||resolved.profile.id!==previous.profile.id||resolved.profile.generation!==previous.profile.generation))
-      throw noRetry(new Error('The Google Drive repository changed during the operation. Start a new operation.'));
+      throw repositoryChanged();
     if(revalidation!==operation){const state=operation.folderState!;state.profile=resolved.profile;state.receipt=resolved;return resolved.id;}
     return rememberVerifiedFolder(operation,resolved);
   }
@@ -884,8 +886,13 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     const descriptor=publicationDescriptor(metadata,parent),created=Date.parse(descriptor.createdAt);if(!Number.isFinite(created)||driveNow()-created>=PUBLICATION_MAX_AGE_MS-PUBLICATION_ASSERTION_MARGIN_MS)throw noRetry(new Error('The Google Drive backup publication marker is too old to safely begin another commit step. Retry the backup.'));
     return descriptor;
   }
+  async function coordinationReleaseParent(context:DriveOperation):Promise<string>{
+    try{return await ensureFolder(context);}
+    catch(error){if(asDriveError(error).code==='DRIVE_REPOSITORY_CHANGED')return '';throw error;}
+  }
   async function endRepositoryPublication(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
-    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');if(!publicationIdValid(id))return false;let metadata:DriveFile|null=null;
+    const context=childDriveOperationContext(baseContext),id=String(ref&&ref.id||'');if(!publicationIdValid(id))return false;
+    const parent=await coordinationReleaseParent(context);if(!parent)return false;let metadata:DriveFile|null=null;
     const trustedRemoteId=trustedCoordinationRemoteId(ref,parent,PUBLICATION_KIND,publicationIdValid);if(trustedRemoteId)metadata=parseDriveFile({id:trustedRemoteId});
     else if(ref&&ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryPublication(parent,id,context);if(!metadata)return false;
@@ -978,7 +985,8 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     return descriptor;
   }
   async function endRepositoryMaintenance(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
-    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');if(!maintenanceIdValid(id))return false;let metadata:DriveFile|null=null;
+    const context=childDriveOperationContext(baseContext),id=String(ref&&ref.id||'');if(!maintenanceIdValid(id))return false;
+    const parent=await coordinationReleaseParent(context);if(!parent)return false;let metadata:DriveFile|null=null;
     const trustedRemoteId=trustedCoordinationRemoteId(ref,parent,MAINTENANCE_KIND,maintenanceIdValid);if(trustedRemoteId)metadata=parseDriveFile({id:trustedRemoteId});
     else if(ref&&ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)return false;

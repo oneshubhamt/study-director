@@ -135,10 +135,12 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
   }
   function schedule(){
     if(renderTimer!==null)return false;
-    renderTimer=environment.setTimeout(()=>{renderTimer=null;render();},0);
+    const timer=environment.setTimeout(()=>{if(renderTimer!==timer)return;renderTimer=null;render();},0);
+    renderTimer=timer;
     return true;
   }
   function render(){
+    if(renderTimer!==null)environment.clearTimeout(renderTimer);
     renderTimer=null;
     let model:ReturnType<typeof presentation.status>;
     try{model=presentation.status(statusInput());}
@@ -148,7 +150,8 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     if(lastRing==='syncing'&&model.ring==='synced'){
       if(settleTimer!==null)environment.clearTimeout(settleTimer);
       for(const host of hosts)host.classList.add('status-settle');
-      settleTimer=environment.setTimeout(()=>{settleTimer=null;for(const host of hosts)host.classList.remove('status-settle');},1400);
+      const timer=environment.setTimeout(()=>{if(settleTimer!==timer)return;settleTimer=null;for(const host of hosts)host.classList.remove('status-settle');},1400);
+      settleTimer=timer;
     }
     lastRing=model.ring;
     for(const host of hosts)drawStatusHost(host,model);
@@ -186,6 +189,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     schedule();return true;
   }
   function connectDriveForProfile(){
+    if(!input.canMutate())return false;
     const profile=currentProfile(),token=++sequence;
     input.markDriveRequested();connection={token,profile};startConnectCard(profile,token);schedule();
     let result:ReturnType<ReturnType<typeof input.providers>['connect']>;
@@ -230,10 +234,12 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     }
     if(model.done&&hideTimer===null){
       const expected=state;
-      hideTimer=environment.setTimeout(()=>{
+      const timer=environment.setTimeout(()=>{
+        if(hideTimer!==timer)return;
         hideTimer=null;
         if(card===expected&&currentProfile()===expected.profile)endConnectCard();
       },6000);
+      hideTimer=timer;
     }else if(!model.done)clearHideTimer();
     return model;
   }

@@ -203,6 +203,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   const done=controller.renderConnectCard();
   assert.equal(done.done,true,'the current profile connection can complete its card');
   assert.ok([...timers.values()].some(timer=>timer.ms===6000),'a completed card schedules its hide');
+  const previousHide=[...timers.values()].find(timer=>timer.ms===6000).fn;
   status={connected:true,waiting:true,sync:{syncedAt:'1970-01-01T00:00:02.000Z'}};
   const resumed=controller.renderConnectCard();
   assert.equal(resumed.done,false,'the same card can resume work after a transient terminal-looking status');
@@ -211,6 +212,8 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   controller.renderConnectCard();
   const staleHide=[...timers.values()].find(timer=>timer.ms===6000)?.fn;
   assert.equal(typeof staleHide,'function','a terminal card re-arms its hide after work settles again');
+  previousHide();assert.equal(controller.connectCardOpen(),true,'a cancelled timer for the same card cannot close it after work resumes');
+  assert.ok([...timers.values()].some(timer=>timer.ms===6000&&timer.fn===staleHide),'the rearmed timer remains authoritative');
   now=3000;status=null;
   const third=controller.connectDriveForProfile();
   staleHide();
@@ -238,6 +241,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     capture:()=>{}
   }));
   assert.equal(await controller.action(target('sign-in')),false,'secondary sync-status sign-in is blocked before provider connection work');assert.equal(connects,0);
+  assert.equal(controller.connectDriveForProfile(),false,'direct connection callers must also stop at the checked owner');assert.equal(connects,0);
   assert.equal(await controller.action(target('sync-now')),false,'secondary sync-now is blocked before scheduling shared work');assert.equal(syncSchedules,0);
   assert.equal(await controller.action(target('open-execute')),true,'read-only navigation remains available on a secondary tab');
   assert.equal(await controller.action(target('open-data')),true,'read-only data navigation remains available on a secondary tab');
@@ -283,6 +287,15 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   profile='profile-b';ring='synced';controller.render();
   assert.equal([...hosts.values()].some(node=>node.classes.has('status-settle')),false,'a successor profile must not inherit the predecessor profile sync-settle glow');
   assert.equal([...timers.values()].some(timer=>timer.ms===1400),false,'a profile switch must reset the predecessor ring transition before scheduling settle animation');
+  ring='syncing';controller.render();ring='synced';controller.render();
+  const oldSettle=[...timers.values()].find(timer=>timer.ms===1400).fn;
+  ring='syncing';controller.render();ring='synced';controller.render();
+  const newSettle=[...timers.values()].find(timer=>timer.ms===1400).fn;
+  oldSettle();assert.ok([...hosts.values()].every(node=>node.classes.has('status-settle')),'a retired settle timer cannot clear a successor animation');
+  assert.ok([...timers.values()].some(timer=>timer.fn===newSettle));newSettle();assert.ok([...hosts.values()].every(node=>!node.classes.has('status-settle')));
+  controller.schedule();const oldRender=[...timers.values()].find(timer=>timer.ms===0).fn;
+  controller.render();controller.schedule();const newRender=[...timers.values()].find(timer=>timer.ms===0).fn;
+  oldRender();assert.equal(controller.schedule(),false,'a retired render timer cannot clear a newer scheduled render');assert.ok([...timers.values()].some(timer=>timer.fn===newRender));
 }
 
 

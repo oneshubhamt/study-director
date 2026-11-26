@@ -471,15 +471,15 @@ for(const failure of ['none','missing','expired','unreadable-age','foreign']){
  await h.provider.disconnect();assert.equal(clock.pending(),0);
 }
 
-// Cancellation releases only coordination artifacts, using the same verified
-// operation scope. Invalidating that scope still forces a fresh folder check.
+// Cancellation releases only coordination artifacts in the original verified
+// scope. A known replacement is definitive evidence against safe retirement.
 for(const invalidate of [false,true]){
  const h=createHarness(),controller=new AbortController();await h.provider.prepare();await h.provider.authorize();
  const operation=h.provider.repository.beginOperation({signal:controller.signal}),marker=await operation.beginMaintenance();
  if(invalidate){h.state.trashedFolders.add('folder-1');await h.provider.repository.scope();}
- const start=h.state.requests.length;controller.abort();await operation.endMaintenance(marker);
- const metadataReads=h.state.requests.slice(start).filter(request=>request.method==='GET');
- if(invalidate){assert.ok(metadataReads.length);assert.ok(h.state.files.has(marker.remoteId),'release cannot delete an old-folder marker after repository identity changes');}
+ const start=h.state.requests.length;controller.abort();assert.equal(await operation.endMaintenance(marker),!invalidate);
+ const requests=h.state.requests.slice(start),metadataReads=requests.filter(request=>request.method==='GET');
+ if(invalidate){assert.equal(requests.length,0,'known replacement must not be rediscovered for retired cleanup');assert.ok(h.state.files.has(marker.remoteId),'release cannot delete an old-folder marker after repository identity changes');}
  else{assert.equal(metadataReads.length,0,'known marker release must not rediscover its already verified folder after cancellation');assert.equal(h.state.files.has(marker.remoteId),false);}
  await h.provider.disconnect();
 }
