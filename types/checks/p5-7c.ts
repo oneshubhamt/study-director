@@ -84,7 +84,7 @@ const storageResetDevice=Object.freeze({
 void storageResetCanonical;void storageResetProvider;void storageResetDevice;
 
 recoveryModule.createStorageReset(Object.freeze({
-  authority:Object.freeze({canMutate:()=>true}),canonical:storageResetCanonical,
+  authority:Object.freeze({canMutate:()=>true,captureOrigin:()=>()=>{}}),canonical:storageResetCanonical,
   writeback:Object.freeze({installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,writeLiveDraft:()=>appData.activeSession.load(0,{strict:true})}),
   provider:storageResetProvider,device:storageResetDevice,
   storage:Object.freeze({health:()=>({lastStudyDataSaveAt:null,browserDataClearedAt:null}),updateHealth:()=>{},storedHealth:()=>null,indexedDbLifecycle:()=>({resets:0,startedFresh:false})}),
