@@ -729,18 +729,19 @@ PRACTICE_PAUSE_CAUSES,
   function completedRuns(){return sanitizePracticeRuns(runs);}
   function status(){return {active:active?JSON.parse(JSON.stringify(active)) as PracticeActive:null,runs:completedRuns(),running:running(),currentMs:currentMsAt(),sessionMs:sessionMsAt()};}
   function remapTaskLinks(taskIdMap:ReadonlyMap<string,string>){
+    const mapped=(id:string)=>taskIdMap.get(id);
     if(!(taskIdMap instanceof Map))return 0;
     let remapped=0,changed=false;
     // The old IDs are schedule-local (index + name), so even an ID present
     // in the new schedule is not a valid link unless the matcher admitted it.
     if(active){
-      const next=taskIdMap.get(active.taskId);
+      const next=mapped(active.taskId);
       if(next){active.taskId=next;remapped++;changed=true;}
       else{recoverUnlinkedActive(nowMs());message='The linked block changed. Practice results were kept without a block link.';changed=true;}
     }
     runs.forEach(run=>{
       if(!run.taskId)return;
-      const next=taskIdMap.get(run.taskId);
+      const next=mapped(run.taskId);
       if(next){run.taskId=next;remapped++;}
       else delete run.taskId;
       changed=true;
