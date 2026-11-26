@@ -38,7 +38,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
     // This harness models request completion and explicit abort, not IndexedDB's
     // cross-connection transaction scheduler. Remember only rows this transaction changes.
     const undo=new Map();
-    const remember=(map,key)=>{let rows=undo.get(map);if(!rows){rows=new Map();undo.set(map,rows);}if(!rows.has(key))rows.set(key,{present:map.has(key),value:map.get(key)});};
+    const remember=(map,key)=>{let rows=undo.get(map);if(!rows){rows=new Map();undo.set(map,rows);}if(!rows.has(key))rows.set(key,{present:Map.prototype.has.call(map,key),value:Map.prototype.get.call(map,key)});};
     const write=(map,key,value)=>{remember(map,key);map.set(key,structuredClone(value));};
     const remove=(map,key)=>{remember(map,key);map.delete(key);};
     const finish=(ok,value)=>{if(settled)return;settled=true;ok?resolve(value):reject(value instanceof Error?value:new Error(String(value||'transaction failed')))};
