@@ -17,6 +17,26 @@ try{
   page=await browser.createPage(server.url('deployment','instrumented.html'),{preload});
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().state==='primary'&&__PWA6.SessionLifecycle.status().ready`),{label:'primary ownership'});
+  // Native generated editor witness: the host can retire a binding while a
+  // long edit is awaiting grouped publication. The retired adapter must not
+  // dispatch an input, replace the rebound textarea, or publish derived text.
+  await page.evaluate(`(async()=>{
+    const field=document.createElement('textarea');field.id='qa-retired-editor';
+    field.value='Original note';document.body.append(field);
+    const state={field,current:true,inputs:0,derived:0,mounted:null};
+    field.addEventListener('input',()=>state.inputs++);
+    state.mounted=await StudyDirectorRichText.mountRichTextEditor({field,label:'Retirement witness',initialValue:field.value,maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}},bindingCurrent:()=>state.current,onDerivedText:()=>state.derived++});
+    window.__retiredEditorQA=state;state.mounted.focus();
+  })()`);
+  await page.send('Input.insertText',{text:' live'});
+  const liveAdapter=await page.evaluate(`(()=>{const s=__retiredEditorQA;s.mounted.flush();return {plain:StudyDirectorRichText.toPlainText(s.field.value),inputs:s.inputs,derived:s.derived}})()`);
+  assert.match(liveAdapter.plain,/live/);assert.ok(liveAdapter.inputs>0&&liveAdapter.derived>0,'current binding still publishes native edits');
+  await page.evaluate(`(()=>{const s=__retiredEditorQA;s.current=false;s.field.value='Rebound canonical note';s.mounted.focus()})()`);
+  await page.send('Input.insertText',{text:' retired'});
+  const retiredAdapter=await page.evaluate(`(async()=>{const s=__retiredEditorQA;s.mounted.flush();await s.mounted.destroy();const result={value:s.field.value,inputs:s.inputs,derived:s.derived,wrapper:!!s.field.nextElementSibling?.classList.contains('sd-rte')};s.field.remove();delete window.__retiredEditorQA;return result})()`);
+  assert.deepEqual(retiredAdapter,{value:'Rebound canonical note',inputs:liveAdapter.inputs,derived:liveAdapter.derived,wrapper:false},'retired native adapter cannot publish into a successor binding');
+  result.checks.nativeRetiredAdapterPreservesReboundField=true;
+
   await page.evaluate(`(()=>{
     const waitFor=(test,timeout=3000)=>new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{const value=test();if(value)resolve(value);else if(Date.now()-started>timeout)reject(new Error('interaction timeout'));else setTimeout(poll,16);};poll();});
     window.__interactionQA=Object.freeze({

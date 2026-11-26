@@ -21,19 +21,19 @@ const context={HTMLTextAreaElement:FakeField,HTMLElement:FakeElement,console};
 context.globalThis=context;vm.createContext(context);
 for(const file of ['source/core/internal.ts','source/core/rich-text-host.ts'])vm.runInContext(readRuntimeSource(file),context,{filename:file});
 const module=context[Symbol.for('studyDirector.internalModules.v1')].require('rich-text-host',1);
-function fixture({holdDestroy=false}={}){
-  const field=new FakeField(),rejectors=[],resolvers=[],diagnostics=[],mountCalls=[],destroyResolvers=[],derived=[];let releases=0;
+function fixture({holdDestroy=false,failFlush=false}={}){
+  const field=new FakeField(),rejectors=[],resolvers=[],diagnostics=[],mountCalls=[],destroyResolvers=[],derived=[];let releases=0,destroys=0;
   let descriptor={documentId:'area:a',label:'A',initialValue:'Original A',maxWords:100};
   const runtime=module.createRuntime({
     configuration:{maxRichTextBytes:1000},
     document:{createElement:()=>new FakeElement()},window:{},
-    richText:{storagePrefix:'WG1:',isRichTextValue:value=>String(value).startsWith('WG1:'),mountRichTextEditor:async options=>{mountCalls.push(options);return {focus(){},flush(){},destroy:async()=>{if(holdDestroy)await new Promise(resolve=>destroyResolvers.push(resolve));if(options.bindingCurrent?.()!==false)field.value=options.initialValue;}};}},
+    richText:{storagePrefix:'WG1:',isRichTextValue:value=>String(value).startsWith('WG1:'),mountRichTextEditor:async options=>{mountCalls.push(options);return {focus(){},flush(){if(failFlush)throw Error('Failed flush')},destroy:async()=>{destroys++;if(holdDestroy)await new Promise(resolve=>destroyResolvers.push(resolve));if(options.bindingCurrent?.()!==false)field.value=options.initialValue;}};}},
     assets:{retain:()=>new Promise((resolve,reject)=>{resolvers.push(()=>resolve(()=>{releases++;}));rejectors.push(reject);})},
     attachments:{port:()=>({})},notes:{normalizeArea:value=>String(value||''),links:()=>({}),updateSearchText:(key,plain)=>derived.push([key,plain]),repository:{flush:async()=>{}}},review:{date:()=>field.dataset.reviewDate,flushPending:async()=>true,settled:async()=>{}},session:{settled:async()=>{}},activation:{},
     view:{documentFor:()=>descriptor,plain:value=>String(value),applyOwnership(){}},
     diagnostics:{capture:(scope,error)=>diagnostics.push({scope,error})}
   });
-  return {field,runtime,rejectors,resolvers,diagnostics,mountCalls,destroyResolvers,derived,get releases(){return releases;},change(id,value){descriptor={...descriptor,documentId:id,initialValue:value};if(id.startsWith('reflection:')){field.id='daily-reflection';field.dataset.reviewDate=id.slice(11)}else{field.id='';field.dataset.areaKey=id.slice(5)}field.value=value;},retire(){descriptor=null;}};
+  return {field,runtime,rejectors,resolvers,diagnostics,mountCalls,destroyResolvers,derived,get releases(){return releases;},get destroys(){return destroys;},change(id,value){descriptor={...descriptor,documentId:id,initialValue:value};if(id.startsWith('reflection:')){field.id='daily-reflection';field.dataset.reviewDate=id.slice(11)}else{field.id='';field.dataset.areaKey=id.slice(5)}field.value=value;},retire(){descriptor=null;}};
 }
 {
   const f=fixture(),old=f.runtime.activate(f.field);
@@ -137,4 +137,9 @@ function fixture({holdDestroy=false}={}){
   const f=fixture(),operation=f.runtime.activate(f.field);f.field.dataset.noteOwnershipRevision='2';f.resolvers[0]();
   assert.equal(await operation,false,'same-document ownership change retires initial mount');assert.equal(f.mountCalls.length,0);assert.equal(f.releases,1);
 }
-console.log(JSON.stringify({status:'PASS',suite:'rich-text-editor-mount-lifetime',reflectionIdentity:true,serializedRebind:true,sameDocumentOrigin:true,retiredFailure:true,newerRequest:true,currentCanonicalFallback:true,detachedFailure:true,currentLeaseCanonical:true,reboundLease:true,lostAuthorityLease:true,detachedLease:true}));
+{
+  const f=fixture({failFlush:true}),initial=f.runtime.activate(f.field);f.resolvers[0]();assert.equal(await initial,true);
+  f.change('area:b','New B');assert.equal(await f.runtime.activate(f.field),false,'failed persistence must reject replacement activation');
+  assert.equal(f.destroys,1,'failed flush must not strand the old editor');assert.equal(f.releases,1);assert.equal(f.field.value,'New B');assert.equal(f.resolvers.length,1);
+}
+console.log(JSON.stringify({status:'PASS',suite:'rich-text-editor-mount-lifetime',failedFlushCleanup:true,reflectionIdentity:true,serializedRebind:true,sameDocumentOrigin:true,retiredFailure:true,newerRequest:true,currentCanonicalFallback:true,detachedFailure:true,currentLeaseCanonical:true,reboundLease:true,lostAuthorityLease:true,detachedLease:true}));
