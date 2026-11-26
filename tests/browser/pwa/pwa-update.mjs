@@ -2,9 +2,24 @@ import {createPwaVariant,registrationsSettled} from '../../helpers/pwa-variant.m
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
-import {launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
+import {CdpPage,launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 
+// Closing a test target must reject pending and future CDP calls instead of
+// swallowing the original browser assertion behind a hung diagnostic.
+{
+  const socket={readyState:WebSocket.OPEN,send(){},close(){this.readyState=WebSocket.CLOSED;this.onclose?.();}};
+  const closedPage=new CdpPage(socket,'closed-page-witness'),pending=closedPage.send('Runtime.evaluate');
+  const settled=assert.rejects(pending,/CDP page closed/u);
+  closedPage.close();await settled;
+  assert.equal(closedPage.pending.size,0);
+  await assert.rejects(closedPage.send('Runtime.evaluate'),/CDP page is closed/u);
+  const peerSocket={...socket,readyState:WebSocket.OPEN};
+  const peer=new CdpPage(peerSocket,'peer-closed-witness'),peerPending=peer.send('Runtime.evaluate');
+  const disconnected=assert.rejects(peerPending,/CDP page closed/u);
+  peerSocket.close();await disconnected;
+  assert.equal(peer.closed,true);assert.equal(peer.pending.size,0);
+}
 const build=renderBuild();
 assert.equal(validateBuild(build),true);
 const deployment=build.deployment;
@@ -310,11 +325,18 @@ try{
   writeArtifact('pwa-update-results.json',JSON.stringify(evidence,null,2)+'\n');
   console.log(JSON.stringify(evidence,null,2));
 }catch(error){
-  let diagnostic=null;
-  console.error('Tab reloads',JSON.stringify({page1:page1?.loadCount,page2:page2?.loadCount}));
-  console.error('Second tab state',await page2?.evaluate(`({origin:performance.timeOrigin,ui:document.documentElement.dataset.studyDirectorUiState,lifecycle:document.documentElement.dataset.studyDirectorLifecycle,pwaMessage:document.getElementById('pwa-update-message')?.textContent,update:document.getElementById('pwa-update-apply')?.textContent,reloadMarker:sessionStorage.getItem('studyDirector.pwaReload.v1')})`).catch(()=>null));
-  try{diagnostic=await page1?.evaluate(`(async()=>({href:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,700),pwaMessage:document.getElementById('pwa-update-message')?.textContent,openDialogs:[...document.querySelectorAll('dialog[open],[data-rich-asset-picker="active"]')].map(node=>node.tagName+'#'+node.id+'.'+node.className),ui:document.documentElement.dataset.studyDirectorUiState,controller:!!navigator.serviceWorker?.controller,registration:!!(await navigator.serviceWorker?.getRegistration()),waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,caches:typeof caches==='undefined'?[]:await caches.keys(),violations:window.__sd73iViolations||[]}))()`);}catch(diagnosticError){diagnostic={error:String(diagnosticError)};}
-  throw new Error(`${error.stack||error}\nPage diagnostic: ${JSON.stringify(diagnostic)}\nChromium stderr:\n${browser.stderr().slice(-8000)}`);
+  // Preserve the original failure before collecting diagnostics. A page may
+  // have been deliberately closed during the independent-profile journey.
+  console.error('PWA journey failure:',error.stack||error);
+  async function describePage(page){
+    if(!page||page.closed)return {closed:!!page?.closed,loads:page?.loadCount??null};
+    try{
+      const state=await Promise.race([page.evaluate(`(async()=>({href:location.href,origin:performance.timeOrigin,ui:document.documentElement.dataset.studyDirectorUiState,lifecycle:document.documentElement.dataset.studyDirectorLifecycle,scope:window[Symbol.for('studyDirector.profileScope.v1')]?.scope,pwaMessage:document.getElementById('pwa-update-message')?.textContent,update:document.getElementById('pwa-update-apply')?.textContent,reloadMarker:sessionStorage.getItem('studyDirector.pwaReload.v1'),openDialogs:[...document.querySelectorAll('dialog[open],[data-rich-asset-picker="active"]')].map(node=>node.id),controller:!!navigator.serviceWorker?.controller,waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,violations:window.__sd73iViolations||[]}))()`),sleep(3000).then(()=>({diagnosticTimeout:true}))]);
+      return {...state,loads:page.loadCount};
+    }catch(diagnosticError){return {error:String(diagnosticError),loads:page.loadCount};}
+  }
+  const [first,second,other]=await Promise.all([page1,page2,independent].map(describePage));
+  throw new Error(`${error.stack||error}\nPage diagnostics: ${JSON.stringify({page1:first,page2:second,independent:other,checks:evidence.checks})}\nChromium stderr:\n${browser.stderr().slice(-8000)}`);
 }finally{
   await browser.close();
   await new Promise(resolve=>server.close(resolve));

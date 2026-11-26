@@ -134,6 +134,7 @@ export async function startReleaseServer(){
 export class CdpPage{
   constructor(socket,targetId){
     this.socket=socket;this.targetId=targetId;this.nextId=0;this.pending=new Map();this.events=[];this.warnings=[];this.loadCount=0;this.coverageStarted=false;this.closed=false;this.listeners=new Map();
+    socket.onclose=()=>this.retire();
     socket.onmessage=event=>{
       const message=JSON.parse(event.data);
       if(message.id){
@@ -155,8 +156,19 @@ export class CdpPage{
   }
   // Calls listener with the params of every CDP event named method.
   on(method,listener){if(!this.listeners.has(method))this.listeners.set(method,new Set());this.listeners.get(method).add(listener);return ()=>this.listeners.get(method)?.delete(listener);}
+  retire(){
+    this.closed=true;
+    const error=new Error('Chromium CDP page closed: '+this.targetId);
+    for(const request of this.pending.values())request.reject(error);
+    this.pending.clear();
+  }
   send(method,params={}){
-    return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});
+    if(this.closed||this.socket.readyState!==WebSocket.OPEN)return Promise.reject(new Error('Chromium CDP page is closed: '+this.targetId));
+    return new Promise((resolve,reject)=>{
+      const id=++this.nextId;this.pending.set(id,{resolve,reject});
+      try{this.socket.send(JSON.stringify({id,method,params}));}
+      catch(error){this.pending.delete(id);reject(error);}
+    });
   }
   async startCoverage(){
     if(!process.env.SD_BROWSER_COVERAGE_DIR||this.coverageStarted)return;
@@ -239,7 +251,7 @@ export class CdpPage{
     const result=await this.send('Page.captureScreenshot',params);
     fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,Buffer.from(result.data,'base64'));return file;
   }
-  close(){this.closed=true;this.socket.close();}
+  close(){this.retire();this.socket.close();}
 }
 
 // Browser tests build plans and Saved Days around the current time. A whole-hour
