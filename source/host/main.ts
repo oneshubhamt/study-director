@@ -1551,6 +1551,10 @@ async function flushProtectedPreferences(options:Readonly<{backupCapture?:boolea
       protectedPreferencesWriteFailure=null;
       if(protectedPreferencesState===snapshot){acceptProtectedPreferences(saved);refreshAppearanceMirrors(saved);}
     }catch(error){
+      // Cancellation may refuse a write before it reaches storage. Retain the
+      // exact still-current pending value for a fresh admission, never a stale
+      // owner's state or a snapshot already replaced by hydration or editing.
+      if(protectedPreferencesState===snapshot){try{AppOwnership.assertWriteToken(token,'retaining unsaved personal preferences');protectedPreferencesDirty=true;}catch{}}
       assertOrigin();
       protectedPreferencesDirty=true;protectedPreferencesWriteFailure=error;
       AppDiagnostics.capture('preferences.write',error,'error');markStorageHealthError('personalPreferences','Personal settings could not be saved.');

@@ -39,4 +39,35 @@ for(const soundMode of ['full','minimal','off']){
   assert.equal(snapshot.nudge.sound,undefined,'new rhythm configuration must not carry sound ownership');
 }
 assert.throws(()=>codec.preferences({...portable,soundMode:'loud'}),/sound mode/);
+// Execute the actual host queue function with controlled ownership, pending
+// persistence and recovery-request retirement. No simulated copy of the logic.
+{
+  const main=readScript(path.join(ROOT,'source/host/main.ts'));
+  const start=main.indexOf('async function flushProtectedPreferences('),end=main.indexOf('function scheduleProtectedPreferencesWrite(',start);
+  assert.ok(start>=0&&end>start,'host preference queue is available');
+  for(const changed of ['hold','owner','snapshot']){
+    let release;const gate=new Promise(resolve=>{release=resolve;});
+    const env=vm.runInNewContext(`
+      let protectedPreferencesWriteTimer=null,protectedPreferencesDirty=true,protectedPreferencesWriteFailure=null;
+      let protectedPreferencesState={studentName:'Accepted'},protectedPreferencesWriteChain=gate;
+      let owner=1,hold=true,writes=0,feedback=0,committed=null;
+      const appCanMutate=()=>true;
+      const AppOwnership={issueWriteToken:()=>owner,assertWriteToken:t=>{if(t!==owner)throw new Error('owner retired');}};
+      const AppData={personalPreferences:{write:async(value,options)=>{options.assertOrigin();writes++;committed=value;return value;}}};
+      const acceptProtectedPreferences=()=>{feedback++;},refreshAppearanceMirrors=()=>{feedback++;};
+      const AppDiagnostics={capture:()=>{feedback++;}},markStorageHealthError=()=>{feedback++;};
+      ${main.slice(start,end)}
+      ({
+        start:()=>flushProtectedPreferences({assertOrigin:()=>{if(!hold)throw new Error('hold retired');}}),
+        retire:kind=>{hold=false;if(kind==='owner')owner++;if(kind==='snapshot'){protectedPreferencesState={studentName:'Newer'};protectedPreferencesDirty=false;}},
+        flush:()=>flushProtectedPreferences(),status:()=>({dirty:protectedPreferencesDirty,writes,feedback,committed:committed?.studentName??null})
+      })
+    `,{gate});
+    const pending=env.start();env.retire(changed);release();
+    await assert.rejects(pending,/hold retired/);
+    assert.equal(env.status().writes,0);assert.equal(env.status().feedback,0);
+    assert.equal(env.status().dirty,changed==='hold','only the still-current accepted snapshot stays pending');
+    if(changed==='hold'){assert.equal(await env.flush(),true);assert.equal(env.status().committed,'Accepted');assert.equal(env.status().writes,1);}
+  }
+}
 console.log(JSON.stringify({status:'PASS',suite:'portable-preferences',currentPortableOnly:true,historicalConversionIsolated:true,canonicalPreferencesV2:true},null,2));
