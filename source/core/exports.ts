@@ -351,14 +351,27 @@ const createModule=(input:ExportsModuleInput)=>{
     async function ask(){return processing.job(async()=>{const record=await refresh();if(!record||key)return true;try{await unlock(record,null,{cancelLabel:'Not now'});return true;}catch(error){if((error as {name?:unknown}|null|undefined)?.name==='AbortError')return false;throw error;}});}
     // The library moved on: another device set or changed the password (the
     // one just typed for its version is kept under its id), or removed it.
-    async function follow({protectionId='',encrypted=false,removedElsewhere=false}={}){
-      const record=await refresh();
+    async function follow({protectionId='',encrypted=false,removedElsewhere=false,assertRequest=()=>{}}={}){
+      const token=issueToken(),epoch=keyEpoch;
+      const assertCurrent=()=>{assertRequest();check();assertToken(token);if(epoch!==keyEpoch)throw cancelled();};
+      assertCurrent();const record=await refresh();assertCurrent();
+      // The originating import and local ownership must survive until the
+      // policy CAS transaction, not just the surrounding provider awaits.
       if(encrypted&&protectionId&&protectionId.length<=128&&protectionId!==record?.id){
-        const candidate=typed&&Date.now()-typed.at<10*60*1000?typed.key:key;typed=null;if(!candidate)return false;
+        const priorTyped=typed,candidate=priorTyped&&Date.now()-priorTyped.at<10*60*1000?priorTyped.key:key;if(!candidate)return false;
         const verifier=await processing.run('crypto.verifier.create',{key:candidate}),next={version:3,id:protectionId,verifier,key:candidate,setAt:new Date().toISOString()};
-        await storage.write(SETTING,next,{expectedId:record?.id||'',check:()=>check()});policy=next;key=candidate;keyId=next.id;publish();return true;
+        assertCurrent();
+        await storage.write(SETTING,next,{expectedId:record?.id||'',check:assertCurrent});
+        // A completed transaction is committed even if its requester has
+        // since been cancelled. Do not publish stale in-memory state.
+        try{assertCurrent();}catch{return true;}
+        if(typed===priorTyped)typed=null;policy=next;key=candidate;keyId=next.id;publish();return true;
       }
-      if(!encrypted&&removedElsewhere&&record){await storage.remove(SETTING,{expectedId:record.id,check:()=>check()});policy=null;lock();return true;}
+      if(!encrypted&&removedElsewhere&&record){
+        await storage.remove(SETTING,{expectedId:record.id,check:assertCurrent});
+        try{assertCurrent();}catch{return true;}
+        policy=null;lock();return true;
+      }
       return false;
     }
     async function verifyFrame(data:FrameInput,{signal}:ProcessingOptions={}){

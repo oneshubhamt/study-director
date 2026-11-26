@@ -39,7 +39,8 @@ for(const file of ['internal','operation-lifecycle','exports'])vm.runInThisConte
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('exports',1,Object.freeze({lifecycle:globalThis[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1)}));
 let saved=null,state,answers=[],choice='unlock',writes=0,readError=false;
 const processing={run:engine.run,check:()=>{},job:fn=>fn()};
-const storage={read:async()=>{if(readError)throw new Error('IDB unavailable');return saved;},write:async(k,v)=>{saved=v;writes++;},remove:async()=>{saved=null;writes++;}};
+let beforePolicyMutation=()=>{};
+const storage={read:async()=>{if(readError)throw new Error('IDB unavailable');return saved;},write:async(k,v,options)=>{beforePolicyMutation();options.check();assert.equal(saved?.id||'',options.expectedId);saved=v;writes++;},remove:async(k,options)=>{beforePolicyMutation();options.check();assert.equal(saved?.id||'',options.expectedId);saved=null;writes++;}};
 const interactions={input:async()=>answers.shift()??null,choose:async()=>choice,confirm:async()=>true};
 const factory=(options={})=>module.createProtection({processing,storage,interactions,settingKey:'backupProtection',onState:s=>{state=s;},...options});
 const protection=factory();answers=[{value:password}];await protection.manage();assert.equal(state.unlocked,true);assert.equal(writes,1);assert.equal(saved.version,3);assert.equal(saved.verifier instanceof Blob,true);assert.deepEqual(Object.keys(saved).sort(),['id','key','setAt','verifier','version']);
@@ -73,6 +74,26 @@ assert.equal(await protection.follow({encrypted:false,removedElsewhere:true}),tr
 // First start: the password typed in the form is set before anything uploads.
 assert.equal(await protection.enable(password),true);assert.equal(saved.version,3);assert.equal(state.unlocked,true);assert.equal(await protection.enable('a second long passphrase'),false,'an existing password is never replaced by the form');
 choice='remove';await protection.manage();assert.equal(saved,null);assert.equal((await protection.protect({blob:plain})).encrypted,false);
+// Policy follow must keep both the originating import and local write
+// authority through the transaction's final synchronous CAS check.
+{
+  let revision=1,requestValid=true;
+  const guarded=factory({issueToken:()=>revision,assertToken:token=>{if(token!==revision)throw new Error('owner changed');}});
+  await guarded.enable(password);
+  const previous=saved,previousWrites=writes;
+  answers=[{value:otherPassword}];await guarded.unprotect(otherVersion);
+  const request=()=>{if(!requestValid)throw new Error('import cancelled');};
+  beforePolicyMutation=()=>{revision++;};
+  await assert.rejects(guarded.follow({protectionId:'remote-policy',encrypted:true,assertRequest:request}),/owner changed/);
+  assert.equal(saved,previous);assert.equal(writes,previousWrites);assert.equal(guarded.status().enabled,true);
+  beforePolicyMutation=()=>{requestValid=false;};
+  await assert.rejects(guarded.follow({encrypted:false,removedElsewhere:true,assertRequest:request}),/import cancelled/);
+  assert.equal(saved,previous);assert.equal(writes,previousWrites);assert.equal(guarded.status().unlocked,true);
+  beforePolicyMutation=()=>{};requestValid=true;
+  assert.equal(await guarded.follow({protectionId:'remote-policy',encrypted:true,assertRequest:request}),true);
+  assert.equal(saved.id,'remote-policy');assert.equal(await guarded.follow({encrypted:false,removedElsewhere:true,assertRequest:request}),true);
+  assert.equal(saved,null);assert.equal(guarded.status().enabled,false);
+}
 console.log(JSON.stringify({status:'PASS',suite:'encryption',checks:['Unicode and whitespace password','independent OpenSSL decryption','fresh salt and IV','authenticated header/cipher/tag','wrong password','truncated/trailing data','32 MiB admission','only a non-extractable key kept','one profile reopens unlocked','several profiles ask','follow a changed or removed password','first-start password','retry','cancel','storage failure closed','cross-tab invalidation','explicit disabling','copy/encryption output receipts']},null,2));
 
 // Streaming envelope: >32 MiB, independent OpenSSL frame authentication, and
