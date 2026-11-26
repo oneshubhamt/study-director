@@ -194,4 +194,17 @@ function device(fault={}){
   assert.equal(d.store.get('studyDirector.theme.v1'),'primary-preserved','another profile remains untouched');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['stable identity through first-start naming','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));
+// A malformed deletion intent must never coerce to the unscoped first profile.
+{
+  const d=device(),first=d.page('');first.ensure('Ana');first.add();
+  const active=d.list().profiles[1],second=d.page(active.scope),rescue='studyDirector.noteRescue.v1';
+  d.store.set(rescue,'unscoped recovery must survive');
+  for(const malformed of [null,false,0,[],{},[active.scope]]){
+    d.store.set(REGISTRY,JSON.stringify({version:1,active:active.id,profiles:[active],removing:[malformed]}));
+    assert.equal(second.unsupported(),true,'non-string deletion intent must fail closed: '+JSON.stringify(malformed));
+    assert.equal((await second.collect()).removed,false);
+    assert.equal(d.store.get(rescue),'unscoped recovery must survive');
+    assert.deepEqual(d.events.databases,[]);assert.deepEqual(d.events.directories,[]);
+  }
+}
+console.log(JSON.stringify({status:'PASS',suite:'profiles',malformedDeletionIntentFailsClosed:true,cases:['stable identity through first-start naming','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));

@@ -71,8 +71,8 @@ const createModule=()=>{
       if(current&&rawRecord!['removing']!==undefined&&!Array.isArray(rawRecord!['removing']))malformedCurrent=true;
       const removing:string[]=[];
       for(const value of rawRemoving){
-        const scope=String(value||''),valid=(scope===''||validId(scope))&&!scopes.has(scope);
-        if(!valid){malformedCurrent=true;continue;}
+        if(typeof value!=='string'||!(value===''||validId(value))||scopes.has(value)){malformedCurrent=true;continue;}
+        const scope=value;
         if(!removing.includes(scope))removing.push(scope);
       }
       const unsupported=present&&(!parsed||!rawRecord||rawRecord['version']!==VERSION||malformedCurrent);

@@ -209,14 +209,21 @@ return freeze({renderOwnershipBanner,renderOwnershipUi,requirePrimaryTab,renderP
 
 function createStages(p:Readonly<StartupStagesInput>):StartupLifecycleInput['startup']{
  let clockInterval:number|null=null,headerInterval:number|null=null;
+ // Navigation can interrupt release of the preceding page's protected mutation.
+ // Do not silently skip primary session hydration while its lease remains.
+ async function settlePreviousMutation(){
+   if(!p.ownsSession())return;
+   const settled=await p.waitForClosedTabLease();
+   if(!settled&&p.ownsSession())throw new Error('A previous protected data operation is still settling. Reload after it finishes.');
+ }
  return freeze({...p.stages,
-  prepareCanonicalData:()=>{if(!p.profileSafe())throw Object.assign(new Error('The device profile list could not be read safely. Profile-owned storage was not opened for use.'),{code:'STUDY_DIRECTOR_PROFILE_REGISTRY_UNREADABLE'});return p.census();},
+  prepareCanonicalData:async()=>{if(!p.profileSafe())throw Object.assign(new Error('The device profile list could not be read safely. Profile-owned storage was not opened for use.'),{code:'STUDY_DIRECTOR_PROFILE_REGISTRY_UNREADABLE'});await settlePreviousMutation();return p.census();},
   restoreAppearance:()=>{if(p.preferencesHydrated()){p.applyProtectedAppearance();return;}p.restoreTheme();p.restorePresentation();p.restoreFontScale();},
   recoverInterruptedRestore:async()=>{await p.hydratePlan();if(await p.readRestoreJournal().catch(()=>null))await p.waitForClosedTabLease();return p.recoverRestore();},
   startClock:()=>{p.tickClock();if(clockInterval===null)clockInterval=p.setInterval(p.tickClock,1000);},
   startHeaderClock:()=>{p.updateHeader();if(headerInterval===null)headerInterval=p.setInterval(p.updateHeader,60000);},
   showEmptyIfNeeded:()=>{if(!p.hasTasks())p.showEmpty();},
-  restoreActiveSession:async()=>{const restored=p.canMutate()?await p.restoreSession():false;await p.refreshBadge();return restored;},
+  restoreActiveSession:async()=>{await settlePreviousMutation();const restored=p.canMutate()?await p.restoreSession():false;await p.refreshBadge();return restored;},
   inspectStorage:async()=>{const state=await p.inspectStorage();await p.offerInstallNotice();return state;},
   verifyReady:async()=>{if(!(await p.topology()).usable)throw new Error('Canonical database topology is unavailable.');return freeze({canonical:true});},
   markReady:async proof=>{

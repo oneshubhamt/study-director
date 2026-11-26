@@ -202,7 +202,7 @@ for(const failed of ['plan','preferences','none']){
     document:stageDocument,window:stageWindow,version:'qa',notices:{dismiss:()=>true},
     stages:{},profileSafe:yes,census:asyncYes,preferencesHydrated:no,applyProtectedAppearance:yes,restoreTheme:yes,restorePresentation:yes,restoreFontScale:yes,
     hydratePlan:asyncYes,readRestoreJournal:async()=>null,waitForClosedTabLease:asyncYes,recoverRestore:asyncYes,tickClock:yes,updateHeader:yes,setInterval:()=>1,setTimeout:fn=>{timeouts++;fn();return 1;},
-    hasTasks:no,showEmpty:yes,canMutate:()=>mutable,restoreSession:asyncYes,refreshBadge:asyncYes,inspectStorage:asyncYes,offerInstallNotice:asyncYes,topology:async()=>({usable:true}),
+    hasTasks:no,showEmpty:yes,ownsSession:()=>mutable,canMutate:()=>mutable,restoreSession:asyncYes,refreshBadge:asyncYes,inspectStorage:asyncYes,offerInstallNotice:asyncYes,topology:async()=>({usable:true}),
     setFastFenceReady:value=>fast.push(value),reseedEpoch:async()=>{reseeded++;},capture:()=>{},reconcileChangeClock:asyncYes,resumeStorageReset:yes,
     installBackground:yes,scheduleMaintenance:yes,wakeBackground:yes,installSessionWatch:yes,refreshKeptVersions:asyncYes,announceUnsupported:yes,renderUnsupported:yes,
     collectProfiles:async()=>({error:null}),askProfilePassword:yes,collectFiles:asyncYes,preloadInsights:yes,confirmBoot:asyncYes,offerDeviceRecovery:asyncYes,
@@ -215,6 +215,20 @@ for(const failed of ['plan','preferences','none']){
   mutable=true;fast=[];await stages.markReady(Object.freeze({canonical:true}));
   assert.equal(reseeded,1);assert.deepEqual(fast,[false,true],'the writable owner reseeds before enabling the fast fence');
   assert.ok(timeouts>=2);
+  // A preceding page's orphaned mutation must settle before primary hydration.
+  let owns=true,canWrite=false,waits=0,censuses=0,restores=0,badges=0,release;
+  let leaseGate=new Promise(resolve=>{release=resolve;});
+  const guarded=StartupHost.createStages({...stageInput,ownsSession:()=>owns,canMutate:()=>canWrite,
+    waitForClosedTabLease:async()=>{waits++;return leaseGate;},census:()=>{censuses++;return true;},restoreSession:async()=>{restores++;return true;},refreshBadge:async()=>{badges++;}});
+  const census=guarded.prepareCanonicalData();await drain();assert.equal(censuses,0);assert.equal(waits,1);
+  canWrite=true;release(true);await census;assert.equal(censuses,1);
+  canWrite=false;leaseGate=new Promise(resolve=>{release=resolve;});const restore=guarded.restoreActiveSession();await drain();assert.equal(restores,0);assert.equal(waits,2);
+  canWrite=true;release(true);assert.equal(await restore,true);assert.equal(restores,1);assert.equal(badges,1);
+  canWrite=false;leaseGate=Promise.resolve(false);await assert.rejects(guarded.prepareCanonicalData(),/protected data operation/);assert.equal(censuses,1);
+  await assert.rejects(guarded.restoreActiveSession(),/protected data operation/);assert.equal(restores,1);
+  owns=false;const before=waits;await guarded.prepareCanonicalData();assert.equal(await guarded.restoreActiveSession(),false);assert.equal(waits,before,'a true secondary does not wait on a primary operation');assert.equal(restores,1);
+  owns=true;leaseGate=new Promise(resolve=>{release=resolve;});const retired=guarded.restoreActiveSession();await drain();owns=false;release(false);assert.equal(await retired,false,'ownership loss while waiting cannot restore a primary session');assert.equal(restores,1);
+  console.log(JSON.stringify({status:'PASS',suite:'startup-previous-mutation-lease',deferredCensus:true,deferredRestore:true,timeoutFailsClosed:true,secondaryNonBlocking:true,ownershipLoss:true}));
 }
 
 const wakeCalls=[];let quiesced=true;

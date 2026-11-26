@@ -73,9 +73,9 @@ export interface StartupStagesInput{
  document:Document;window:Window;version:string;notices:Pick<import('../source/core/notice-coordinator.ts').NoticeCoordinator,'dismiss'|'publish'>;
  stages:Pick<StartupLifecycleInput['startup'],'bindDom'|'recoverInterruptedLibraryClear'|'loadNotes'|'hydrateDrafts'|'previewPlan'|'refreshCoreUi'|'renderRecovery'|'checkBackup'|'openInitialTab'|'applyLaunchRoute'|'showNameSetup'>;
  profileSafe():boolean;census():unknown;preferencesHydrated():boolean;applyProtectedAppearance():unknown;restoreTheme():unknown;restorePresentation():unknown;restoreFontScale():unknown;
- hydratePlan():PromiseLike<unknown>;readRestoreJournal():Promise<unknown>;waitForClosedTabLease():PromiseLike<unknown>;recoverRestore():PromiseLike<unknown>;
+ hydratePlan():PromiseLike<unknown>;readRestoreJournal():Promise<unknown>;waitForClosedTabLease():PromiseLike<boolean>;recoverRestore():PromiseLike<unknown>;
  tickClock():unknown;updateHeader():unknown;setInterval(callback:()=>unknown,ms:number):number;setTimeout(callback:()=>unknown,ms:number):number;
- hasTasks():boolean;showEmpty():unknown;canMutate():boolean;restoreSession():PromiseLike<boolean>;refreshBadge():PromiseLike<unknown>;inspectStorage():PromiseLike<unknown>;offerInstallNotice():PromiseLike<unknown>;topology():PromiseLike<{usable:boolean}>;
+ hasTasks():boolean;showEmpty():unknown;ownsSession():boolean;canMutate():boolean;restoreSession():PromiseLike<boolean>;refreshBadge():PromiseLike<unknown>;inspectStorage():PromiseLike<unknown>;offerInstallNotice():PromiseLike<unknown>;topology():PromiseLike<{usable:boolean}>;
  setFastFenceReady(value:boolean):void;reseedEpoch():PromiseLike<unknown>;capture(scope:string,error:unknown,level:'warn'|'error'):unknown;reconcileChangeClock():PromiseLike<unknown>;resumeStorageReset():unknown;
  installBackground():unknown;scheduleMaintenance():unknown;wakeBackground(reason:string):unknown;installSessionWatch():unknown;refreshKeptVersions():PromiseLike<unknown>;announceUnsupported():unknown;renderUnsupported():unknown;
  collectProfiles():PromiseLike<{error?:unknown}>;askProfilePassword():unknown;collectFiles():Promise<unknown>;preloadInsights():unknown;confirmBoot():Promise<unknown>;offerDeviceRecovery():Promise<unknown>;

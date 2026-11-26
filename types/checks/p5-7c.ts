@@ -97,7 +97,7 @@ recoveryModule.createStorageReset(Object.freeze({
 
 const backupNudgeInput=Object.freeze({
   verified:readinessModule.createVerifiedRecovery(verifiedRecoveryInput),storageHealth:verifiedRecoveryInput.storageHealth,dueMs:7,checkMs:1,
-  canMutate:()=>true,now:()=>Date.now(),automaticActive:()=>runtime.providers.automaticActive(),dailySummaryCount:async()=>0,todayIso:()=> '2026-11-15',
+  canMutate:()=>true,captureOrigin:()=>()=>{},now:()=>Date.now(),automaticActive:()=>runtime.providers.automaticActive(),dailySummaryCount:async()=>0,todayIso:()=> '2026-11-15',
   publishMessage:(_message:string)=>{},notify:(_title:string,_message:string,_tag:string)=>{},capture:(_scope:string,_error:unknown,_level:'warn')=>{}
 }) satisfies Readonly<BackupNudgeInput>;
 readinessModule.createBackupNudge(backupNudgeInput);
