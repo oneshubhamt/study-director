@@ -83,8 +83,11 @@ const appUrl=`http://127.0.0.1:${server.address().port}/${build.identity.main}`;
 
 const browser=await launchChromium({profilePrefix:'study-director-qa-pwa-'});
 
+// Register before application startup, but leave the ordinary profile watcher
+// untouched until the distinct-profile event-ordering probe explicitly arms it.
+const profileRegistryGate="window.__qaDelayProfileEvents=false;window.__qaDelayedProfileEvents=0;window.addEventListener('storage',e=>{if(window.__qaDelayProfileEvents&&e.key==='studyDirector.profiles.v1'){window.__qaDelayedProfileEvents++;e.stopImmediatePropagation();}},true);";
 async function createPage(url=appUrl,extraPreload=''){
-  const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>window.__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));const nativeUpdate=ServiceWorkerRegistration.prototype.update;ServiceWorkerRegistration.prototype.update=function(){localStorage.setItem('qa.pwaExplicitChecks',String(Number(localStorage.getItem('qa.pwaExplicitChecks')||0)+1));return nativeUpdate.call(this)};"+extraPreload});
+  const page=await browser.createPage(url,{preload:"window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';window.__sd73iViolations=[];document.addEventListener('securitypolicyviolation',event=>window.__sd73iViolations.push({directive:event.effectiveDirective,disposition:event.disposition,blocked:event.blockedURI||''}));const nativeUpdate=ServiceWorkerRegistration.prototype.update;ServiceWorkerRegistration.prototype.update=function(){localStorage.setItem('qa.pwaExplicitChecks',String(Number(localStorage.getItem('qa.pwaExplicitChecks')||0)+1));return nativeUpdate.call(this)};"+profileRegistryGate+extraPreload});
   await waitForStartup(page);
   await skipFirstStart(page);
   return page;
@@ -263,15 +266,18 @@ try{
   await browser.closePage(secondary);
   const originalProfile=await updateOwner.evaluate("window[Symbol.for('studyDirector.profileScope.v1')].id||JSON.parse(localStorage.getItem('studyDirector.profiles.v1')).active");
   assert.ok(originalProfile);
-  const delayRegistry="window.__qaDelayedProfileEvents=0;window.addEventListener('storage',e=>{if(e.key==='studyDirector.profiles.v1'){window.__qaDelayedProfileEvents++;e.stopImmediatePropagation();}},true);";
-  await updateOwner.evaluate(delayRegistry);
+  const initiatingScope=await updateOwner.evaluate("window[Symbol.for('studyDirector.profileScope.v1')].scope");
+  await updateOwner.evaluate("window.__qaDelayProfileEvents=true;window.__qaDelayedProfileEvents=0;");
+  assert.equal(await updateOwner.evaluate("window.__qaDelayProfileEvents"),true);
   const otherProfile='prof_pwaqa_mve00000_abcdef02';
   const seedProfile="(()=>{const key='studyDirector.profiles.v1',list=JSON.parse(localStorage.getItem(key));if(!list.profiles.some(row=>row.id==='"+otherProfile+"')){list.profiles.push({id:'"+otherProfile+"',scope:'"+otherProfile+"',name:'Independent update QA',email:'',folder:'',createdAt:new Date().toISOString(),fresh:false,from:null});list.active='"+otherProfile+"';localStorage.setItem(key,JSON.stringify(list));}})();";
-  independent=await createPage(appUrl,delayRegistry+seedProfile);
+  independent=await createPage(appUrl,'window.__qaDelayProfileEvents=true;'+seedProfile);
   await independent.send('Page.bringToFront');
   await waitFor(()=>independent.evaluate("document.documentElement.dataset.studyDirectorUiState==='primary'&&window[Symbol.for('studyDirector.profileScope.v1')].scope==='"+otherProfile+"'"),{label:'independent profile primary'});
   await waitFor(()=>updateOwner.evaluate("window.__qaDelayedProfileEvents>0"),{label:'profile registry event deliberately delayed'});
+  assert.equal(await updateOwner.evaluate("window[Symbol.for('studyDirector.profileScope.v1')].scope"),initiatingScope,'the registry event must not have reloaded the initiating profile');
   assert.equal(await updateOwner.evaluate("document.documentElement.dataset.studyDirectorUiState"),'primary','the initiating profile must still own its independent lease');
+  console.log('[qa-pwa] independent primary leases established');
   await updateOwner.evaluate("(()=>{const key='studyDirector.profiles.v1',list=JSON.parse(localStorage.getItem(key));list.active='"+originalProfile+"';localStorage.setItem(key,JSON.stringify(list));})()");
   const independentPlan=await independent.evaluate("(()=>{const d=new Date(),minute=(d.getHours()*60+d.getMinutes()+1439)%1440,hh=String(Math.floor(minute/60)).padStart(2,'0'),mm=String(minute%60).padStart(2,'0');return hh+':'+mm+' | 60 | Independent writer QA | work | Profile authority | pages | 5';})()");
   await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click();");
@@ -279,6 +285,7 @@ try{
   await waitFor(()=>independent.evaluate("document.querySelector('[data-action=\"apply-schedule\"]')?.disabled===false"),{label:'independent Plan preview ready'});
   await independent.click('[data-action="apply-schedule"]');
   await waitFor(()=>independent.evaluate("document.getElementById('cd-mode')?.textContent.includes('RUNNING')&&document.getElementById('execute-state-overlay')?.hidden"),{label:'independent live timer'});
+  console.log('[qa-pwa] independent live timer established');
   const draft=independentPlan.replace('Independent writer QA','Independent draft QA');
   await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click();");
   await independent.evaluate("(()=>{const field=document.getElementById('plan-input');field.value="+JSON.stringify(draft)+";field.dispatchEvent(new Event('input',{bubbles:true}));})()");
@@ -294,6 +301,7 @@ try{
   await waitFor(()=>registrationsSettled([updateOwner,independent]),{label:'shared worker activates second release'});
   await waitFor(()=>updateOwner.evaluate("performance.timeOrigin!=="+initiatingOrigin),{label:'initiator reloads'});
   assert.equal(await workerIdentity(updateOwner),profileNext.releaseId);
+  console.log('[qa-pwa] initiating profile updated');
   await independent.send('Page.bringToFront');
   await waitFor(()=>independent.evaluate("document.getElementById('pwa-update-message')?.textContent.includes('live timer before updating')"),{label:'independent primary refuses automatic reload'});
   assert.equal(independent.loadCount,independentLoads,'origin-wide worker activation must not reload a live primary in another profile');
@@ -302,6 +310,7 @@ try{
   assert.equal(await workerIdentity(independent),profileNext.releaseId);
   assert.equal(await independent.evaluate("document.getElementById('plan-input').value"),draft);
   assert.equal(await independent.evaluate("document.getElementById('pwa-update-apply').textContent"),'Pause & Update');
+  console.log('[qa-pwa] independent primary protected from automatic reload');
   // Restore the normal active-profile selection before the manual reload; the
   // initiator has finished, so closing it also removes the synthetic delay.
   await browser.closePage(updateOwner);
