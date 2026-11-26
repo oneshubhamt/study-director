@@ -92,7 +92,7 @@ function createBackupControls({
   });
   return backupActions.createControls(freeze({
     document:{getElementById:id=>nodes.get(id)||null},controller,processing,protection,device:()=>null,providers,presentation:activePresentation,
-    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),captureImportAuthority:()=>()=>{},resolveFileOpen,
+    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),captureActionAuthority:()=>()=>{},resolveFileOpen,
     foregroundChanged:()=>{},scheduleSyncStatus,renderProfile,firstStartOpen,renderFirstStart,scheduleUpdate,
     connectDevice:()=>false,connectDrive:()=>false,openHistory:()=>false
   }));
