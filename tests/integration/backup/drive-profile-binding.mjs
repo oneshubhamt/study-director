@@ -193,4 +193,34 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   assert.equal(state.folders.length,1);assert.equal(state.deletedSignals.length,0);
   cases.push('another profile’s marker is ignored');
 }
+
+{
+  // The provider must expose a live guard while the actual host decision is
+  // pending, not only reject after the host has made its registry changes.
+  let finish,enteredResolve,localWrites=0;const gate=new Promise(r=>finish=r),entered=new Promise(r=>enteredResolve=r);
+  const {state,provider}=createDriveHarness({bind:async(_info,assertOrigin)=>{assertOrigin();enteredResolve();await gate;assertOrigin();localWrites++;return 'claim';}});
+  state.folders.push('folder-pending');state.folderProperties.set('folder-pending',{});
+  await provider.prepare();await provider.authorize();const listing=provider.repository.list({kind:'object'});await entered;
+  await provider.disconnect();await provider.authorize();finish();await assert.rejects(listing,/authorization changed|stopped|cancelled/u);
+  assert.equal(localWrites,0);assert.equal(patches(state),0);
+  cases.push('provider guard prevents a retired authorization from committing host binding');
+}
+{
+  // Capture deletion before consent; a later token cannot authorize it.
+  const {state,provider}=await connected();await provider.repository.list({kind:'object'});
+  const folder=state.folders[0],target={email:state.email,folder};
+  const prior=state.libraryControl.captureDeletion(target);
+  await provider.disconnect();await provider.authorize();
+  const before=state.requests.length;await assert.rejects(prior(()=>{}),/authorization changed/u);
+  assert.equal(state.requests.length,before);assert.equal(state.deletionMarkers.length,0);
+  const wrongAccount=state.libraryControl.captureDeletion({...target,email:'other@example.com'});
+  await assert.rejects(wrongAccount(()=>{}),/different account/u);
+  const wrongFolder=state.libraryControl.captureDeletion({...target,folder:'other-folder'});
+  await assert.rejects(wrongFolder(()=>{}),/no longer matches/u);
+  assert.equal(state.deletionMarkers.length,0);assert.equal(state.trashedFolders.size,0);
+  const current=state.libraryControl.captureDeletion(target);
+  assert.equal(await current(()=>{}),true);assert.equal(state.deletionMarkers.length,1);assert.equal(state.trashedFolders.has(folder),true);
+  cases.push('destructive consent pins authorization, account and library before marker or Trash');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'drive-profile-binding',cases},null,2));

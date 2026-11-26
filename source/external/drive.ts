@@ -1,5 +1,5 @@
 import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,ProviderItem,RepositoryKind,RepositoryTransport,Upload} from '../../types/backup-provider.ts';
-import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts';
+import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts';
 
 /*
   Study Director Google Drive Backup Provider
@@ -30,7 +30,7 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
   type PendingAuthorization={promise:Promise<string>;resolve:(value:string)=>void;reject:(error:unknown)=>void;timer:ReturnType<typeof setTimeout>|null;profile:ProfileSnapshot};
   type FolderFlight={controller:AbortController;promise:Promise<string>;waiters:number;settled:boolean;profile:ProfileSnapshot};
   type UploadSession={parent:string;digest:string;size:number;url:string;offset:number;busy:boolean};
-  type DriveProfilePort={id:()=>string;name:()=>string;bind:(info:Readonly<{email:string;folder:string;found:string;mine:boolean;library:Readonly<{savedAt:string;days:number|null;notes:number|null}>|null}>)=>string|Promise<string>;deleted?:(info:Readonly<{profile:string}>)=>unknown|PromiseLike<unknown>;controls?:(control:Readonly<{deleteLibrary:()=>Promise<boolean>}>)=>unknown};
+  type DriveProfilePort=Pick<BackupProfilePublic,'id'|'name'|'bind'>&Partial<Pick<BackupProfilePublic,'deleted'|'controls'>>;
   type RepositoryPolicy=Readonly<Record<string,unknown>>;
   type ReceiveStream=(stream:ReadableStream<Uint8Array>,size:number,options?:{signal?:AbortSignal|null;onProgress?:(value:{loaded?:number;total?:number;phase?:string})=>void})=>Promise<Blob>;
   type PluginApi={capabilities:Readonly<Record<string,number>>;backup:{repositoryPolicy:RepositoryPolicy;receiveStream:ReceiveStream;releaseFile:(file:Blob)=>unknown|PromiseLike<unknown>;limits:{maxFileBytes:number};device:()=>string;profile:DriveProfilePort;providers:{register:(config:ProviderConfig)=>unknown}}};
@@ -580,10 +580,12 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
   function expectedProfile():string{return profileSnapshot().id;}
   function folderProfile(folder:DriveFile|null|undefined):string{const id=String(folder&&folder.appProperties&&folder.appProperties[PROFILE_MARKER]||'');return PROFILE_PATTERN.test(id)?id:'';}
   async function bindFolder(id:string,context:DriveOperation=EMPTY_DRIVE_OPERATION,expected:ProfileSnapshot=profileSnapshot()):Promise<void>{
-    assertProfileCurrent(expected);if(boundFolder===id+'\n'+expected.id)return;
+    const authorization=authorizationGeneration;
+    const assertBinding=()=>{if(authorization!==authorizationGeneration||!tokenValid()||context.signal?.aborted)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));assertProfileCurrent(expected);};
+    assertBinding();if(boundFolder===id+'\n'+expected.id)return;
     const metadata=seenFolder&&seenFolder.id===id?seenFolder:await getFolderMetadata(id,context);assertProfileCurrent(expected);
     const found=folderProfile(metadata),mine=found===expected.id;const [email,library]=await Promise.all([accountEmail(context),mine?Promise.resolve(null):latestLibrary(id,context)]);assertProfileCurrent(expected);
-    if(!profilePort)throw new Error('Study Director profile binding is unavailable.');const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
+    assertBinding();if(!profilePort)throw new Error('Study Director profile binding is unavailable.');const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}),assertBinding);
     await assertDriveOperationCurrent(context);
     const current=profileSnapshot();
     const adopted=!!found&&decision==='adopt'&&current.id===found&&current.generation!==expected.generation;
@@ -608,13 +610,38 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
   // Delete everywhere: the marker first, so no device makes the library
   // again, then the library folder goes to the Drive Trash, where it can be
   // brought back for 30 days.
-  async function deleteLibrary():Promise<boolean>{
-    const expected=profileSnapshot(),context=driveOperationContext();if(!expected.id)throw new Error('This profile is still starting.');if(!tokenValid())throw new Error('Sign in to Google Drive first.');
-    if(!await deletionMarker(expected.id,context)){assertProfileCurrent(expected);const response=await authorizedFetch(DRIVE_API+'/files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:libraryName()+' (deleted)',mimeType:FOLDER_MIME,appProperties:{[DELETED_MARKER]:expected.id}})},API_TIMEOUT_MS,context);if(!response.ok)throw await apiError(response,'Could not mark this profile as deleted in Google Drive.');assertProfileCurrent(expected);}else assertProfileCurrent(expected);
-    libraryDeleted=expected.id;repositoryUploads.clear();const id=await findFolder(context);assertProfileCurrent(expected);
-    if(id&&folderProfile(seenFolder)===expected.id){const response=await authorizedFetch(DRIVE_API+'/files/'+encodeURIComponent(id)+'?fields=id',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})},API_TIMEOUT_MS,context);if(!response.ok)throw await apiError(response,'Could not move the library to the Google Drive Trash.');assertProfileCurrent(expected);}
-    invalidateFolderIdentity();return true;
+  function captureDeletion(target:DriveDeletionTarget|null=null):DriveDeletionAction{
+    const expected=profileSnapshot(),authorization=authorizationGeneration;
+    const email=target?.email??'',folder=target?.folder??'';
+    return async assertOrigin=>{
+      const assert=()=>{assertOrigin();assertProfileCurrent(expected);if(authorization!==authorizationGeneration||!tokenValid())throw noRetry(new Error('Google Drive authorization changed. Confirm the deletion again.'));};
+      assert();if(!expected.id)throw new Error('This profile is still starting.');
+      if(target&&(!email||!folder))throw new Error('Confirm the Google Drive account and library before deleting it.');
+      const context=driveOperationContext({checkSource:assert});
+      if(target&&await accountEmail(context)!==email)throw noRetry(new Error('Google Drive is signed in to a different account. Confirm the deletion again.'));
+      assert();
+      const id=await findFolder(context);assert();
+      if(id&&((target&&id!==folder)||folderProfile(seenFolder)!==expected.id))throw noRetry(new Error('The Google Drive library no longer matches this profile. Nothing was deleted.'));
+      const marked=await deletionMarker(expected.id,context);assert();
+      if(!marked){
+        const response=await authorizedFetch(DRIVE_API+'/files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:libraryName()+' (deleted)',mimeType:FOLDER_MIME,appProperties:{[DELETED_MARKER]:expected.id}})},API_TIMEOUT_MS,context);
+        if(!response.ok)throw await apiError(response,'Could not mark this profile as deleted in Google Drive.');
+        assert();
+      }
+      libraryDeleted=expected.id;repositoryUploads.clear();
+      if(id){
+        const verified=await getFolderMetadata(id,context);assert();
+        if(verified.trashed!==true){
+          if(!validFolderMetadata(verified)||verified.id!==id||folderProfile(verified)!==expected.id)throw noRetry(new Error('The Google Drive library changed. The remaining deletion steps were stopped.'));
+          const response=await authorizedFetch(DRIVE_API+'/files/'+encodeURIComponent(id)+'?fields=id',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})},API_TIMEOUT_MS,context);
+          if(!response.ok)throw await apiError(response,'Could not move the library to the Google Drive Trash.');
+          assert();
+        }
+      }
+      invalidateFolderIdentity();return true;
+    };
   }
+  function deleteLibrary():Promise<boolean>{return captureDeletion()(()=>{});}
   async function markFolder(id:string,profile:string,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<void>{
     const expected=profileSnapshot();if(expected.id!==profile)throw noRetry(new Error('The active Study Director profile changed before the Drive folder could be claimed.'));
     const fields='id,name,mimeType,ownedByMe,shared,trashed,appProperties,capabilities(canAddChildren)';
@@ -1324,7 +1351,7 @@ import type {StudyDirectorPluginDescriptor} from '../../types/public-api-host.ts
     PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;PUBLICATION_RENEW_MS=publicationRenewMs;PUBLICATION_STALE_MS=publicationStaleMs;API_TIMEOUT_MS=metadataTimeoutMs;MAINTENANCE_MAX_AGE_MS=driveMaintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=driveMaintenanceAssertionMarginMs;
     const publishedLimit=Number(api.backup.limits.maxFileBytes);if(Number.isFinite(publishedLimit)&&publishedLimit>0)maxBackupBytes=publishedLimit;
     releaseFile=api.backup.releaseFile;receiveBackupStream=api.backup.receiveStream;profilePort=api.backup.profile;devicePort=api.backup.device;
-    profilePort.controls?.(Object.freeze({deleteLibrary}));restoreSession();
+    profilePort.controls?.(Object.freeze({deleteLibrary,captureDeletion}));restoreSession();
     const providerConfig:ProviderConfig=Object.freeze({id:'google-drive',label:'Google Drive',shared:true,prepare,authorize,backgroundAvailable:()=>tokenValid()&&Platform.online(),connected:()=>tokenValid(),automaticConfigured:()=>tokenValid()||signedInBefore,connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,subscribeConnection,disconnect,release,repository:repositoryTransport()});
     return api.backup.providers.register(providerConfig)!==false;
   }

@@ -91,6 +91,10 @@ function device(fault={}){
   assert.equal(second.adopt('not-an-id'),false);
   assert.equal(second.adopt(libraryId),true);assert.equal(second.current().id,libraryId);assert.equal(second.current().scope,ben.scope,'its storage stays where it is');assert.equal(d.list().active,libraryId);
   assert.equal(second.adopt(libraryId),true,'adopting the id it has changes nothing');
+  first.setAccount({email:'other@example.com',folder:'folder-other'});
+  const before=d.list();assert.throws(()=>second.bindAccount(libraryId,{email:'other@example.com',folder:'folder-other'}),/another profile/);assert.deepEqual(d.list(),before);
+  const newId='prof_new_mvd00000_0000abcd';let writes=0;const observed=[];d.listeners.add(()=>{writes++;observed.push(d.list().profiles.find(row=>row.scope===ben.scope));});
+  assert.equal(second.bindAccount(newId,{email:'new@example.com',folder:'folder-new'}),true);assert.equal(writes,1);assert.deepEqual([observed[0].id,observed[0].email,observed[0].folder],[newId,'new@example.com','folder-new']);assert.equal(d.list().active,newId);
 }
 {
   // A random collision must never make the registry self-invalidating.

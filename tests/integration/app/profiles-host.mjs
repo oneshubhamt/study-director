@@ -17,7 +17,7 @@ try{
   let switchCalls=0,addCalls=0,ensureCalls=0,renameCalls=0,settleCalls=0,reportedErrors=0,throwSwitch=false,throwAdd=false,releaseSettle,settleValue=true,lifecycleAuthority=true;
   let settleGate=Promise.resolve(),lifecycleEpoch=1;
   const profiles=freeze({
-    current:()=>profile,list:()=>[profile],ensure:()=>{ensureCalls++;return profile;},rename:()=>{renameCalls++;return profile;},setAccount:()=>profile,adopt:()=>true,renew:()=>profile,finishFirstStart:()=>profile,
+    current:()=>profile,list:()=>[profile],ensure:()=>{ensureCalls++;return profile;},rename:()=>{renameCalls++;return profile;},setAccount:()=>profile,adopt:()=>true,bindAccount:()=>true,renew:()=>profile,finishFirstStart:()=>profile,
     add:()=>{if(throwAdd)throw new Error('add failed');addCalls++;return true;},switchTo:()=>{if(throwSwitch)throw new Error('switch failed');switchCalls++;return true;},remove:()=>true,collect:async()=>({removed:false,error:null}),watch:()=>()=>{},removalPending:()=>0,unsupported:()=>false
   });
   // Profile rename can finish on blur/dialog close after the initiating click.
@@ -140,19 +140,55 @@ try{
     let authority=false,setAccounts=0,adopts=0,confirmResolve;
     const confirmGate=new Promise(resolve=>{confirmResolve=resolve;});
     const binding=Host.createDriveBinding(freeze({
-      profiles:freeze({...profiles,setAccount:()=>{setAccounts++;return profile;},adopt:()=>{adopts++;return true;}}),
+      captureOrigin:stableOrigin,
+      profiles:freeze({...profiles,bindAccount:()=>{setAccounts++;adopts++;return true;}}),
       appCanMutate:()=>authority,
       interactions:freeze({confirm:async()=>await confirmGate,notify:()=>true}),
       clearBaseline:async()=>true,renderProfile:()=>true,endConnectCard:()=>true,firstStartJoined:()=>true,capture:()=>{},
       storageHealthTime:()=>'',now:()=>Date.now()
     }));
-    assert.equal(await binding.bind({email:'qa@example.com',folder:'folder-1',mine:true}),'refuse');
+    assert.equal(await binding.bind({email:'qa@example.com',folder:'folder-1',mine:true,found:profile.id},()=>{}),'refuse');
     assert.equal(setAccounts,0,'secondary Drive binding cannot update the device profile registry');
     authority=true;binding.markRequested();
-    const pending=binding.bind({email:'qa@example.com',folder:'folder-2',found:'prof_remote_mve00000_abcdef12',mine:false,library:{notes:1,savedAt:'2026-11-23T00:00:00.000Z'}});
+    const pending=binding.bind({email:'qa@example.com',folder:'folder-2',found:'prof_remote_mve00000_abcdef12',mine:false,library:{notes:1,savedAt:'2026-11-23T00:00:00.000Z'}},()=>{});
     await Promise.resolve();authority=false;confirmResolve(true);
     assert.equal(await pending,'refuse','a Drive-library decision cannot resume registry mutation after ownership changes');
     assert.equal(adopts,0);assert.equal(setAccounts,0);
+  }
+
+
+  // Provider authorization, profile ownership and one library's consent
+  // must still be current when the registry is actually updated.
+  for(const stage of ['provider-choice','owner-choice','baseline-provider','baseline-failure','success','replacement']){
+    let mine={...profile,email:'old@example.com',folder:'old-folder'},epoch=1,providerEpoch=1,writes=0,joined=0,ended=0,clears=0;
+    const questions=[],baselines=[];
+    const defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
+    const binding=Host.createDriveBinding(freeze({
+      captureOrigin:()=>{const original=epoch;return ()=>{if(original!==epoch)throw Error('retired owner');};},
+      profiles:freeze({...profiles,current:()=>mine,list:()=>[mine],bindAccount:(id,account)=>{writes++;mine={...mine,id,...account};return true;}}),
+      appCanMutate:()=>true,interactions:freeze({confirm:()=>{const g=defer();questions.push(g);return g.promise;},notify:()=>{}}),
+      clearBaseline:async assert=>{clears++;assert();const g=defer();baselines.push(g);const result=await g.promise;assert();return result;},
+      renderProfile:()=>{},endConnectCard:()=>{ended++;},firstStartJoined:()=>{joined++;},capture:()=>{},storageHealthTime:()=>'',now:()=>Date.now()
+    }));
+    const begin=(email,folder,found)=>{const original=providerEpoch;binding.markRequested();return binding.bind({email,folder,found,mine:false,library:{notes:1}},()=>{if(original!==providerEpoch)throw Error('retired authorization');});};
+    const pending=begin('new@example.com','folder-2','prof_remote_mve00000_abcdef12');
+    assert.equal(questions.length,1);
+    if(stage==='replacement'){
+      providerEpoch++;const next=begin('other@example.com','folder-3','prof_remote_mve00000_abcdef13');assert.equal(questions.length,2);
+      questions[0].resolve(true);assert.equal(await pending,'refuse');assert.equal(writes,0);assert.equal(ended,0);
+      questions[1].resolve(true);await Promise.resolve();assert.equal(baselines.length,1);baselines[0].resolve(true);
+      assert.equal(await next,'adopt');assert.equal(mine.email,'other@example.com');assert.equal(writes,1);assert.equal(joined,1);continue;
+    }
+    if(stage==='provider-choice')providerEpoch++;
+    if(stage==='owner-choice')epoch++;
+    questions[0].resolve(true);await Promise.resolve();
+    if(stage.endsWith('choice')){assert.equal(await pending,'refuse');assert.deepEqual([writes,clears,joined,ended],[0,0,0,0]);continue;}
+    assert.equal(baselines.length,1);assert.equal(writes,0,'adoption must wait until baseline clearance succeeds');
+    if(stage==='baseline-provider')providerEpoch++;
+    baselines[0].resolve(stage!=='baseline-failure');
+    assert.equal(await pending,stage==='success'?'adopt':'refuse');
+    assert.equal(writes,stage==='success'?1:0);assert.equal(joined,stage==='success'?1:0);
+    assert.equal(mine.email,stage==='success'?'new@example.com':'old@example.com');
   }
 
   let holdReleased=0,holdSettled=false,releaseHold,deletionAuthority=true,deletionSettlements=0,mutationRuns=0,authorityAssertions=0;

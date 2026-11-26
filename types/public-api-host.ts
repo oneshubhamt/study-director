@@ -35,11 +35,18 @@ export type PublicInsights=InsightsHostBoundary['appInsights'];
 export type PublicLogic=InsightsHostBoundary['logic'];
 export type PublicPreview=InsightsHostBoundary['publicPreview'];
 export type PublicPlan=Pick<PlanController,'getDraft'|'loadDraft'>;
+export type DriveBindingDecision='refuse'|'continue'|'claim'|'adopt';
+export type DriveDeletionTarget=Readonly<{email:string;folder:string}>;
+export type DriveDeletionAction=(assertOrigin:()=>void)=>Promise<boolean>;
+export interface DriveLibraryControl{
+ deleteLibrary():Promise<boolean>;
+ captureDeletion(target:DriveDeletionTarget):DriveDeletionAction;
+}
 export interface BackupProfilePublic{
  id():string;name():string;
- bind(info:Readonly<{email:string;folder:string;found:string;mine:boolean;library:Readonly<{savedAt:string;days:number|null;notes:number|null}>|null}>):unknown|PromiseLike<unknown>;
+ bind(info:Readonly<{email:string;folder:string;found:string;mine:boolean;library:Readonly<{savedAt:string;days:number|null;notes:number|null}>|null}>,assertOrigin:()=>void):DriveBindingDecision|PromiseLike<DriveBindingDecision>;
  deleted(info:Readonly<{profile:string}>):unknown|PromiseLike<unknown>;
- controls(control:Readonly<{deleteLibrary:()=>Promise<boolean>}>):unknown;
+ controls(control:Readonly<DriveLibraryControl>):unknown;
 }
 type PublicBackupController=Pick<ReturnType<BackupModule['createRuntime']>['controller'],'createCheckpoint'|'inspect'|'restore'|'downloadSafetyCopy'>;
 export interface BackupPublicInput extends PublicBackupController{

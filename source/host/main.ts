@@ -1706,10 +1706,11 @@ const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
 
 type ProfileDriveBindingInput=Parameters<typeof ProfilesHostModule.createDriveBinding>[0];
 const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<ProfileDriveBindingInput>({
+  captureOrigin:captureProfileOrigin,
   profiles:Profiles,
   appCanMutate:()=>appCanMutate(),
   interactions:Object.freeze<ProfileDriveBindingInput['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify(options)}),
-  clearBaseline:()=>ReconciliationBaselineStore.clear(),
+  clearBaseline:assertOrigin=>ReconciliationBaselineStore.clear(assertOrigin),
   renderProfile:()=>renderProfile(),
   endConnectCard:()=>endDriveConnectCard(),
   firstStartJoined:()=>FirstStart.joined(),
@@ -4086,7 +4087,7 @@ const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<PublicA
     maxFileBytes:APP_LIMITS.backupMaxFileBytes,
     repositoryPolicy:RepositoryPolicyModule.protocol,
     device:()=>AppData.provenance.installationId(),
-    profile:Object.freeze<PublicApiInput['backup']['profile']>({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary({...info,library:info.library?{savedAt:info.library.savedAt,...(info.library.notes===null?{}:{notes:info.library.notes})}:null}),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
+    profile:Object.freeze<PublicApiInput['backup']['profile']>({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:(info,assertOrigin)=>bindDriveLibrary({...info,library:info.library?{savedAt:info.library.savedAt,...(info.library.notes===null?{}:{notes:info.library.notes})}:null},assertOrigin),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
     providers:Object.freeze<PublicApiInput['backup']['providers']>({register:config=>BackupProviderRuntime.register(config),list:()=>BackupProviderRuntime.list()})
   }),
   installation:Object.freeze<PublicApiInput['installation']>({

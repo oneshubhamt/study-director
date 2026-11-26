@@ -36,6 +36,7 @@ export interface ProfilesController{
   rename(name:string):Readonly<ProfileEntry>|null;
   setAccount(account?:Readonly<{email?:unknown;folder?:unknown}>):Readonly<ProfileEntry>|null;
   adopt(id:string):boolean;
+  bindAccount(id:string,account:Readonly<{email:unknown;folder:unknown}>):boolean;
   renew():Readonly<ProfileEntry>|null;
   finishFirstStart():Readonly<ProfileEntry>|null;
   add():boolean;

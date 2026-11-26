@@ -1,3 +1,4 @@
+import type {DriveBindingDecision,DriveDeletionAction,DriveLibraryControl} from '../../types/public-api-host.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {ProfileEntry,ProfilesController,ProfilesInput,ProfilesModulePort} from '../../types/profiles.ts';
 
@@ -26,17 +27,17 @@ interface LifecycleInput extends ProfileOriginPort{
   readonly backupProtection:Readonly<{ask():PromiseLike<unknown>}>;setBackupProtectionSurfaceError(error:unknown):unknown;
 }
 interface DriveLibraryInfo{readonly email?:unknown;readonly folder?:unknown;readonly found?:unknown;readonly mine?:unknown;readonly library?:Readonly<{notes?:number;savedAt?:string}>|null}
-interface DriveBindingInput{
+interface DriveBindingInput extends ProfileOriginPort{
   readonly profiles:ProfilesController;
   appCanMutate():boolean;
   readonly interactions:Readonly<{confirm(input:Readonly<Record<string,unknown>>):Promise<boolean>;notify(input:Readonly<Record<string,unknown>>):unknown}>;
-  clearBaseline():PromiseLike<unknown>;renderProfile():unknown;endConnectCard():unknown;firstStartJoined():unknown;capture(scope:string,error:unknown):unknown;
+  clearBaseline(assertOrigin:()=>void):PromiseLike<boolean>;renderProfile():unknown;endConnectCard():unknown;firstStartJoined():unknown;capture(scope:string,error:unknown):unknown;
   storageHealthTime(value:string):string;now():number;
 }
 interface DriveBindingController{
-  markRequested():void;bind(info:DriveLibraryInfo|null|undefined):Promise<'refuse'|'continue'|'claim'|'adopt'>;
+  markRequested():void;bind(info:DriveLibraryInfo|null|undefined,assertProviderOrigin:()=>void):Promise<DriveBindingDecision>;
 }
-interface DeleteLibraryControl{deleteLibrary():PromiseLike<unknown>}
+type DeleteLibraryControl=Readonly<DriveLibraryControl>;
 interface ProfileMutationAuthority{assert():unknown}
 interface ProfileMutationPort{run<T>(kind:string,operation:(authority:ProfileMutationAuthority)=>T|PromiseLike<T>):Promise<T>}
 interface DeletionInput extends ProfileOriginPort{
@@ -386,15 +387,9 @@ function createLifecycle(ports:LifecycleInput){
   return Object.freeze({switchProfile,addProfile,startProfile,askProfilePassword});
 }
 function createDriveBinding(ports:DriveBindingInput):Readonly<DriveBindingController>{
-  let connectRequestedAt=0,libraryQuestion:Promise<boolean>|null=null;
+  let connectRequestedAt=0,revision=0;
   const CHOICE_WINDOW_MS=5*60*1000;
-  function markRequested(){connectRequestedAt=ports.now();}
-  async function record(email:string,folder:string){
-    const mine=ports.profiles.current();if(!mine)return;
-    if(!ports.appCanMutate())throw new Error('Study control changed while Google Drive was connecting.');
-    if(mine.folder!==folder){await ports.clearBaseline();if(!ports.appCanMutate())throw new Error('Study control changed while Google Drive was connecting.');}
-    ports.profiles.setAccount({email,folder});ports.renderProfile();
-  }
+  function markRequested(){connectRequestedAt=ports.now();revision+=1;}
   function askToJoin(email:string,library:DriveLibraryInfo['library']){
     const notes=Number.isFinite(library?.notes)?`${library?.notes} note${library?.notes===1?'':'s'}`:'',when=library?.savedAt?ports.storageHealthTime(library.savedAt):'';
     const summary=[notes,when&&`synced ${when}`].filter(Boolean).join(', ');
@@ -405,25 +400,46 @@ function createDriveBinding(ports:DriveBindingInput):Readonly<DriveBindingContro
       confirmLabel:'Continue with your library',cancelLabel:'Not now'
     });
   }
-  async function bind(info:DriveLibraryInfo|null|undefined):Promise<'refuse'|'continue'|'claim'|'adopt'>{
+  async function bind(info:DriveLibraryInfo|null|undefined,assertProviderOrigin:()=>void):Promise<DriveBindingDecision>{
+    // A retired provider must not invalidate a current choice or its card.
+    if(typeof assertProviderOrigin!=='function'||!stillCurrent(assertProviderOrigin))return 'refuse';
+    const origin=++revision;
     const refuse=(message:string)=>{ports.endConnectCard();ports.interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});ports.renderProfile();return 'refuse' as const;};
+    if(!ports.appCanMutate())return refuse('Another Study Director tab has control. Take control here before connecting this profile.');
+    let assertCurrent=()=>{assertProviderOrigin();if(origin!==revision)throw new Error('A newer Google Drive connection replaced this one.');};
     try{
-      const mine=ports.profiles.current();if(!mine)return 'refuse';
-      if(!ports.appCanMutate())return refuse('Another Study Director tab has control. Take control here before connecting this profile.');
-      const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=ports.profiles.list().filter(row=>row.scope!==mine.scope);
-      const owner=others.find(row=>(!!email&&row.email===email)||(!!found&&row.id===found));
+      const mine=ports.profiles.current();if(!mine||!info)return 'refuse';
+      const intent=profileIntent(ports,'bind Google Drive',{account:true});
+      const assertRequest=assertCurrent;
+      assertCurrent=()=>{assertRequest();intent.assert();if(!ports.appCanMutate())throw new Error('Study control changed while Google Drive was connecting.');};
+      assertCurrent();
+      const email=String(info.email||'').trim().toLowerCase(),folder=String(info.folder||''),found=String(info.found||'');
+      if(!/^[^\s@]{1,128}@[^\s@]{1,190}$/u.test(email)||!/^[A-Za-z0-9_-]{1,200}$/u.test(folder)||(info.mine===true&&found!==mine.id))return refuse('Google Drive did not confirm the account and library. Connect again.');
+      const others=ports.profiles.list().filter(row=>row.scope!==mine.scope);
+      const owner=others.find(row=>row.email===email||(!!found&&row.id===found));
       if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
-      if(info?.mine){await record(email,folder);return 'continue';}
-      if(!found&&(!info?.library||!others.length)){await record(email,folder);return 'claim';}
-      if(ports.now()-connectRequestedAt>CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
-      libraryQuestion??=askToJoin(email,info?.library).finally(()=>{libraryQuestion=null;});
-      if(!await libraryQuestion){ports.endConnectCard();ports.renderProfile();return 'refuse';}
-      if(!ports.appCanMutate())return refuse('Another Study Director tab took control while the Drive library choice was open. Connect again from the active tab.');
-      if(found&&!ports.profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
-      ports.firstStartJoined();await record(email,folder);return found?'adopt':'claim';
+      const ask=info.mine!==true&&(!!found||!!info.library&&others.length>0);
+      if(ask){
+        if(ports.now()-connectRequestedAt>CHOICE_WINDOW_MS)return refuse(`${email} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
+        const accepted=await askToJoin(email,info.library);
+        assertCurrent();
+        if(!accepted){ports.endConnectCard();ports.renderProfile();return 'refuse';}
+      }
+      const nextId=found||mine.id;
+      if(mine.folder!==folder||mine.email!==email||mine.id!==nextId){
+        if(await ports.clearBaseline(assertCurrent)!==true)throw new Error('The previous Drive reconciliation baseline could not be cleared.');
+        assertCurrent();
+      }
+      // No await between the original authority check and the one registry
+      // write. ID adoption and account recording cannot partially succeed.
+      assertCurrent();
+      if(!ports.profiles.bindAccount(nextId,{email,folder}))return refuse('The Google Drive library could not be bound safely.');
+      if(ask)ports.firstStartJoined();
+      ports.renderProfile();
+      return info.mine===true?'continue':found?'adopt':'claim';
     }catch(error){
       ports.capture('profile.drive-binding',error);
-      return refuse('The local profile list could not be updated safely. Retry after browser storage recovers.');
+      return stillCurrent(assertCurrent)?refuse('The local profile list could not be updated safely. Retry after browser storage recovers.'):'refuse';
     }
   }
   return Object.freeze({markRequested,bind});
@@ -442,7 +458,7 @@ function createDeletion(ports:DeletionInput){
     if(!await prepareMutation(intent))return false;
     return ports.mutation.run('profile-remove',authority=>{authority.assert();intent.assert();return ports.profiles.remove();});
   }
-  async function deleteWithIntent(intent:DeletionIntent,drive:boolean,control:DeleteLibraryControl|null){
+  async function deleteWithIntent(intent:DeletionIntent,driveAction:DriveDeletionAction|null){
     try{
       if(!await prepareMutation(intent))return false;
       return await ports.mutation.run('profile-delete',async authority=>{
@@ -451,10 +467,7 @@ function createDeletion(ports:DeletionInput){
           const assert=()=>{authority.assert();intent.assert();};
           assert();hold=ports.provider.suspendBackground('profile-delete');
           if(hold?.settled){await hold.settled;assert();}
-          if(drive){
-            if(!control||control!==libraryControl||!ports.provider.locationStatus('google-drive')?.connected)throw new Error('Google Drive changed or is not ready yet. Confirm the deletion again.');
-            await control.deleteLibrary();assert();
-          }
+          if(driveAction){if(await driveAction(assert)!==true)throw new Error('Google Drive did not confirm library deletion.');assert();}
           await ports.device.deleteBackups();assert();
           return ports.profiles.remove();
         }finally{hold?.release();}
@@ -465,10 +478,17 @@ function createDeletion(ports:DeletionInput){
       return false;
     }
   }
+  function captureDriveDeletion(mine:Readonly<ProfileEntry>,control:DeleteLibraryControl|null){
+    if(!control)throw new Error('Google Drive is not ready yet. Try again in a moment.');
+    const action=control.captureDeletion(Object.freeze({email:mine.email,folder:mine.folder}));
+    return (assertOrigin:()=>void)=>action(()=>{assertOrigin();if(control!==libraryControl||!ports.provider.locationStatus('google-drive')?.connected)throw new Error('Google Drive changed. Confirm the deletion again.');});
+  }
   async function deleteHere({drive=false}:Readonly<{drive?:boolean}>={}){
     if(!ports.appCanMutate())return false;
-    try{return await deleteWithIntent(captureDeletion(),drive,libraryControl);}
-    catch(error){ports.capture('profile.delete',error);return false;}
+    try{
+      const mine=ports.profiles.current();if(!mine)return false;
+      return await deleteWithIntent(captureDeletion(),drive?captureDriveDeletion(mine,libraryControl):null);
+    }catch(error){ports.capture('profile.delete',error);return false;}
   }
   async function deleteThisProfile(){
     try{
@@ -476,6 +496,7 @@ function createDeletion(ports:DeletionInput){
       const mine=ports.profiles.current();if(!mine)return false;
       const intent=captureDeletion(),control=libraryControl;
       const name=ports.getStudentName(),last=ports.profiles.list().length<2,drive=ports.provider.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync?.syncing),folder=ports.device.status();
+      const driveAction=drive?.connected&&control?captureDriveDeletion(mine,control):null;
       const afterwards=last?' A new, empty profile starts afterwards.':'';
       const choice=await ports.interactions.choose({
         title:`Delete ${name}?`,message:last?'This is the only profile on this device.':'Other profiles on this device are not changed.',
@@ -490,13 +511,14 @@ function createDeletion(ports:DeletionInput){
         return current(intent)?removeLocal(intent):false;
       }
       if(choice!=='everywhere')return false;
+      if(drive?.connected&&!driveAction)throw new Error('Google Drive is not ready yet. Confirm the deletion again.');
       if(mine.email&&!drive?.connected){ports.interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
       const places=[drive?.connected?`its library in ${mine.email||'Google Drive'} moves to the Drive Trash, where it can be brought back for 30 days`:'',folder.connected?'its Device Folder backups on this device are deleted':''].filter(Boolean);
       const ok=await ports.interactions.confirm({
         title:`Delete ${name} everywhere?`,message:`Its notes, Saved Days, plans, reflections and attachments are deleted from this device${places.length?`; ${places.join('; ')}`:''}.`,
         details:['Other devices remove this profile the next time they sign in to Google Drive.',...(last?['A new, empty profile starts afterwards.']:[])],confirmLabel:'Delete everywhere',danger:true
       });
-      return ok&&current(intent)?deleteWithIntent(intent,!!drive?.connected,control):false;
+      return ok&&current(intent)?deleteWithIntent(intent,driveAction):false;
     }catch(error){
       ports.capture('profile.delete',error);
       ports.interactions.notify({key:'profile-delete',title:'The profile was not deleted',message:'The local profile list could not be updated safely. Nothing was removed; retry after browser storage recovers.'});
@@ -506,7 +528,7 @@ function createDeletion(ports:DeletionInput){
   async function driveProfileDeleted(info:ProfileDeletionInfo|null|undefined){
     const mine=ports.profiles.current();if(!ports.appCanMutate()||!mine||String(info?.profile||'')!==mine.id||deletionQuestion)return false;
     const intent=captureDeletion(),name=ports.getStudentName(),synced=ports.verifiedSourceRevision();
-    if(synced&&synced===ports.currentBackupSourceRevision())return deleteWithIntent(intent,false,null);
+    if(synced&&synced===ports.currentBackupSourceRevision())return deleteWithIntent(intent,null);
     deletionQuestion=ports.interactions.confirm({
       title:`${name} was deleted on another device`,message:'This device has changes that never reached Google Drive.',
       details:['Delete here too: they are deleted with the profile, and so are its Device Folder backups on this device.','Keep on this device: the profile stays here and stops syncing. Connecting Google Drive again starts a new library.'],
@@ -514,13 +536,13 @@ function createDeletion(ports:DeletionInput){
     }).finally(()=>{deletionQuestion=null;});
     const accepted=await deletionQuestion;
     if(!current(intent))return false;
-    if(accepted)return deleteWithIntent(intent,false,null);
+    if(accepted)return deleteWithIntent(intent,null);
     ports.profiles.renew();ports.renderProfile();
     ports.interactions.notify({key:'profile-kept',title:`${name} is kept on this device`,message:'It no longer syncs with Google Drive. Connect Google Drive again to start a new library.'});
     return false;
   }
   function setLibraryControl(control:unknown){
-    libraryControl=control&&typeof control==='object'&&'deleteLibrary' in control&&typeof (control as {deleteLibrary?:unknown}).deleteLibrary==='function'?control as DeleteLibraryControl:null;
+    libraryControl=control&&typeof control==='object'&&'deleteLibrary' in control&&typeof (control as {deleteLibrary?:unknown}).deleteLibrary==='function'&&'captureDeletion' in control&&typeof control.captureDeletion==='function'?control as DeleteLibraryControl:null;
   }
   return Object.freeze({deleteThisProfile,driveProfileDeleted,deleteHere,setLibraryControl});
 }

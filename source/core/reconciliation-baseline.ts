@@ -197,7 +197,10 @@ const createModule=()=>{
     }
     // Forgets what was last shared (the Drive library changed): the next sync
     // is a first sync, a two-way merge. The next full base rewrites the rows.
-    function clear(){return meta.remove(families.header,'',{strict:true});}
+    function clear(assertOrigin:()=>void){return meta.transaction<boolean>('readwrite',(view,tx,finish)=>{
+      try{assertOrigin();const request=view.remove(families.header);request.onerror=()=>finish(false,request.error||new Error('Reconciliation baseline removal failed.'));tx.oncomplete=()=>finish(true,true);}
+      catch(error){try{tx.abort();}catch{}finish(false,error);}
+    },{strict:true,abortMessage:'reconciliation baseline removal aborted'});}
     return freeze({format:'study-director.reconciliation-baseline-store',contractVersion:1,readHeader,readNotes,readDays,readDayAncestry,write,clear});
   }
   return freeze({format:'study-director.reconciliation-baseline-module',contractVersion:1,createCodec,createStore});

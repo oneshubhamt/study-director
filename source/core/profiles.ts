@@ -125,6 +125,15 @@ const createModule=()=>{
       if(list.profiles.some(row=>row.id===id))return current(list)?.id===id;
       return update(()=>({id}))?.id===id;
     }
+    function bindAccount(id:string,account:Readonly<{email:unknown;folder:unknown}>){
+      const email=cleanEmail(account.email),folder=cleanFolder(account.folder);
+      if(!validId(id)||!email||!folder)return false;
+      const result=update((mine,list)=>{
+        if(list.profiles.some(row=>row.scope!==mine.scope&&(row.id===id||row.email===email)))throw new Error('That Google account or library belongs to another profile on this device.');
+        return mine.id===id&&mine.email===email&&mine.folder===folder?null:{id,email,folder};
+      });
+      return !!result&&result.id===id&&result.email===email&&result.folder===folder;
+    }
     const finishFirstStart=()=>update(mine=>mine.fresh?{fresh:false,from:null}:null);
     function activate(id:string,list=read()){
       if(!list.profiles.some(row=>row.id===id))return false;
@@ -189,7 +198,7 @@ const createModule=()=>{
     const list=()=>read().profiles;
     const removalPending=()=>read().removing.filter(scope=>scope!==pageScope).length;
     const unsupported=()=>read().unsupported;
-    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,renew,finishFirstStart,add,switchTo,remove,collect,watch,removalPending,unsupported});
+    return freeze({current:()=>current(),list,ensure,rename,setAccount,adopt,bindAccount,renew,finishFirstStart,add,switchTo,remove,collect,watch,removalPending,unsupported});
   }
   return freeze({format:'study-director.profiles-module',contractVersion:1,createController});
 };
