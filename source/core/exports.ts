@@ -241,7 +241,7 @@ const createModule=(input:ExportsModuleInput)=>{
     const cancelled=()=>Object.assign(new Error('Backup encryption cancelled.'),{name:'AbortError',code:'STUDY_DIRECTOR_IMPORT_CANCELLED'});
     const validKey=(value:unknown):value is CryptoKey|null=>value===null||(typeof CryptoKey!=='undefined'&&value instanceof CryptoKey&&value.type==='secret'&&value.algorithm?.name==='PBKDF2'&&value.extractable===false);
     function publish(){onState(Object.freeze({enabled:!!policy,unlocked:!!key&&keyId===policy?.id}));}
-    function lock(){keyEpoch++;generation.abort();generation=new AbortController();key=null;keyId='';publish();}
+    function lock(){keyEpoch++;generation.abort();generation=new AbortController();key=null;keyId='';typed=null;publish();}
     async function refresh(){
       const value=await storage.read(SETTING) as Partial<Record<keyof Policy,unknown>>|null|undefined,version=Number(value&&value.version);
       if(value&&(typeof value.id!=='string'||!value.id||value.id.length>128||version!==3||!(value.verifier instanceof Blob)||!validKey(value.key??null)))throw new Error('Backup encryption settings are unreadable. Backups are paused.');
@@ -256,20 +256,24 @@ const createModule=(input:ExportsModuleInput)=>{
       if(!answer)throw cancelled();check(signal);
       try{return await processing.run('crypto.key',{password:answer.value},{signal});}finally{answer=null;}
     }
-    // Keeps the key with a record that has none, so this device does not ask
-    // again. A kept key always opens its own record (set, change and follow
-    // each keep theirs), so it is never replaced.
-    async function keep(record:Policy,candidate:CryptoKey){
-      if(record.key)return;
-      await storage.write(SETTING,{...record,key:candidate},{expectedId:record.id,check:()=>{check();}});
-      policy={...record,key:candidate};
+    // Keep the key only under authority captured before asking for it. A
+    // read-only unlock may use a tab-memory key but cannot change metadata.
+    function mutationFence(){
+      const token=issueToken(),epoch=keyEpoch,operation=processing.checkpoint?.()||processing.check;
+      return ()=>{operation();check();if(epoch!==keyEpoch)throw cancelled();assertToken(token);};
     }
-    async function unlock(record:Policy,signal?:AbortSignal|null,{message='',cancelLabel=''}={}){
-      const epoch=keyEpoch;
-      for(;;){const candidate=await askKey({message:message||'Enter this profile’s backup password. Sync and encrypted backups wait until it is entered.',cancelLabel,signal});try{
+    async function unlock(record:Policy,signal?:AbortSignal|null,{message='',cancelLabel='',assertOrigin}: {message?:string;cancelLabel?:string;assertOrigin?:()=>void}={}){
+      const epoch=keyEpoch,operation=processing.checkpoint?.()||processing.check;
+      const assertCurrent=()=>{operation();check(signal);if(epoch!==keyEpoch)throw cancelled();assertOrigin?.();};
+      const keepAuthority=canMutate()&&!record.key?(assertOrigin||mutationFence()):null;
+      for(;;){assertCurrent();const candidate=await askKey({message:message||'Enter this profile’s backup password. Sync and encrypted backups wait until it is entered.',cancelLabel,signal});try{
         await processing.run('crypto.verifier.check',{file:record.verifier,key:candidate},{signal});
-        check(signal);if(epoch!==keyEpoch)throw cancelled();const latest=await refresh();if(latest?.id!==record.id)throw new Error('Backup encryption changed in another tab. Try again.');
-        await keep(latest,candidate);key=candidate;keyId=record.id;publish();return key;
+        assertCurrent();const latest=await refresh();assertCurrent();if(latest?.id!==record.id)throw new Error('Backup encryption changed in another tab. Try again.');
+        if(!latest.key&&keepAuthority){
+          const assertKeep=()=>{assertCurrent();keepAuthority();},next={...latest,key:candidate};
+          await storage.write(SETTING,next,{expectedId:latest.id,check:assertKeep});assertKeep();policy=next;
+        }
+        assertCurrent();key=candidate;keyId=record.id;publish();return key;
       }catch(error){if((error as {code?:unknown}|null|undefined)?.code!=='BACKUP_AUTH_FAILED')throw error;message=String((error as {message?:unknown}|null|undefined)?.message||'');}}
     }
     async function protect<T extends SaveFile>(file:T|(()=>Promise<T>),{interactive=true,signal,onProgress=null}:ProtectionOptions={}){
@@ -313,39 +317,38 @@ const createModule=(input:ExportsModuleInput)=>{
         finally{for(const source of signals)source.removeEventListener('abort',abort);}
       }
     }
-    async function setPassword(token:Token|null,record:Policy|null,{change=false}={}){
-      const epoch=keyEpoch,candidate=await askKey({confirm:true,title:change?'Change backup password':'Set a backup password',message:change?'Versions made from now on use the new password; earlier ones keep the one they were made with. Your other devices ask for the new password at their next sync.':''}),verifier=await processing.run('crypto.verifier.create',{key:candidate});
-      if(!canMutate())throw new Error('Control changed to another tab.');
-      if(epoch!==keyEpoch)throw cancelled();assertToken(token);check();if(((await refresh())?.id||'')!==(record?.id||''))throw cancelled();assertToken(token);
-      const recordToSave={version:3,id:globalThis.crypto.randomUUID(),verifier,key:candidate,setAt:new Date().toISOString()};await storage.write(SETTING,recordToSave,{expectedId:record?.id||'',check:()=>{check();assertToken(token);if(epoch!==keyEpoch)throw cancelled();}});
-      if(epoch!==keyEpoch){await refresh();throw cancelled();}
+    async function setPassword(assertCurrent:()=>void,record:Policy|null,{change=false}={}){
+      assertCurrent();const candidate=await askKey({confirm:true,title:change?'Change backup password':'Set a backup password',message:change?'Versions made from now on use the new password; earlier ones keep the one they were made with. Your other devices ask for the new password at their next sync.':''}),verifier=await processing.run('crypto.verifier.create',{key:candidate});
+      assertCurrent();if(((await refresh())?.id||'')!==(record?.id||''))throw cancelled();assertCurrent();
+      const recordToSave={version:3,id:globalThis.crypto.randomUUID(),verifier,key:candidate,setAt:new Date().toISOString()};await storage.write(SETTING,recordToSave,{expectedId:record?.id||'',check:assertCurrent});
+      try{assertCurrent();}catch{return;}
       policy=recordToSave;key=candidate;keyId=policy.id;publish();
     }
-    async function removePassword(token:Token|null,record:Policy){
+    async function removePassword(assertCurrent:()=>void,record:Policy){
+      assertCurrent();
       if(!await interactions.confirm({title:'Remove the backup password?',message:'Versions made from now on upload without encryption, to Drive too. Earlier versions still need this password.',confirmLabel:'Remove password',danger:true}))return;
-      if(!canMutate())throw new Error('Control changed to another tab.');
-      assertToken(token);check();if((await refresh())?.id!==record.id)throw cancelled();assertToken(token);
-      await storage.remove(SETTING,{expectedId:record.id,check:()=>{check();assertToken(token);}});policy=null;lock();
+      assertCurrent();if((await refresh())?.id!==record.id)throw cancelled();assertCurrent();
+      await storage.remove(SETTING,{expectedId:record.id,check:assertCurrent});try{assertCurrent();}catch{return;}policy=null;lock();
     }
     // Set, change or remove the password; a locked profile is unlocked first.
     async function manage(){return processing.job(async()=>{
       if(!canMutate())throw new Error('Take control in this tab before changing the backup password.');
-      const token=issueToken(),record=await refresh();
-      if(!record)return setPassword(token,null);
-      if(!key){await unlock(record);return;}
+      const assertCurrent=mutationFence(),record=await refresh();assertCurrent();
+      if(!record)return setPassword(assertCurrent,null);
+      if(!key){await unlock(record,null,{assertOrigin:assertCurrent});return;}
       const action=await interactions.choose({title:'Backup password',message:'Device Folder, Drive and file backups are encrypted with it.',choices:[{value:'change',label:'Change password'},{value:'remove',label:'Remove password',description:'Later versions upload unencrypted.',kind:'danger'}]});
-      if(action==='change')return setPassword(token,record,{change:true});
-      if(action==='remove')return removePassword(token,record);
+      if(action==='change')return setPassword(assertCurrent,record,{change:true});
+      if(action==='remove')return removePassword(assertCurrent,record);
     });}
     // First start: the password typed in the form, set before anything uploads.
     async function enable(password:unknown){return processing.job(async()=>{
       if(!canMutate())throw new Error('Take control in this tab before setting the backup password.');
-      const token=issueToken();if(await refresh())return false;
+      const assertCurrent=mutationFence(),record=await refresh();assertCurrent();if(record)return false;
       const candidate=await processing.run('crypto.key',{password:String(password||'')}),verifier=await processing.run('crypto.verifier.create',{key:candidate});
-      assertToken(token);check();if(await refresh())return false;
+      assertCurrent();const latest=await refresh();assertCurrent();if(latest)return false;
       const next={version:3,id:globalThis.crypto.randomUUID(),verifier,key:candidate,setAt:new Date().toISOString()};
-      await storage.write(SETTING,next,{expectedId:'',check:()=>{check();assertToken(token);}});
-      policy=next;key=candidate;keyId=next.id;publish();return true;
+      await storage.write(SETTING,next,{expectedId:'',check:assertCurrent});
+      try{assertCurrent();}catch{return true;}policy=next;key=candidate;keyId=next.id;publish();return true;
     });}
     // Switching into a profile with a password, when the device has several.
     async function ask(){return processing.job(async()=>{const record=await refresh();if(!record||key)return true;try{await unlock(record,null,{cancelLabel:'Not now'});return true;}catch(error){if((error as {name?:unknown}|null|undefined)?.name==='AbortError')return false;throw error;}});}

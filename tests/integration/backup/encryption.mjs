@@ -94,6 +94,35 @@ choice='remove';await protection.manage();assert.equal(saved,null);assert.equal(
   assert.equal(saved.id,'remote-policy');assert.equal(await guarded.follow({encrypted:false,removedElsewhere:true,assertRequest:request}),true);
   assert.equal(saved,null);assert.equal(guarded.status().enabled,false);
 }
+// Explicit changes and retained-key writes keep the original local authority
+// and lock generation through the metadata CAS, not a successor's consent.
+{
+  let revision=1,owner=true;
+  const guarded=factory({canMutate:()=>owner,remember:()=>false,issueToken:()=>revision,assertToken:token=>{if(!owner||token!==revision)throw new Error('owner changed');}});
+  const previousWrites=writes;
+  beforePolicyMutation=()=>guarded.lock();
+  await assert.rejects(guarded.enable(password),{name:'AbortError'});
+  assert.equal(saved,null);assert.equal(writes,previousWrites);
+  beforePolicyMutation=()=>{};assert.equal(await guarded.enable(password),true);
+  const previous=saved,enabledWrites=writes;
+  choice='remove';beforePolicyMutation=()=>guarded.lock();
+  await assert.rejects(guarded.manage(),{name:'AbortError'});
+  assert.equal(saved,previous);assert.equal(writes,enabledWrites);
+  beforePolicyMutation=()=>{};answers=[{value:password}];await guarded.manage();
+  const originalChoose=interactions.choose;
+  interactions.choose=async()=>{revision++;return 'change';};
+  try{await assert.rejects(guarded.manage(),/owner changed/);}finally{interactions.choose=originalChoose;}
+  assert.equal(saved,previous);assert.equal(writes,enabledWrites);
+  saved={...previous,key:null};const noKey=saved;guarded.lock();
+  answers=[{value:password}];beforePolicyMutation=()=>{revision++;};
+  await assert.rejects(guarded.ask(),/owner changed/);
+  assert.equal(saved,noKey);assert.equal(writes,enabledWrites);
+  // A secondary can unlock in memory, but cannot retain a key in IndexedDB.
+  beforePolicyMutation=()=>{};owner=false;answers=[{value:password}];
+  assert.equal(await guarded.ask(),true);assert.equal(guarded.status().unlocked,true);
+  assert.equal(saved,noKey);assert.equal(writes,enabledWrites);
+  owner=true;choice='remove';await guarded.manage();assert.equal(saved,null);
+}
 console.log(JSON.stringify({status:'PASS',suite:'encryption',checks:['Unicode and whitespace password','independent OpenSSL decryption','fresh salt and IV','authenticated header/cipher/tag','wrong password','truncated/trailing data','32 MiB admission','only a non-extractable key kept','one profile reopens unlocked','several profiles ask','follow a changed or removed password','first-start password','retry','cancel','storage failure closed','cross-tab invalidation','explicit disabling','copy/encryption output receipts']},null,2));
 
 // Streaming envelope: >32 MiB, independent OpenSSL frame authentication, and
