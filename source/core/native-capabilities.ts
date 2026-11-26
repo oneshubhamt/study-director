@@ -39,11 +39,12 @@ const createModule=()=>{
     const badgeSupported=typeof nav?.setAppBadge==='function'&&typeof nav?.clearAppBadge==='function';
     const installedRelatedAppsSupported=typeof nav?.getInstalledRelatedApps==='function';
     let installed=false,revision=0;
-    let storageMode:StorageMode=storageStatusSupported?'checking':'unsupported',storageBusy=false,storageMessage='';
+    let storageMode:StorageMode=storageStatusSupported?'checking':'unsupported',storageBusy=false,storageMessage='',storagePending:Promise<NativeCapabilitiesStatus>|null=null;
     let keepAwake=false,wakeSentinel:WakeLockSentinelPort|null=null,wakeRequest:Promise<boolean>|null=null;
-    let installPrompt:InstallPromptEventPort|null=null,installFeedback='',standalone=false,installedEvent=false,relatedInstalled=false;
+    let installPrompt:InstallPromptEventPort|null=null,installFeedback='',standalone=false,installedEvent=false,relatedInstalled=false,installRevision=0;
     let installing=false,installInspecting=false,installInspectionPromise:Promise<NativeCapabilitiesStatus>|null=null,installHelpRequested=false,installNoticeVisible=false,installNoticeOffered=false;
-    let badgeActive:boolean|null=null;
+    type BadgeRequest={active:boolean;promise:Promise<boolean>;settle:(result:boolean)=>void};
+    let badgeActive:boolean|null=null,badgeRequest:BadgeRequest|null=null,badgeRunning=false;
 
     function capture(scope:string,error:unknown){try{hooks.capture(scope,error);}catch{}}
     function isStandalone(){
@@ -183,50 +184,39 @@ const createModule=()=>{
       try{return hooks.writePreference(input.configuration.installNoticeKey,true)!==false;}
       catch(error){capture('native.install-notice-write',error);return false;}
     }
-    async function inspectStorage(){
-      const persisted=storage?.persisted;
-      if(typeof persisted!=='function'){storageMode='unsupported';storageMessage='Browser-managed storage is in use; persistent-storage requests are unavailable here.';return publish();}
-      storageBusy=true;storageMessage='';publish();
-      const persist=storage?.persist;
-      let canRequest=false;
-      try{
-        const alreadyProtected=(await persisted.call(storage))===true;
-        storageMode=alreadyProtected?'protected':'standard';
-        canRequest=!alreadyProtected&&typeof persist==='function';
-      }catch(error){storageMode='standard';capture('native.storage-status',error);}
-      if(canRequest&&persist){
-        try{
-          storageMode=(await persist.call(storage))===true?'protected':'standard';
-          storageMessage=storageMode==='protected'
-            ? 'Persistent local storage is enabled for this browser profile.'
-            : 'The browser kept Study Director in browser-managed storage. You can try protection again here.';
-        }catch(error){
-          storageMode='standard';storageMessage='The browser kept Study Director in browser-managed storage. You can try protection again here.';
-          capture('native.storage-protect-auto',error);
-        }
-      }else if(storageMode==='protected')storageMessage='Persistent local storage is enabled for this browser profile.';
-      storageBusy=false;
-      return publish();
-    }
-    async function protectLocalData(){
-      const persist=storage?.persist;
-      if(typeof persist!=='function'){
+    function requestStorage(explicit:boolean):Promise<NativeCapabilitiesStatus>{
+      // Inspection already requests persistence when needed. Concurrent callers
+      // share one browser operation; a subsequent explicit retry is independent.
+      if(storagePending)return storagePending;
+      const persisted=storage?.persisted,persist=storage?.persist;
+      if(explicit?typeof persist!=='function':typeof persisted!=='function'){
         storageMode=storageStatusSupported?'standard':'unsupported';
         storageMessage='Browser-managed storage is in use; persistent-storage requests are unavailable here.';
-        return publish();
+        return Promise.resolve(publish());
       }
-      storageBusy=true;storageMessage='Requesting browser storage protection…';publish();
-      try{
-        storageMode=(await persist.call(storage))===true?'protected':'standard';
-        storageMessage=storageMode==='protected'
-          ? 'Persistent local storage is enabled for this browser profile.'
-          : 'The browser kept Study Director in browser-managed storage. You can try protection again here.';
-      }catch(error){
-        storageMode='standard';storageMessage='The browser kept Study Director in browser-managed storage. You can try protection again here.';
-        capture('native.storage-protect',error);
-      }finally{storageBusy=false;}
-      return publish();
+      storageBusy=true;storageMessage=explicit?'Requesting browser storage protection…':'';
+      const pending=Promise.resolve().then(async()=>{
+        let mode:StorageMode='standard',message='',canRequest=explicit;
+        if(!explicit&&persisted){
+          try{
+            const alreadyProtected=(await persisted.call(storage))===true;
+            mode=alreadyProtected?'protected':'standard';
+            canRequest=!alreadyProtected&&typeof persist==='function';
+          }catch(error){capture('native.storage-status',error);}
+        }
+        if(canRequest&&persist){
+          try{mode=(await persist.call(storage))===true?'protected':'standard';}
+          catch(error){capture(explicit?'native.storage-protect':'native.storage-protect-auto',error);}
+          if(mode==='standard')message='The browser kept Study Director in browser-managed storage. You can try protection again here.';
+        }
+        if(mode==='protected')message='Persistent local storage is enabled for this browser profile.';
+        storageMode=mode;storageMessage=message;storageBusy=false;storagePending=null;
+        return publish();
+      });
+      storagePending=pending;publish();return pending;
     }
+    function inspectStorage(){return requestStorage(false);}
+    function protectLocalData(){return requestStorage(true);}
     function shouldHoldWakeLock(){return wakeSupported&&keepAwake&&!doc.hidden&&hooks.isTimerRunning()===true;}
     async function releaseWakeLock(){
       const sentinel=wakeSentinel;wakeSentinel=null;
@@ -243,6 +233,7 @@ const createModule=()=>{
           const wakeLock=nav?.wakeLock;
           if(!wakeLock)return false;
           const sentinel=await wakeLock.request('screen');
+          if(sentinel.released)return false;
           if(!shouldHoldWakeLock()){
             try{await sentinel.release();}catch(error){capture('native.wake-late-release',error);}
             return false;
@@ -285,9 +276,9 @@ const createModule=()=>{
       if(!prompt)return;
       prompt.preventDefault?.();
       if(standalone||installedEvent)return;
-      installPrompt=prompt;installing=false;installFeedback='';publish();
+      installRevision+=1;installPrompt=prompt;installing=false;installFeedback='';publish();
     }
-    function handleInstalled(){installPrompt=null;installedEvent=true;installing=false;installFeedback='Installed on this device.';installNoticeVisible=false;publish();}
+    function handleInstalled(){installRevision+=1;installPrompt=null;installedEvent=true;installing=false;installFeedback='Installed on this device.';installNoticeVisible=false;publish();}
     function installCaptureBridge():InstallCaptureBridge|null{
       const value=(win as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.installCapture.v1')];
       if(!value||typeof value!=='object')return null;
@@ -316,20 +307,21 @@ const createModule=()=>{
       standalone=isStandalone();
       const inspect=nav?.getInstalledRelatedApps;
       if(typeof inspect!=='function'){publish();return Promise.resolve(snapshot());}
-      installInspecting=true;publish();
+      installInspecting=true;const origin=installRevision;
       let pending!:Promise<NativeCapabilitiesStatus>;
       pending=Promise.resolve().then(async()=>{
         try{
           const apps=await inspect.call(nav);
+          if(origin!==installRevision)return;
           relatedInstalled=Array.isArray(apps)&&apps.some((app:unknown)=>!!app&&typeof app==='object'&&Reflect.get(app,'platform')==='webapp');
-          if(relatedInstalled){installing=false;installPrompt=null;}
+          if(relatedInstalled){installRevision+=1;installing=false;installPrompt=null;}
         }catch(error){capture('native.install-inspection',error);}
       }).finally(()=>{
         installInspecting=false;
         if(installInspectionPromise===pending)installInspectionPromise=null;
         publish();
       }).then(()=>snapshot());
-      installInspectionPromise=pending;
+      installInspectionPromise=pending;publish();
       return pending;
     }
     function revealInstallHelp(){installHelpRequested=true;installFeedback='';return publish();}
@@ -343,10 +335,12 @@ const createModule=()=>{
     async function promptInstall(){
       const prompt=installPrompt;
       if(!prompt||isStandalone()||installedConfirmed())return false;
-      installPrompt=null;installFeedback='';publish();
+      const origin=++installRevision;
+      installPrompt=null;installing=true;installFeedback='';publish();
       try{
         await prompt.prompt();
         const choice=prompt.userChoice?await prompt.userChoice:null;
+        if(origin!==installRevision)return installedConfirmed();
         const accepted=choice?.outcome==='accepted';
         installing=accepted&&!installedEvent&&!relatedInstalled&&!isStandalone();
         installFeedback=accepted?(installedConfirmed()?'Installed on this device.':'Installation accepted. Finish the browser step if it is still open.'):'Installation was not completed.';
@@ -354,17 +348,37 @@ const createModule=()=>{
         publish();
         if(accepted)await inspectInstallation();
         return accepted;
-      }catch(error){capture('native.install-prompt',error);installing=false;installFeedback='Installation could not start in this browser.';publish();return false;}
+      }catch(error){if(origin!==installRevision)return installedConfirmed();capture('native.install-prompt',error);installing=false;installFeedback='Installation could not start in this browser.';publish();return false;}
     }
-    async function updateBadge(active:unknown){
+    async function drainBadge(){
+      // Native calls cannot be cancelled. Serialize their physical effects and
+      // retain only the latest requested state while one call is in flight.
+      while(badgeRequest){
+        const request=badgeRequest;
+        let succeeded=false;
+        try{
+          if(badgeActive!==request.active){
+            if(request.active)await nav.setAppBadge!(1);else await nav.clearAppBadge!();
+            badgeActive=request.active;
+          }
+          succeeded=true;
+        }catch(error){badgeActive=null;capture('native.badge',error);}
+        if(badgeRequest===request){badgeRequest=null;request.settle(succeeded);}
+        try{publish();}catch(error){capture('native.badge-render',error);}
+      }
+      badgeRunning=false;
+    }
+    function updateBadge(active:unknown):Promise<boolean>{
       const next=active===true;
-      if(!badgeSupported){badgeActive=false;return false;}
-      if(badgeActive===next)return true;
-      try{
-        if(next)await nav.setAppBadge!(1);else await nav.clearAppBadge!();
-        badgeActive=next;return true;
-      }catch(error){capture('native.badge',error);return false;}
-      finally{publish();}
+      if(!badgeSupported){badgeActive=false;return Promise.resolve(false);}
+      if(badgeRequest?.active===next)return badgeRequest.promise;
+      if(!badgeRunning&&badgeActive===next)return Promise.resolve(true);
+      badgeRequest?.settle(false);
+      let settle!:(result:boolean)=>void;
+      const promise=new Promise<boolean>(resolve=>{settle=resolve;});
+      badgeRequest={active:next,promise,settle};
+      if(!badgeRunning){badgeRunning=true;void drainBadge();}
+      return promise;
     }
     function handleVisibility(){void syncWake();}
     function install(){

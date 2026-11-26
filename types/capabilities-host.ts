@@ -19,7 +19,7 @@ export interface CapabilityInstallationInput{
   readonly goTab:(name:string,options:Readonly<{source:string}>)=>Promise<boolean>;
   readonly preferredScrollBehavior:()=>ScrollBehavior;
 }
-export interface ActiveSessionRepositoryPort{settled():PromiseLike<unknown>;load():PromiseLike<Readonly<{storage?:Readonly<{idb?:unknown}>;value?:unknown}>|null>}
+export interface ActiveSessionRepositoryPort{settled():PromiseLike<unknown>;load(retry:number,options:Readonly<{strict:true}>):PromiseLike<Readonly<{ok?:unknown;error?:unknown;storage?:Readonly<{idb?:unknown}>;value?:unknown}>|null>}
 export interface CapabilityBadgeInput{
   readonly controller:()=>NativeCapabilitiesController|null;
   readonly activeSession:()=>ActiveSessionRepositoryPort;

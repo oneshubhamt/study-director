@@ -59,38 +59,43 @@ function createViews(ports:CapabilityViewsInput){
 function createStorage(ports:CapabilityStorageInput){
   const {document,navigator,limits,controller,storageSizeLabel,markStorageHealthError,markStorageHealthOk,renderStorageHealth}=ports;
   let estimate:Readonly<StorageEstimateSnapshot>=Object.freeze({persisted:null,usageBytes:null,quotaBytes:null});
-  let checkedAt=0;
+  let checkedAt=0,inspectionRevision=0;
+  function readPersisted(native:NativeCapabilitiesController|null){
+    const mode=native?.status().storageMode;
+    return mode==='protected'?true:mode==='standard'?false:null;
+  }
   function snapshot(){return estimate;}
   function lastCheckedAt(){return checkedAt;}
   async function inspectStorageCapability(){
     if(!navigator.storage)return null;
     checkedAt=Date.now();
-    let persisted:boolean|null=null,rawEstimate:Readonly<{usage?:number;quota?:number}>|null=null;
-    try{
-      const native=controller();
-      if(native){
-        const nativeState=await native.inspectStorage();
-        persisted=nativeState.storageMode==='protected'?true:nativeState.storageMode==='standard'?false:null;
-      }
-    }catch{}
+    const origin=++inspectionRevision,native=controller(),current=()=>origin===inspectionRevision&&native===controller();
+    let rawEstimate:Readonly<{usage?:number;quota?:number}>|null=null;
+    try{await native?.inspectStorage();}catch{}
+    if(!current())return null;
     try{if(typeof navigator.storage.estimate==='function')rawEstimate=await navigator.storage.estimate();}catch{}
-    const usage=Number(rawEstimate?.usage),quota=Number(rawEstimate?.quota);
-    const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
+    if(!current())return null;
+    const persisted=readPersisted(native);
+    const usage=rawEstimate?.usage,quota=rawEstimate?.quota;
+    const validUsage=typeof usage==='number'&&Number.isFinite(usage)&&usage>=0?usage:null;
+    const validQuota=typeof quota==='number'&&Number.isFinite(quota)&&quota>0?quota:null;
+    const ratio=validUsage!==null&&validQuota!==null?validUsage/validQuota:null;
     const use=document.getElementById('local-storage-use');
-    if(use)use.textContent=Number.isFinite(usage)?`Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
-    const payload=Object.freeze({version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()});
+    if(use)use.textContent=validUsage!==null?`Browser storage estimate: ${storageSizeLabel(validUsage)}${validQuota!==null?` of ${storageSizeLabel(validQuota)}`:''}`:'';
+    const payload=Object.freeze({version:1,persisted:persisted===true,usageBytes:validUsage,quotaBytes:validQuota,usageRatio:ratio,checkedAt:new Date().toISOString()});
     estimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
-    if(ratio!==null&&ratio>=limits.storageCriticalRatio){
-      markStorageHealthError('capacity',`Storage is ${Math.round(ratio*100)}% full (${storageSizeLabel(usage)} of ${storageSizeLabel(quota)}). Export a backup and free browser storage before continuing.`);
+    if(ratio!==null&&validUsage!==null&&validQuota!==null&&ratio>=limits.storageCriticalRatio){
+      markStorageHealthError('capacity',`Storage is ${Math.round(ratio*100)}% full (${storageSizeLabel(validUsage)} of ${storageSizeLabel(validQuota)}). Export a backup and free browser storage before continuing.`);
     }else if(ratio!==null&&ratio>=limits.storageWarningRatio){
       markStorageHealthError('capacity',`Storage usage is ${Math.round(ratio*100)}%. Export a recent backup and monitor available browser storage.`,{level:'warn'});
-    }else markStorageHealthOk('capacity');
+    }else if(ratio!==null)markStorageHealthOk('capacity');
     return payload;
   }
   async function protectLocalData(){
     const native=controller();if(!native)return false;
-    const state=await native.protectLocalData();
-    const persisted=state.storageMode==='protected'?true:state.storageMode==='standard'?false:null;
+    await native.protectLocalData();
+    if(native!==controller())return false;
+    const persisted=readPersisted(native);
     estimate=Object.freeze({...estimate,persisted});
     renderStorageHealth();
     return persisted===true;
@@ -123,23 +128,28 @@ function createInstallation(ports:CapabilityInstallationInput){
 }
 function createBadge(ports:CapabilityBadgeInput){
   const {controller,activeSession,persistedActiveSessionUnfinished,capture}=ports;
+  let revision=0;
   function syncFromCanonicalCommit(event:CanonicalCommitBadgeEvent|null|undefined){
     const native=controller();
     if(!native||event?.entityType!=='activeSession')return false;
     const badgeActive=event.operation==='delete'?false:persistedActiveSessionUnfinished(event.value);
-    if(native.status().badgeActive!==badgeActive)void native.updateBadge(badgeActive);
+    revision+=1;void native.updateBadge(badgeActive);
     return true;
   }
   async function refreshPersistedSessionBadge(){
     const native=controller();if(!native)return false;
+    const origin=++revision,current=()=>origin===revision&&native===controller();
     try{
       const repository=activeSession();
       await repository.settled();
-      const loaded=await repository.load();
-      const confirmed=!!(loaded?.storage?.idb&&persistedActiveSessionUnfinished(loaded.value));
-      return native.updateBadge(confirmed);
+      if(!current())return false;
+      const loaded=await repository.load(0,{strict:true});
+      // A successful empty read is evidence of absence; idb records row
+      // presence, not read success. A local-only row is not canonical proof.
+      if(!current()||loaded?.ok!==true||loaded.error||loaded.value===undefined||(loaded.value!==null&&loaded.storage?.idb!==true))return false;
+      return native.updateBadge(persistedActiveSessionUnfinished(loaded.value));
     }catch(error){
-      capture('native.badge-refresh',error);
+      if(current())capture('native.badge-refresh',error);
       // An unavailable canonical read is unknown, not proof that no session
       // remains. Preserve the last badge state until a canonical read succeeds.
       return false;
