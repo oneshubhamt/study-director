@@ -660,7 +660,7 @@ let syncWorld=null;
   const claimTransport=freeze({...transport,
     // Drive lists claims newest first.
     listSessionClaims:async()=>freeze({items:freeze([...claims.values()].reverse().map(claimItem)),overflow:false,ignored:0}),
-    uploadSessionClaim:async file=>{await file.checkProtection?.();claims.set(file.id,freeze({...file}));return claimItem(file);},
+    uploadSessionClaim:async file=>{if(gate.beforeClaim)await gate.beforeClaim(file);await file.checkProtection?.();claims.set(file.id,freeze({...file}));return claimItem(file);},
     downloadSessionClaim:async item=>{const file=claims.get(item.id);if(!file)throw new Error('QA_FIXTURE missing session claim');return freeze({blob:file.blob,release:async()=>{}});},
     deleteSessionClaim:async item=>claims.delete(item.id)
   });
@@ -1736,6 +1736,12 @@ for(const skew of [-2*3600e3,2*3600e3]){
   let originCurrent=true;
   await assert.rejects(B.claim({date:day,handoffToken:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',assertOrigin:()=>{if(!originCurrent)throw new Error('QA_FIXTURE stale claim authority');},onWrite:()=>{wrote=true;},decide:async source=>{const decision=await fields(source);originCurrent=false;return decision;}}),/stale claim authority/u);
   assert.equal(wrote,false);assert.equal(syncWorld.claims.size,0);
+  // Loss inside the transport's asynchronous preparation must be refused
+  // at the actual publication check (onWrite is conservative at admission).
+  originCurrent=true;syncWorld.gate.beforeClaim=()=>{originCurrent=false;};
+  try{await assert.rejects(B.claim({date:day,handoffToken:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',assertOrigin:()=>{if(!originCurrent)throw new Error('QA_FIXTURE stale transport authority');},onWrite:()=>{wrote=true;},decide:fields}),/stale transport authority/u);}
+  finally{syncWorld.gate.beforeClaim=null;}
+  assert.equal(wrote,true);assert.equal(syncWorld.claims.size,0);wrote=false;
   // Drive unchanged since the read ahead: the claim reuses that session.
   const again=await B.handoffSource();downloads=counts.downloads;
   const claimed=await B.claim({date:day,handoffToken:'55555555-5555-4555-8555-555555555555',onWrite:()=>{wrote=true;},decide:async source=>{seen=source;return fields(source);}});

@@ -452,7 +452,7 @@ assert.match(plan,/if\(opts\.persistDraft===false\)return apply\(\);/u,'canonica
 assert.match(plan,/save\(\{strictDurability:true\}\)/u,'user-authored Apply/Done remains gated by strict durable draft persistence');
 assert.match(host,/PlanHostModule\.createData\(/u,'PlanData composition must cross the checked Plan host boundary');
 assert.doesNotMatch(host,/const PlanData=\(\(\)=>\{/u,'the legacy untyped PlanData implementation must not return to the host');
-assert.match(planHost,/repositories\.plans\.replace\(snapshot\)/u,'browser-data-clear recovery restores Plan draft and library through one canonical replacement');
+assert.match(planHost,/repositories\.plans\.replace\(snapshot,\{ownershipToken:activeToken,/u,'browser-data-clear recovery restores Plan draft and library through one originating-authority canonical replacement');
 assert.doesNotMatch(planHost,/TimerEngine|TimerState|SessionLifecycle|activeSession|flushLiveDraft|setCurrentTask|Pomodoro|PracticePacer/u,'Plan host persistence/default composition must not absorb P5.4 live-runtime ownership');
 console.log(JSON.stringify({status:'PASS',boundary:'plan-authoring-runtime',runtimePort:'scheduleGateway',directRuntimeOwnership:false,synchronousRestoreSeam:true,checkedPlanHost:true,atomicResetRecovery:true},null,2));
 }

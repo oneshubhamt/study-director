@@ -1,5 +1,8 @@
 # TypeScript conversion — execution record
 
+- REVIEW-P5 continuation `a541acd43ca6f931622daec44ca50210afd4f877`: [repository job](https://github.com/oneshubhamt/study-director/actions/runs/45766649550/job/139729037216) strict/lint SUCCESS; 44/45 targeted files passed including strict-durability-boundaries and session-handoff-runtime. Only runtime-boundaries assertion failed (old signature `replace(snapshot)`); strengthen to require originating token. Close final Plan/preference metadata request and completion guards (including atomic portable replacement) and schedule-time preference origin; actual repository witnesses for last-request refusal vs physically committed but stale completion, plus provider transport cancellation after publication admission. All exact-head verification remains required.
+
+
 - REVIEW-P5 continuation `4f544ef4faff5346dd6f1ec2e0bd5a1f19b94b22`: [repository](https://github.com/oneshubhamt/study-director/actions/runs/45766446595/job/139728376512) strict compilation reached typed lint; failed on mutable protectedFile closure inference (unsafe any). Capture validated prepared value in const, no suppression. Extend originating authority to actual Notes save lane: capture token when scheduled, pass request/hold check through transactional reads, conflict-copy writes and acknowledgement, keep accepted dirty evidence without reauthorizing retired callbacks, preserve new explicit flush and genuine retries. Actual repository regressions cancel queued/read/committed Notes recovery and Active Session CAS while local ownership stays valid, assert durable vs refused receipts and no stale notifications/rescue. Further exact-head tests required.
 
 

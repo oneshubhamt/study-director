@@ -1563,7 +1563,8 @@ async function flushProtectedPreferences(options:Readonly<{backupCapture?:boolea
 }
 function scheduleProtectedPreferencesWrite(){
   if(protectedPreferencesWriteTimer!==null)clearTimeout(protectedPreferencesWriteTimer);
-  protectedPreferencesWriteTimer=setTimeout(()=>{protectedPreferencesWriteTimer=null;void flushProtectedPreferences().catch(()=>{});},PROTECTED_PREFERENCES_SAVE_DELAY_MS);
+  const token=AppOwnership.issueWriteToken('scheduling personal preferences'),assertOrigin=()=>AppOwnership.assertWriteToken(token,'saving scheduled preferences');
+  protectedPreferencesWriteTimer=setTimeout(()=>{protectedPreferencesWriteTimer=null;try{assertOrigin();}catch{return;}void flushProtectedPreferences({assertOrigin}).catch(()=>{});},PROTECTED_PREFERENCES_SAVE_DELAY_MS);
 }
 type PortablePreferenceOverrides=Partial<Omit<PortablePreferencesState,'version'|'updatedAt'>>;
 function persistProtectedPreferences(overrides:PortablePreferenceOverrides={}){

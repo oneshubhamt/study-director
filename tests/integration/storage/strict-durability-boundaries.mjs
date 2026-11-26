@@ -250,6 +250,26 @@ for(const stage of ['read','committed']){
   assert.equal(owned.stores.session.get('active').revision,3);
 }
 
+// Plan and protected Preferences must fence the originating request at
+// the actual metadata transaction, including its last queued write and
+// post-commit acknowledgement. A post-commit rejection is not a rollback.
+for(const target of ['plan','preferences','portable']){
+  for(const stage of ['last-request','committed']){
+    const events=[],controls={onCanonicalCommit:event=>events.push(event)},h=createHarness(new Map(),null,controls);
+    await h.app.planData.writeDraft('before');
+    const initial=await h.app.planData.read(),count=events.length;
+    let current=true,checks=0;
+    const assertOrigin=()=>{if(stage==='last-request'&&++checks>=3)current=false;if(!current)throw new Error('personal data request changed');};
+    if(stage==='committed')controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&stores.includes('meta')){delete controls.onTransactionComplete;current=false;}};
+    const replacement={draft:'after',savedPlans:[],defaultId:null};
+    const work=target==='plan'?h.app.planData.replace(replacement,{assertOrigin}):target==='preferences'?h.app.personalPreferences.write({studentName:'After'},{assertOrigin}):h.app.planData.replacePortable({version:2,plans:replacement,preferences:{studentName:'After',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null}},{assertOrigin});
+    await assert.rejects(work,/personal data request changed/u);
+    if(target!=='preferences')assert.equal((await h.app.planData.read()).draft,stage==='committed'?'after':initial.draft);
+    if(target!=='plan')assert.equal((await h.app.personalPreferences.read())?.studentName??null,stage==='committed'?'After':null);
+    assert.equal(events.length,count,'no stale Plan/preference commit announcement');
+  }
+}
+
 const beforePlanDraftStrict=strictCount();
 await app.planData.writeDraft('temporary draft');
 assert.equal(strictCount(),beforePlanDraftStrict,'high-frequency Plan draft persistence must remain normal/default durability');

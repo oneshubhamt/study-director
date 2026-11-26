@@ -444,13 +444,19 @@ function writePlanMeta(family:string,value:unknown,{strictDurability=false,owner
   return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{
     assertOrigin?.();assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
     request.onsuccess=()=>{try{assertOrigin?.();assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true,settingsOnly:family==='personalPreferences'});finish(true,undefined);};
+    tx.oncomplete=()=>{try{assertOrigin?.();assertWriteToken(token,'acknowledging Plan documents');reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true,settingsOnly:family==='personalPreferences'});finish(true,undefined);}catch(error){finish(false,error);}};
   },{strict:strictDurability,abortMessage:'plan document write aborted'});
 }
 const planData=freeze({
   replace:(value:SavedPlans,{ownershipToken=null,assertOrigin}:WriteOptions={})=>{
     assertOrigin?.();const token=ownershipToken||issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
-    return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{assertOrigin?.();assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,undefined);};},{strict:true,abortMessage:'Plan document restore aborted'});
+    const check=()=>{assertOrigin?.();assertWriteToken(token,'restore Plan documents');};
+    return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{
+      check();stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();
+      meta.put('planDraft',value.draft,{updatedAt});const last=meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});
+      last.onsuccess=()=>{try{check();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+      tx.oncomplete=()=>{try{check();reportCanonicalCommit('planData','upsert');finish(true,undefined);}catch(error){finish(false,error);}};
+    },{strict:true,abortMessage:'Plan document restore aborted'});
   },
   // Save the three existing portable Personal Data records in one strict
   // transaction. Neither a failed import nor a kept review can split them.
@@ -460,13 +466,15 @@ const planData=freeze({
       portable=PersonalDataCodec.portablePreferences({...clean.preferences,version:2,updatedAt:now});
     if(new TextEncoder().encode(JSON.stringify(clean.plans)).length>1024*1024)
       throw new RangeError('Plan data exceeds its storage allowance.');
+    const check=()=>{assertOrigin?.();assertWriteToken(token,'restore portable Plans and Preferences');};
     return Meta.transaction<PortablePreferences>('readwrite',(meta,tx,finish)=>{
-      assertOrigin?.();assertWriteToken(token,'restore portable Plans and Preferences');
+      check();
       stageCanonicalMutationEpoch(tx,['personalData']);
       meta.put('planDraft',clean.plans.draft,{updatedAt:now});
       meta.put('planLibrary',{savedPlans:clean.plans.savedPlans,defaultId:clean.plans.defaultId},{updatedAt:now});
-      meta.put('personalPreferences',portable,{updatedAt:now});
-      tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,freeze(portable));};
+      const last=meta.put('personalPreferences',portable,{updatedAt:now});
+      last.onsuccess=()=>{try{check();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+      tx.oncomplete=()=>{try{check();reportCanonicalCommit('planData','upsert');finish(true,freeze(portable));}catch(error){finish(false,error);}};
     },{strict:true,abortMessage:'Portable Plans and Preferences restore aborted'});
   },
   read:async():Promise<SavedPlans>=>{const [draft,rawLibrary]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);const library=rawLibrary as Omit<SavedPlans,'draft'>|null;return {draft:typeof draft==='string'?draft:null,savedPlans:[...(library?.savedPlans||[])],defaultId:library?.defaultId||null};},
