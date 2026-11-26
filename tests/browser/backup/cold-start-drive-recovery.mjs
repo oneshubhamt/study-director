@@ -22,7 +22,9 @@ const settled=page=>waitFor(async()=>!!(await sync(page))?.syncedAt&&!await wait
 async function removeDatabaseWhileClosed(page,{signedOut=false}={}){
   await browser.closePage(page);await new Promise(resolve=>setTimeout(resolve,500));
   const cleaner=await browser.createPage(server.url('deployment','manifest.webmanifest'),{viewport:{width:800,height:600,mobile:false,scale:1}});
+  const before=await cleaner.evaluate('indexedDB.databases()');assert.ok(before.length,'the closed app has a database to remove');
   await cleaner.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb'});
+  const after=await cleaner.evaluate('indexedDB.databases()');assert.deepEqual(after,[],'CDP removed the origin database before cold startup');
   if(signedOut)await cleaner.evaluate(`Object.keys(localStorage).filter(key=>key.includes(${JSON.stringify(LOCAL_STORAGE_KEYS.driveSession)})).forEach(key=>localStorage.removeItem(key))`);
   await browser.closePage(cleaner);
 }
@@ -61,7 +63,8 @@ try{
   collect(page);assert.deepEqual(errors,[],'no start-up or uncaught errors');
   console.log(JSON.stringify({status:'PASS',suite:'cold-start-drive-recovery',keptSignIn:true,signedOut:true}));
 }catch(error){
-  console.error(JSON.stringify({faults:faults.slice(0,10),drive:ledger.slice(-40)},null,1));
+  const diagnostic=page?await page.evaluate(`(async()=>{const d=window.__PWA6;if(!d)return null;return {startup:d.StartupLifecycle.status(),ownership:d.AppOwnership.status(),idb:d.IndexedDb.lifecycle(),health:d.readStorageHealth(),notice:!!d.NoticeCoordinator.readEvent('storage-reset','detected'),restored:!!d.NoticeCoordinator.readEvent('storage-reset','restored'),notes:!!d.AppData.notes.get('ethics'),plans:(await d.AppData.planData.read()).savedPlans.length,connected:d.BackupProviderRuntime.connected('google-drive'),ready:document.documentElement.dataset.studyDirectorReady};})()`).catch(error=>String(error)):null;
+  console.error(JSON.stringify({faults:faults.slice(0,10),drive:ledger.slice(-40),diagnostic},null,1));
   throw error;
 }finally{
   if(page)await browser.closePage(page).catch(()=>{});await browser.close();await server.close();

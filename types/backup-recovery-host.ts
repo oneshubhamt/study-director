@@ -72,7 +72,7 @@ export type StorageResetLocation=Readonly<{id:string;label:string;connected:bool
 export type StorageResetHistoryEntry=Readonly<{exportedAt?:string;location:Readonly<{tier?:string;exportedAt:string;checkpointId:string}>}>;
 export type StorageResetRecoveryResult=Readonly<{cancelled?:boolean;verified?:boolean;exportedAt?:string;added?:number;assetsRestored?:number}>;
 export interface StorageResetInput{
-  readonly authority:Readonly<{canMutate():boolean}>;
+  readonly authority:Readonly<{canMutate():boolean;captureOrigin(reason:string):()=>void}>;
   readonly canonical:Readonly<{
     dailyRecordsList():Promise<readonly unknown[]>;notesReadFreshPayload():Promise<Readonly<Record<string,unknown>>>;
     activeSessionLoad():Promise<SessionResult>;planDataRead():Promise<Readonly<{draft?:unknown;savedPlans?:readonly unknown[]}>>;
@@ -85,7 +85,7 @@ export interface StorageResetInput{
   }>;
   readonly provider:Readonly<{
     history(id:string,options:{interactive:boolean}):Promise<{available?:boolean;entries?:readonly StorageResetHistoryEntry[]}|null>;
-    restoreRepositoryProviderVersion(id:string,options:{checkpointId:string;confirmed:boolean}):Promise<StorageResetRecoveryResult|null>;
+    restoreRepositoryProviderVersion(id:string,options:{checkpointId:string;confirmed:boolean;assertOrigin:()=>void}):Promise<StorageResetRecoveryResult|null>;
     bringInRepositoryProvider(id:string,options:{missingOnly:boolean;quiet:boolean;before:string}):Promise<StorageResetRecoveryResult|null>;
     syncRepositoryProvider(id:string):Promise<StorageResetRecoveryResult|null>;
     list():readonly StorageResetLocation[];locationStatus(id:string):Readonly<{connected:boolean;engineBusy?:boolean}>|null;

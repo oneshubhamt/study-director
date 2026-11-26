@@ -353,7 +353,7 @@ const createModule=()=>{
 
   function createStorageReset(input:Readonly<StorageResetInput>):Readonly<StorageResetController>{
     exactObject(input,['authority','canonical','writeback','provider','device','storage','presentation','ownership','mutation','background','session','view','readiness','diagnostics','environment'],'Storage reset recovery input');
-    functions(input.authority,['canMutate'],'Storage reset authority');
+    functions(input.authority,['canMutate','captureOrigin'],'Storage reset authority');
     functions(input.canonical,['dailyRecordsList','notesReadFreshPayload','activeSessionLoad','planDataRead','attachmentsList','pendingReviewsList','savedDayDeletions','noteDeletions'],'Storage reset canonical data');
     functions(input.writeback,['installationKeep','notesRecover','planRewrite','settingsFlush','hasTasks','writeLiveDraft'],'Storage reset writeback');
     functions(input.provider,['history','restoreRepositoryProviderVersion','bringInRepositoryProvider','syncRepositoryProvider','list','locationStatus','suspendBackground','connected'],'Storage reset provider');
@@ -394,17 +394,21 @@ const createModule=()=>{
     }
     async function offerDeviceRecovery(options:Readonly<{reason?:string;latestBefore?:number}>={}){
       if(offerRunning||offerDismissed||!input.authority.canMutate())return false;
-      if(!await canonicalEmpty())return false;
-      const state=input.device.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
-      if(!state.connected){
-        if(options.reason==='startup'&&!hintNotified&&await studyDataLostHere()){
-          hintNotified=true;input.presentation.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${input.presentation.restoreChoices()}.`,action:{label:'Restore from backup',opens:true,run:()=>void input.presentation.openRestore()}});
-        }
-        return false;
-      }
+      const active=hold;let assertOwner:()=>void;
+      try{assertOwner=input.authority.captureOrigin('recovering from Device Folder');}catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
+      const assertOrigin=()=>{assertOwner();if(hold!==active)throw new Error('The storage recovery decision changed. Open recovery again.');};
       offerRunning=true;
       try{
-        const history=await input.provider.history('device-folder',{interactive:false});
+        if(!await canonicalEmpty())return false;
+        assertOrigin();
+        const state=input.device.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
+        if(!state.connected){
+          if(options.reason==='startup'&&!hintNotified&&await studyDataLostHere()){
+            assertOrigin();hintNotified=true;input.presentation.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${input.presentation.restoreChoices()}.`,action:{label:'Restore from backup',opens:true,run:()=>void input.presentation.openRestore()}});
+          }
+          return false;
+        }
+        const history=await input.provider.history('device-folder',{interactive:false});assertOrigin();
         const candidate=history?.available?(history.entries||[]).find(entry=>entry?.location?.tier==='latest'&&Date.parse(String(entry.exportedAt||entry.location?.exportedAt||''))<=latestBefore):null;
         if(!candidate)return false;
         const accepted=await input.presentation.confirm({
@@ -412,12 +416,15 @@ const createModule=()=>{
           details:[`Latest backup: ${new Date(candidate.location.exportedAt).toLocaleString()}.`,'Study Director checks the backup before replacing this device’s data. Nothing is restored unless you choose Recover latest.'],
           confirmLabel:'Recover latest',cancelLabel:'Not now'
         });
-        offerDismissed=true;if(!accepted)return false;
-        try{
-          const restored=await input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true});
-          return !!restored&&restored.cancelled!==true&&restored.verified===true;
-        }catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
-      }finally{offerRunning=false;}
+        assertOrigin();offerDismissed=true;if(!accepted)return false;
+        // Consent to replace an empty library cannot authorize replacing work
+        // created while the confirmation was open.
+        if(!await canonicalEmpty())return false;
+        assertOrigin();
+        const restored=await input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true,assertOrigin});
+        return !!restored&&restored.cancelled!==true&&restored.verified===true;
+      }catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
+      finally{offerRunning=false;}
     }
     async function connectDevice(){
       const startedAt=input.environment.now(),result=await input.device.connect();

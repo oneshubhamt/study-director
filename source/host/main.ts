@@ -3322,7 +3322,7 @@ if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-
 }
 type StorageResetInput=Parameters<typeof BackupRecoveryHostModule.createStorageReset>[0];
 StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<StorageResetInput>({
-  authority:Object.freeze<StorageResetInput['authority']>({canMutate:()=>appCanMutate()}),
+  authority:Object.freeze<StorageResetInput['authority']>({canMutate:()=>appCanMutate(),captureOrigin:reason=>{if(!appCanMutate())throw new Error('Study control is required before '+reason+'.');const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);}}),
   canonical:Object.freeze<StorageResetInput['canonical']>({
     dailyRecordsList:()=>AppData.dailyRecords.list({strict:true}),notesReadFreshPayload:()=>AppData.notes.readFreshPayload(),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),
     planDataRead:()=>AppData.planData.read(),attachmentsList:()=>AttachmentStorage.list(),pendingReviewsList:()=>AppData.pendingReviews.list(),

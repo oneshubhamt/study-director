@@ -15,7 +15,7 @@ async function drain(){
 }
 
 function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missing={cancelled:false,verified:true,added:1,assetsRestored:0,exportedAt:clearedAt},restore={cancelled:false,verified:true},confirm=true,driveConnected=false,driveBusy=false,deviceConnected=false}={}){
-  const state={owner:true,driveConnected,driveBusy,deviceConnected,health:{lastStudyDataSaveAt:'2026-11-06T12:00:00.000Z',browserDataClearedAt:clearedAt},resets:1,startedFresh:false};
+  const state={owner:true,revision:1,empty,afterConfirm:()=>{},driveConnected,driveBusy,deviceConnected,health:{lastStudyDataSaveAt:'2026-11-06T12:00:00.000Z',browserDataClearedAt:clearedAt},resets:1,startedFresh:false};
   const calls={syncs:[],missing:[],history:0,restores:[],confirms:0,decisions:0,successes:0,captures:[],suspends:0,releases:0,wakes:[],remember:0,installs:0,refreshes:0};
   let listener=()=>{},timerSequence=0;
   const locations=()=>freeze([
@@ -23,9 +23,9 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
     freeze({id:'device-folder',label:'Device Folder',connected:state.deviceConnected})
   ]);
   const controller=BackupRecoveryHost.createStorageReset(freeze({
-    authority:freeze({canMutate:()=>state.owner}),
+    authority:freeze({canMutate:()=>state.owner,captureOrigin:()=>{const revision=state.revision;return ()=>{if(!state.owner||revision!==state.revision)throw new Error('origin changed');};}}),
     canonical:freeze({
-      dailyRecordsList:async()=>{if(empty===null)throw new Error('canonical unavailable');return empty?freeze([]):freeze([freeze({date:'2026-11-06'})]);},
+      dailyRecordsList:async()=>{if(state.empty===null)throw new Error('canonical unavailable');return state.empty?freeze([]):freeze([freeze({date:'2026-11-06'})]);},
       notesReadFreshPayload:async()=>freeze({}),
       activeSessionLoad:async()=>freeze({ok:true,value:null,error:null,storage:freeze({idb:true})}),
       planDataRead:async()=>freeze({draft:'',savedPlans:freeze([])}),
@@ -43,7 +43,7 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
         assert.equal(id,'device-folder');assert.equal(options.interactive,false);calls.history++;
         return freeze({available:true,entries:freeze([freeze({exportedAt:clearedAt,location:freeze({tier:'latest',checkpointId:checkpoint,exportedAt:clearedAt})})])});
       },
-      restoreRepositoryProviderVersion:async(id,options)=>{calls.restores.push([id,options]);return restore;},
+      restoreRepositoryProviderVersion:async(id,options)=>{options.assertOrigin();calls.restores.push([id,options]);return restore;},
       bringInRepositoryProvider:async(id,options)=>{calls.missing.push([id,options]);if(missing instanceof Error)throw missing;return missing;},
       syncRepositoryProvider:async id=>{calls.syncs.push(id);if(sync instanceof Error)throw sync;return sync;},
       list:locations,
@@ -67,7 +67,7 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
     presentation:freeze({
       restoreChoices:()=>'your backups',
       openRestore:async()=>true,
-      confirm:async()=>{calls.confirms++;return confirm;},
+      confirm:async()=>{calls.confirms++;state.afterConfirm();return confirm;},
       notify:()=>true,
       emit:event=>{if(event.id==='detected')calls.decisions++;if(event.id==='restored')calls.successes++;return true;},
       resolve:()=>true,
@@ -158,6 +158,20 @@ for(const [label,empty] of [['device with data',false],['unreadable local state'
   h.disconnectDrive();h.state.driveConnected=true;assert.equal(h.controller.connectionsChanged(),true,'a later reconnection may retry');await drain();
   assert.equal(h.calls.syncs.length,2);h.controller.settle();assert.equal(h.controller.connectionsChanged(),false,'settled clears have no connection recovery');
   cases.push('Drive connection recovery is once per connection and respects busy state');
+}
+
+for(const [label,change] of [
+  ['successor owner',h=>{h.state.revision++;}],
+  ['new local study data',h=>{h.state.empty=false;}],
+  ['retired recovery hold',h=>{h.controller.settle();}]
+]){
+  const h=harness({empty:true,deviceConnected:false,confirm:true});h.begin();
+  h.state.afterConfirm=()=>change(h);
+  await h.controller.connectDevice();
+  assert.equal(h.calls.confirms,1,label+' changed during the confirmation');
+  assert.equal(h.calls.restores.length,0,label+' cannot authorize the stale replacement');
+  if(label!=='retired recovery hold'){assert.equal(h.controller.unresolved(),true);assert.equal(h.calls.releases,0);}
+  cases.push('stale Device Folder confirmation: '+label);
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'storage-reset-connect-recovery',productionOwner:'backup-recovery-host',cases},null,2));
