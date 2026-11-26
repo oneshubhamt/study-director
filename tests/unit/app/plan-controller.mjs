@@ -193,6 +193,10 @@ ids['plan-input'].value='Draft different';
 const beforeReapplyWrites=draftWrites;
 assert.equal(await plan.apply(),true);
 assert.equal(draftWrites,beforeReapplyWrites+1,'reapplying does not duplicate the draft save');
+// The unchanged-live preparation must not retire the editor before its own fence.
+plan.draft.enter();const unchangedDoneWrites=draftWrites,unchangedDoneApply=applyCount;
+assert.equal(await plan.draft.confirm(),true,'Done on an unchanged live plan retains progress');
+assert.equal(draftWrites,unchangedDoneWrites+1);assert.equal(applyCount,unchangedDoneApply);assert.equal(state().label,'LIVE');
 
 // Done commits the edited draft exactly once, then applies the saved text.
 ids['plan-input'].value='Changed via board';

@@ -523,7 +523,8 @@ function prepareScheduleApply(parsed:readonly ScheduleRow[],rawOriginal:unknown,
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
   if(hasApplied&&!scheduleChanged&&scheduleGateway.hasLiveState()&&!opts.forceReload&&!opts.reviewOnly){
-    return {handled:true,result:keepAppliedScheduleOnReapply(parsed,rawOriginal,opts),scheduleChanged:false,progressMigration:null};
+    // Preparation must be side-effect free: the editor fence is checked again before reapply.
+    return {handled:true,result:true,scheduleChanged:false,progressMigration:null};
   }
   if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null};
   const finish=():Readonly<PlanApplyPreparation>|PromiseLike<Readonly<PlanApplyPreparation>>=>{
@@ -554,7 +555,7 @@ function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraf
   return {text:warningText?baseStatus+' · '+warningText:baseStatus,state:warningText?'warn':true};
 }
 function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly import('../../types/domain.ts').ScheduleRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft){
-  if(preparation.handled)return preparation.result===true;
+  if(preparation.handled)return preparation.result===true&&keepAppliedScheduleOnReapply(parsed,rawOriginal,opts);
   if(preparation.cancelled)return false;
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
@@ -652,7 +653,7 @@ const PlanDraftEditor=(()=>{
     if(name==='preview'){draftPreviewTimer=null;previewGeneration++;}else{draftSaveTimer=null;saveGeneration++;}
   }
   function replaceText(value:string){
-    editEpoch++;openedEpoch=editEpoch;clearTimer('save');clearTimer('preview');clearDragState();draftSaveWarningActive=false;
+    editEpoch++;writeGeneration++;openedEpoch=editEpoch;clearTimer('save');clearTimer('preview');clearDragState();draftSaveWarningActive=false;
     const input=fieldById('plan-input','textarea');if(input)input.value=value;
   }
   async function persistNow(options:Readonly<PlanDraftSaveOptions>={}){
