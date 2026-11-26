@@ -56,7 +56,7 @@ function makeHarness(options={}){
         return {status:'completed',claim:{revision:decision.revision,epoch:remoteClaim.epoch,state:'owned'}};
       },
       releaseClaim:async()=>{calls.releases++;return releaseWorks;},
-      readClaim:async()=>{calls.claimReads++;return claim;},
+      readClaim:async()=>{calls.claimReads++;const observed=claim;if(options.readClaimGate)await options.readClaimGate;return observed;},
       scheduleSync:(_id,reason)=>{calls.syncs.push(reason);return true;},
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>true}),
       wakeBackground:()=>true
@@ -143,6 +143,32 @@ function makeHarness(options={}){
   const remote={...structuredClone(sessionBase),runningOn:REMOTE};const t=makeHarness({current:remote,source:remote});
   const moved=await t.controller.transferHere(remote);
   assert.equal(moved.session.runningOn,LOCAL);assert.equal(t.claims(),1);assert.equal(t.calls.notes,1);assert.deepEqual(t.calls.syncs,['session-continue']);
+}
+// A return handoff must discard the previous ownership's frozen timer and
+// practice, even when its ordinary 15-second claim poll has not run again.
+{
+  const t=makeHarness();
+  await t.controller.checkClaim();assert.equal(t.controller.frozen(),true);
+  const remote={...t.current(),runningOn:REMOTE,revision:20,snapshot:{...structuredClone(sessionBase.snapshot),timerRuntime:{token:'new-paused-timer'},practice:{token:'new-paused-practice'}}};
+  t.setCurrent(remote);t.setSource(remote);t.setTasks(false);
+  await t.controller.transferHere(remote);
+  assert.equal(t.controller.frozen(),false,'verified new claim retires the old freeze');
+  const projected=t.controller.snapshotForWrite();
+  assert.equal(projected.timerRuntime.token,'new-paused-timer');assert.equal(projected.practice.token,'new-paused-practice');
+}
+// The old remote claim and local row can both have been read before a
+// successful handoff. A delayed response cannot freeze its successor.
+{
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const t=makeHarness({readClaimGate:gate}),poll=t.controller.checkClaim();
+  assert.equal(t.calls.claimReads,1);assert.equal(t.calls.sessionLoads,1);
+  const remote={...structuredClone(sessionBase),runningOn:REMOTE,revision:20,snapshot:{...structuredClone(sessionBase.snapshot),timerRuntime:{token:'new-running-timer'}}};
+  t.setCurrent(remote);t.setSource(remote);t.setTasks(false);
+  await t.controller.transferHere(remote);t.setTasks(true);
+  const writes=t.calls.writes.length;release();assert.equal(await poll,false);
+  assert.equal(t.calls.stops,0,'old remote claim must not stop the new owner');
+  assert.equal(t.calls.writes.length,writes,'old poll must not persist stale evidence');
+  assert.equal(t.controller.frozen(),false);assert.equal(t.controller.snapshotForWrite().timerRuntime.token,'new-running-timer');
 }
 // A genuinely advanced, unproven source starts ordinary sync and writes no ownership claim.
 {
