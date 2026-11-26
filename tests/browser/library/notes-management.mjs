@@ -17,8 +17,8 @@ try{
   page=await browser.createPage(server.url('deployment','instrumented.html'),{preload});
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().state==='primary'&&__PWA6.SessionLifecycle.status().ready`),{label:'primary ownership'});
-  // Native generated editor witness: the host can retire a binding while a
-  // long edit is awaiting grouped publication. The retired adapter must not
+  // Native generated editor witness: the host can retire a binding while the
+  // editor still exists. The retired adapter must not
   // dispatch an input, replace the rebound textarea, or publish derived text.
   await page.evaluate(`(async()=>{
     const field=document.createElement('textarea');field.id='qa-retired-editor';
