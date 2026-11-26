@@ -130,7 +130,9 @@ assert.doesNotMatch(device,/scheduledUrgent|scheduledRetry|automaticRetryPaused/
 assert.match(pwaUpdateHost,/if\(!force&&\(state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)\)\)\{scheduleCheck\(30000\);return false;\}/u,'automatic discovery defers before acquiring the update lock while a provider transfer is active');
 assert.match(pwaUpdateHost,/const perform=async\(\)=>\{[\s\S]*if\(!force&&\(state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)\)\)\{deferred=true;return false;\}/u,'provider busy state is checked again after waiting on the Web Lock');
 assert.match(pwaUpdateHost,/locks\.request\(CHECK_LOCK,\{mode:'exclusive'\},perform\)/u,'automatic discovery is serialized through the checked update lock');
-assert.match(pwaUpdateHost,/if\(state\.ownership\(\)\.state!==configuration\.primaryState\|\|environment\.navigator\.onLine===false\)return false;/u,'offline and non-primary windows do not perform network update checks');
+assert.match(pwaUpdateHost,/const origin=state\.ownership\(\);if\(origin\.state!==configuration\.primaryState\|\|!ownerCurrent\(origin\)\|\|environment\.navigator\.onLine===false\)return false;/u,'offline and non-primary windows do not perform network update checks');
+assert.match(pwaUpdateHost,/const perform=async\(\)=>\{if\(!ownerCurrent\(origin\)\|\|environment\.navigator\.onLine===false\)return false;/u,'lock admission rechecks the originating lease and connectivity');
+assert.match(pwaUpdateHost,/const success=await lifecycle\.checkForUpdate\(\);if\(!ownerCurrent\(origin\)\)return false;if\(success\)\{markCheck\(\)/u,'only the originating owner may consume the discovery cooldown');
 assert.match(app,/providerBusy:\(\)=>BackupProviderRuntime\.status\(\)\.busy,[\s\S]*providerBackgroundBackupActive:\(\)=>BackupProviderRuntime\.list\(\)\.some\(row=>BackupProviderRuntime\.locationStatus\(row\.id\)\?\.backingUp===true\),[\s\S]*providerDriveBackingUp:\(\)=>BackupProviderRuntime\.locationStatus\('google-drive'\)\?\.backingUp===true/u,'main supplies foreground, background-backup and Drive transfer state through narrow checked ports');
 
 function productionFunction(signature){
