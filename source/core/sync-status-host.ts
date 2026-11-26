@@ -189,7 +189,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     schedule();return true;
   }
   function connectDriveForProfile(){
-    if(!input.canMutate())return false;
+    if(!input.canMutate())return Promise.resolve(false);
     const profile=currentProfile(),token=++sequence;
     input.markDriveRequested();connection={token,profile};startConnectCard(profile,token);schedule();
     let result:ReturnType<ReturnType<typeof input.providers>['connect']>;

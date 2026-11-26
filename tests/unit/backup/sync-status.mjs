@@ -241,7 +241,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     capture:()=>{}
   }));
   assert.equal(await controller.action(target('sign-in')),false,'secondary sync-status sign-in is blocked before provider connection work');assert.equal(connects,0);
-  assert.equal(controller.connectDriveForProfile(),false,'direct connection callers must also stop at the checked owner');assert.equal(connects,0);
+  assert.equal(await controller.connectDriveForProfile(),false,'direct connection callers must also stop at the checked owner');assert.equal(connects,0);
   assert.equal(await controller.action(target('sync-now')),false,'secondary sync-now is blocked before scheduling shared work');assert.equal(syncSchedules,0);
   assert.equal(await controller.action(target('open-execute')),true,'read-only navigation remains available on a secondary tab');
   assert.equal(await controller.action(target('open-data')),true,'read-only data navigation remains available on a secondary tab');
