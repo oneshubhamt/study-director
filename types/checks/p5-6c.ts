@@ -44,9 +44,9 @@ const richWorkspaceOverlay:Readonly<WorkspaceOverlayPort>=Object.freeze({
       ...(history.key!==undefined?{key:history.key}:{}),
       ...(history.token!==undefined?{token:history.token}:{}),
       ...(history.valid?{valid:history.valid}:{}),
-      ...(history.reopen?{reopen:(descriptor:{kind:string;token:string;key?:string})=>{
+      ...(history.reopen?{reopen:(descriptor:{kind:string;token:string;key?:string},current:()=>boolean)=>{
         if(descriptor.kind!=='focus'&&descriptor.kind!=='audio')return false;
-        return history.reopen!({kind:descriptor.kind,token:descriptor.token,...(descriptor.key!==undefined?{key:descriptor.key}:{})});
+        return history.reopen!({kind:descriptor.kind,token:descriptor.token,...(descriptor.key!==undefined?{key:descriptor.key}:{})},current);
       }}:{})
     });
     return workspace.open(Object.freeze({...surface,history:mappedHistory}));

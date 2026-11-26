@@ -657,7 +657,11 @@ function commitTabView(context:NavigationContext){
   if(activeNav&&window.matchMedia&&window.matchMedia(NAV_HORIZONTAL_MEDIA_QUERY).matches){
     requestAnimationFrame(()=>activeNav.scrollIntoView({block:'nearest',inline:'nearest',behavior:preferredScrollBehavior()}));
   }
-  navigationReadyByGeneration.set(context.generation,Promise.all(waits).then(()=>true));
+  const readiness=Promise.all(waits).then(()=>true);
+  // A superseded tab can retire before readiness is awaited; observe failures
+  // without changing the rejection seen by a current readiness consumer.
+  void readiness.catch(()=>undefined);
+  navigationReadyByGeneration.set(context.generation,readiness);
   return true;
 }
 async function waitForTabReady(context:NavigationContext){

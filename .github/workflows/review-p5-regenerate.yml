@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/review-p5-regenerate.yml'
       - 'rich-text/editor.ts'
+      - 'types/checks/p5-6c.ts'
+      - 'source/core/foundation-host.ts'
 permissions:
   contents: read
 jobs:
