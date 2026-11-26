@@ -1,6 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {SavedPlans} from '../../types/record-models.ts';
-import type {PlanDataController,PlanDataHostInput,PlanDataWriteOptions,PlanHostModule as PlanHostContract,PlanLibraryWriteOptions,PlanControllerHostInput} from '../../types/plan-host.ts';
+import type {PlanDataController,PlanDataHostInput,PlanDataWriteOptions,PlanDataSettleOptions,PlanImportOptions,PlanHostModule as PlanHostContract,PlanLibraryWriteOptions,PlanControllerHostInput} from '../../types/plan-host.ts';
 import type {PlanLibrary} from '../../types/plan.ts';
 import type {WriteToken} from '../../types/ownership.ts';
 
@@ -41,6 +41,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   const factory=freeze({studentName:input.defaults.factory.studentName,scheduleText:input.defaults.factory.scheduleText});
   let state:SavedPlans={draft:null,savedPlans:[],defaultId:null},draftKnown=true,libraryKnown=true,ready=false,chain:Promise<unknown>=Promise.resolve();
   const failures=new Map<'draft'|'library'|'replacement',unknown>();
+  const requireKnownReplacement=()=>{if(failures.has('replacement')&&(!draftKnown||!libraryKnown))throw new Error('Portable Plan storage is unconfirmed. Recover or reload before editing Plans.');};
   const libraryKey=(value:PlanLibrary)=>JSON.stringify(value);
   const uncertainDraft=(error:unknown)=>Object.assign(new Error(error instanceof Error?error.message:String(error),{cause:error}),{planDraftUnconfirmed:true as const});
 
@@ -77,10 +78,12 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   }
   function writeDraft(value:string|null,options:Readonly<PlanDataWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
+    requireKnownReplacement();
     codec.plans({...state,draft:value});
     const token=options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
     ownership.assertWriteToken(token,'admitting Plan draft');
     return enqueue('draft',async activeToken=>{
+      requireKnownReplacement();
       // A preceding saved-plan write can change the combined 1 MiB allowance.
       codec.plans({...state,draft:value});
       const before=state.draft;
@@ -114,9 +117,11 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   }
   function writeLibrary(value:PlanLibrary,options:Readonly<PlanLibraryWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
+    requireKnownReplacement();
     const clean=cloneLibrary(codec.plans({...state,savedPlans:value.savedPlans,defaultId:value.defaultId}));
     const baseline=libraryKey(cloneLibrary(state));
     return enqueue('library',async token=>{
+      requireKnownReplacement();
       if(!libraryKnown){
         const current=codec.plans(await repositories.plans.read());
         ownership.assertWriteToken(token,'checking saved plans');
@@ -160,9 +165,11 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
       return true;
     },{},token);
   }
-  async function settled(options:Readonly<{backupCapture?:boolean}>={}){
+  async function settled(options:Readonly<PlanDataSettleOptions>={}){
     await chain;
+    options.assertOrigin?.();
     await preferences.flush(options);
+    options.assertOrigin?.();
     if(failures.size)throw failures.values().next().value;
     return true;
   }
@@ -177,23 +184,58 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
     }
     return codec.normalize({version:2,plans:await repositories.plans.read(),preferences:await currentPreferences()});
   }
-  async function importData(value:unknown){
-    const clean=codec.normalize(value),token=ownership.issueWriteToken('importing portable Plan data');
-    await settled();ownership.assertWriteToken(token,'importing portable Plan data');
-    await enqueue('replacement',async activeToken=>{
-      const portable=await repositories.plans.replacePortable(clean,{ownershipToken:activeToken});
-      ownership.assertWriteToken(activeToken,'acknowledging portable Plan data');
-      state=clonePlans(clean.plans);
-      draftKnown=libraryKnown=true;
-      failures.clear();
-      preferences.accept(portable);
-      preferences.refreshAppearance(portable);
-      preferences.applyRuntime(portable);
-      return true;
-    },{},token);
-    ownership.assertWriteToken(token,'projecting portable Plan data');runtime.replaceDraftText(String(clean.plans.draft??activeDefaults().scheduleText));
+  function projectReplacement(plans:SavedPlans,portable:unknown){
+    state=clonePlans(plans);
+    draftKnown=libraryKnown=true;
+    preferences.accept(portable);
+    preferences.refreshAppearance(portable);
+    preferences.applyRuntime(portable);
+    runtime.replaceDraftText(String(plans.draft??activeDefaults().scheduleText));
     runtime.previewDraft();
     runtime.renderSavedPlans();
+  }
+  async function importData(value:unknown,options:PlanImportOptions={}){
+    if(options.rollback===true&&typeof options.assertOrigin!=='function')throw new TypeError('Plan rollback requires the original protected recovery authority.');
+    options.assertOrigin?.();
+    const clean=codec.normalize(value),token=ownership.issueWriteToken('importing portable Plan data');
+    const check=()=>{options.assertOrigin?.();ownership.assertWriteToken(token,'importing portable Plan data');};
+    if(options.rollback===true){
+      // The verified restore journal owns the preimage. A failed replacement
+      // must not prevent its rollback, but never discard unrelated edit failures.
+      await chain.catch(()=>undefined);check();
+      if(failures.has('draft')||failures.has('library'))throw new Error('Unsettled Plan edits prevent automatic portable rollback.');
+      await preferences.flush({assertOrigin:check});
+    }else await settled({assertOrigin:check});
+    check();
+    await enqueue('replacement',async activeToken=>{
+      check();
+      const before=options.rollback===true?null:codec.normalize({version:2,plans:await repositories.plans.read(),preferences:await currentPreferences()});
+      check();
+      let portable;
+      try{
+        portable=await repositories.plans.replacePortable(clean,{ownershipToken:activeToken,assertOrigin:check});
+        check();
+      }catch(error){
+        draftKnown=libraryKnown=false;
+        // A rejected acknowledgement need not mean the transaction aborted.
+        // Only the original authority may classify a read-back or project it.
+        try{
+          check();
+          const plans=codec.plans(await repositories.plans.read()),stored=await repositories.preferences.read();
+          check();
+          const actual=codec.normalize({version:2,plans,preferences:codec.preferences(stored??preferences.fallback())});
+          if(stored!=null&&JSON.stringify(actual)===JSON.stringify(clean)){
+            projectReplacement(plans,stored);
+          }else if(before&&JSON.stringify(actual)===JSON.stringify(before)){
+            state=clonePlans(plans);draftKnown=libraryKnown=true;
+          }
+        }catch{}
+        throw error;
+      }
+      projectReplacement(clean.plans,portable);
+      failures.clear();
+      return true;
+    },{},token);
     return true;
   }
   async function verify(value:unknown){

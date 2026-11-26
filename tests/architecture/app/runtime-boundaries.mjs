@@ -326,7 +326,8 @@ assert.match(timer,/function resumeRestoredPaused\([^)]*\)\{[\s\S]*?if\(!appCanM
 assert.match(timer,/function resumeRestoredRunning\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;/u,'running timer restoration is authority fenced inside the engine');
 assert.match(timer,/function recoveryCaptureActiveBeforeSwitch\(\)\{[\s\S]*?if\(!appCanMutate\(\)[\s\S]*?recordCurrentActiveToTask[\s\S]*?storeResolvedCompletion/u,'timer switching captures focus/completion inside the checked engine under current authority');
 assert.match(executionHost,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|resolveActivePauseBeforeTimerSwitch\(\)!==true\)return false;[\s\S]*?writeLiveDraftNow\(\)/u,'Plan break termination delegates to the ownership-fenced checked timer transition after confirmation');
-assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
+assert.doesNotMatch(plan,/scheduleGateway\.breakState\('end'\)/u,'Plan confirmation does not terminate a break before the checked gateway admits it');
+assert.match(executionHost,/const beforeStart=\(\)=>\{[\s\S]*?if\(activeBreak!==null&&breakState\('end'\)!==true\)return false;[\s\S]*?\{current:opts.current\|\|\(\(\)=>true\),beforeStart,cancelled:false\}/u,'the checked admission propagates failed break termination instead of claiming a successful replacement');
 assert.doesNotMatch(review,/function setCompletionState\(/u,'Review must consume the checked completion-state owner instead of maintaining a duplicate mutator');
 assert.match(review,/resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState/u,'Review completion editing consumes the checked execution evidence port');
 const reviewHost=readScript('source/core/review-host.ts');

@@ -22,7 +22,7 @@ export interface PlanOwnershipPort{
 }
 export interface PlanPreferenceHooks{
   fallback():unknown;
-  flush(options?:Readonly<{backupCapture?:boolean}>):unknown|PromiseLike<unknown>;
+  flush(options?:Readonly<{backupCapture?:boolean;assertOrigin?:()=>void}>):unknown|PromiseLike<unknown>;
   accept(value:unknown):unknown;
   refreshAppearance(value:unknown):unknown;
   applyRuntime(value:unknown):unknown;
@@ -54,7 +54,8 @@ export interface PlanLibraryWriteOptions{
   readonly ownershipToken?:WriteToken|null;
   readonly allowHydrating?:boolean;
 }
-export interface PlanDataSettleOptions{readonly backupCapture?:boolean}
+export interface PlanDataSettleOptions{readonly backupCapture?:boolean;readonly assertOrigin?:()=>void}
+export type PlanImportOptions=Readonly<{rollback?:false;assertOrigin?:()=>void}|{rollback:true;assertOrigin:()=>void}>;
 export interface PlanDataController{
   readonly format:'study-director.plan-data';
   readonly contractVersion:1;
@@ -65,7 +66,7 @@ export interface PlanDataController{
   rewriteAfterStorageReset(assertOrigin?:()=>void):Promise<boolean>;
   settled(options?:Readonly<PlanDataSettleOptions>):Promise<boolean>;
   exportData(options?:Readonly<{flush?:boolean;backupCapture?:boolean}>):Promise<PersonalData>;
-  importData(value:unknown):Promise<boolean>;
+  importData(value:unknown,options?:PlanImportOptions):Promise<boolean>;
   verify(value:unknown):Promise<boolean>;
   readDraft():string|null;
   library():PlanLibrary;

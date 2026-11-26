@@ -282,7 +282,10 @@ const createModule=()=>{
         if(name)try{await input.files.release(name);}catch(error){input.diagnostics.capture('backup.restore-journal-file-release',error,'warn');}
       },
       personalSettle:async options=>{const backupCapture=options?.backupCapture===true;if(input.personal.canMutate()&&await input.personal.draft.flush({backupCapture})===false)throw new Error('The current Plan draft could not be safely settled before backup.');await input.personal.data.settled({backupCapture});return true;},
-      personalExport:options=>input.personal.data.exportData(options),personalImport:value=>input.personal.data.importData(value),personalVerify:value=>input.personal.data.verify(value),
+      personalExport:options=>input.personal.data.exportData(options),personalImport:(value,options)=>{
+        const fence=input.journalFence(options);fence.assert();
+        return input.personal.data.importData(value,options?.allowDurableProtected===true?{rollback:true,assertOrigin:fence.assert}:{assertOrigin:fence.assert});
+      },personalVerify:value=>input.personal.data.verify(value),
       sourceRevision,snapshotRevision,storageGeneration:input.storageGeneration,canonicalMutationEpochRead:()=>input.appData.mutationEpoch.read(),canonicalPreparationRebase:()=>input.appData.mutationEpoch.rebasePreparation(),
       preparationUnitStamps:()=>input.appData.preparationUnits.list(),preparationUnitReplace:units=>input.appData.preparationUnits.replace(units),installationId:()=>input.appData.provenance.installationId(),
       deletionRecoveryFlush:()=>input.appData.deletionRecovery.flush(),deletionRecoverySavedDays:()=>input.appData.deletionRecovery.savedDays(),deletionRecoveryReplaceSavedDays:values=>input.appData.deletionRecovery.replaceSavedDays(values),

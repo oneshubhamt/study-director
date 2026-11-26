@@ -8,11 +8,11 @@ const {ScheduleModel:model,TimeModel:time}=domain,owner=registry.require('execut
 const state=registry.require('timer-state',1).createStateController(Object.freeze({helpers:Object.freeze({makeTaskId:domain.makeTaskId}),diagnostics:Object.freeze({capture(){}}),effects:Object.freeze({modeChanged(){}})}));
 const tasks=state.tasks,fields=owner.createTaskSessionState(state.taskIdentity);
 const schedule=owner.createExecutionSchedule({tasks,timerState:state,taskSessionState:fields,model,time,compactAdjustedSchedule:value=>value,invalidateDerived(){}});
-let carry='Keep unfinished evidence',links=new Map(),pauseCalls=0,starts=0,liveTimer=false,recordCalls=0,checkpoints=0;
+let carry='Keep unfinished evidence',links=new Map(),pauseCalls=0,starts=0,liveTimer=false,recordCalls=0,checkpoints=0,allowBreakEnd=true;
 const runtime={...schedule,TASKS:tasks,TimerState:state,TaskSessionState:fields,TaskIdentity:state.taskIdentity,TIMER_MODES:state.modes,
   setCurrentTask:index=>{state.currentIndex=index;},setTimerMode:state.setMode,resetCountdownRuntime(){},clearProgressRuntime:fields.clear,isTaskResolved:fields.isResolved,
   PracticePacerModel:{PRACTICE_PAUSE_CAUSES:{MAIN:'main'}},PracticePacer:{status:()=>({active:null,runs:[]}),pauseFromMain(){pauseCalls++;},snapshot:()=>({active:null,runs:[{taskId:state.taskIdentity.idAt(0)}]}),remapTaskLinks:map=>{links=map;return map.size;}},
-  TimerEngine:{currentTimerActiveSeconds:()=>0,recordCurrentActiveToTask(idx){recordCalls++;fields.setField(idx,'actualTime',(fields.getField(idx,'actualTime')||0)+60);},startCur(){starts++;},toggleDone(){},jumpTo(){},resolveActivePauseBeforeTimerSwitch:()=>true}
+  TimerEngine:{currentTimerActiveSeconds:()=>0,recordCurrentActiveToTask(idx){recordCalls++;fields.setField(idx,'actualTime',(fields.getField(idx,'actualTime')||0)+60);},startCur(){starts++;},toggleDone(){},jumpTo(){},resolveActivePauseBeforeTimerSwitch:()=>allowBreakEnd}
 };
 const date='2026-11-13',row=(name,area,target)=>({start:'08:00',dur:40,name,kind:'work',area,measure:'pages',target});
 const original=[row('Read A','Area A',10),{...row('Read B','Area B',5),start:'08:40'}];
@@ -91,4 +91,15 @@ const lateActivity=gateway.apply([duplicate[1]],{liveReplacement:{breakIdentity:
 fields.setField(0,'actualTime',90);releaseReview();reviewGate=null;
 assert.equal(await lateActivity,false);assert.equal(tasks.length,2);assert.equal(fields.getField(0,'actualTime'),90);
 
-console.log(JSON.stringify({status:'PASS',suite:'execution-host',progressPreserved:true,ambiguousMatchRejected:true,practiceLinksRemapped:true,reviewOnlyNoTimer:true,recoveryBounded:true,guardedGatewayAdmission:true,pureMigrationPreview:true,latestProgressPreserved:true,newUnmatchedRefused:true,sourceAmbiguityRefused:true,lateActivityRefused:true}));
+// The real gateway must propagate a refusal by the actual break owner.
+state.currentIndex=0;state.runtime={taskIdx:0,startMs:100000,durationSec:1800,pausedStartedMs:110000};
+state.paused=true;state.activeBreak={type:'manual',startedAtMs:110000};state.breakStartMs=110000;liveTimer=true;
+const breakIdentity=gateway.read().breakIdentity;
+assert.notEqual(breakIdentity,null);
+const breakPreview=gateway.captureMigration([duplicate[0]]),beforeRefusalEvents=[...lifecycleEvents],beforeRefusalPause=pauseCalls;
+allowBreakEnd=false;
+assert.equal(await gateway.apply([duplicate[0]],{progressMigration:breakPreview,liveReplacement:{breakIdentity},current:()=>true,reviewOnly:true}),false);
+assert.equal(state.paused,true);assert.equal(tasks.length,2);assert.equal(pauseCalls,beforeRefusalPause);
+assert.deepEqual(lifecycleEvents,beforeRefusalEvents);
+
+console.log(JSON.stringify({status:'PASS',suite:'execution-host',progressPreserved:true,ambiguousMatchRejected:true,practiceLinksRemapped:true,reviewOnlyNoTimer:true,recoveryBounded:true,guardedGatewayAdmission:true,pureMigrationPreview:true,latestProgressPreserved:true,newUnmatchedRefused:true,sourceAmbiguityRefused:true,lateActivityRefused:true,refusedBreakStopsApply:true}));

@@ -25,7 +25,7 @@ let canonical=cleanPlans({draft:null,savedPlans:[a,b],defaultId:a.id});
 let canonicalPreferences={...emptyPreferences(),studentName:'Stored Student'};
 let writeDraftCalls=0,writeLibraryCalls=0,replaceCalls=0,replacePortableCalls=0,flushPreferenceCalls=0;
 let revision=1,failLibrary=false,denyToken=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
-let draftMode='normal',readFails=false,authoredDraft=null;
+let draftMode='normal',readFails=false,authoredDraft=null,portableMode='normal',operationRevision=1;
 const token=freeze({format:'study-director.ownership-write-token',contractVersion:1,tabId:'t',pageId:'p',claimId:'c',revision:1,state:'primary',allowHydrating:false,reason:'qa'});
 const data=PlanHostModule.createData(freeze({
   codec,
@@ -33,7 +33,16 @@ const data=PlanHostModule.createData(freeze({
     plans:freeze({
       read:async()=>{if(readFails)throw new Error('read unavailable');return clone(canonical);},
       replace:async(value,options)=>{options?.assertOrigin?.();assert.equal(options?.ownershipToken?.revision,revision);replaceCalls++;canonical=cleanPlans(value);return true;},
-      replacePortable:async(value,options)=>{assert.equal(options?.ownershipToken?.revision,revision);replacePortableCalls++;canonical=cleanPlans(value.plans);canonicalPreferences=clone(value.preferences);return clone({...value.preferences,version:2,updatedAt:'2026-11-10T00:00:00.000Z'});},
+      replacePortable:async(value,options)=>{
+        options?.assertOrigin?.();assert.equal(options?.ownershipToken?.revision,revision);replacePortableCalls++;
+        if(portableMode==='reject')throw new Error('portable transaction rejected');
+        canonical=cleanPlans(value.plans);canonicalPreferences=clone(value.preferences);
+        if(portableMode==='retired'){operationRevision++;options?.assertOrigin?.();}
+        if(portableMode==='unknown')readFails=true;
+        if(portableMode==='committed'||portableMode==='unknown')throw new Error('portable acknowledgement failed');
+        options?.assertOrigin?.();
+        return clone({...value.preferences,version:2,updatedAt:'2026-11-10T00:00:00.000Z'});
+      },
       writeDraft:async value=>{writeDraftCalls++;if(draftMode==='reject')throw new Error('draft rejected');canonical={...canonical,draft:value};if(draftMode==='committed')throw new Error('draft acknowledgement failed');return true;},
       writeLibrary:async value=>{writeLibraryCalls++;if(failLibrary)throw new Error('library unavailable');if(libraryWriteGate)await libraryWriteGate;canonical=cleanPlans({...canonical,...value});return true;}
     }),
@@ -177,4 +186,38 @@ await data.rewriteAfterStorageReset();assert.equal(canonical.draft,null,'display
 assert.equal(await data.verify(imported),true);
 assert.ok(flushPreferenceCalls>=2,'settlement keeps Plan and protected Preferences in one portable-data barrier');
 
-console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','supplied-stale-token-before-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification','rejected-draft-not-published','independent-failure-lanes','unconfirmed-commit-readback','unknown-readback-forces-retry','stale-library-queue-refused','visible-draft-storage-recovery']},null,2));
+// The same PlanData owner is used by restore-journal compensation. Neither
+// a rejected transaction nor a committed/unacknowledged one may poison the
+// authorized rollback lane; ordinary import still cannot bypass settlement.
+const preimage=await data.exportData({flush:false}),target={...preimage,plans:{draft:'Incoming portable draft',savedPlans:[a],defaultId:a.id},preferences:{...preimage.preferences,studentName:'Incoming Student'}};
+for(const mode of ['reject','committed','unknown']){
+  const origin=operationRevision,assertOrigin=()=>{if(operationRevision!==origin)throw new Error('protected operation retired');};
+  portableMode=mode;
+  await assert.rejects(data.importData(target,{assertOrigin}),/portable (transaction rejected|acknowledgement failed)/u);
+  assert.equal(canonical.draft,mode==='reject'?preimage.plans.draft:target.plans.draft);
+  assert.equal(data.readDraft(),mode==='committed'?target.plans.draft:preimage.plans.draft);
+  if(mode==='unknown')assert.throws(()=>data.writeDraft('Unrelated edit'),/Portable Plan storage is unconfirmed/u);
+  readFails=false;portableMode='normal';
+  await assert.rejects(data.importData(preimage),/portable (transaction rejected|acknowledgement failed)/u);
+  await assert.rejects(data.importData(preimage,{rollback:true}),/original protected recovery authority/u);
+  const beforeRollback=replacePortableCalls;
+  assert.equal(await data.importData(preimage,{rollback:true,assertOrigin}),true);
+  assert.equal(replacePortableCalls,beforeRollback+1);
+  assert.equal(await data.verify(preimage),true);
+  assert.equal(replacedDraftText,preimage.plans.draft??b.scheduleText);
+}
+
+// A retired protected operation must not project a commit or restore bytes
+// under an unrelated successor, even if the tab ownership token still works.
+{
+  const origin=operationRevision,assertOrigin=()=>{if(operationRevision!==origin)throw new Error('protected operation retired');};
+  const beforeProjection=previewCalls;
+  portableMode='retired';await assert.rejects(data.importData(target,{assertOrigin}),/protected operation retired/u);
+  assert.equal(canonical.draft,target.plans.draft);assert.equal(previewCalls,beforeProjection);
+  portableMode='normal';const beforeRollback=replacePortableCalls;
+  await assert.rejects(data.importData(preimage,{rollback:true,assertOrigin}),/protected operation retired/u);
+  assert.equal(replacePortableCalls,beforeRollback);
+  await data.hydrate();
+}
+
+console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','supplied-stale-token-before-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification','rejected-draft-not-published','independent-failure-lanes','unconfirmed-commit-readback','unknown-readback-forces-retry','stale-library-queue-refused','visible-draft-storage-recovery','portable-failure-rollback','committed-portable-readback','unknown-portable-outcome','retired-protected-import']},null,2));

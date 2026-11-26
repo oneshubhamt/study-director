@@ -2263,7 +2263,9 @@ const PlanData=PlanHostModule.createData(Object.freeze<PlanDataInput>({
   runtime:Object.freeze<PlanDataInput['runtime']>({
     canMutate:()=>appCanMutate(),
     flushDraft:options=>PlanDraftEditor.flush(options),
-    authoredDraft:()=>PlanDraftEditor.authoredText(),
+    // Before startup has projected canonical Plan data, an empty textarea is
+    // not evidence of a newer authored draft during storage-loss writeback.
+    authoredDraft:()=>StartupLifecycle?.status().fullyInitialized?PlanDraftEditor.authoredText():null,
     replaceDraftText:value=>PlanRuntime.draft.replaceText(value),
     previewDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
     renderSavedPlans:()=>PlanRuntime.savedPlans.render()

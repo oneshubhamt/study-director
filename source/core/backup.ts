@@ -2261,7 +2261,7 @@ async function replacePortableCanonicalSnapshot(snapshot:Parsed,{deletionState=n
   await mark('active-session');
   await restoreSessionStateWithRecoveryProof(targetSession);
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
-  if(targetPersonal){await mark('personal-data');await personalImport(targetPersonal);throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);}
+  if(targetPersonal){await mark('personal-data');await personalImport(targetPersonal,authorityOptions||undefined);throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);}
   // The snapshot's versions kept for review, exactly (a version restore
   // passes this device's and the version's together).
   const targetReviews=Array.isArray(source.pendingReviews)?freeze(PendingReviewCodec.merge([source.pendingReviews],APP_LIMITS.maxPendingReviews)):null;
