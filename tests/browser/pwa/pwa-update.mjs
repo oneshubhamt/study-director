@@ -320,12 +320,12 @@ try{
   await independent.evaluate("document.getElementById('pwa-update-apply').click()");
   await waitFor(()=>independent.evaluate('performance.timeOrigin!=='+independentOrigin),{label:'independent manual safe reload'});
   await waitForStartup(independent);
-  await waitFor(()=>independent.evaluate("document.documentElement.dataset.studyDirectorUiState==='primary'&&sessionStorage.getItem('studyDirector.pwaReload.v1')===null"),{label:'independent boot and ownership confirmed'});
+  await waitFor(()=>independent.evaluate("document.documentElement.dataset.studyDirectorUiState==='primary'&&document.documentElement.dataset.studyDirectorLifecycle==='ready'&&sessionStorage.getItem('studyDirector.pwaReload.v1')===null"),{label:'independent boot and ownership confirmed'});
   assert.equal(await independent.evaluate("window[Symbol.for('studyDirector.profileScope.v1')].scope"),otherProfile);
   await independent.evaluate("document.querySelector('[data-tab=\"plan\"]').click()");
   assert.equal(await independent.evaluate("document.getElementById('plan-input').value"),draft,'independent authored Plan draft must survive the update');
   await independent.evaluate("document.querySelector('[data-tab=\"execute\"]').click()");
-  await waitFor(()=>independent.evaluate("document.getElementById('execute')?.textContent.includes('Independent writer QA')||document.querySelector('.pane.on')?.textContent.includes('Independent writer QA')"),{label:'independent applied session restored'});
+  await waitFor(()=>independent.evaluate("document.getElementById('pane-execute')?.classList.contains('on')&&document.getElementById('pane-execute')?.textContent.includes('Independent writer QA')"),{label:'independent applied session restored'});
   assert.equal(independent.loadCount-independentLoads,1);
   evidence.checks.independentProfileUpdate={delayedRegistryEvent:true,independentPrimaryProtected:true,manualPauseAndUpdate:true,authoredDraftPreserved:true,appliedSessionRestored:true};
 
@@ -342,7 +342,7 @@ try{
   async function describePage(page){
     if(!page||page.closed)return {closed:!!page?.closed,loads:page?.loadCount??null};
     try{
-      const state=await Promise.race([page.evaluate(`(async()=>({href:location.href,origin:performance.timeOrigin,ui:document.documentElement.dataset.studyDirectorUiState,lifecycle:document.documentElement.dataset.studyDirectorLifecycle,scope:window[Symbol.for('studyDirector.profileScope.v1')]?.scope,pwaMessage:document.getElementById('pwa-update-message')?.textContent,update:document.getElementById('pwa-update-apply')?.textContent,reloadMarker:sessionStorage.getItem('studyDirector.pwaReload.v1'),openDialogs:[...document.querySelectorAll('dialog[open],[data-rich-asset-picker="active"]')].map(node=>node.id),controller:!!navigator.serviceWorker?.controller,waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,violations:window.__sd73iViolations||[]}))()`),sleep(3000).then(()=>({diagnosticTimeout:true}))]);
+      const state=await Promise.race([page.evaluate(`(async()=>({href:location.href,origin:performance.timeOrigin,ui:document.documentElement.dataset.studyDirectorUiState,lifecycle:document.documentElement.dataset.studyDirectorLifecycle,scope:window[Symbol.for('studyDirector.profileScope.v1')]?.scope,mutationLeases:Object.keys(localStorage).filter(key=>/mutationLock/i.test(key)).map(key=>({key,value:localStorage.getItem(key)})),executeTitle:document.getElementById('execute-overlay-title')?.textContent,executeDetail:document.getElementById('execute-overlay-sub')?.textContent,executeText:document.getElementById('pane-execute')?.textContent.slice(0,1200),pwaMessage:document.getElementById('pwa-update-message')?.textContent,update:document.getElementById('pwa-update-apply')?.textContent,reloadMarker:sessionStorage.getItem('studyDirector.pwaReload.v1'),openDialogs:[...document.querySelectorAll('dialog[open],[data-rich-asset-picker="active"]')].map(node=>node.id),controller:!!navigator.serviceWorker?.controller,waiting:!!(await navigator.serviceWorker?.getRegistration())?.waiting,violations:window.__sd73iViolations||[]}))()`),sleep(3000).then(()=>({diagnosticTimeout:true}))]);
       return {...state,loads:page.loadCount};
     }catch(diagnosticError){return {error:String(diagnosticError),loads:page.loadCount};}
   }

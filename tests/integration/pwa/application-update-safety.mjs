@@ -36,7 +36,7 @@ function makeHarness(options={}){
     format:'study-director.pwa-lifecycle',contractVersion:1,
     install:async()=>lifecycleStatus,
     apply:async()=>{calls.apply++;return options.applyResult!==false;},
-    checkForUpdate:async()=>{calls.check++;return options.checkResult!==false;},
+    checkForUpdate:async()=>{calls.check++;await options.checkGate;return options.checkResult!==false;},
     confirmBoot:async()=>true,reportClient:()=>true,status:()=>lifecycleStatus
   };
   const lifecycleModule={createCoordinator:input=>{lifecycleHooks=input.hooks;return Object.freeze(lifecycle);}};
@@ -79,7 +79,7 @@ function makeHarness(options={}){
   const controller=UpdateHost.createController(Object.freeze({
     configuration:Object.freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:'./sw.js',updateCheckStorageKey:'last-check',primaryState:'primary',secondaryState:'secondary',runningTimerMode:'running'}),
     lifecycle:Object.freeze({module:lifecycleModule,environment:Object.freeze({})}),
-    environment:Object.freeze({document,window,navigator:Object.freeze({onLine:options.offline!==true,locks:Object.freeze({request:async(_name,_lockOptions,perform)=>{calls.lock++;if(options.lockRace)providerBusy=true;return perform();}})}),setTimeout:(fn,delay)=>{const id=nextTimer++;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),now:()=>now}),
+    environment:Object.freeze({document,window,navigator:Object.freeze({onLine:options.offline!==true,locks:Object.freeze({request:async(_name,_lockOptions,perform)=>{calls.lock++;if(options.lockRace)providerBusy=true;await options.lockGate;return perform();}})}),setTimeout:(fn,delay)=>{const id=nextTimer++;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),now:()=>now}),
     state:statePorts,reservation:reservationPorts,persistence,effects
   }));
   lifecycleHooks.render(lifecycleStatus);
@@ -277,3 +277,31 @@ for(const options of [{diaryOk:false},{storedPlan:'stale'},{reviewOk:false},{not
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'application-update-safety',checkedOwner:true,reservationCancellation:true,newWorkFence:true,readBack:true,preflightBeforePause:true,autoPlanGate:true,checkTimestamp:true},null,2));
+
+ // An awaited backup, lock or worker check must not adopt a successor lease.
+ for(const automatic of [true,false]){
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const t=makeHarness({backupWaiting:true,backupGate:gate});
+  const update=automatic?t.controller.evaluateAutomatic():t.controller.applyFromUi();
+  assert.equal(t.calls.backup,1);
+  t.setOwnership({state:'secondary',revision:2});t.setOwnership({state:'primary',revision:3});
+  release();assert.equal(await update,false);assert.equal(t.calls.apply,0,'retired update origin must not activate');
+ }
+ {
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const t=makeHarness({lockGate:gate}),check=t.controller.checkIfDue({force:true});
+  assert.equal(t.calls.lock,1);t.setOwnership({state:'secondary',revision:2});t.setOwnership({state:'primary',revision:3});release();
+  assert.equal(await check,false);assert.equal(t.calls.check,0);assert.equal(t.calls.localWrites,0);
+ }
+ {
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const t=makeHarness({checkGate:gate}),check=t.controller.checkIfDue({force:true});
+  await Promise.resolve();assert.equal(t.calls.check,1);t.setOwnership({state:'secondary',revision:2});t.setOwnership({state:'primary',revision:3});release();
+  assert.equal(await check,false);assert.equal(t.calls.localWrites,0,'retired check cannot consume new owner cooldown');
+ }
+ {
+  const t=makeHarness({tasks:[{}],loadedSession:{value:{revision:7},storage:{idb:false}}});
+  const result=await t.controller.prepare({requestId:'',automatic:false,external:false});
+  assert.equal(result.ok,false);assert.match(result.reason,/read-back/u);
+ }
+ console.log(JSON.stringify({status:'PASS',suite:'pwa-origin-and-canonical-readback',automaticBackupOrigin:true,manualBackupOrigin:true,lockOrigin:true,networkOrigin:true,idbRequired:true}));
