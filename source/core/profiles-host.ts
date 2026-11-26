@@ -8,7 +8,8 @@ interface PanelActionsInput{
   renderPanel():unknown;reportError(error:unknown):unknown;appCanMutate():boolean;
   readonly recent:Readonly<{opened():unknown;closed():unknown}>;
 }
-interface FirstStartInput{
+interface ProfileOriginPort{captureOrigin(reason:string):()=>void}
+interface FirstStartInput extends ProfileOriginPort{
   readonly document:Document;readonly profiles:ProfilesController;
   readonly backupProtection:Readonly<{enable(password:string):PromiseLike<unknown>}>;
   readonly provider:Readonly<{locationStatus(id:'google-drive'):Readonly<{connected?:boolean;engineBusy?:boolean}>|null}>;
@@ -18,7 +19,7 @@ interface FirstStartInput{
 interface FirstStartController{
   open():boolean;close():void;render():void;connect():Promise<boolean>;finish():Promise<boolean>;skip():boolean;confirmField():void;key(event:KeyboardEvent):boolean;joined():void;isOpen():boolean;
 }
-interface LifecycleInput{
+interface LifecycleInput extends ProfileOriginPort{
   readonly profiles:ProfilesController;readonly firstStart:FirstStartController;
   settleCurrentProfile():PromiseLike<boolean>;getStudentName():string;isDefaultStudentName(value:string):boolean;canonicalLocalRecoveryEmpty():PromiseLike<boolean|null>;
   renderProfile():unknown;appCanMutate():boolean;reportError(error:unknown):unknown;
@@ -38,7 +39,7 @@ interface DriveBindingController{
 interface DeleteLibraryControl{deleteLibrary():PromiseLike<unknown>}
 interface ProfileMutationAuthority{assert():unknown}
 interface ProfileMutationPort{run<T>(kind:string,operation:(authority:ProfileMutationAuthority)=>T|PromiseLike<T>):Promise<T>}
-interface DeletionInput{
+interface DeletionInput extends ProfileOriginPort{
   readonly profiles:ProfilesController;
   appCanMutate():boolean;settleCurrentProfile():PromiseLike<boolean>;readonly mutation:ProfileMutationPort;
   readonly provider:Readonly<{
@@ -58,7 +59,7 @@ interface ProfileViewsInput{
  AppDiagnostics:{capture(scope:string,error:unknown,level:'warn'):unknown};Interactions:{notify(input:{key:string;title:string;message:string}):unknown};
  connectDrive():unknown;disconnectDrive():unknown;
 }
-interface ProfileSettlementInput{
+interface ProfileSettlementInput extends ProfileOriginPort{
  AppOwnership:{canMutate():boolean};AppMutationCoordinator:{settled():PromiseLike<unknown>};appCanMutate():boolean;
  PlanDraftEditor:{flush(options:{strictDurability:true}):boolean|PromiseLike<boolean>};PlanData:{settled():PromiseLike<unknown>};flushPreferences():boolean|PromiseLike<boolean>;
  settleAttachmentWriters():PromiseLike<unknown>;deletionRecovery:{flush():PromiseLike<boolean>};
@@ -70,6 +71,14 @@ const sdProfilesHostFactory=(()=>{
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'profiles-host','study-director.profiles-host-module'>|undefined;
 if(!registry||registry.version!==1)throw new Error('Study Director internal module registry is unavailable.');
 const createModule=()=>{
+function profileIntent(ports:ProfileOriginPort & {readonly profiles:ProfilesController},reason:string,{account=false}:Readonly<{account?:boolean}>={}){
+  const assertOwner=ports.captureOrigin(reason);
+  const identity=(row:Readonly<ProfileEntry>|null)=>row?JSON.stringify([row.id,row.scope,...(account?[row.email,row.folder]:[])]):'';
+  const expected=identity(ports.profiles.current());
+  const assert=()=>{assertOwner();if(identity(ports.profiles.current())!==expected)throw new Error('The profile changed while this action was pending.');};
+  return Object.freeze({assert,assertOwner});
+}
+function stillCurrent(assertOrigin:()=>void){try{assertOrigin();return true;}catch{return false;}}
 function createPlatform(p:Readonly<{indexedDB:IDBFactory;window:Window;localStorage:Storage;storage:StorageManager|undefined;now():number;random(bytes:number):string;reload():void}>):ProfilesInput['ports']['platform']{
  return Object.freeze({
   deleteDatabase:(name:string)=>new Promise((resolve,reject)=>{const request=p.indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));request.onblocked=()=>reject(new Error('Profile deletion is waiting for another open Study Director tab. Close the other tabs and retry; your recovery data remains protected.'));}),
@@ -167,18 +176,20 @@ function createSettlement(ports:Readonly<ProfileSettlementInput>){
 const {AppOwnership,AppMutationCoordinator,appCanMutate,PlanDraftEditor,PlanData,flushPreferences,settleAttachmentWriters,deletionRecovery,AppDiagnostics,setPlanStatus}=ports;
 async function settleCurrentProfileWriters(){
   if(!AppOwnership.canMutate())throw new Error('Study Director does not currently have write control.');
+  const assertOrigin=ports.captureOrigin('settle current profile writers');
+  const requireCurrent=()=>{assertOrigin();if(!appCanMutate())throw new Error('Study Director could not reach a safe write state.');};
   // A mutation already owned by this tab is allowed to finish; only after it
   // settles do we require the ordinary unblocked write state.
-  await AppMutationCoordinator.settled();
-  if(!appCanMutate())throw new Error('Study Director could not reach a safe write state.');
+  await AppMutationCoordinator.settled();requireCurrent();
   if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
-  await PlanData.settled();
+  requireCurrent();await PlanData.settled();requireCurrent();
   if(await Promise.resolve(flushPreferences())!==true)throw new Error('Personal profile settings could not be saved.');
+  requireCurrent();
   // This existing writer barrier closes/settles rich-text and Diary edits,
   // Notes, the current reflection and Active Session.
-  await settleAttachmentWriters();
+  await settleAttachmentWriters();requireCurrent();
   if(await deletionRecovery.flush()!==true)throw new Error('Pending deletions could not be saved.');
-  await AppMutationCoordinator.settled();
+  requireCurrent();await AppMutationCoordinator.settled();requireCurrent();
   return true;
 }
 async function settleCurrentProfileBeforeReload(){
@@ -241,7 +252,7 @@ function createPanelActions(ports:PanelActionsInput){
   return Object.freeze({open,close,install,startRename,finishRename,handleNameKey,saveName});
 }
 function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
-  const {document,profiles}=ports;let joined=false;
+  const {document,profiles}=ports;let joined=false,actionRevision=0;
   const node=(id:string)=>document.getElementById(id);
   const field=(id:string)=>document.getElementById(id) as HTMLInputElement|null;
   function showError(message:string){const box=node('first-start-error');if(!box)return;box.textContent=message;box.hidden=!message;}
@@ -276,14 +287,14 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
   }
   function open(){
     const dialog=node('first-start-dialog') as HTMLDialogElement|null;if(!dialog||dialog.open)return false;
-    joined=false;showError('');
+    const origin=++actionRevision;joined=false;showError('');
     for(const id of ['first-start-password','first-start-confirm']){const item=field(id);if(item)item.value='';}
     const name=ports.getStudentName(),nameField=field('first-start-name'),confirmField=node('first-start-confirm-field');
     if(nameField)nameField.value=ports.isDefaultStudentName(name)?'':name;
     if(confirmField)confirmField.hidden=true;
-    render();dialog.showModal();setTimeout(()=>field('first-start-name')?.focus(),0);return true;
+    render();dialog.showModal();setTimeout(()=>{if(actionRevision===origin&&dialog.open)field('first-start-name')?.focus();},0);return true;
   }
-  function close(){const dialog=node('first-start-dialog') as HTMLDialogElement|null;if(dialog?.open)dialog.close();}
+  function close(){actionRevision+=1;const dialog=node('first-start-dialog') as HTMLDialogElement|null;if(dialog?.open)dialog.close();}
   function fail(error:unknown){
     ports.reportError(error);showError('This profile could not be updated safely. Retry after storage recovers.');return false;
   }
@@ -292,23 +303,40 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
     showError('Another tab has control. Take control here before changing this profile.');
     return false;
   }
+  function beginAction(reason:string){
+    const intent=profileIntent(ports,reason),origin=++actionRevision;
+    const active=()=>origin===actionRevision&&!!(node('first-start-dialog') as HTMLDialogElement|null)?.open;
+    const current=()=>active()&&requireMutationAuthority()&&stillCurrent(intent.assert);
+    const ownerCurrent=()=>active()&&ports.appCanMutate()&&stillCurrent(intent.assertOwner);
+    return {active,current,ownerCurrent};
+  }
   async function connect(){
+    if(!requireMutationAuthority())return false;
     try{
-      showError('');if(!requireMutationAuthority()||!await applyPassword()||!requireMutationAuthority())return false;
-      const raw=String(field('first-start-name')?.value||'').trim();if(raw)profiles.rename(raw);
-      const ok=await ports.connectDriveForProfile();render();return ok;
+      const action=beginAction('connect new profile');showError('');
+      try{
+        if(!action.current()||!await applyPassword()||!action.current())return false;
+        const raw=String(field('first-start-name')?.value||'').trim();if(raw)profiles.rename(raw);
+        const ok=await ports.connectDriveForProfile();
+        if(!action.ownerCurrent())return false;
+        render();return ok;
+      }catch(error){return action.ownerCurrent()?fail(error):false;}
     }catch(error){return fail(error);}
   }
   async function finish(){
+    if(!requireMutationAuthority())return false;
     try{
-      showError('');if(!requireMutationAuthority()||!await applyPassword()||!requireMutationAuthority())return false;
-      applyName();profiles.finishFirstStart();close();ports.renderProfile();return true;
+      const action=beginAction('finish new profile');showError('');
+      try{
+        if(!action.current()||!await applyPassword()||!action.current())return false;
+        applyName();profiles.finishFirstStart();close();ports.renderProfile();return true;
+      }catch(error){return action.ownerCurrent()?fail(error):false;}
     }catch(error){return fail(error);}
   }
   function skip(){
     try{
       if(!requireMutationAuthority())return false;
-      const mine=profiles.current();if(mine&&mine.from!==null)return profiles.remove();
+      actionRevision+=1;const mine=profiles.current();if(mine&&mine.from!==null)return profiles.remove();
       profiles.finishFirstStart();close();ports.renderProfile();return true;
     }catch(error){return fail(error);}
   }
@@ -317,6 +345,8 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
   return Object.freeze({open,close,render,connect,finish,skip,confirmField,key,joined:()=>{joined=true;render();},isOpen:()=>!!(node('first-start-dialog') as HTMLDialogElement|null)?.open});
 }
 function createLifecycle(ports:LifecycleInput){
+  let actionRevision=0;
+  const begin=(reason:string)=>{const intent=profileIntent(ports,reason),origin=++actionRevision;return ()=>origin===actionRevision&&ports.appCanMutate()&&stillCurrent(intent.assert);};
   const fail=(error:unknown)=>{ports.reportError(error);return false;};
   async function switchProfile(event:unknown){
     try{
@@ -324,23 +354,28 @@ function createLifecycle(ports:LifecycleInput){
       const target=event&&typeof event==='object'&&'target' in event?(event as {target?:unknown}).target:null;
       const element=target instanceof Element?target.closest<HTMLElement>('[data-profile]'):null;
       const id=String(element?.dataset['profile']||'');if(!id)return false;
-      if(await ports.settleCurrentProfile()!==true||!ports.appCanMutate())return false;
+      const current=begin('switch profile');
+      if(await ports.settleCurrentProfile()!==true||!current())return false;
       return ports.profiles.switchTo(id);
     }catch(error){return fail(error);}
   }
   async function addProfile(){
     try{
-      if(!ports.appCanMutate()||await ports.settleCurrentProfile()!==true||!ports.appCanMutate())return false;
+      if(!ports.appCanMutate())return false;
+      const current=begin('add profile');
+      if(await ports.settleCurrentProfile()!==true||!current())return false;
       return ports.profiles.add();
     }catch(error){return fail(error);}
   }
   async function startProfile(){
     const name=ports.getStudentName(),named=!ports.isDefaultStudentName(name);let mine=ports.profiles.current();
     if(ports.appCanMutate()){
+      const current=begin('start profile');
       if(!mine){
         const fresh=!named&&await ports.canonicalLocalRecoveryEmpty()===true;
-        if(ports.appCanMutate())mine=ports.profiles.ensure(named?name:'',{fresh});
-      }else if(named)ports.profiles.rename(name);
+        if(!current()){ports.renderProfile();return;}
+        mine=ports.profiles.ensure(named?name:'',{fresh});
+      }else if(named&&current())ports.profiles.rename(name);
     }
     ports.renderProfile();if(mine?.fresh&&ports.appCanMutate())ports.firstStart.open();
   }
@@ -395,28 +430,32 @@ function createDriveBinding(ports:DriveBindingInput):Readonly<DriveBindingContro
 }
 function createDeletion(ports:DeletionInput){
   let libraryControl:DeleteLibraryControl|null=null,deletionQuestion:Promise<boolean>|null=null;
-  async function prepareMutation(){
-    if(!ports.appCanMutate())return false;
+  type DeletionIntent=ReturnType<typeof profileIntent>;
+  const captureDeletion=()=>profileIntent(ports,'delete profile',{account:true});
+  const current=(intent:DeletionIntent)=>ports.appCanMutate()&&stillCurrent(intent.assert);
+  async function prepareMutation(intent:DeletionIntent){
+    if(!current(intent))return false;
     if(await ports.settleCurrentProfile()!==true)return false;
-    return ports.appCanMutate();
+    return current(intent);
   }
-  async function removeLocal(){
-    if(!await prepareMutation())return false;
-    return ports.mutation.run('profile-remove',authority=>{authority.assert();return ports.profiles.remove();});
+  async function removeLocal(intent:DeletionIntent){
+    if(!await prepareMutation(intent))return false;
+    return ports.mutation.run('profile-remove',authority=>{authority.assert();intent.assert();return ports.profiles.remove();});
   }
-  async function deleteHere({drive=false}:Readonly<{drive?:boolean}>={}){
+  async function deleteWithIntent(intent:DeletionIntent,drive:boolean,control:DeleteLibraryControl|null){
     try{
-      if(!await prepareMutation())return false;
+      if(!await prepareMutation(intent))return false;
       return await ports.mutation.run('profile-delete',async authority=>{
         let hold:Readonly<{release():unknown;settled?:PromiseLike<unknown>}>|null=null;
         try{
-          authority.assert();hold=ports.provider.suspendBackground('profile-delete');
-          if(hold?.settled){await hold.settled;authority.assert();}
+          const assert=()=>{authority.assert();intent.assert();};
+          assert();hold=ports.provider.suspendBackground('profile-delete');
+          if(hold?.settled){await hold.settled;assert();}
           if(drive){
-            if(!libraryControl)throw new Error('Google Drive is not ready yet. Try again in a moment.');
-            await libraryControl.deleteLibrary();authority.assert();
+            if(!control||control!==libraryControl||!ports.provider.locationStatus('google-drive')?.connected)throw new Error('Google Drive changed or is not ready yet. Confirm the deletion again.');
+            await control.deleteLibrary();assert();
           }
-          await ports.device.deleteBackups();authority.assert();
+          await ports.device.deleteBackups();assert();
           return ports.profiles.remove();
         }finally{hold?.release();}
       });
@@ -426,10 +465,16 @@ function createDeletion(ports:DeletionInput){
       return false;
     }
   }
+  async function deleteHere({drive=false}:Readonly<{drive?:boolean}>={}){
+    if(!ports.appCanMutate())return false;
+    try{return await deleteWithIntent(captureDeletion(),drive,libraryControl);}
+    catch(error){ports.capture('profile.delete',error);return false;}
+  }
   async function deleteThisProfile(){
     try{
       if(!ports.appCanMutate())return false;
       const mine=ports.profiles.current();if(!mine)return false;
+      const intent=captureDeletion(),control=libraryControl;
       const name=ports.getStudentName(),last=ports.profiles.list().length<2,drive=ports.provider.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync?.syncing),folder=ports.device.status();
       const afterwards=last?' A new, empty profile starts afterwards.':'';
       const choice=await ports.interactions.choose({
@@ -439,9 +484,10 @@ function createDeletion(ports:DeletionInput){
           {value:'everywhere',label:'Delete everywhere',description:`Here, in Google Drive (to its Trash) and in this device’s Device Folder backups. Other devices remove it when they next sign in.${afterwards}`,kind:'danger'}
         ]
       });
+      if(!current(intent))return false;
       if(choice==='device'){
         if(!synced&&!await ports.interactions.confirm({title:`Remove ${name} from this device?`,message:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',details:['Its Device Folder backups and backup files, if any, stay where they are.'],confirmLabel:'Remove from this device',danger:true}))return false;
-        return removeLocal();
+        return current(intent)?removeLocal(intent):false;
       }
       if(choice!=='everywhere')return false;
       if(mine.email&&!drive?.connected){ports.interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
@@ -450,7 +496,7 @@ function createDeletion(ports:DeletionInput){
         title:`Delete ${name} everywhere?`,message:`Its notes, Saved Days, plans, reflections and attachments are deleted from this device${places.length?`; ${places.join('; ')}`:''}.`,
         details:['Other devices remove this profile the next time they sign in to Google Drive.',...(last?['A new, empty profile starts afterwards.']:[])],confirmLabel:'Delete everywhere',danger:true
       });
-      return ok?deleteHere({drive:!!drive?.connected}):false;
+      return ok&&current(intent)?deleteWithIntent(intent,!!drive?.connected,control):false;
     }catch(error){
       ports.capture('profile.delete',error);
       ports.interactions.notify({key:'profile-delete',title:'The profile was not deleted',message:'The local profile list could not be updated safely. Nothing was removed; retry after browser storage recovers.'});
@@ -459,15 +505,16 @@ function createDeletion(ports:DeletionInput){
   }
   async function driveProfileDeleted(info:ProfileDeletionInfo|null|undefined){
     const mine=ports.profiles.current();if(!ports.appCanMutate()||!mine||String(info?.profile||'')!==mine.id||deletionQuestion)return false;
-    const name=ports.getStudentName(),synced=ports.verifiedSourceRevision();
-    if(synced&&synced===ports.currentBackupSourceRevision())return deleteHere();
+    const intent=captureDeletion(),name=ports.getStudentName(),synced=ports.verifiedSourceRevision();
+    if(synced&&synced===ports.currentBackupSourceRevision())return deleteWithIntent(intent,false,null);
     deletionQuestion=ports.interactions.confirm({
       title:`${name} was deleted on another device`,message:'This device has changes that never reached Google Drive.',
       details:['Delete here too: they are deleted with the profile, and so are its Device Folder backups on this device.','Keep on this device: the profile stays here and stops syncing. Connecting Google Drive again starts a new library.'],
       confirmLabel:'Delete here too',cancelLabel:'Keep on this device',danger:true
     }).finally(()=>{deletionQuestion=null;});
-    if(await deletionQuestion)return deleteHere();
-    if(!ports.appCanMutate())return false;
+    const accepted=await deletionQuestion;
+    if(!current(intent))return false;
+    if(accepted)return deleteWithIntent(intent,false,null);
     ports.profiles.renew();ports.renderProfile();
     ports.interactions.notify({key:'profile-kept',title:`${name} is kept on this device`,message:'It no longer syncs with Google Drive. Connect Google Drive again to start a new library.'});
     return false;

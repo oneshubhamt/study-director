@@ -15,7 +15,7 @@ assert.equal(ownershipModule.isOwnershipLostError(lost),true);
 assert.equal(ownershipModule.isOwnershipLostError({code:'STUDY_DIRECTOR_OWNERSHIP_LOST'}),true);
 assert.equal(ownershipModule.isOwnershipLostError(new Error('other')),false);
 
-let ownershipNow=1000,lastError=null,ownershipSettleFailure=false;
+let ownershipNow=1000,lastError=null,ownershipSettleFailure=false,ownershipSettleGate=null;
 const ownerStore=new Map(),sessionStore=new Map(),ownershipHookCalls={render:0,refreshStorage:0,practiceRender:0};
 const ownershipInput=Object.freeze({
   config:Object.freeze({storageKey:'owner',sessionTabKey:'tab',channelName:'test',heartbeatMs:1000,staleMs:100,probeMs:25,webLockName:'test-lock'}),
@@ -32,7 +32,7 @@ const ownershipInput=Object.freeze({
   diagnostics:Object.freeze({capture:()=>{},guard:(_scope,fn)=>fn()}),
   hooks:Object.freeze({
     render:()=>{ownershipHookCalls.render+=1;},refreshStorage:()=>{ownershipHookCalls.refreshStorage+=1;},stopExecution:()=>{},isInitialized:()=>false,admitHydration:async()=>{},hydrate:async()=>{},finalizeHydration:async()=>{},resume:()=>{},refreshCore:()=>{},
-    scheduleMaintenance:()=>{},practiceRender:()=>{ownershipHookCalls.practiceRender+=1;},blocked:()=>{},invalidate:()=>{},flush:async()=>{},settled:async()=>{if(ownershipSettleFailure)throw new Error('durability barrier failed');}
+    scheduleMaintenance:()=>{},practiceRender:()=>{ownershipHookCalls.practiceRender+=1;},blocked:()=>{},invalidate:()=>{},flush:async()=>{},settled:async()=>{if(ownershipSettleFailure)throw new Error('durability barrier failed');if(ownershipSettleGate)await ownershipSettleGate;}
   })
 });
 const ownership=ownershipModule.createOwnershipController(ownershipInput);
@@ -60,6 +60,16 @@ assert.equal(await ownership.flushAndRelease('takeover-regression'),false);
 assert.equal(ownership.canMutate(),true,'failed deliberate handoff keeps the old primary authoritative');
 assert.ok(ownerStore.get('owner'),'failed deliberate handoff keeps its durable ownership lease');
 ownershipSettleFailure=false;
+// An earlier release request cannot relinquish a claim obtained while its
+// writer settlement was pending, even when this page is primary again.
+{
+  let resume;ownershipSettleGate=new Promise(resolve=>resume=resolve);
+  const prior=ownership.flushAndRelease('retired-takeover');
+  ownership.release();ownership.setPrimary(false);assert.equal(ownership.writeLease({force:true}),true);
+  const successor=ownership.issueWriteToken('successor claim'),lease=ownerStore.get('owner');
+  resume();assert.equal(await prior,false);ownershipSettleGate=null;
+  assert.equal(ownership.assertWriteToken(successor),true);assert.deepEqual(ownerStore.get('owner'),lease);
+}
 
 // Unsuccessful secondary probes must preserve the authority epoch. Actual
 // acquisition and release must still invalidate reservations and write tokens.

@@ -1677,7 +1677,9 @@ function handleProfileNameKey(event:Parameters<typeof ProfilePanelActions['handl
 function profileDriveAction(){return ProfileViews.profileDriveAction();}
 // Profile deletion composes backup/provider effects behind a checked profile-owned adapter.
 type ProfileDeletionInput=Parameters<typeof ProfilesHostModule.createDeletion>[0];
+function captureProfileOrigin(reason:string){const token=AppOwnership.issueWriteToken(reason);return ()=>AppOwnership.assertWriteToken(token,reason);}
 const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<ProfileDeletionInput>({
+  captureOrigin:captureProfileOrigin,
   profiles:Profiles,
   appCanMutate:()=>appCanMutate(),
   settleCurrentProfile:()=>settleCurrentProfileBeforeReload(),
@@ -1761,6 +1763,7 @@ const bindDriveLibrary=ProfileDriveBinding.bind;
 // from it, so nothing typed here competes with them.
 type FirstStartInput=Parameters<typeof ProfilesHostModule.createFirstStart>[0];
 const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<FirstStartInput>({
+  captureOrigin:captureProfileOrigin,
   document,
   profiles:Profiles,
   backupProtection:Object.freeze({enable:password=>BackupProtection.enable(password)}),
@@ -1777,7 +1780,7 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<FirstStartInp
 
 // A deliberate profile reload must not outrun writes owned by the current
 // profile. Page-exit flushing remains a last safety net, not the commit gate.
-const ProfileSettlement=ProfilesHostModule.createSettlement({AppOwnership,AppMutationCoordinator:requireMutationCoordinator(),appCanMutate,
+const ProfileSettlement=ProfilesHostModule.createSettlement({AppOwnership,AppMutationCoordinator:requireMutationCoordinator(),appCanMutate,captureOrigin:captureProfileOrigin,
  PlanDraftEditor:{flush:options=>PlanDraftEditor.flush(options)},PlanData:{settled:()=>PlanData.settled()},flushPreferences:()=>flushProtectedPreferences(),
  settleAttachmentWriters:()=>LibraryDocuments.settleAttachmentWriters(),deletionRecovery:AppData.deletionRecovery,AppDiagnostics,setPlanStatus:(...args)=>setPlanStatus(...args)
 });
@@ -1786,6 +1789,7 @@ async function settleCurrentProfileBeforeReload(){return ProfileSettlement.settl
 // Startup: make sure this page's profile is on the device's list, and offer
 // the first-start form to someone new.
 const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze<Parameters<typeof ProfilesHostModule.createLifecycle>[0]>({
+  captureOrigin:captureProfileOrigin,
   profiles:Profiles,
   firstStart:FirstStart,
   settleCurrentProfile:()=>settleCurrentProfileBeforeReload(),

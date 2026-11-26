@@ -234,6 +234,7 @@ const createModule=()=>{
     }
     async function flushAndRelease(requestId:unknown=''){
       if(!canMutate())return false;
+      let origin:WriteToken;try{origin=issueWriteToken('settling ownership release');}catch{return false;}
       diagnostics.guard('ownership.release-flush',hooks.flush);
       try{await hooks.settled();}
       catch(error){
@@ -243,6 +244,7 @@ const createModule=()=>{
         // Page exit cannot safely retain a lease owned by a departing page.
         if(requestId)return false;
       }
+      try{assertWriteToken(origin,'complete ownership release');}catch{return false;}
       transition(OWNERSHIP_STATES.RELEASING,requestId?'handoff':'page exit');
       release();setPrimary(false);
       if(requestId)post({type:'owner-takeover-ready',requestId});

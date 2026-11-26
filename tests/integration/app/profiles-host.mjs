@@ -12,10 +12,10 @@ try{
   for(const file of ['source/core/internal.ts','source/core/profiles-host.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
   const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
   const Host=registry.require('profiles-host',1);
-  const freeze=Object.freeze;
+  const freeze=Object.freeze,stableOrigin=()=>()=>{};
   const profile={id:'prof_profile_mve00000_00000001',scope:'',name:'QA',email:'',folder:'',createdAt:'2026-11-10T00:00:00.000Z',fresh:false,from:null};
   let switchCalls=0,addCalls=0,ensureCalls=0,renameCalls=0,settleCalls=0,reportedErrors=0,throwSwitch=false,throwAdd=false,releaseSettle,settleValue=true,lifecycleAuthority=true;
-  let settleGate=Promise.resolve();
+  let settleGate=Promise.resolve(),lifecycleEpoch=1;
   const profiles=freeze({
     current:()=>profile,list:()=>[profile],ensure:()=>{ensureCalls++;return profile;},rename:()=>{renameCalls++;return profile;},setAccount:()=>profile,adopt:()=>true,renew:()=>profile,finishFirstStart:()=>profile,
     add:()=>{if(throwAdd)throw new Error('add failed');addCalls++;return true;},switchTo:()=>{if(throwSwitch)throw new Error('switch failed');switchCalls++;return true;},remove:()=>true,collect:async()=>({removed:false,error:null}),watch:()=>()=>{},removalPending:()=>0,unsupported:()=>false
@@ -45,6 +45,7 @@ try{
   }
 
   const lifecycle=Host.createLifecycle(freeze({
+    captureOrigin:()=>{const origin=lifecycleEpoch;return ()=>{if(origin!==lifecycleEpoch)throw Error('retired owner');};},
     profiles,firstStart:freeze({open:()=>true,close:()=>{},render:()=>{},connect:async()=>true,finish:async()=>true,skip:()=>true,confirmField:()=>{},key:()=>true,joined:()=>{},isOpen:()=>false}),
     settleCurrentProfile:async()=>{settleCalls++;await settleGate;return settleValue;},
     getStudentName:()=>profile.name,isDefaultStudentName:()=>false,canonicalLocalRecoveryEmpty:async()=>false,renderProfile:()=>true,appCanMutate:()=>lifecycleAuthority,reportError:()=>{reportedErrors++;},
@@ -73,11 +74,18 @@ try{
   assert.equal(switchCalls,switchBefore);assert.equal(addCalls,addBefore);assert.equal(renameCalls,renameBefore,'secondary startup cannot rename the device profile registry');
   assert.equal(ensureCalls,0);
   lifecycleAuthority=true;
+  settleGate=new Promise(resolve=>{releaseSettle=resolve;});
+  const staleSwitch=lifecycle.switchProfile({target:new FakeElement('prof_other_mve00000_00000002')});
+  await Promise.resolve();lifecycleEpoch++;releaseSettle();assert.equal(await staleSwitch,false);assert.equal(switchCalls,switchBefore);
+  settleGate=new Promise(resolve=>{releaseSettle=resolve;});
+  const staleAdd=lifecycle.addProfile();await Promise.resolve();lifecycleEpoch++;releaseSettle();assert.equal(await staleAdd,false);assert.equal(addCalls,addBefore);
+  settleGate=Promise.resolve();
 
   {
     let emptyAuthority=true,releaseEmpty,emptyEnsureCalls=0;
     const emptyGate=new Promise(resolve=>{releaseEmpty=resolve;});
     const emptyLifecycle=Host.createLifecycle(freeze({
+      captureOrigin:stableOrigin,
       profiles:freeze({...profiles,current:()=>null,list:()=>[],ensure:()=>{emptyEnsureCalls++;return profile;}}),
       firstStart:freeze({open:()=>true,close:()=>{},render:()=>{},connect:async()=>true,finish:async()=>true,skip:()=>true,confirmField:()=>{},key:()=>true,joined:()=>{},isOpen:()=>false}),
       settleCurrentProfile:async()=>true,getStudentName:()=>'',isDefaultStudentName:()=>true,
@@ -102,9 +110,10 @@ try{
         ['first-start-error',{textContent:'',hidden:true}],
         ['first-start-dialog',new FakeDialog()]
       ]);
-      let authority=true,releasePassword,finishCalls=0,applyCalls=0;
-      const passwordGate=new Promise(resolve=>{releasePassword=resolve;});
+      let authority=true,releasePassword,finishCalls=0,applyCalls=0,firstStartEpoch=1;
+      let passwordGate=new Promise(resolve=>{releasePassword=resolve;});
       const firstStart=Host.createFirstStart(freeze({
+        captureOrigin:()=>{const origin=firstStartEpoch;return ()=>{if(origin!==firstStartEpoch)throw Error('retired owner');};},
         document:{getElementById:id=>nodes.get(id)||null},profiles:freeze({...profiles,finishFirstStart:()=>{finishCalls++;return profile;}}),
         backupProtection:freeze({enable:async()=>{await passwordGate;return true;}}),provider:freeze({locationStatus:()=>null}),connectDriveForProfile:async()=>true,
         getStudentName:()=>profile.name,isDefaultStudentName:()=>false,applyStudentName:value=>{applyCalls++;return value;},persistUserDefaultName:()=>true,renderProfile:()=>true,reportError:()=>{reportedErrors++;},
@@ -115,6 +124,10 @@ try{
       assert.equal(finishCalls,0);assert.equal(applyCalls,0);
       assert.match(nodes.get('first-start-error').textContent,/Another tab has control/);
       assert.equal(firstStart.skip(),false,'First Start skip is also authority-fenced inside its checked owner');
+      authority=true;passwordGate=new Promise(resolve=>{releasePassword=resolve;});
+      const stale=firstStart.finish();await Promise.resolve();firstStartEpoch++;releasePassword();assert.equal(await stale,false);assert.equal(finishCalls,0);assert.equal(applyCalls,0);
+      passwordGate=new Promise(resolve=>{releasePassword=resolve;});
+      const closed=firstStart.finish();await Promise.resolve();firstStart.close();releasePassword();assert.equal(await closed,false);assert.equal(finishCalls,0);
     }finally{
       if(priorInput===undefined)delete globalThis.HTMLInputElement;else globalThis.HTMLInputElement=priorInput;
       if(priorDialog===undefined)delete globalThis.HTMLDialogElement;else globalThis.HTMLDialogElement=priorDialog;
@@ -146,6 +159,7 @@ try{
   const holdGate=new Promise(resolve=>{releaseHold=()=>{holdSettled=true;resolve();};});
   let backupDeletes=0,removes=0,captures=0,notices=0;
   const deletion=Host.createDeletion(freeze({
+    captureOrigin:stableOrigin,
     profiles:freeze({...profiles,remove:()=>{removes++;return true;}}),
     appCanMutate:()=>deletionAuthority,settleCurrentProfile:async()=>{deletionSettlements++;return deletionAuthority;},
     mutation:freeze({run:async(_kind,operation)=>{mutationRuns++;return operation(freeze({assert:()=>{authorityAssertions++;if(!deletionAuthority)throw new Error('authority lost');return true;}}));}}),
@@ -172,7 +186,7 @@ try{
   // A reload only follows a complete writer barrier; any failed stage is contained.
   for(const failure of ['', 'draft', 'preferences', 'deletions', 'authority']){
     const order=[];
-    const settlement=Host.createSettlement({AppOwnership:{canMutate:()=>true},AppMutationCoordinator:{settled:async()=>order.push('mutation')},appCanMutate:()=>failure!=='authority',
+    const settlement=Host.createSettlement({captureOrigin:stableOrigin,AppOwnership:{canMutate:()=>true},AppMutationCoordinator:{settled:async()=>order.push('mutation')},appCanMutate:()=>failure!=='authority',
       PlanDraftEditor:{flush:async options=>{assert.equal(options.strictDurability,true);order.push('draft');return failure!=='draft';}},PlanData:{settled:async()=>order.push('plan')},
       flushPreferences:async()=>{order.push('preferences');return failure!=='preferences';},
       settleAttachmentWriters:async()=>order.push('editors'),deletionRecovery:{flush:async()=>{order.push('deletions');return failure!=='deletions';}},AppDiagnostics:{capture:()=>order.push('error')},setPlanStatus:()=>order.push('status')});
@@ -183,6 +197,41 @@ try{
       if(failure==='draft')assert.ok(!order.includes('preferences'));
       if(failure==='preferences')assert.ok(!order.includes('editors'),'failed personal-preference durability stops profile reload before later writer settlement');
     }
+  }
+
+
+  // Profile consent is a capability of the original claim and profile, not
+  // merely of whatever owner/account happens to be active after the modal.
+  for(const stage of ['choice','confirmation','settlement','identity','remote-keep','remote-delete']){
+    let epoch=1,mine={...profile,email:'',folder:''},removed=0,external=0,renewed=0,runs=0,release,enteredResolve;
+    const gate=new Promise(r=>release=r),entered=new Promise(r=>enteredResolve=r);
+    const wait=async(value)=>{enteredResolve();await gate;return value;};
+    const deletion=Host.createDeletion(freeze({
+      captureOrigin:()=>{const captured=epoch;return ()=>{if(captured!==epoch)throw Error('retired claim');};},
+      profiles:freeze({...profiles,current:()=>mine,list:()=>[mine],remove:()=>{removed++;return true;},renew:()=>{renewed++;return mine;}}),
+      appCanMutate:()=>true,settleCurrentProfile:()=>stage==='settlement'?wait(true):Promise.resolve(true),
+      mutation:freeze({run:async(_kind,operation)=>{runs++;return operation(freeze({assert:()=>true}));}}),
+      provider:freeze({locationStatus:()=>null,suspendBackground:()=>null}),
+      device:freeze({status:()=>({connected:false}),deleteBackups:async()=>{external++;return true;}}),
+      interactions:freeze({choose:()=>stage==='choice'?wait('everywhere'):Promise.resolve('everywhere'),
+        confirm:()=>['confirmation','identity','remote-keep','remote-delete'].includes(stage)?wait(stage!=='remote-keep'):Promise.resolve(true),notify:()=>{}}),
+      capture:()=>{},getStudentName:()=>mine.name,renderProfile:()=>true,verifiedSourceRevision:()=>'',currentBackupSourceRevision:()=>''}));
+    const pending=stage.startsWith('remote')?deletion.driveProfileDeleted({profile:mine.id}):deletion.deleteThisProfile();
+    await entered;
+    if(stage==='identity')mine={...mine,email:'new@example.com',folder:'new-folder'};else epoch++;
+    release();assert.equal(await pending,false,stage);assert.deepEqual([removed,external,renewed,runs],[0,0,0,0],stage);
+  }
+  // Do not start the next writer in a reload barrier under a successor claim.
+  {
+    let epoch=1,release,enteredResolve;const gate=new Promise(r=>release=r),entered=new Promise(r=>enteredResolve=r),order=[];
+    const settlement=Host.createSettlement({
+      captureOrigin:()=>{const captured=epoch;return ()=>{if(captured!==epoch)throw Error('retired claim');};},
+      AppOwnership:{canMutate:()=>true},AppMutationCoordinator:{settled:async()=>order.push('mutation')},appCanMutate:()=>true,
+      PlanDraftEditor:{flush:async()=>{order.push('draft');enteredResolve();await gate;return true;}},PlanData:{settled:async()=>order.push('plan')},
+      flushPreferences:async()=>{order.push('preferences');return true;},settleAttachmentWriters:async()=>order.push('editors'),deletionRecovery:{flush:async()=>true},
+      AppDiagnostics:{capture:()=>{}},setPlanStatus:()=>{}});
+    const pending=settlement.settleCurrentProfileBeforeReload();await entered;epoch++;release();
+    assert.equal(await pending,false);assert.deepEqual(order,['mutation','draft']);
   }
 
   console.log(JSON.stringify({status:'PASS',contract:'profiles-host',checks:['switch-settlement-gate','add-settlement-gate','delegated-action-error-containment','deletion-quiescence','successful-hold-release']},null,2));
