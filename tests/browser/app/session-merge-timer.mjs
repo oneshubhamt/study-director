@@ -30,6 +30,28 @@ try{
   assert.equal(await page.evaluate(run),'running','the session runs again');
   const plain=await page.evaluate(merge(false));
   assert.equal(plain.on,true);assert.notEqual(plain.mode,'running','a plain restore keeps the session\'s own timer state');
+  // Plan replacement is not a new study day. Preserve the day-wide
+  // reflection and quality through the real lifecycle, then verify storage.
+  const review=await page.evaluate(`(async()=>{
+    const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));
+    await d.goTab('review');await wait(120);
+    document.getElementById('daily-reflection').value='KEEP REFLECTION THROUGH PLAN REPLACEMENT';
+    d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});
+    await d.ReviewEditor.flushPending({strict:true});await d.ReviewEditor.settled();
+    const before=(await d.AppData.activeSession.load()).value;
+    if(!before||!before.snapshot.review?.reflection.includes('KEEP REFLECTION THROUGH PLAN REPLACEMENT'))throw new Error('Review fixture did not persist');
+    const plan=document.getElementById('plan-input');plan.value=plan.value.replace('Merge Two','Merge Two revised');
+    let settled=false,result,error;Promise.resolve(d.applySchedule({skipNotify:true})).then(v=>{result=v;settled=true},e=>{error=e;settled=true});
+    const deadline=Date.now()+20000;
+    while(!settled&&Date.now()<deadline){document.querySelector('#sd-interaction-dialog[open] .interaction-actions .primary')?.click();await wait(30);}
+    if(error)throw error;if(!settled||result!==true)throw new Error('Plan replacement did not finish: '+document.getElementById('plan-status').textContent);
+    const visible=document.getElementById('daily-reflection').value;
+    await d.flushLiveDraft();await d.AppData.activeSession.settled();
+    const after=(await d.AppData.activeSession.load()).value;
+    return {date:after?.date,expectedDate:before.date,reflection:after?.snapshot?.review?.reflection,expectedReflection:before.snapshot.review.reflection,quality:after?.snapshot?.review?.studyQuality,visible,schedule:after?.scheduleText};
+  })()`);
+  assert.equal(review.date,review.expectedDate);assert.equal(review.reflection,review.expectedReflection,'same-day reflection survives the complete lifecycle and subsequent checkpoint');
+  assert.equal(review.quality,4);assert.match(review.visible,/KEEP REFLECTION THROUGH PLAN REPLACEMENT/u);assert.match(review.schedule,/Merge Two revised/u);
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
-  console.log(JSON.stringify({status:'PASS',suite:'session-merge-timer'}));
+  console.log(JSON.stringify({status:'PASS',suite:'session-merge-timer',sameDayReviewPreserved:true}));
 }finally{await browser.close();await server.close();}
