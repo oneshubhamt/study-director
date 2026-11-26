@@ -224,5 +224,5 @@ assert.doesNotMatch(backupProvider,/publishSharedStateNow/u,'live ownership tran
 assert.doesNotMatch(sessionClaimRelease,/deleteSessionClaim/u,'failed takeover rollback must never delete the newest immutable claim and expose an older owner');
 assert.ok(sessionTransfer.indexOf("await provider.claimOwnership(")>=0&&sessionTransfer.indexOf("await provider.claimOwnership(")<sessionTransfer.indexOf("saveCanonicalSession(next,'claiming Active Session ownership'"),'Drive ownership must become durable before the new local owner is saved or allowed to run');
 assert.match(app,/'apply-schedule': \(\)=>SessionActions\.applyScheduleAction\(\)/u,'Apply routes through the checked session action owner');
-assert.match(sessionActions,/async function applyScheduleAction\([\s\S]*?transferSessionOwnershipHere\(session\)[\s\S]*?ports\.applySchedule\(takeover/u,'Start a new plan here transfers durable ownership before applying');
+assert.match(sessionActions,/async function applyScheduleAction\([\s\S]*?transferSessionOwnershipHere\(session,\{assertOrigin\}\)[\s\S]*?sessionActionCurrent\(assertOrigin\)[\s\S]*?ports\.applySchedule\(takeover/u,'Start a new plan here transfers durable ownership under the original consent before applying');
 }

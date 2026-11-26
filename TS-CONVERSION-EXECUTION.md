@@ -1,5 +1,8 @@
 # TypeScript conversion — execution record
 
+- REVIEW-P5 prior `a541acd4` [Stage 1 fast](https://github.com/oneshubhamt/study-director/actions/runs/45766649443/job/139729134635): 166/169 passed, including actual Notes recovery, Plan host, Active Session CAS, handoff, provider sync and storage-reset tests. Three structural checks expected old signatures (Plan reset replacement, start-new-plan handoff, portable Plan import). Require the new authority arguments and consent/token ordering, preserving original atomic replacement and ordering assertions. Latest production revision `30791d4de1a623788cf410673466ddfe3586d7db` also adds transaction acknowledgement and transport witnesses, so fresh checks still required. No application behavior changed by this structural-test correction.
+
+
 - REVIEW-P5 continuation `a541acd43ca6f931622daec44ca50210afd4f877`: [repository job](https://github.com/oneshubhamt/study-director/actions/runs/45766649550/job/139729037216) strict/lint SUCCESS; 44/45 targeted files passed including strict-durability-boundaries and session-handoff-runtime. Only runtime-boundaries assertion failed (old signature `replace(snapshot)`); strengthen to require originating token. Close final Plan/preference metadata request and completion guards (including atomic portable replacement) and schedule-time preference origin; actual repository witnesses for last-request refusal vs physically committed but stale completion, plus provider transport cancellation after publication admission. All exact-head verification remains required.
 
 
