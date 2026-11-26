@@ -25,13 +25,13 @@ let canonical=cleanPlans({draft:null,savedPlans:[a,b],defaultId:a.id});
 let canonicalPreferences={...emptyPreferences(),studentName:'Stored Student'};
 let writeDraftCalls=0,writeLibraryCalls=0,replaceCalls=0,replacePortableCalls=0,flushPreferenceCalls=0;
 let revision=1,failLibrary=false,denyToken=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
-let draftMode='normal',readFails=false,authoredDraft=null,portableMode='normal',operationRevision=1;
+let draftMode='normal',readFails=false,authoredDraft=null,portableMode='normal',operationRevision=1,planReadGate=null;
 const token=freeze({format:'study-director.ownership-write-token',contractVersion:1,tabId:'t',pageId:'p',claimId:'c',revision:1,state:'primary',allowHydrating:false,reason:'qa'});
 const data=PlanHostModule.createData(freeze({
   codec,
   repositories:freeze({
     plans:freeze({
-      read:async()=>{if(readFails)throw new Error('read unavailable');return clone(canonical);},
+      read:async()=>{if(readFails)throw new Error('read unavailable');const snapshot=clone(canonical),gate=planReadGate;planReadGate=null;if(gate){gate.enter();await gate.wait;}return snapshot;},
       replace:async(value,options)=>{options?.assertOrigin?.();assert.equal(options?.ownershipToken?.revision,revision);replaceCalls++;canonical=cleanPlans(value);return true;},
       replacePortable:async(value,options)=>{
         options?.assertOrigin?.();assert.equal(options?.ownershipToken?.revision,revision);replacePortableCalls++;
@@ -220,4 +220,23 @@ for(const mode of ['reject','committed','unknown']){
   await data.hydrate();
 }
 
+// A delayed read cannot overwrite the successor's hydrated cache, nor a
+// write admitted during that read. The latter must re-read canonical bytes.
+function gatedRead(){
+  let release,enter;
+  const entered=new Promise(resolve=>{enter=resolve;}),wait=new Promise(resolve=>{release=resolve;});
+  planReadGate={enter,wait};return {entered,release};
+}
+{
+  const gate=gatedRead(),origin=revision,check=()=>{if(origin!==revision)throw new Error('hydration authority retired');};
+  const previous=data.hydrate(check),rejected=assert.rejects(previous,/hydration authority retired/u);
+  await gate.entered;revision++;canonical={...canonical,draft:'Successor canonical draft'};
+  await data.hydrate();gate.release();await rejected;
+  assert.equal(data.readDraft(),'Successor canonical draft');
+}
+{
+  const gate=gatedRead(),previous=data.hydrate();
+  await gate.entered;await data.writeDraft('Committed during hydration');gate.release();
+  await previous;assert.equal(data.readDraft(),'Committed during hydration');assert.equal(canonical.draft,data.readDraft());
+}
 console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','supplied-stale-token-before-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification','rejected-draft-not-published','independent-failure-lanes','unconfirmed-commit-readback','unknown-readback-forces-retry','stale-library-queue-refused','visible-draft-storage-recovery','portable-failure-rollback','committed-portable-readback','unknown-portable-outcome','retired-protected-import']},null,2));

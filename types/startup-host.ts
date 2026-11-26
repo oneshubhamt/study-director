@@ -5,12 +5,12 @@ import type {ActivationContract,ActivationEvent,ActivationKind,StartupCoordinato
 export interface ActivationInput{capture(scope:string,error:unknown,severity?:'error'):unknown}
 export type OwnershipController=ReturnType<OwnershipModule['createOwnershipController']>;
 export interface OwnershipHydrationInput{
-  hydratePlanData():unknown|PromiseLike<unknown>;
+  hydratePlanData(assertOrigin:()=>void):unknown|PromiseLike<unknown>;
   hydratePlanRuntime():unknown;
   renderSavedPlans():unknown;
   hydratePrimary(options:Readonly<{sameTabReload:boolean}>):unknown|PromiseLike<unknown>;
   censusUnsupported():unknown|PromiseLike<unknown>;
-  hydrateSavedDrafts(options:Readonly<{forcePreferences:true;failClosed:true}>):unknown|PromiseLike<unknown>;
+  hydrateSavedDrafts(options:Readonly<{forcePreferences:true;failClosed:true;assertOrigin:()=>void}>):unknown|PromiseLike<unknown>;
 }
 export interface OwnershipRecoveryAdmissionInput{
   readLibraryClear():PromiseLike<unknown>;
@@ -62,7 +62,7 @@ export interface StartupHostModule{
   readonly format:'study-director.startup-host-module';readonly contractVersion:1;
   createOwnershipViews(input:Readonly<OwnershipViewsInput>):Readonly<{renderOwnershipBanner():void;renderOwnershipUi():void;requirePrimaryTab(event:Event|null,reason?:string):boolean;renderPrimaryTabBlock(status:import('./ownership.ts').OwnershipStatus,reason:string):void}>;
   createStages(input:Readonly<StartupStagesInput>):StartupLifecycleInput['startup'];
-  createDraftHydration(input:Readonly<StartupDraftHydrationInput>):(options?:{forcePreferences?:boolean;failClosed?:boolean})=>Promise<boolean>;
+  createDraftHydration(input:Readonly<StartupDraftHydrationInput>):(options?:{forcePreferences?:boolean;failClosed?:boolean;assertOrigin?:()=>void})=>Promise<boolean>;
   createWake(input:Readonly<{quiesced():boolean;sync():unknown}>):()=>unknown;
   createActivation(input:Readonly<ActivationInput>):Readonly<ActivationContract>;
   createOwnershipController(input:Readonly<OwnershipHostInput>):Readonly<OwnershipController>;
@@ -82,7 +82,7 @@ export interface StartupStagesInput{
  reportUnsupported():boolean;setPlanStatus(message:string,ok:boolean):unknown;noticeCanCompact(message:string):boolean;getReviewDate():string;reconcileLifecycle(kind:string,options:{date:string;autoDate:boolean}):unknown;
 }
 export interface StartupDraftHydrationInput{
- document:Document;hydratePlan():PromiseLike<unknown>;hydratePreferences(options:{force:boolean}):PromiseLike<unknown>;capture(scope:string,error:unknown,level:'error'):unknown;markStorageError(scope:string,message:string):unknown;
+ document:Document;hydratePlan(assertOrigin?:()=>void):PromiseLike<unknown>;hydratePreferences(options:{force:boolean;assertOrigin?:()=>void}):PromiseLike<unknown>;capture(scope:string,error:unknown,level:'error'):unknown;markStorageError(scope:string,message:string):unknown;
  projectPlan(options?:{fallback:true}):unknown;renderSavedPlans():unknown;quote():string;quoteChanged(options:{markChanged:false}):unknown;
 }
 

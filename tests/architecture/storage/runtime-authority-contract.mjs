@@ -16,10 +16,10 @@ const hydrateStart=app.indexOf('async function hydrateProtectedPreferences(');
 const hydrateEnd=app.indexOf('async function flushProtectedPreferences(',hydrateStart);
 const hydrateBlock=app.slice(hydrateStart,hydrateEnd);
 assert.match(hydrateBlock,/protectedPreferencesHydrated&&!force/u,'ordinary hydration may reuse current in-memory Preferences');
-assert.match(startupHost,/hydrateSavedDrafts\(freeze\(\{forcePreferences:true,failClosed:true\}\)\)/u,'ownership takeover must force a fresh canonical Preferences read before becoming writable');
+assert.match(startupHost,/hydrateSavedDrafts\(freeze\(\{forcePreferences:true,failClosed:true,assertOrigin:assertCurrent\}\)\)/u,'ownership takeover must force a fresh canonical Preferences read before becoming writable');
 assert.match(app,/StartupHostModule\.createOwnershipController/u,'host ownership startup composition must cross the checked startup-host boundary');
 assert.doesNotMatch(app,/OwnershipModule\.createOwnershipController\(Object\.freeze/u,'host must not retain duplicate direct ownership startup composition');
-assert.match(startupHost,/let planError[\s\S]*preferencesError[\s\S]*try\{await p\.hydratePlan\(\);\}[\s\S]*try\{await p\.hydratePreferences\(\{force:forcePreferences\}\);\}/u,'Plan and Preferences hydration failures are isolated');
+assert.match(startupHost,/let planError[\s\S]*preferencesError[\s\S]*try\{await p\.hydratePlan\(assertOrigin\);\}[\s\S]*try\{await p\.hydratePreferences\(\{force:forcePreferences,\.\.\.\(assertOrigin\?\{assertOrigin\}:\{\}\)\}\);\}/u,'Plan and Preferences hydration failures are isolated');
 assert.match(startupHost,/if\(planError\)p\.projectPlan\(\{fallback:true\}\);else\{p\.projectPlan\(\);p\.renderSavedPlans\(\);\}/u,'Preferences failure must not force Plan fallback');
 assert.match(app,/if\(!appCanMutate\(\)\|\|!protectedPreferencesHydrated\)return false;/u,'portable Preferences writes must be blocked when canonical Preferences are not hydrated');
 
@@ -44,7 +44,10 @@ assert.match(startupHost,/markReady:async proof=>\{[\s\S]*proof\.canonical!==tru
 const plan=readScript('source/core/plan-host.ts');
 const importStart=plan.indexOf('async function importData('),importEnd=plan.indexOf('async function verify(',importStart);
 assert.ok(importStart>=0&&importEnd>importStart);
-const applyPreferences=plan.slice(importStart,importEnd);
+const projectionStart=plan.indexOf('function projectReplacement(');
+assert.ok(projectionStart>=0&&projectionStart<importStart);
+const applyPreferences=plan.slice(projectionStart,importEnd);
+assert.match(plan.slice(importStart,importEnd),/projectReplacement\(clean\.plans,portable\)/u,'ordinary import must use the checked projection owner');
 assert.match(applyPreferences,/preferences\.accept\(portable\)[\s\S]*?preferences\.applyRuntime\(portable\)/u);
 assert.doesNotMatch(applyPreferences,/keepScreenAwake|systemAlerts/u,'portable backup import must not touch destination device-local settings');
 

@@ -79,7 +79,7 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
         }
       },
       hydrate:async({sameTabReload,assertCurrent}:Readonly<{sameTabReload:boolean;assertCurrent:()=>void}>)=>{
-        assertCurrent();await input.hydration.hydratePlanData();assertCurrent();
+        assertCurrent();await input.hydration.hydratePlanData(assertCurrent);assertCurrent();
         input.hydration.hydratePlanRuntime();
         input.hydration.renderSavedPlans();
         const result=await input.hydration.hydratePrimary(freeze({sameTabReload:!!sameTabReload||input.reloadHint()}));
@@ -90,7 +90,7 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
       },
       finalizeHydration:async (assertCurrent:()=>void)=>{
         assertCurrent();await input.hydration.censusUnsupported();assertCurrent();
-        await input.hydration.hydrateSavedDrafts(freeze({forcePreferences:true,failClosed:true}));assertCurrent();
+        await input.hydration.hydrateSavedDrafts(freeze({forcePreferences:true,failClosed:true,assertOrigin:assertCurrent}));assertCurrent();
       },
       resume:input.hooks.resume,
       refreshCore:input.hooks.refreshCore,
@@ -245,10 +245,13 @@ function createStages(p:Readonly<StartupStagesInput>):StartupLifecycleInput['sta
  });
 }
 function createDraftHydration(p:Readonly<StartupDraftHydrationInput>){
- return async({forcePreferences=false,failClosed=false}:{forcePreferences?:boolean;failClosed?:boolean}={})=>{
+ return async({forcePreferences=false,failClosed=false,assertOrigin}:{forcePreferences?:boolean;failClosed?:boolean;assertOrigin?:()=>void}={})=>{
+  assertOrigin?.();
   let planError:unknown=null,preferencesError:unknown=null;
-  try{await p.hydratePlan();}catch(error){planError=error;p.capture('startup.plan-hydrate',error,'error');p.markStorageError('planDraft',error instanceof Error?error.message:'Saved Plan data could not be hydrated.');}
-  try{await p.hydratePreferences({force:forcePreferences});}catch(error){preferencesError=error;p.capture('startup.preferences-hydrate',error,'error');p.markStorageError('personalPreferences',error instanceof Error?error.message:'Personal settings could not be hydrated.');}
+  try{await p.hydratePlan(assertOrigin);}catch(error){assertOrigin?.();planError=error;p.capture('startup.plan-hydrate',error,'error');p.markStorageError('planDraft',error instanceof Error?error.message:'Saved Plan data could not be hydrated.');}
+  assertOrigin?.();
+  try{await p.hydratePreferences({force:forcePreferences,...(assertOrigin?{assertOrigin}:{})});}catch(error){assertOrigin?.();preferencesError=error;p.capture('startup.preferences-hydrate',error,'error');p.markStorageError('personalPreferences',error instanceof Error?error.message:'Personal settings could not be hydrated.');}
+  assertOrigin?.();
   if(planError)p.projectPlan({fallback:true});else{p.projectPlan();p.renderSavedPlans();}
   if(!preferencesError){const qi=p.document.querySelector<HTMLTextAreaElement|HTMLInputElement>('#quote-input'),q=p.quote()||'';if(qi&&q){qi.value=q;p.quoteChanged({markChanged:false});}}
   const failure=planError||preferencesError;if(failure&&failClosed)throw failure;return !failure;

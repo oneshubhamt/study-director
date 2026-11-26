@@ -60,7 +60,7 @@ export interface PlanDataController{
   readonly format:'study-director.plan-data';
   readonly contractVersion:1;
   readonly factory:Readonly<PlanDefaults>;
-  hydrate():Promise<boolean>;
+  hydrate(assertOrigin?:()=>void):Promise<boolean>;
   writeDraft(value:string|null,options?:Readonly<PlanDataWriteOptions>):Promise<boolean>;
   writeLibrary(value:PlanLibrary,options?:Readonly<PlanLibraryWriteOptions>):Promise<boolean>;
   rewriteAfterStorageReset(assertOrigin?:()=>void):Promise<boolean>;

@@ -68,13 +68,25 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
       scheduleText:defaultSchedule()??factory.scheduleText
     });
   }
-  async function hydrate(){
-    await chain.catch(()=>undefined);
-    state=clonePlans(codec.plans(await repositories.plans.read()));
-    draftKnown=libraryKnown=true;
-    failures.clear();
-    ready=true;
-    return true;
+  let hydrationGeneration=0;
+  async function hydrate(assertOrigin?:()=>void){
+    assertOrigin?.();
+    const generation=++hydrationGeneration;
+    const check=()=>{
+      assertOrigin?.();
+      if(generation!==hydrationGeneration)throw new Error('Plan hydration was superseded.');
+    };
+    for(;;){
+      const observed=chain;
+      await observed.catch(()=>undefined);check();
+      const loaded=clonePlans(codec.plans(await repositories.plans.read()));
+      check();
+      // A write admitted during the read may have changed the canonical bytes.
+      if(observed!==chain)continue;
+      state=loaded;draftKnown=libraryKnown=true;
+      failures.clear();ready=true;
+      return true;
+    }
   }
   function writeDraft(value:string|null,options:Readonly<PlanDataWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));

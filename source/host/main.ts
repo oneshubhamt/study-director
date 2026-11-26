@@ -763,7 +763,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Own
     failClosed:(message,kind)=>requireMutationCoordinator().failClosed(message,kind)
   }),
   hydration:Object.freeze<OwnershipControllerInput['hydration']>({
-    hydratePlanData:()=>PlanData.hydrate(),
+    hydratePlanData:assertOrigin=>PlanData.hydrate(assertOrigin),
     hydratePlanRuntime:()=>PlanRuntime.hydrate(),
     renderSavedPlans:()=>PlanRuntime.savedPlans.render(),
     hydratePrimary:options=>hydratePrimaryStateFromStorage(options),
@@ -1528,9 +1528,11 @@ function applyPortablePreferencesToRuntime(value:unknown=protectedPreferencesSta
   NoticeCoordinator.setSoundMode(clean.soundMode??(clean.nudge?.sound===false?'off':'full'));renderSoundSettings();
   return clean;
 }
-async function hydrateProtectedPreferences({force=false}:Readonly<{force?:boolean}>={}){
+async function hydrateProtectedPreferences({force=false,assertOrigin}:Readonly<{force?:boolean;assertOrigin?:()=>void}>={}){
+  assertOrigin?.();
   if(protectedPreferencesHydrated&&!force)return protectedPreferencesState;
   const saved=await AppData.personalPreferences.read();
+  assertOrigin?.();
   protectedPreferencesDirty=false;protectedPreferencesWriteFailure=null;
   const accepted=acceptProtectedPreferences(saved||{version:2,studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,updatedAt:null});
   refreshAppearanceMirrors(accepted);applyPortablePreferencesToRuntime(accepted);
@@ -1606,7 +1608,7 @@ function saveQuoteDraft(){
   if(!appCanMutate())return;
   try{const el=document.getElementById('quote-input');if(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement){const value=clampText(el.value,APP_LIMITS.maxQuoteChars);if(el.value!==value)el.value=value;persistProtectedPreferences({quote:value});}}catch(e){}
 }
-const StartupDraftHydration=StartupHostModule.createDraftHydration({document,hydratePlan:()=>PlanData.hydrate(),hydratePreferences:options=>hydrateProtectedPreferences(options),
+const StartupDraftHydration=StartupHostModule.createDraftHydration({document,hydratePlan:assertOrigin=>PlanData.hydrate(assertOrigin),hydratePreferences:options=>hydrateProtectedPreferences(options),
  capture:AppDiagnostics.capture,markStorageError:markStorageHealthError,projectPlan:options=>PlanRuntime.hydrate(options),renderSavedPlans:()=>PlanRuntime.savedPlans.render(),quote:()=>protectedPreferencesState.quote||'',quoteChanged:options=>onQuoteChange(options)});
 async function hydrateSavedDrafts(options:Parameters<typeof StartupDraftHydration>[0]={}){return StartupDraftHydration(options);}
 type UserDefaultOverrides=Partial<Pick<PersonalPreferences,'studentName'|'practiceTargetMs'|'practiceCueMode'>>;

@@ -122,3 +122,26 @@ for(const late of ['pending','failure','clear']){
   assert.deepEqual(h.tab.status(),successor);assert.deepEqual(h.events,events);assert.deepEqual(h.faults,[]);
 }
 console.log('PASS: actual ownership/StartupHost — pending and unreadable journals deny takeover and hydration tokens, normal admission works, stale claim results cannot affect successors');
+
+ // Test the actual final hydration owner as well as the ownership wrapper.
+for(const stage of ['plan','preferences']){
+  for(const outcome of ['success','failure']){
+    const gate=deferred(),entered=deferred(),events=[];let valid=true;
+    const assertOrigin=()=>{if(!valid)throw Error('retired hydration');};
+    const wait=async check=>{assert.equal(check,assertOrigin);entered.resolve();return gate.promise;};
+    const hydrate=StartupHost.createDraftHydration({
+      document:{querySelector:()=>null},
+      hydratePlan:check=>stage==='plan'?wait(check):Promise.resolve(),
+      hydratePreferences:options=>stage==='preferences'?wait(options.assertOrigin):Promise.resolve(),
+      capture:()=>events.push('capture'),markStorageError:()=>events.push('error'),
+      projectPlan:()=>events.push('project'),renderSavedPlans:()=>events.push('render'),
+      quote:()=>'',quoteChanged:()=>events.push('quote')
+    });
+    const pending=hydrate({forcePreferences:true,failClosed:true,assertOrigin}),rejected=assert.rejects(pending,/retired hydration/u);
+    await entered.promise;valid=false;
+    if(outcome==='failure')gate.reject(Error('late read failure'));else gate.resolve();
+    await rejected;
+    assert.deepEqual(events,[],'retired hydration cannot project or publish storage errors');
+  }
+}
+console.log('PASS: final hydration forwards and enforces the originating ownership guard on both read outcomes');
