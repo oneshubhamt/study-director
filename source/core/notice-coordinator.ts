@@ -468,7 +468,7 @@ const createModule=()=>{
       const handle=begin({...raw,source,id,occurrence,kind:'os',surface:'quiet',foreground:false,announce:false});
       const isCurrent=()=>!!(handle.read()?.lifecycle==='running'&&now()-createdAt<30000&&(!delivery||deliveryContext().owner&&(raw.test||!deliveryContext().foreground)));
       try{
-        if(!isCurrent())return false;
+        if(!isCurrent()){handle.update({lifecycle:'cancelled',outcome:'expired-or-inactive'});return false;}
         const delivered=await deliver(isCurrent);
         if(!isCurrent()){handle.update({lifecycle:'cancelled',outcome:'expired-or-inactive'});return false;}
         handle.update({lifecycle:delivered?'succeeded':'cancelled',outcome:delivered?'delivered':'not-delivered'});

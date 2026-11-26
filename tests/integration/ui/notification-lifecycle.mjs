@@ -456,6 +456,15 @@ function createBackupControls({
   assert.equal(oldCurrent(),false);finish(true);assert.equal(await old,false);assert.equal(next.read().lifecycle,'running');
   n.clear();
 }
+// A subscriber can make a newly published OS event ineligible before delivery.
+// Settle its own still-current handle rather than leaving running work behind.
+{
+  const {notices:n}=coordinator();let foreground=false,called=0;
+  n.configureDelivery({context:()=>({owner:true,foreground}),audio:{stop(){},status:()=> 'ready',play:async()=>true}});
+  n.subscribe(state=>{if(state.events.some(row=>row.id==='inactive'))foreground=true;});
+  assert.equal(await n.deliverSystem({source:'system',id:'inactive'},()=>{called++;return true;}),false);
+  assert.equal(called,0);assert.equal(n.readEvent('system','inactive').lifecycle,'cancelled');n.clear();
+}
 // Exercise the actual native-alert owner with deferred browser permission and
 // registration; the current owner boolean alone must never renew an old intent.
 {
