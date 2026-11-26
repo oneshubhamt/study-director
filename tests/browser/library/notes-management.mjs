@@ -50,6 +50,30 @@ try{
     });
   })()`);
 
+  async function typeNewNote(name,option,key,content){
+    await page.evaluate(`__interactionQA.create(${JSON.stringify(name)},${JSON.stringify(option)})`);
+    const expected=JSON.stringify(key);
+    await waitFor(()=>page.evaluate(`(()=>{const f=document.querySelector('#library-notes-editor .library-notes-textarea'),r=__PWA6.RichTextRuntime.status(),editor=document.querySelector('#library-notes-editor .sd-rte-editor');return document.querySelector('.library-note-nav-item.active')?.dataset.noteKey===${expected}&&f?.dataset.areaKey===${expected}&&f.dataset.noteBindingState==='current'&&r.activeDocumentIds.includes('area:'+${expected})&&!!editor?.checkVisibility()})()`),{label:'real editor mounted for '+key});
+    await page.evaluate(`document.querySelector('#library-notes-editor .sd-rte-editor').focus()`);
+    await page.send('Input.insertText',{text:content});
+    const written=await page.evaluate(`(async()=>{
+      const d=__PWA6,key=${expected},plain=value=>StudyDirectorRichText.toPlainText(String(value||''));
+      d.RichTextRuntime.flushEditors();
+      const f=document.querySelector('#library-notes-editor .library-notes-textarea'),note=d.AppData.notes.get(key);
+      if(!note)return {present:false,binding:f?.dataset.areaKey||'',bindingState:f?.dataset.noteBindingState||'',editor:document.querySelector('#library-notes-editor .sd-rte-editor')?.textContent||'',owner:d.AppOwnership.status().state,lifecycle:d.SessionLifecycle.status(),runtime:d.RichTextRuntime.status(),keys:Object.values(d.AppData.notes.exportPayload()).map(row=>row.label)};
+      await d.AppData.notes.flush({strict:true});
+      const payload=Object.values(d.AppData.notes.exportPayload()).find(row=>row.label===note.label);
+      const fresh=payload?(await d.AppData.notes.readFreshItems([payload.key]))[0]:null;
+      return {present:true,text:plain(note.text),canonical:note.text,exported:payload?.text||'',stored:fresh?.text||'',id:note.id,revision:note.updatedAt,storedRevision:fresh?.updatedAt||''};
+    })()`);
+    assert.equal(written.present,true,'first edit must create '+key+': '+JSON.stringify(written));
+    assert.equal(written.text,content,'first edit must belong to '+key);
+    assert.ok(written.id&&written.revision,'saved note must have a permanent identity and revision');
+    assert.equal(written.exported,written.canonical,'export must preserve the accepted canonical note');
+    assert.equal(written.stored,written.canonical,'strict save must be confirmed in IndexedDB');
+    assert.equal(written.storedRevision,written.revision,'read-back must confirm the exact edit revision');
+  }
+
   const prepared=await page.evaluate(`(async()=>{
     const d=__PWA6,now=new Date(),base=now.getHours()*60+now.getMinutes()-1;
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
@@ -139,15 +163,15 @@ try{
   result.checks.blankManualAreaIsTemporaryAndDiscarded=true;
   console.error('[qa-notes] temporary blank passed');
 
+  await typeNewNote('Standalone Only','top','standalone only','Standalone Area knowledge');
+  await page.evaluate(`__PWA6.LibraryView.showSection('days');__PWA6.LibraryView.showSection('notes');`);
+  await waitFor(()=>page.evaluate(`document.querySelector('[data-note-key="standalone only"]')?.classList.contains('has-note')`),{label:'stored standalone note reopens'});
+  await page.evaluate(`document.querySelector('[data-note-key="standalone only"]').click()`);
+  await typeNewNote('Nested Topic','nested','standalone only > nested topic','Nested knowledge');
+  await page.evaluate(`__PWA6.LibraryView.showSection('days');__PWA6.LibraryView.showSection('notes');`);
+  await waitFor(()=>page.evaluate(`document.querySelector('[data-note-key="standalone only > nested topic"]')?.classList.contains('has-note')`),{label:'stored nested note reopens'});
   const created=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-    await __interactionQA.create('Standalone Only','top');await wait(25);
-    let field=document.querySelector('.library-notes-textarea');field.value='Standalone Area knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
-    __PWA6.LibraryView.showSection('days');await wait(25);__PWA6.LibraryView.showSection('notes');await wait(50);
-    [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='standalone only').click();await wait(25);
-    await __interactionQA.create('Nested Topic','nested');await wait(25);
-    field=document.querySelector('.library-notes-textarea');field.value='Nested knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
-    __PWA6.LibraryView.showSection('days');await wait(25);__PWA6.LibraryView.showSection('notes');await wait(60);
     const rows=[...document.querySelectorAll('[data-note-key]')],keys=rows.map(item=>item.dataset.noteKey);
     const beforeCount=keys.filter(key=>key==='standalone only').length;
     [...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='standalone only').click();await wait(20);
@@ -156,13 +180,14 @@ try{
       keys,adjacent:keys.indexOf('standalone only > nested topic')===keys.indexOf('standalone only')+1,
       beforeCount,afterCount:[...document.querySelectorAll('[data-note-key="standalone only"]')].length,
       selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',
-      payload:Object.fromEntries(Object.values(d.AppData.notes.exportPayload()).map(note=>[note.label.toLowerCase(),note]))
+      payload:Object.fromEntries(Object.values(d.AppData.notes.exportPayload()).map(note=>[note.label.toLowerCase(),{...note,text:StudyDirectorRichText.toPlainText(note.text)}]))
     };
   })()`);
   assert.equal(created.adjacent,true);
   assert.equal(created.beforeCount,1);assert.equal(created.afterCount,1);assert.equal(created.selected,'standalone only');
-  assert.equal(created.payload['standalone only'].text,'Standalone Area knowledge');
-  assert.equal(created.payload['standalone only > nested topic'].text,'Nested knowledge');
+  assert.equal(created.payload['standalone only']?.text,'Standalone Area knowledge',JSON.stringify(created.payload));
+  assert.equal(created.payload['standalone only > nested topic']?.text,'Nested knowledge',JSON.stringify(created.payload));
+  result.checks.nativeFirstEditDurableReadbackAndExport=true;
   result.checks.standaloneNestedAndDuplicateNormalizedCreation=true;
   console.error('[qa-notes] standalone and nested creation passed');
 
@@ -171,10 +196,10 @@ try{
     const start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
     d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Manual Area Task | work | Standalone Only | pages | 10';
     const applying=d.applySchedule({skipNotify:true});if(applying&&typeof applying.then==='function')await __interactionQA.accept();const applied=await applying;d.goTab('execute');d.refreshPnote({force:true});await wait(50);
-    const timer={value:document.getElementById('pn-extra').value,key:document.getElementById('pn-extra').dataset.areaKey};
+    const timer={value:StudyDirectorRichText.toPlainText(document.getElementById('pn-extra').value),key:document.getElementById('pn-extra').dataset.areaKey};
     d.goTab('review');d.ReviewView.refresh({force:true});await wait(70);
     const reviewField=[...document.querySelectorAll('#review-list .task-note-field')].find(field=>field.dataset.areaKey==='standalone only');
-    const review={value:reviewField?.value||'',key:reviewField?.dataset.areaKey||''};
+    const review={value:StudyDirectorRichText.toPlainText(reviewField?.value||''),key:reviewField?.dataset.areaKey||''};
     d.goTab('library');__PWA6.LibraryView.showSection('notes');await wait(60);
     return {applied,timer,review};
   })()`);
@@ -197,7 +222,7 @@ try{
   const deletedParent=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const parent=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='standalone only');parent.click();await wait(25);
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={noteMenu:!!document.getElementById('library-note-actions'),child:d.AppData.notes.get('standalone only > nested topic')?.text||''};
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={noteMenu:!!document.getElementById('library-note-actions'),child:StudyDirectorRichText.toPlainText(d.AppData.notes.get('standalone only > nested topic')?.text||'')};
     await __interactionQA.noteAction('library-note-delete');const confirmation=document.getElementById('sd-interaction-dialog')?.open===true;
     await new Promise((resolve,reject)=>{const started=Date.now(),poll=()=>{if(/Moved/.test(document.getElementById('notes-status').textContent))resolve();else if(Date.now()-started>5000)reject(new Error('delete timeout'));else setTimeout(poll,40);};poll();});
     await wait(100);
@@ -205,7 +230,7 @@ try{
     return {
       before,confirmation,status:document.getElementById('notes-status').textContent,
       parentPresent:!!parentAfter,parentClass:parentAfter?.className||'',
-      child:d.AppData.notes.get('standalone only > nested topic')?.text||'',
+      child:StudyDirectorRichText.toPlainText(d.AppData.notes.get('standalone only > nested topic')?.text||''),
       zeta:d.AppData.notes.get('zeta filled')?.text||''
     };
   })()`);
@@ -228,13 +253,13 @@ try{
     const preview={title:document.querySelector('.library-notes-editor-title').textContent,text:document.querySelector('#library-notes-editor .library-note-read').textContent,editable:!!document.querySelector('#library-notes-editor textarea')};
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Restore').click();
     await until(()=>/Restored/.test(document.getElementById('notes-status').textContent));
-    const restored={text:d.AppData.notes.get('standalone only')?.text||'',status:document.getElementById('notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',sectionHidden:section.hidden};
+    const restored={text:StudyDirectorRichText.toPlainText(d.AppData.notes.get('standalone only')?.text||''),status:document.getElementById('notes-status').textContent,selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',sectionHidden:section.hidden};
     await __interactionQA.noteAction('library-note-delete');await until(()=>/Moved/.test(document.getElementById('notes-status').textContent));
     if(toggle.getAttribute('aria-expanded')!=='true')toggle.click();await until(()=>document.querySelector('[data-trash-key]'));
     document.querySelector('[data-trash-key]').click();await until(()=>[...document.querySelectorAll('#library-notes-editor button')].some(button=>button.textContent==='Delete forever'));
     [...document.querySelectorAll('#library-notes-editor button')].find(button=>button.textContent==='Delete forever').click();
     const confirmation=await __interactionQA.accept();await until(()=>section.hidden);
-    return {shown,listed,preview,restored,confirmation,forever:{sectionHidden:section.hidden,trashLeft:d.AppData.notes.trashSnapshot().length,child:d.AppData.notes.get('standalone only > nested topic')?.text||''}};
+    return {shown,listed,preview,restored,confirmation,forever:{sectionHidden:section.hidden,trashLeft:d.AppData.notes.trashSnapshot().length,child:StudyDirectorRichText.toPlainText(d.AppData.notes.get('standalone only > nested topic')?.text||'')}};
   })()`);
   assert.deepEqual(trash.shown,{hidden:false,label:'Recently deleted (1)'});
   assert.deepEqual(trash.listed,{name:'Standalone Only',when:'Deleted today',beforeList:'library-notes-trash-list'},'deleted notes are listed above the toggle, opening upward');
@@ -247,10 +272,9 @@ try{
   // The title renames in place (Escape keeps the name); Move… takes a full
   // name, and a name that already holds a note merges only after the person
   // agrees. The breadcrumb opens the parent; parent notes start collapsed.
+  await typeNewNote('Rename Me','top','rename me','Moved knowledge');
   const renamed=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),until=async test=>{for(let i=0;i<150&&!test();i++)await wait(20);return test();};
-    await __interactionQA.create('Rename Me','top');await wait(25);
-    const field=document.querySelector('.library-notes-textarea');field.value='Moved knowledge';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();await wait(40);
     d.LibraryView.refreshNotes();await wait(40);
     const status=()=>document.getElementById('notes-status').textContent,title=()=>document.querySelector('#library-notes-editor .library-notes-editor-title');
     const key=(target,name)=>target.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));
@@ -263,7 +287,7 @@ try{
     const afterRename={keptId:!!startId&&d.AppData.notes.get('renamed note')?.id===startId,keys:titles().filter(name=>/rename/.test(name)),selected:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',title:title()?.textContent||'',status:status()};
     const moved=await __interactionQA.move('Standalone Only > Nested Topic');const confirmation=await __interactionQA.accept();
     await until(()=>/Merged into/.test(status()));
-    const merged=d.AppData.notes.get('standalone only > nested topic')?.text||'';
+    const merged=StudyDirectorRichText.toPlainText(d.AppData.notes.get('standalone only > nested topic')?.text||'');
     d.AppData.notes.update('standalone only','Standalone Only','Parent context',d.AppData.notes.get('standalone only')?.updatedAt||'');await d.AppData.notes.flush();
     d.LibraryView.openNote('standalone only > nested topic');await wait(60);
     const crumbs=[...document.querySelectorAll('#library-notes-editor .library-notes-crumb')].map(crumb=>crumb.textContent);

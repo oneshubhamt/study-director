@@ -14,7 +14,7 @@ class FakeElement {
 }
 class FakeField extends FakeElement {
   constructor(){super();this.value='Original A';this.dataset.areaKey='a';this.errors=[];}
-  matches(){return true;}
+  matches(selector){return selector.includes('.task-note-field');}
   insertAdjacentElement(_position,node){this.errors.push(node);}
 }
 const context={HTMLTextAreaElement:FakeField,HTMLElement:FakeElement,console};
@@ -22,18 +22,18 @@ context.globalThis=context;vm.createContext(context);
 for(const file of ['source/core/internal.ts','source/core/rich-text-host.ts'])vm.runInContext(readRuntimeSource(file),context,{filename:file});
 const module=context[Symbol.for('studyDirector.internalModules.v1')].require('rich-text-host',1);
 function fixture(){
-  const field=new FakeField(),rejectors=[],diagnostics=[],mountCalls=[];
+  const field=new FakeField(),rejectors=[],resolvers=[],diagnostics=[],mountCalls=[];let releases=0;
   let descriptor={documentId:'area:a',label:'A',initialValue:'Original A',maxWords:100};
   const runtime=module.createRuntime({
     configuration:{maxRichTextBytes:1000},
     document:{createElement:()=>new FakeElement()},window:{},
-    richText:{mountRichTextEditor:options=>{mountCalls.push(options);throw new Error('Unexpected mount after failed lease');}},
-    assets:{retain:()=>new Promise((_resolve,reject)=>rejectors.push(reject))},
-    attachments:{},notes:{},review:{},session:{},activation:{},
-    view:{documentFor:()=>descriptor,plain:value=>String(value)},
+    richText:{storagePrefix:'WG1:',isRichTextValue:value=>String(value).startsWith('WG1:'),mountRichTextEditor:async options=>{mountCalls.push(options);return {focus(){},flush(){},destroy:async()=>{}};}},
+    assets:{retain:()=>new Promise((resolve,reject)=>{resolvers.push(()=>resolve(()=>{releases++;}));rejectors.push(reject);})},
+    attachments:{port:()=>({})},notes:{normalizeArea:value=>String(value||''),links:()=>({})},review:{},session:{},activation:{},
+    view:{documentFor:()=>descriptor,plain:value=>String(value),applyOwnership(){}},
     diagnostics:{capture:(scope,error)=>diagnostics.push({scope,error})}
   });
-  return {field,runtime,rejectors,diagnostics,mountCalls,change(id,value){descriptor={...descriptor,documentId:id,initialValue:value};field.dataset.areaKey=id.slice(5);field.value=value;}};
+  return {field,runtime,rejectors,resolvers,diagnostics,mountCalls,get releases(){return releases;},change(id,value){descriptor={...descriptor,documentId:id,initialValue:value};field.dataset.areaKey=id.slice(5);field.value=value;},retire(){descriptor=null;}};
 }
 {
   const f=fixture(),old=f.runtime.activate(f.field);
@@ -81,4 +81,39 @@ function fixture(){
   assert.equal(f.field.errors.length,0);
   assert.equal(f.runtime.status().pending,false);
 }
-console.log(JSON.stringify({status:'PASS',suite:'rich-text-editor-mount-lifetime',retiredFailure:true,newerRequest:true,currentCanonicalFallback:true,detachedFailure:true}));
+// A successful delayed lease also needs fresh document authority and canonical content.
+{
+  const f=fixture(),operation=f.runtime.activate(f.field);
+  f.change('area:a','Newer canonical A');
+  f.resolvers[0]();
+  assert.equal(await operation,true);
+  assert.equal(f.mountCalls.length,1);
+  assert.equal(f.mountCalls[0].initialValue,'Newer canonical A','lease completion must not mount the old snapshot');
+}
+{
+  const f=fixture(),operation=f.runtime.activate(f.field);
+  f.change('area:b','New B');
+  f.resolvers[0]();
+  assert.equal(await operation,false);
+  assert.equal(f.mountCalls.length,0,'a replaced binding cannot mount its old editor');
+  assert.equal(f.field.value,'New B');
+  assert.equal(f.releases,1);
+  assert.equal(f.runtime.status().pending,false);
+}
+{
+  const f=fixture(),operation=f.runtime.activate(f.field);
+  f.retire();f.resolvers[0]();
+  assert.equal(await operation,false,'lost write authority prevents mounting');
+  assert.equal(f.mountCalls.length,0);
+  assert.equal(f.releases,1);
+  assert.equal(f.runtime.status().pending,false);
+}
+{
+  const f=fixture(),operation=f.runtime.activate(f.field);
+  f.field.isConnected=false;f.resolvers[0]();
+  assert.equal(await operation,false);
+  assert.equal(f.mountCalls.length,0);
+  assert.equal(f.releases,1);
+  assert.equal(f.runtime.status().pending,false,'detached successful lease cannot leave a pending mount');
+}
+console.log(JSON.stringify({status:'PASS',suite:'rich-text-editor-mount-lifetime',retiredFailure:true,newerRequest:true,currentCanonicalFallback:true,detachedFailure:true,currentLeaseCanonical:true,reboundLease:true,lostAuthorityLease:true,detachedLease:true}));
