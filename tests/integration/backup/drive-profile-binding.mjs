@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {createDriveHarness,QA_PROFILE_ID} from '../../helpers/drive-harness.mjs';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
+import vm from 'node:vm';
 
 // A Drive library belongs to one profile (5.3). Once per sign-in the app is
 // told the account and what the folder holds and settles it: its own folder
@@ -221,6 +223,41 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   const current=state.libraryControl.captureDeletion(target);
   assert.equal(await current(()=>{}),true);assert.equal(state.deletionMarkers.length,1);assert.equal(state.trashedFolders.has(folder),true);
   cases.push('destructive consent pins authorization, account and library before marker or Trash');
+}
+
+
+{
+  const vmContext=vm.createContext({console,Error,TypeError,Object,Array,String,Number,Map,Set,JSON,Date,Math,Symbol,Promise,RegExp});
+  vmContext.globalThis=vmContext;
+  for(const path of ['source/core/internal.ts','source/core/profiles.ts','source/core/profiles-host.ts'])vm.runInContext(readRuntimeSource(path),vmContext,{filename:path});
+  const registry=vmContext[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
+  let text=null,writes=0,clearCount=0,joined=0,questions=0,release,enteredResolve,nonce=0;
+  const profiles=registry.require('profiles',1).createController(freeze({ports:freeze({
+    scope:freeze({pattern:/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u,registryKey:'profiles',scope:'',separator:'~'}),
+    storage:freeze({keys:()=>[],read:()=>text,write:value=>{text=value;writes++;return true;},remove:()=>true}),
+    names:freeze({database:'db',directories:freeze([]),keys:freeze([])}),
+    platform:freeze({deleteDatabase:async()=>true,removeDirectory:async()=>true,listen:()=>()=>{},now:()=>Date.now(),random:()=>String(++nonce).padStart(8,'0'),reload:()=>{}}),
+    limits:freeze({maxName:60})
+  })}));
+  const initial=profiles.ensure('QA');profiles.setAccount({email:'old@example.com',folder:'old-folder'});
+  const binding=registry.require('profiles-host',1).createDriveBinding(freeze({
+    profiles,captureOrigin:()=>()=>{},appCanMutate:()=>true,
+    interactions:freeze({confirm:()=>{questions++;const pending=new Promise(r=>release=r);enteredResolve();return pending;},notify:()=>{}}),
+    clearBaseline:async assert=>{assert();clearCount++;return true;},
+    renderProfile:()=>{},endConnectCard:()=>{},firstStartJoined:()=>{joined++;},capture:()=>{},storageHealthTime:()=>'',now:()=>Date.now()
+  }));
+  const {state,provider}=createDriveHarness({profileId:()=>profiles.current().id,bind:binding.bind});
+  state.folders.push('folder-bound');state.folderProperties.set('folder-bound',{[MARKER]:OTHER});
+  const before=writes;let entered=new Promise(r=>enteredResolve=r);
+  await provider.prepare();binding.markRequested();await provider.authorize();
+  const old=provider.repository.list({kind:'object'});const rejected=assert.rejects(old,/authorization changed|cancelled|stopped/u);
+  await entered;await provider.disconnect();await provider.authorize();release(true);await rejected;
+  assert.equal(profiles.current().id,initial.id);assert.equal(writes,before);assert.equal(clearCount,0);assert.equal(joined,0);
+  binding.markRequested();entered=new Promise(r=>enteredResolve=r);
+  const current=provider.repository.list({kind:'object'});await entered;release(true);await current;
+  assert.equal(questions,2);assert.equal(writes,before+1);assert.equal(clearCount,1);assert.equal(joined,1);
+  assert.deepEqual([profiles.current().id,profiles.current().email,profiles.current().folder],[OTHER,'qa@example.com','folder-bound']);
+  cases.push('real provider, host binding and profile registry preserve origin through consent and commit');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'drive-profile-binding',cases},null,2));

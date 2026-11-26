@@ -244,6 +244,24 @@ for(const kind of ['list','download','disconnect','refused binding']){
   folderVerificationMeasurement={directChecks,scopedChecks,contradictionChecks:folderVerificationCount()-beforeContradiction};
 }
 
+
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  const old=provider.repository.beginOperation();await old.list({kind:'object'});
+  const original=state.folders[0];state.folderShared=true;
+  await assert.rejects(provider.repository.list({kind:'object'}),/no longer private and owned/u);
+  state.folderShared=false;state.trashedFolders.add(original);
+  const before=state.requests.length;
+  await assert.rejects(old.list({kind:'object'}),/repository changed/u);
+  assert.equal(state.requests.slice(before).some(row=>row.method==='POST'||row.method==='PATCH'),false,'a stale scope may not create or bind a successor repository');
+  await provider.repository.list({kind:'object'});
+  const replacement=state.folders.find(id=>!state.trashedFolders.has(id));assert.notEqual(replacement,original);
+  const after=state.requests.length;
+  await assert.rejects(old.list({kind:'object'}),/repository changed/u);
+  assert.equal(state.requests.length,after,'a rejected operation retains its original receipt, even after an independent root recovers');
+  assert.equal(await provider.repository.beginOperation().scope(),'drive-repository:1:1:'+replacement);
+}
+
 {
   const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();
   await provider.repository.list({kind:'object'});assert.deepEqual(state.folders,['folder-1']);

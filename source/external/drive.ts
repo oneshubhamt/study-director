@@ -19,8 +19,8 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
   type ProfileSnapshot=Readonly<{id:string;generation:number}>;
   type FolderReceipt=Readonly<{id:string;epoch:number;profile:ProfileSnapshot}>;
   type FolderState={readonly authorization:number;profile:ProfileSnapshot;receipt:FolderReceipt|null};
-  type DriveOperation=Readonly<{signal:AbortSignal|null;checkProtection:DriveCheck|null;checkSource:DriveCheck|null;folderState:FolderState|null}>;
-  type DriveOperationOptions={signal?:AbortSignal|null|undefined;checkProtection?:DriveCheck|null|undefined;checkSource?:DriveCheck|null|undefined;folderState?:FolderState|null|undefined};
+  type DriveOperation=Readonly<{signal:AbortSignal|null;checkProtection:DriveCheck|null;checkSource:DriveCheck|null;assertOrigin:(()=>void)|null;folderState:FolderState|null}>;
+  type DriveOperationOptions={signal?:AbortSignal|null|undefined;checkProtection?:DriveCheck|null|undefined;checkSource?:DriveCheck|null|undefined;assertOrigin?:(()=>void)|null;folderState?:FolderState|null|undefined};
   type DriveCapabilities={canAddChildren?:boolean;canDownload?:boolean};
   type DriveFile={id:string;name:string;size:string;version:string;modifiedTime:string;createdTime:string;mimeType:string;parents:readonly string[];ownedByMe?:boolean;shared?:boolean;trashed?:boolean;sha256Checksum:string;appProperties:Readonly<Record<string,string>>;capabilities:DriveCapabilities};
   type DrivePayload=DriveFile&{files?:readonly DriveFile[];nextPageToken?:string;incompleteSearch?:boolean;error?:{message?:string;errors?:readonly {reason?:string}[]};user?:{emailAddress?:string};successful?:boolean};
@@ -28,7 +28,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
   type GoogleTokenClient={requestAccessToken(options:{include_granted_scopes:boolean;prompt:string}):void};
   type GoogleOAuth2={initTokenClient(config:{client_id:string;scope:string;include_granted_scopes:boolean;prompt:string;callback:(response:unknown)=>void;error_callback:(detail:unknown)=>void}):unknown;hasGrantedAllScopes(response:unknown,...scopes:string[]):boolean;revoke(token:string,callback:(response:unknown)=>void):void};
   type PendingAuthorization={promise:Promise<string>;resolve:(value:string)=>void;reject:(error:unknown)=>void;timer:ReturnType<typeof setTimeout>|null;profile:ProfileSnapshot};
-  type FolderFlight={controller:AbortController;promise:Promise<string>;waiters:number;settled:boolean;profile:ProfileSnapshot};
+  type FolderFlight={controller:AbortController;promise:Promise<FolderReceipt>;waiters:number;settled:boolean;profile:ProfileSnapshot};
   type UploadSession={parent:string;digest:string;size:number;url:string;offset:number;busy:boolean};
   type DriveProfilePort=Pick<BackupProfilePublic,'id'|'name'|'bind'>&Partial<Pick<BackupProfilePublic,'deleted'|'controls'>>;
   type RepositoryPolicy=Readonly<Record<string,unknown>>;
@@ -188,12 +188,13 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
   const repositoryUploads=new Map<string,UploadSession>(),uploadsInFlight=new Set<string>(),MAX_RETAINED_UPLOADS=16;
   let releaseFile:(file:Blob)=>unknown|PromiseLike<unknown>=async()=>{},receiveBackupStream:ReceiveStream|null=null;
 
-  const EMPTY_DRIVE_OPERATION:DriveOperation=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:null});
-  function driveOperationContext({signal=null,checkProtection=null,checkSource=null,folderState=null}:DriveOperationOptions={}):DriveOperation{
+  const EMPTY_DRIVE_OPERATION:DriveOperation=Object.freeze({signal:null,checkProtection:null,checkSource:null,assertOrigin:null,folderState:null});
+  function driveOperationContext({signal=null,checkProtection=null,checkSource=null,assertOrigin=null,folderState=null}:DriveOperationOptions={}):DriveOperation{
     return Object.freeze({
       signal:signal&&typeof signal.addEventListener==='function'?signal:null,
       checkProtection:typeof checkProtection==='function'?checkProtection:null,
       checkSource:typeof checkSource==='function'?checkSource:null,
+      assertOrigin:typeof assertOrigin==='function'?assertOrigin:null,
       folderState:folderState&&typeof folderState==='object'?folderState:{authorization:authorizationGeneration,profile:profileSnapshot(),receipt:null}
     });
   }
@@ -203,37 +204,39 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
       signal:signal&&typeof signal.addEventListener==='function'?signal:parent.signal,
       checkProtection:typeof checkProtection==='function'?checkProtection:parent.checkProtection,
       checkSource:typeof checkSource==='function'?checkSource:parent.checkSource,
+      assertOrigin:parent.assertOrigin,
       folderState:parent.folderState
     });
   }
   function invalidateFolderIdentity():void{folderId='';boundFolder='';seenFolder=null;deletionChecked='';folderEpoch+=1;}
-  function verifiedFolderReceipt(context:DriveOperation=EMPTY_DRIVE_OPERATION):string{
-    const state=context&&context.folderState,receipt=state&&state.receipt;
-    if(!receipt)return '';
-    if(!folderId||receipt.id!==folderId||receipt.epoch!==folderEpoch){state.receipt=null;return '';}
+  function folderReceipt(id:string,profile:ProfileSnapshot):FolderReceipt{
+    return Object.freeze({id,epoch:folderEpoch,profile});
+  }
+  function folderReceiptCurrent(receipt:FolderReceipt):boolean{
+    return !!folderId&&receipt.id===folderId&&receipt.epoch===folderEpoch;
+  }
+  function assertFolderReceipt(receipt:FolderReceipt):void{
+    assertProfileCurrent(receipt.profile);
+    if(!folderReceiptCurrent(receipt)||boundFolder!==receipt.id+'\n'+receipt.profile.id)throw noRetry(new Error('The Google Drive repository changed during the operation.'));
+  }
+  function rememberVerifiedFolder(context:DriveOperation,receipt:FolderReceipt):string{
+    assertDriveIdentity(context);
+    assertFolderReceipt(receipt);
+    const state=context.folderState;if(state){state.profile=receipt.profile;state.receipt=receipt;}
     return receipt.id;
   }
-  function rememberVerifiedFolder(context:DriveOperation,id:string):string{
-    const value=String(id||''),state=context&&context.folderState;if(!value||!state)return value;
-    state.profile=profileSnapshot();
-    state.receipt=Object.freeze({id:value,epoch:folderEpoch,profile:state.profile});return value;
+  function assertDriveIdentity(operation:DriveOperation):void{
+    if(operation.signal?.aborted)throw noRetry(driveAbortError(operation.signal));
+    operation.assertOrigin?.();
+    const state=operation.folderState;
+    if(state&&state.authorization!==authorizationGeneration)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
+    if(state?.receipt)assertFolderReceipt(state.receipt);
   }
-  async function assertDriveOperationCurrent(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<void>{
-    const operation=context||EMPTY_DRIVE_OPERATION;
-    if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
-    const state=operation.folderState,receipt=state?.receipt;
-    const verifyIdentity=()=>{
-      if(state&&state.authorization!==authorizationGeneration)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
-      if(receipt){
-        assertProfileCurrent(receipt.profile);
-        if(receipt.epoch!==folderEpoch||receipt.id!==folderId)throw noRetry(new Error('The Google Drive repository changed during the operation.'));
-      }
-    };
-    verifyIdentity();
+  async function assertDriveOperationCurrent(operation:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<void>{
+    assertDriveIdentity(operation);
     await operation.checkProtection?.();
     await operation.checkSource?.();
-    verifyIdentity();
-    if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
+    assertDriveIdentity(operation);
   }
 
   function requirePlatform():void{
@@ -399,7 +402,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     let timer:ReturnType<typeof setTimeout>|null=null;const disarm=()=>{if(timer!==null){clearTimeout(timer);timer=null;}},renew=()=>{disarm();timer=setTimeout(()=>{timer=null;controller.abort();},Math.max(1000,Number(timeoutMs)||API_TIMEOUT_MS));};
     let bodyAbort:(()=>void)|null=null;
     try{
-      await assertDriveOperationCurrent(operation);renew();
+      await assertDriveOperationCurrent(operation);assertDriveIdentity(operation);renew();
       const progressUpload=!!Platform.XMLHttpRequest&&options.body instanceof Platform.Blob&&new Platform.URL(url).pathname==='/upload/drive/v3/files';
       const response=await (progressUpload?uploadWithProgress(url,options,controller.signal,renew):Platform.fetch!(url,{...options,signal:controller.signal,credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer'}));
       const media=response.ok&&new Platform.URL(url).searchParams.get('alt')==='media';
@@ -413,7 +416,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
         responsePayloads.set(response,payload);
       }else if(!media){void response.body?.cancel().catch(()=>{});}
       if(controller.signal.aborted)throw controller.signal.reason;
-      disarm();await assertDriveOperationCurrent(operation);
+      disarm();await assertDriveOperationCurrent(operation);assertDriveIdentity(operation);
       return response;
     }catch(error){
       if(externalSignal&&externalSignal.aborted)throw noRetry(driveAbortError(externalSignal));
@@ -429,7 +432,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     const headers=new Platform.Headers(options.headers||{});
     headers.set('Authorization',`Bearer ${token}`);
     const response=await fetchWithTimeout(safeUrl,{...options,method,headers},timeoutMs,context);
-    if(token!==accessToken)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
+    assertDriveIdentity(context);if(token!==accessToken)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
     if(response.status===401){expireSession();throw new Error('Google authorization expired. Retry the Drive action.');}
     return response;
   }
@@ -558,14 +561,17 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
       }
     },0);
   }
-  async function resolveFolder(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<string>{
+  async function resolveFolder(context:DriveOperation,requiredFolder=''):Promise<FolderReceipt>{
     const expected=profileSnapshot();if(!expected.id)throw new Error('This profile is still starting. Try again in a moment.');
     if(libraryDeleted===expected.id)throw noRetry(Object.assign(new Error('This profile was deleted. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));
     if(deletionChecked!==expected.id){
       if(await deletionMarker(expected.id,context)){assertProfileCurrent(expected);disconnectProfileLater(expected);Promise.resolve().then(()=>profilePort?.deleted?.(Object.freeze({profile:expected.id}))).catch(()=>{});throw noRetry(Object.assign(new Error('This profile was deleted on another device. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));}
       assertProfileCurrent(expected);deletionChecked=expected.id;
     }
-    let found=await findFolder(context);assertProfileCurrent(expected);if(!found){found=await createFolder(context,expected);assertProfileCurrent(expected);}await bindFolder(found,context,expected);return found;
+    let found=await findFolder(context);assertProfileCurrent(expected);
+    if(requiredFolder&&found!==requiredFolder)throw noRetry(new Error('The Google Drive repository changed during the operation. Start a new operation.'));
+    if(!found){found=await createFolder(context,expected);assertProfileCurrent(expected);}
+    return bindFolder(found,context,expected);
   }
   function profileSnapshot():ProfileSnapshot{
     let id='';try{id=String(profilePort?.id()||'');if(!PROFILE_PATTERN.test(id))id='';}catch{id='';}
@@ -579,19 +585,28 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
   }
   function expectedProfile():string{return profileSnapshot().id;}
   function folderProfile(folder:DriveFile|null|undefined):string{const id=String(folder&&folder.appProperties&&folder.appProperties[PROFILE_MARKER]||'');return PROFILE_PATTERN.test(id)?id:'';}
-  async function bindFolder(id:string,context:DriveOperation=EMPTY_DRIVE_OPERATION,expected:ProfileSnapshot=profileSnapshot()):Promise<void>{
+  async function bindFolder(id:string,context:DriveOperation=EMPTY_DRIVE_OPERATION,expected:ProfileSnapshot=profileSnapshot()):Promise<FolderReceipt>{
     const authorization=authorizationGeneration;
     const assertBinding=()=>{if(authorization!==authorizationGeneration||!tokenValid()||context.signal?.aborted)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));assertProfileCurrent(expected);};
-    assertBinding();if(boundFolder===id+'\n'+expected.id)return;
+    assertBinding();if(boundFolder===id+'\n'+expected.id){const receipt=folderReceipt(id,expected);assertFolderReceipt(receipt);return receipt;}
     const metadata=seenFolder&&seenFolder.id===id?seenFolder:await getFolderMetadata(id,context);assertProfileCurrent(expected);
     const found=folderProfile(metadata),mine=found===expected.id;const [email,library]=await Promise.all([accountEmail(context),mine?Promise.resolve(null):latestLibrary(id,context)]);assertProfileCurrent(expected);
     assertBinding();if(!profilePort)throw new Error('Study Director profile binding is unavailable.');const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}),assertBinding);
     await assertDriveOperationCurrent(context);
     const current=profileSnapshot();
     const adopted=!!found&&decision==='adopt'&&current.id===found&&current.generation!==expected.generation;
-    if(!adopted&&(current.id!==expected.id||current.generation!==expected.generation)){invalidateFolderIdentity();cancelFolderResolution();throw noRetry(new Error('The active Study Director profile changed while the Drive library choice was open. Nothing was changed.'));}
+    if(!adopted&&(current.id!==expected.id||current.generation!==expected.generation))throw noRetry(new Error('The active Study Director profile changed while the Drive library choice was open. Nothing was changed.'));
     if(mine&&decision==='continue'){}else if(!found&&decision==='claim'){await markFolder(id,expected.id,context);assertProfileCurrent(expected);}else if(adopted){}else{disconnectProfileLater(current);throw noRetry(Object.assign(new Error(found?'This Google account holds the library of another profile. Drive was not used.':'This Google account already holds a Study Director library. Drive was not used.'),{studyDirectorProfileRefused:true}));}
-    if(adopted){folderId=id;seenFolder=metadata;}const settled=profileSnapshot();boundFolder=id+'\n'+settled.id;const name=libraryName();if(name&&metadata.name!==name)await renameFolder(id,name,context).catch(()=>{});
+    // The host's successful adoption is the only permitted profile change.
+    // Publish and carry this exact receipt through optional rename, not a
+    // fresh snapshot of whatever happens to be active when it completes.
+    const settled=adopted?current:expected;assertProfileCurrent(settled);assertDriveIdentity(context);
+    if(adopted){folderId=id;seenFolder=metadata;}
+    if(folderId!==id)throw noRetry(new Error('The Google Drive repository changed during the operation.'));
+    boundFolder=id+'\n'+settled.id;
+    const receipt=folderReceipt(id,settled),verifiedContext=driveOperationContext({signal:context.signal,folderState:{authorization,profile:settled,receipt}});
+    const name=libraryName();if(name&&metadata.name!==name)await renameFolder(id,name,verifiedContext).catch(()=>{});
+    assertDriveIdentity(verifiedContext);return receipt;
   }
   function libraryName():string{try{const name=String(profilePort?.name()||'').trim();return name&&name.length<=200?name:FOLDER_NAME;}catch{return FOLDER_NAME;}}
   async function renameFolder(id:string,name:string,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<void>{
@@ -617,7 +632,7 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
       const assert=()=>{assertOrigin();assertProfileCurrent(expected);if(authorization!==authorizationGeneration||!tokenValid())throw noRetry(new Error('Google Drive authorization changed. Confirm the deletion again.'));};
       assert();if(!expected.id)throw new Error('This profile is still starting.');
       if(target&&(!email||!folder))throw new Error('Confirm the Google Drive account and library before deleting it.');
-      const context=driveOperationContext({checkSource:assert});
+      const context=driveOperationContext({assertOrigin:assert});
       if(target&&await accountEmail(context)!==email)throw noRetry(new Error('Google Drive is signed in to a different account. Confirm the deletion again.'));
       assert();
       const id=await findFolder(context);assert();
@@ -685,19 +700,20 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
     folderResolutionFlight=null;
     if(!flight.settled)flight.controller.abort(new Error('Google Drive folder resolution was cancelled.'));
   }
-  function startFolderResolution(profile:ProfileSnapshot=profileSnapshot()):FolderFlight{
+  function startFolderResolution(profile:ProfileSnapshot,requiredFolder=''):FolderFlight{
     const controller=new Platform.AbortController(),context=driveOperationContext({signal:controller.signal});
-    const flight:FolderFlight={controller,promise:Promise.resolve(''),waiters:0,settled:false,profile};
-    const pending=resolveFolder(context);flight.promise=pending;folderResolutionFlight=flight;
+    const pending=resolveFolder(context,requiredFolder);
+    const flight:FolderFlight={controller,promise:pending,waiters:0,settled:false,profile};
+    folderResolutionFlight=flight;
     pending.then(()=>{flight.settled=true;if(folderResolutionFlight===flight)folderResolutionFlight=null;},()=>{flight.settled=true;if(folderResolutionFlight===flight)folderResolutionFlight=null;});
     return flight;
   }
-  async function awaitFolderResolution(flight:FolderFlight,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<string>{
+  async function awaitFolderResolution(flight:FolderFlight,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<FolderReceipt>{
     const operation=context||EMPTY_DRIVE_OPERATION,signal=operation.signal;
     let abortListener:(()=>void)|null=null;flight.waiters+=1;
     try{
       await assertDriveOperationCurrent(operation);
-      let result:string;
+      let result:FolderReceipt;
       if(signal){
         result=await Promise.race([flight.promise,new Promise<never>((_,reject)=>{
           abortListener=()=>reject(noRetry(driveAbortError(signal)));
@@ -719,14 +735,22 @@ import type {BackupProfilePublic,DriveDeletionAction,DriveDeletionTarget,StudyDi
       if(operation.folderState.authorization!==authorizationGeneration)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
       assertProfileCurrent(operation.folderState.profile);
     }
-    const verified=verifiedFolderReceipt(operation);if(verified){await assertDriveOperationCurrent(operation);return verified;}
-    const current=profileSnapshot();if(folderResolutionFlight&&(folderResolutionFlight.profile.id!==current.id||folderResolutionFlight.profile.generation!==current.generation))cancelFolderResolution();
-    const flight=folderResolutionFlight||startFolderResolution(current);
-    const resolved=await awaitFolderResolution(flight,operation),settledProfile=profileSnapshot();
-    if(boundFolder!==resolved+'\n'+settledProfile.id){
-      invalidateFolderIdentity();
-      throw noRetry(new Error('The active Study Director profile changed while Google Drive was settling its library. Retry the Drive action.'));
-    }
+    const previous=operation.folderState?.receipt;
+    if(previous&&folderReceiptCurrent(previous)){await assertDriveOperationCurrent(operation);assertDriveIdentity(operation);return previous.id;}
+    // Keep the original receipt on the caller. A stale receipt can reverify
+    // the same folder, but failure must not turn it into an unscoped caller.
+    if(previous&&folderId&&folderId!==previous.id)throw noRetry(new Error('The Google Drive repository changed during the operation. Start a new operation.'));
+    const revalidation=previous&&operation.folderState
+      ?Object.freeze({...operation,folderState:{...operation.folderState,receipt:null}})
+      :operation;
+    const current=profileSnapshot();
+    if(folderResolutionFlight&&(folderResolutionFlight.profile.id!==current.id||folderResolutionFlight.profile.generation!==current.generation))cancelFolderResolution();
+    const flight=folderResolutionFlight||startFolderResolution(current,previous?.id||'');
+    const resolved=await awaitFolderResolution(flight,revalidation);
+    assertDriveIdentity(revalidation);assertFolderReceipt(resolved);
+    if(previous&&(resolved.id!==previous.id||resolved.profile.id!==previous.profile.id||resolved.profile.generation!==previous.profile.generation))
+      throw noRetry(new Error('The Google Drive repository changed during the operation. Start a new operation.'));
+    if(revalidation!==operation){const state=operation.folderState!;state.profile=resolved.profile;state.receipt=resolved;return resolved.id;}
     return rememberVerifiedFolder(operation,resolved);
   }
   async function repositoryScope(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<string>{return repositoryVerificationScope(await ensureFolder(context));}

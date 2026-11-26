@@ -149,4 +149,9 @@ assert.equal(await store.write(cp(18),freeze({...noteOnly,baseCheckpointId:cp(15
 assert.deepEqual(await store.readHeader(),beforeBad,'invalid or stale writes preserve the last verified semantic baseline');
 await assert.rejects(store.readDayAncestry(['2026-11-01'],cp(16)),/ancestor changed/,'reads with an obsolete checkpoint id cannot reuse newer semantic ancestry');
 assert.equal(codec.normalizeHeader({...await store.readHeader(),sessionContentFingerprint:'bad'}),null,'corrupt semantic hashes fail validation');
+// Guard is checked inside the real metadata transaction, not only before awaiting it.
+await assert.rejects(store.clear(()=>{throw new Error('retired Drive binding');}),/retired Drive binding/);
+assert.deepEqual(await store.readHeader(),beforeBad);
+assert.equal(await store.clear(()=>{}),true);assert.equal(await store.readHeader(),null);
+assert.deepEqual(sharedStores.meta.get('reconciliationBaseDays:2026-11'),novemberUnchanged,'clearing only the verified header leaves inactive rows for the next full rewrite');
 console.log(JSON.stringify({status:'PASS',suite:'reconciliation-baseline-v2',unchangedCheckpoint:'header-only',editedNote:'one-row',deletedNote:'one-row-delete',lazyReads:'keyed-only',staleBase:'fail-closed',days:'month-rows',session:'fingerprint'},null,2));
