@@ -21,7 +21,10 @@ const settled=page=>waitFor(async()=>!!(await sync(page))?.syncedAt&&!await wait
 // Drive sign-in kept in browser storage, as when it expired days later.
 async function removeDatabaseWhileClosed(page,{signedOut=false}={}){
   await browser.closePage(page);await new Promise(resolve=>setTimeout(resolve,500));
-  const cleaner=await browser.createPage(server.url('deployment','manifest.webmanifest'),{viewport:{width:800,height:600,mobile:false,scale:1}});
+  // A controlled navigation to the manifest is served the app shell by the
+  // worker. The cleaner must never start the app or recreate the database.
+  const cleaner=await browser.createPage(server.url('deployment','manifest.webmanifest'),{bypassServiceWorker:true,viewport:{width:800,height:600,mobile:false,scale:1}});
+  assert.equal(await cleaner.evaluate('typeof window.StudyDirector'), 'undefined','cleaner is not the application');
   const before=await cleaner.evaluate('indexedDB.databases()');assert.ok(before.length,'the closed app has a database to remove');
   await cleaner.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb'});
   const after=await cleaner.evaluate('indexedDB.databases()');assert.deepEqual(after,[],'CDP removed the origin database before cold startup');
