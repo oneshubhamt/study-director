@@ -295,7 +295,7 @@ const createModule=()=>{
         target.assetId=String(identity?.assetId||'');
         if(!current(target))return false;
         if(!target.releaseId)return await postpone(target,'The waiting update could not be identified. Try again later.');
-        const external=!!activated&&activated!==baselineController,context:PwaUpdateContext=freeze({requestId:target.requestId,releaseId:target.releaseId,automatic:options.automatic===true,external,follower:external,signal:target.controller.signal});
+        const external=!!activated&&activated!==baselineController,context:PwaUpdateContext=freeze({requestId:target.requestId,releaseId:target.releaseId,automatic:options.automatic===true,external,signal:target.controller.signal});
         publish('Checking saved state before updating…','preparing');
         target.deadlineTimer=environment.setTimeout(()=>{void postpone(target,'Preparing saved work took too long. Keep this window open and retry.');},20000);
         target.guard=hooks.reserve(context);

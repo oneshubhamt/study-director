@@ -22,7 +22,7 @@ function makeHarness(options={}){
   let lifecycleStatus={...baseStatus(),...(options.lifecycle||{})},backupBusy=!!options.backupBusy,providerBusy=!!options.providerBusy;
   let timerLive=!!options.timerLive,timerPaused=!!options.timerPaused,pacerRunning=!!options.pacerRunning,tasks=options.tasks??[];
   let mutation={active:'',foreign:false,recoveryFault:'',...(options.mutation||{})},session={ready:true,transitioning:false,revision:1,...(options.session||{})};
-  const calls={pause:0,pacer:0,backup:0,backupMessage:'',apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,yieldFollower:0,project:0,foreground:0,captures:[],localWrites:0};
+  const calls={pause:0,pacer:0,backup:0,backupMessage:'',apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,exclusive:0,diary:0,plan:0,review:0,live:0,notes:0,deletions:0,project:0,foreground:0,captures:[],localWrites:0};
   const elements=new Map([['pwa-update-control',node()],['pwa-update-apply',node('button')],['pwa-update-message',node()]]);
   const listeners={document:new Map(),window:new Map()};
   const document={
@@ -51,27 +51,26 @@ function makeHarness(options={}){
     isTrackableTask:()=>true,isTaskResolved:index=>options.resolvedTasks?.has(index)??false,currentTaskIndex:()=>options.currentTaskIndex??0
   });
   const reservationPorts=Object.freeze({
-    settleMutation:async()=>{calls.settleMutation++;},
+    settleMutation:async()=>{calls.settleMutation++;await options.settleMutationGate;},
     suspendProvider:()=>({settled:Promise.resolve(),release:()=>{calls.providerRelease++;}}),
     settleRichTextAssets:async()=>{},settleMaintenance:async()=>{},settleAttachmentIntegrity:async()=>{},
-    quiesceRichText:async run=>run(),runExclusive:async(_name,run)=>run({assert(){}}),runManagedRecovery:async run=>run(),
-    yieldFollowerOwnership:()=>{calls.yieldFollower++;if(ownership.state==='primary')ownership={...ownership,state:'secondary',revision:ownership.revision+1};return true;},
+    quiesceRichText:async run=>run(),runExclusive:async(_name,run)=>{calls.exclusive++;return run({assert(){}});},runManagedRecovery:async run=>run(),
     projectOwnership:()=>{calls.project++;},foregroundChanged:()=>{calls.foreground++;}
   });
   const persistence=Object.freeze({
-    settleDiary:async()=>options.diaryOk!==false,flushPlanDraft:async()=>options.planFlushOk!==false,
+    settleDiary:async()=>{calls.diary++;await options.diaryGate;return options.diaryOk!==false;},flushPlanDraft:async()=>{calls.plan++;return options.planFlushOk!==false;},
     planAuthoredText:()=>options.planText??'plan',planReadDraft:()=>options.planRead??(options.planText??'plan'),
     savePlanDraft:async()=>options.planSaveOk!==false,settlePlanData:async()=>{},
     readStoredPlan:async()=>({draft:options.storedPlan??(options.planText??'plan')}),
-    flushPendingReview:async()=>options.reviewOk!==false,settleReviewEditor:async()=>{},
-    writeLiveDraft:async()=>options.liveResult??{ok:true,value:{revision:7},storage:{idb:true}},
-    flushNotes:async()=>{},noteFailure:()=>options.noteFailure??null,flushDeletionRecovery:async()=>options.deletionOk!==false,
+    flushPendingReview:async()=>{calls.review++;return options.reviewOk!==false;},settleReviewEditor:async()=>{},
+    writeLiveDraft:async()=>{calls.live++;return options.liveResult??{ok:true,value:{revision:7},storage:{idb:true}};},
+    flushNotes:async()=>{calls.notes++;},noteFailure:()=>options.noteFailure??null,flushDeletionRecovery:async()=>{calls.deletions++;return options.deletionOk!==false;},
     settleActiveSession:async()=>{},loadActiveSession:async()=>options.loadedSession??{value:{revision:7},storage:{idb:true}},
     activeSessionIssue:()=>options.activeSessionIssue??''
   });
   const effects=Object.freeze({
     automaticBackupsWaiting:()=>options.backupWaiting===true,
-    flushAutomaticBackups:async reason=>{assert.equal(reason,'app-update');calls.backup++;calls.backupMessage=elements.get('pwa-update-message')?.textContent||'';},pauseTimer:()=>{calls.pause++;timerPaused=true;},
+    flushAutomaticBackups:async reason=>{assert.equal(reason,'app-update');calls.backup++;calls.backupMessage=elements.get('pwa-update-message')?.textContent||'';await options.backupGate;},pauseTimer:()=>{calls.pause++;timerPaused=true;},
     togglePacer:()=>{calls.pacer++;pacerRunning=false;},scheduleSyncStatus:()=>{},
     publishNotice:()=>{},capture:(scope,error,level)=>calls.captures.push({scope,error,level}),
     localGet:(key,fallback)=>local.get(key)??fallback,localSet:(key,value)=>{calls.localWrites++;local.set(key,value);return true;}
@@ -157,19 +156,61 @@ function makeHarness(options={}){
   const abort=new AbortController(),guard=t.controller.reserve(Object.freeze({requestId:'f1',releaseId:'release-f',automatic:true,external:true,signal:abort.signal}));
   await guard.ready;assert.equal(guard.validate(),true);
   const prepared=await t.controller.prepare({requestId:'f1',releaseId:'release-f',automatic:true,external:true,signal:abort.signal});assert.equal(prepared.ok,true);assert.equal(prepared.reason,'');
+  for(const key of ['exclusive','diary','plan','review','live','notes','deletions'])assert.equal(t.calls[key],0,'true secondary must not write: '+key);
   await guard.release();
 }
 
-// A follower classification captured at controller-change time remains read-only
-// even if the initiating primary reload releases ownership before reserve begins.
+// An external controller does not confer read-only authority to an independent writer.
 {
-  const t=makeHarness();t.setOwnership({state:'primary',revision:5,hydrating:false,takeoverPending:false,resolving:false});
-  const abort=new AbortController(),guard=t.controller.reserve(Object.freeze({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,follower:true,signal:abort.signal}));
-  await guard.ready;
-  assert.equal(guard.validate(),true,'captured follower role must survive a secondary-to-primary handoff before reservation');
-  const prepared=await t.controller.prepare({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,follower:true,signal:abort.signal});
-  assert.equal(prepared.ok,true);assert.equal(t.calls.settleMutation,0,'captured follower handoff must remain read-only');assert.equal(t.calls.yieldFollower,1,'a follower that transiently acquired the lease must relinquish it before reload');assert.equal(guard.validate(),true,'follower guard must remain valid after deliberate lease relinquishment');
+  const t=makeHarness({timerLive:true,pacerRunning:true,tasks:[{}],lifecycle:{externalUpdate:true}});
+  const update={requestId:'independent',releaseId:'release-f2',automatic:true,external:true,signal:new AbortController().signal};
+  assert.match(t.controller.blockReason(update),/live timer/u);
+  assert.throws(()=>t.controller.reserve(update),/live timer/u);
+  assert.equal(await t.controller.evaluateAutomatic(),false);
+  assert.equal(t.calls.exclusive,0);assert.equal(t.calls.apply,0);
+  assert.equal(await t.controller.applyFromUi(),true,'explicit Pause & Update must pause the independent writer');
+  assert.equal(t.calls.pause,1);assert.equal(t.calls.pacer,1);
+  const manual={...update,automatic:false};
+  const guard=t.controller.reserve(manual);await guard.ready;
+  assert.equal((await t.controller.prepare(manual)).ok,true);
+  assert.equal(t.calls.exclusive,1);
+  for(const key of ['diary','plan','review','live','notes','deletions'])assert.equal(t.calls[key],1,key+' must settle before a primary reload');
   await guard.release();
+}
+for(const options of [{diaryOk:false},{storedPlan:'stale'},{reviewOk:false},{noteFailure:{failed:true}},{liveResult:{ok:false}},{deletionOk:false}]){
+  const t=makeHarness({...options,tasks:[{}]});
+  const update={requestId:'external-failure',releaseId:'release-f2',automatic:false,external:true,signal:new AbortController().signal};
+  const guard=t.controller.reserve(update);await guard.ready;
+  assert.equal((await t.controller.prepare(update)).ok,false,JSON.stringify(options));
+  await guard.release();
+}
+// A secondary-to-primary takeover invalidates the old read-only reservation.
+{
+  const t=makeHarness();t.setOwnership({state:'secondary',revision:4});
+  const update={requestId:'f2',releaseId:'release-f2',automatic:true,external:true,signal:new AbortController().signal};
+  const guard=t.controller.reserve(update);await guard.ready;
+  t.setOwnership({state:'primary',revision:5});
+  assert.equal(guard.validate(),false);
+  assert.equal((await t.controller.prepare(update)).ok,false);
+  assert.equal(t.calls.diary,0);assert.equal(t.calls.exclusive,0);
+  await guard.release();
+  const next={...update,requestId:'f3'},retry=t.controller.reserve(next);await retry.ready;
+  assert.equal((await t.controller.prepare(next)).ok,true);
+  assert.equal(t.calls.exclusive,1);assert.equal(t.calls.diary,1);
+  await retry.release();
+}
+{
+  let finish;const gate=new Promise(resolve=>{finish=resolve;});
+  const t=makeHarness({settleMutationGate:gate}),abort=new AbortController();
+  const operation=t.controller.prepare({requestId:'',external:false,signal:abort.signal});
+  abort.abort();finish();assert.equal((await operation).ok,false);assert.equal(t.calls.diary,0);
+}
+{
+  let finish;const gate=new Promise(resolve=>{finish=resolve;});
+  const t=makeHarness({diaryGate:gate});
+  const operation=t.controller.prepare({requestId:'',external:false});
+  await Promise.resolve();await Promise.resolve();t.setOwnership({state:'secondary',revision:2});finish();
+  assert.equal((await operation).ok,false);assert.equal(t.calls.plan,0);
 }
 
 // Automatic update waits for applied-plan completion, then backs up and applies.
@@ -184,6 +225,15 @@ function makeHarness(options={}){
   assert.equal(t.calls.backupMessage,'Backing up before the update…','the checked PWA owner must render backup-wait state before entering the host backup callback');
 }
 
+// Eligibility must be checked again after asynchronous backup.
+{
+  let finish;const gate=new Promise(resolve=>{finish=resolve;});
+  const t=makeHarness({backupWaiting:true,backupGate:gate});
+  const operation=t.controller.evaluateAutomatic();
+  assert.equal(t.calls.backup,1);t.setTasks([{}]);finish();
+  assert.equal(await operation,false);assert.equal(t.calls.apply,0,'new unfinished Plan must defer activation');
+}
+
 // Successful update checks persist their timestamp; failures do not.
 {
   const ok=makeHarness({checkResult:true});assert.equal(await ok.controller.checkIfDue({force:true}),true);assert.equal(ok.calls.check,1);assert.equal(ok.calls.localWrites,1);
@@ -191,16 +241,14 @@ function makeHarness(options={}){
 }
 
 
-// An external controller handoff stays automatic across ownership takeover:
-// recent edits defer it, then the stable follower path may proceed even if this
-// tab transiently became primary after the initiating tab reloaded.
+// An external handoff still observes edit-idle safety; a primary must settle its own writers.
 {
   const t=makeHarness({lifecycle:{externalUpdate:true,bootState:'mismatch'}});
   const input=t.listeners.document.get('input');assert.equal(typeof input,'function');
   input({target:{isContentEditable:false,matches:()=>true}});
   assert.equal(await t.controller.evaluateAutomatic(),false);assert.equal(t.calls.apply,0,'recent edits must defer an external handoff');
   t.setNow(101801);
-  assert.equal(await t.controller.evaluateAutomatic(),true);assert.equal(t.calls.apply,1,'the external handoff must retry as a follower after edit-idle even with primary ownership');
+  assert.equal(await t.controller.evaluateAutomatic(),true);assert.equal(t.calls.apply,1,'the external handoff must retry after edit-idle through primary settlement');
 }
 
 // Automatic discovery yields to provider work before and after lock acquisition; force remains user-driven.

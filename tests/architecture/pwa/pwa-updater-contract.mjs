@@ -38,18 +38,18 @@ assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerBackgroundBackup
 assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked update safety must own the pre-update backup wait policy');
 assert.doesNotMatch(app,/PWA_UPDATE_BACKUP_WAIT_MS|function backUpBeforeUpdate\b/u,'PWA-specific backup wait policy must not remain in unchecked main');
 assert.match(lifecycle,/function externalController\(\)[\s\S]*?worker!==baselineController/u,'external update state must mean a genuinely different controller rather than a same-controller boot mismatch');
-assert.match(lifecycle,/const external=!!activated&&activated!==baselineController,context\s*=freeze\(\{requestId:target\.requestId,releaseId:target\.releaseId,automatic:options\.automatic===true,external,follower:external/u,'a genuinely changed controller must classify every non-initiating window as a follower without consulting racy ownership state');
+assert.match(lifecycle,/const external=!!activated&&activated!==baselineController,context\s*=freeze\(\{requestId:target\.requestId,releaseId:target\.releaseId,automatic:options\.automatic===true,external,signal:target\.controller\.signal/u,'the worker identifies an external controller but does not classify profile ownership');
 const messageStart=lifecycle.indexOf('function handleMessage('),messageEnd=lifecycle.indexOf('function reportClient(',messageStart);
 assert.ok(messageStart>=0&&messageEnd>messageStart,'checked PWA message handler must remain inspectable');
 const messageBody=lifecycle.slice(messageStart,messageEnd),sourceGate=messageBody.indexOf("![serviceWorker?.controller,registration?.active,registration?.waiting,registration?.installing].includes(source)"),updateAvailable=messageBody.indexOf("data['type']==='SD_PWA_UPDATE_AVAILABLE'");
 assert.ok(sourceGate>=0&&updateAvailable>sourceGate,'worker-message provenance must be established before an update-available announcement can watch or trust its sender');
 
 assert.match(lifecycle,/return apply\(\{automatic:true\}\);/u,'external controller reconciliation must retain automatic edit-idle protection');
-assert.doesNotMatch(lifecycle,/captureFollower|followerWorkers|followerIdentities|rememberFollower|reconcileFollowerRole/u,'follower classification must not depend on candidate-message timing or ownership handoff hints');
-assert.match(updater,/const follower=current\.externalUpdate;/u,'host retry logic must preserve follower semantics after a secondary acquires primary ownership');
-assert.match(updater,/blockReason\(\{automatic:true,external:current\.externalUpdate,follower\}\)/u,'external automatic retries must preflight using the stable follower classification');
-assert.match(updater,/reservationToken\.follower&&!reservation\.yieldFollowerOwnership\(\)/u,'a follower that transiently acquires the primary lease must relinquish it before reload');
-assert.match(app,/yieldFollowerOwnership:\(\)=>\{const owner=AppOwnership\.status\(\);if\(owner\.state===OWNERSHIP_STATES\.SECONDARY\)return true;if\(owner\.state!==OWNERSHIP_STATES\.PRIMARY\)return false;AppOwnership\.transitionReleasing\(\);AppOwnership\.release\(\);AppOwnership\.setPrimary\(false\);return true;\}/u,'follower lease relinquishment must release authority without invoking the normal writer-settlement path');
+assert.doesNotMatch(lifecycle,/follower:external/u,'external controller changes must not confer read-only authority');
+assert.match(updater,/follower=external&&ownership\.state===configuration\.secondaryState/u,'only a locally verified secondary may use read-only settlement');
+assert.match(updater,/blockReason\(\{automatic:true,external:refreshed\.externalUpdate\}\)/u,'automatic eligibility must be rechecked after asynchronous backup');
+assert.match(updater,/owner\.state!==reservationToken\.ownerState\|\|owner\.revision!==reservationToken\.ownerRevision/u,'a reserved read-only window that becomes primary must not use its old reservation');
+assert.doesNotMatch(app,/yieldFollowerOwnership/u,'a controller change must not authorize relinquishing a primary lease without settlement');
 assert.match(lifecycle,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
 assert.match(sw,/SD_PWA_UPDATE_AVAILABLE',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'waiting-worker announcements must carry the immutable identity tuple');
 assert.match(sw,/SD_PWA_ACTIVATED',releaseId:RELEASE_ID,buildId:BUILD_ID,assetId:ASSET_ID/u,'activation announcements must carry the immutable identity tuple');

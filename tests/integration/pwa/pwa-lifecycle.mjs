@@ -70,14 +70,14 @@ await test('candidate announcement remains advisory until registration exposes a
  h.registration.installing=h.candidate;h.registration.emit('updatefound');h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
  assert.equal(h.api.status().waitingReleaseId,'next','candidate availability must come from verified registration state and worker identity, not an untrusted announcement');
 });
-await test('external controller handoff is follower-safe even when candidate announcements are missed',async()=>{
+await test('external controller handoff remains automatic even when candidate announcements are missed',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
  const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'a controller changed without this window owning an activation attempt is necessarily a non-initiating handoff');assert.equal(h.prepares[0].automatic,true,'external handoff must retain automatic edit-idle safety');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal('follower' in h.prepares[0],false,'the origin-wide worker cannot classify profile write authority');assert.equal(h.prepares[0].automatic,true,'external handoff must retain automatic edit-idle safety');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
 });
 await test('direct waiting-update apply remains a primary persistence path',async()=>{
  const h=harness();await h.api.install();assert.equal(await h.api.apply(),true);
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false);assert.equal(h.prepares[0].automatic,false);assert.ok(h.candidate.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));h.win.emit('pagehide');await flush();
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].automatic,false);assert.ok(h.candidate.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));h.win.emit('pagehide');await flush();
 });
 await test('forged candidate announcement cannot create trust, update authority or reload permission',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();const rogue=h.worker('rogue','installing');
@@ -154,7 +154,7 @@ await test('boot confirmation checks the actual page assets and worker before cl
 await test('wrong loaded assets keep boot pending and advertise safe manual recovery',async()=>{
  const h=harness();h.registration.waiting=null;await h.api.install();h.old.assetId='b'.repeat(24);h.storage.set('reload',JSON.stringify({version:2,releaseId:'old',assetId:'b'.repeat(24)}));
  assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.api.status().phase,'boot-failed');assert.equal(h.api.status().updateReady,true);assert.equal(h.api.status().externalUpdate,false,'same-controller boot mismatch is a local recovery state, not an external activation');assert.equal(h.storage.has('reload'),true);assert.equal(h.counts().reloads,0);
- await h.api.apply();await flush();assert.equal(h.prepares[0].external,false);assert.equal(h.prepares[0].follower,false,'manual mismatch recovery must retain the full primary persistence path');assert.equal(h.counts().reloads,1);assert.equal(JSON.parse(h.storage.get('reload')).assetId,'b'.repeat(24));h.win.emit('pagehide');
+ await h.api.apply();await flush();assert.equal(h.prepares[0].external,false);assert.equal(h.counts().reloads,1);assert.equal(JSON.parse(h.storage.get('reload')).assetId,'b'.repeat(24));h.win.emit('pagehide');
 });
 await test('legacy markers confirm without suppressing retries; current boot without an update reports client generation',async()=>{
  const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');assert.equal(await h.api.confirmBoot(),true);assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);
