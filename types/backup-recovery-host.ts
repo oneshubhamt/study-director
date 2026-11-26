@@ -86,8 +86,8 @@ export interface StorageResetInput{
   readonly provider:Readonly<{
     history(id:string,options:{interactive:boolean}):Promise<{available?:boolean;entries?:readonly StorageResetHistoryEntry[]}|null>;
     restoreRepositoryProviderVersion(id:string,options:{checkpointId:string;confirmed:boolean;assertOrigin:()=>void}):Promise<StorageResetRecoveryResult|null>;
-    bringInRepositoryProvider(id:string,options:{missingOnly:boolean;quiet:boolean;before:string}):Promise<StorageResetRecoveryResult|null>;
-    syncRepositoryProvider(id:string):Promise<StorageResetRecoveryResult|null>;
+    bringInRepositoryProvider(id:string,options:{missingOnly:boolean;quiet:boolean;before:string;assertOrigin:()=>void}):Promise<StorageResetRecoveryResult|null>;
+    syncRepositoryProvider(id:string,options:{assertOrigin:()=>void}):Promise<StorageResetRecoveryResult|null>;
     list():readonly StorageResetLocation[];locationStatus(id:string):Readonly<{connected:boolean;engineBusy?:boolean}>|null;
     suspendBackground(reason:string):Suspension;connected(id:string):boolean;
   }>;
@@ -125,6 +125,7 @@ export interface StorageResetController{
   handle(event?:Readonly<{detectedAt?:unknown;peer?:boolean}>):Promise<void>;
   resume():boolean;
   settle():boolean;
+  settleVerified():boolean;
   restore():Promise<unknown>;
   connectionsChanged():boolean;
 }

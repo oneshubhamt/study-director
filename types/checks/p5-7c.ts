@@ -73,7 +73,7 @@ const storageResetProvider=Object.freeze({
   history:(id:string,options:Parameters<StorageResetInput['provider']['history']>[1])=>runtime.providers.history(id,options),
   restoreRepositoryProviderVersion:(id:string,options:Parameters<StorageResetInput['provider']['restoreRepositoryProviderVersion']>[1])=>runtime.providers.restoreRepositoryProviderVersion(id,options),
   bringInRepositoryProvider:(id:string,options:Parameters<StorageResetInput['provider']['bringInRepositoryProvider']>[1])=>runtime.providers.bringInRepositoryProvider(id,options),
-  syncRepositoryProvider:(id:string)=>runtime.providers.syncRepositoryProvider(id),
+  syncRepositoryProvider:(id:string,options:Parameters<StorageResetInput['provider']['syncRepositoryProvider']>[1])=>runtime.providers.syncRepositoryProvider(id,options),
   list:()=>runtime.providers.list(),locationStatus:(id:string)=>runtime.providers.locationStatus(id),
   suspendBackground:(reason:string)=>runtime.providers.suspendBackground(reason),connected:(id:string)=>runtime.providers.connected(id)
 }) satisfies StorageResetInput['provider'];

@@ -372,10 +372,26 @@ const createModule=()=>{
     const RETRY=freeze([3000,10000,30000]),PARTS=freeze({device:'this device’s ID',notes:'notes',plans:'plans',settings:'settings',session:'today’s session'});
     type StepName=keyof typeof PARTS;
     type Hold={provider:Suspension|null;deviceReady:Promise<boolean>|null;reloaded:boolean;clearedAt:string;tried?:Set<string>};
-    let hold:Hold|null=null,handling:Promise<void>|null=null,since=0,acknowledged=0;
+    let hold:Hold|null=null,handling:Promise<void>|null=null,since=0,acknowledged=0,holdRevision=0;
+    let providerAttempt:{active:Hold|null;verified:boolean}|null=null;
     let offerRunning=false,offerDismissed=false,hintNotified=false,deviceInstallPromise:Promise<unknown>|null=null;
 
     function unresolved(){return !!hold||input.storage.indexedDbLifecycle().resets>acknowledged;}
+    function captureHoldOrigin(active:Hold|null,reason:string){
+      const assertOwner=input.authority.captureOrigin(reason),revision=holdRevision;
+      return ()=>{assertOwner();if(hold!==active||holdRevision!==revision)throw new Error('The storage recovery decision changed. Open recovery again.');};
+    }
+    // A verified journal callback is proof, not permission to retire the
+    // hold while the same import still needs its originating authority.
+    async function runRecoveryProvider(active:Hold|null,assertOrigin:()=>void,operation:()=>Promise<StorageResetRecoveryResult|null>,settleOnProof=false){
+      assertOrigin();if(providerAttempt)return null;
+      const attempt={active,verified:false};providerAttempt=attempt;
+      try{
+        const result=await operation();assertOrigin();
+        if(settleOnProof&&attempt.verified&&result?.cancelled!==true&&result?.verified===true)settle();
+        return result;
+      }finally{if(providerAttempt===attempt)providerAttempt=null;}
+    }
     async function canonicalEmpty(){
       try{
         const [records,notePayload,active,plans,assets,reviews]=await Promise.all([
@@ -394,9 +410,8 @@ const createModule=()=>{
     }
     async function offerDeviceRecovery(options:Readonly<{reason?:string;latestBefore?:number}>={}){
       if(offerRunning||offerDismissed||!input.authority.canMutate())return false;
-      const active=hold;let assertOwner:()=>void;
-      try{assertOwner=input.authority.captureOrigin('recovering from Device Folder');}catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
-      const assertOrigin=()=>{assertOwner();if(hold!==active)throw new Error('The storage recovery decision changed. Open recovery again.');};
+      const active=hold;let assertOrigin:()=>void;
+      try{assertOrigin=captureHoldOrigin(active,'recovering from Device Folder');}catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
       offerRunning=true;
       try{
         if(!await canonicalEmpty())return false;
@@ -421,22 +436,25 @@ const createModule=()=>{
         // created while the confirmation was open.
         if(!await canonicalEmpty())return false;
         assertOrigin();
-        const restored=await input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true,assertOrigin});
+        const restored=await runRecoveryProvider(active,assertOrigin,()=>input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true,assertOrigin}),true);
         return !!restored&&restored.cancelled!==true&&restored.verified===true;
       }catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
       finally{offerRunning=false;}
     }
     async function connectDevice(){
-      const startedAt=input.environment.now(),result=await input.device.connect();
+      const startedAt=input.environment.now(),active=hold,assertOrigin=captureHoldOrigin(active,'connecting Device Folder for recovery');
+      const result=await input.device.connect();
+      try{assertOrigin();}catch(error){input.diagnostics.capture('storage-reset.connect-recovery',error,'warn');return result;}
       if(input.device.status().connected){
-        if(hold)await recoverAfterConnect('device-folder');
+        if(active)await recoverAfterConnect('device-folder');
         else await offerDeviceRecovery({reason:'connect',latestBefore:startedAt-1});
       }
       return result;
     }
     function list(names:readonly StepName[]){const parts=names.map(name=>PARTS[name]||name);return parts.length<2?parts.join(''):`${parts.slice(0,-1).join(', ')} and ${parts.at(-1)}`;}
     function showDecision({unsaved=[],retrying=false}:{unsaved?:readonly StepName[];retrying?:boolean}={}){
-      const active=hold,clearedAt=Date.parse(String(active?.clearedAt||'')),parts:string[]=[];
+      const active=hold;if(!active||!input.authority.canMutate())return;
+      const assertOrigin=captureHoldOrigin(active,'responding to storage recovery'),clearedAt=Date.parse(active.clearedAt),parts:string[]=[];
       if(active?.reloaded)parts.push(`Browser data was cleared${Number.isFinite(clearedAt)?` on ${new Date(clearedAt).toLocaleString()}`:''}.`);
       else if(unsaved.length)parts.push(`Not saved again${retrying?' yet':''}: ${list(unsaved)}. ${retrying?'Study Director is retrying. ':''}Until then that data exists only in this tab, so keep it open${retrying?'':' and export a backup file from Data & Backup'}.`);
       else parts.push('Your open notes, plans, settings and today’s session were saved again.');
@@ -445,8 +463,8 @@ const createModule=()=>{
       if(backingUp)parts.push('Automatic backups are paused until you choose.');
       input.presentation.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'critical',surface:'toast',dismissible:false,
         title:'Browser data was cleared',message:parts.join(' '),
-        action:{label:'Restore from backup',run:()=>void restore()},
-        secondaryAction:{label:'Continue with current data',run:()=>settle()}});
+        action:{label:'Restore from backup',run:()=>void restore(assertOrigin)},
+        secondaryAction:{label:'Continue with current data',run:()=>{try{assertOrigin();return settle();}catch(error){input.diagnostics.capture('storage-reset.stale-decision',error,'warn');return false;}}}});
     }
     function ensureDeviceInstalled(){
       if(!deviceInstallPromise)deviceInstallPromise=input.readiness.reconcileStartupChangeClock().then(()=>input.device.install()).catch(error=>{deviceInstallPromise=null;throw error;});
@@ -454,7 +472,7 @@ const createModule=()=>{
     }
     function beginHold(clearedAt:unknown){
       if(hold)return hold;
-      const next:Hold={provider:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||input.environment.nowIso())};hold=next;since=input.environment.now();
+      const next:Hold={provider:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||input.environment.nowIso())};hold=next;holdRevision++;since=input.environment.now();
       try{next.provider=input.provider.suspendBackground('storage-reset');}catch(error){input.diagnostics.capture('storage-reset.provider-suspend',error,'warn');}
       next.deviceReady=new Promise<boolean>(resolve=>{
         let finished=false;
@@ -469,25 +487,25 @@ const createModule=()=>{
       device:()=>input.writeback.installationKeep(),notes:()=>input.writeback.notesRecover(),plans:()=>input.writeback.planRewrite(),settings:()=>input.writeback.settingsFlush(),
       session:async()=>{if(!input.writeback.hasTasks())return true;const result=await input.writeback.writeLiveDraft();return !!(result&&result.ok&&result.storage?.idb===true);}
     });
-    async function writeBack(active:Hold){
+    async function writeBack(active:Hold,assertOrigin:()=>void){
       let pending=Object.keys(steps) as StepName[];
       for(let attempt=0;;attempt+=1){
         const failed:StepName[]=[];
-        for(const name of pending){let saved=false;try{saved=await steps[name]()===true;}catch(error){input.diagnostics.capture(`storage-reset.${name}`,error,'error');}if(!saved)failed.push(name);}
+        for(const name of pending){assertOrigin();let saved=false;try{saved=await steps[name]()===true;}catch(error){input.diagnostics.capture(`storage-reset.${name}`,error,'error');}assertOrigin();if(!saved)failed.push(name);}
         if(!failed.length||attempt>=RETRY.length||hold!==active||!input.authority.canMutate())return failed;
         pending=failed;showDecision({unsaved:failed,retrying:true});
         await new Promise<void>(resolve=>input.environment.setTimeout(resolve,RETRY[attempt]!));
       }
     }
-    async function restoreMissing(active:Hold,id:string=''){
+    async function restoreMissing(active:Hold,assertOrigin:()=>void,id:string=''){
       if(!input.authority.canMutate())return false;
       const locations=input.provider.list(),location=id?locations.find(item=>item.id===id&&item.connected):locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
       (active.tried??=new Set()).add(location.id);
       let outcome:{exportedAt:string|undefined;result:StorageResetRecoveryResult;label:string}|null=null;
-      try{const restored=await input.provider.bringInRepositoryProvider(location.id,{missingOnly:true,quiet:true,before:active.clearedAt});if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
+      try{const restored=await runRecoveryProvider(active,assertOrigin,()=>input.provider.bringInRepositoryProvider(location.id,{missingOnly:true,quiet:true,before:active.clearedAt,assertOrigin}));if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
       catch(error){input.diagnostics.capture('storage-reset.missing-restore',error,'warn');}
       if(!outcome)return false;
-      settle();
+      assertOrigin();settle();
       const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result.added)||0),files=Math.max(0,Number(outcome.result.assetsRestored)||0);
       const source=`your ${outcome.label} backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value:number,word:string)=>`${value} ${word}${value===1?'':'s'}`;
       input.presentation.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',title:'Browser data was cleared',
@@ -495,25 +513,31 @@ const createModule=()=>{
       return true;
     }
     async function recoverAfterConnect(id:string){
-      const active=hold;if(!active||!input.authority.canMutate())return false;
-      (active.tried??=new Set()).add(id);const empty=await canonicalEmpty()===true;if(hold!==active)return false;
-      let recovered=false;
-      if(!empty)recovered=await restoreMissing(active,id);
-      else if(id==='device-folder')recovered=await offerDeviceRecovery({reason:'connect',latestBefore:Date.parse(active.clearedAt)});
-      else{
-        let synced:StorageResetRecoveryResult|null=null;
-        try{synced=await input.provider.syncRepositoryProvider(id);}catch(error){input.diagnostics.capture('storage-reset.sync-recovery',error,'warn');}
-        recovered=!!synced&&synced.cancelled===false&&synced.verified===true;
-        if(recovered){
-          if(hold===active)settle();
-          const label=input.provider.list().find(item=>item.id===id)?.label||'Google Drive';
-          input.presentation.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',title:'Browser data was cleared',message:`Your library was brought back from ${label}.`});
+      const active=hold;if(!active||providerAttempt||!input.authority.canMutate())return false;
+      const assertOrigin=captureHoldOrigin(active,'recovering after backup connection');
+      try{
+        (active.tried??=new Set()).add(id);const empty=await canonicalEmpty()===true;assertOrigin();
+        let recovered=false;
+        if(!empty)recovered=await restoreMissing(active,assertOrigin,id);
+        else if(id==='device-folder')recovered=await offerDeviceRecovery({reason:'connect',latestBefore:Date.parse(active.clearedAt)});
+        else{
+          const synced=await runRecoveryProvider(active,assertOrigin,()=>input.provider.syncRepositoryProvider(id,{assertOrigin}));
+          recovered=!!synced&&synced.cancelled===false&&synced.verified===true;
+          if(recovered){
+            assertOrigin();settle();
+            const label=input.provider.list().find(item=>item.id===id)?.label||'Google Drive';
+            input.presentation.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',title:'Browser data was cleared',message:`Your library was brought back from ${label}.`});
+          }
         }
+        if(!recovered){assertOrigin();showDecision();}return recovered;
+      }catch(error){
+        input.diagnostics.capture('storage-reset.connect-recovery',error,'warn');
+        try{assertOrigin();showDecision();}catch{}
+        return false;
       }
-      if(!recovered&&hold===active)showDecision();return recovered;
     }
     function connectionsChanged(){
-      const active=hold;if(!active||handling)return false;
+      const active=hold;if(!active||handling||providerAttempt||!input.authority.canMutate())return false;
       const tried=active.tried??=new Set(),drive=input.provider.locationStatus('google-drive');
       if(!drive?.connected){tried.delete('google-drive');return false;}
       if(tried.has('google-drive')||drive.engineBusy)return false;
@@ -526,12 +550,14 @@ const createModule=()=>{
           acknowledged=input.storage.indexedDbLifecycle().resets;void input.writeback.notesRecover();
           if(!event.peer)input.ownership.announceStorageReset(event.detectedAt);return;
         }
-        const active=beginHold(event.detectedAt),unsaved=await writeBack(active);
-        try{input.view.refreshAfterWriteback();}catch(error){input.diagnostics.capture('storage-reset.render',error,'warn');}
-        if(hold!==active)return;
-        if(unsaved.length){showDecision({unsaved});return;}
-        await active.deviceReady;
-        if(hold===active&&!(await restoreMissing(active))&&hold===active)showDecision();
+        const active=beginHold(event.detectedAt),assertOrigin=captureHoldOrigin(active,'recovering open work after storage loss');
+        try{
+          const unsaved=await writeBack(active,assertOrigin);assertOrigin();
+          try{input.view.refreshAfterWriteback();}catch(error){input.diagnostics.capture('storage-reset.render',error,'warn');}
+          if(unsaved.length){showDecision({unsaved});return;}
+          await active.deviceReady;assertOrigin();
+          if(!await restoreMissing(active,assertOrigin)){assertOrigin();showDecision();}
+        }catch(error){input.diagnostics.capture('storage-reset.writeback',error,'warn');}
       })().finally(()=>{handling=null;});
       return handling;
     }
@@ -549,19 +575,30 @@ const createModule=()=>{
       beginHold(clearedAt).reloaded=true;showDecision();connectionsChanged();return true;
     }
     function settle(){
-      const active=hold;hold=null;acknowledged=input.storage.indexedDbLifecycle().resets;input.presentation.resolve('storage-reset','detected');
+      if(!input.authority.canMutate())return false;
+      const active=hold,assertOwner=input.authority.captureOrigin('settling storage recovery');hold=null;const revision=++holdRevision;acknowledged=input.storage.indexedDbLifecycle().resets;input.presentation.resolve('storage-reset','detected');
       if(input.storage.health().browserDataClearedAt)input.storage.updateHealth({browserDataClearedAt:null});
       input.background.wake('storage-reset-settled');
       if(!active)return false;
       try{active.provider?.release();}catch(error){input.diagnostics.capture('storage-reset.provider-resume',error,'warn');}
-      void Promise.resolve(input.mutation.settled()).then(()=>input.device.rememberAfterStorageReset()).catch(error=>input.diagnostics.capture('storage-reset.remember-folder',error,'warn'));return true;
+      void Promise.resolve(input.mutation.settled()).then(()=>{assertOwner();if(holdRevision===revision&&!hold)return input.device.rememberAfterStorageReset();}).catch(error=>input.diagnostics.capture('storage-reset.remember-folder',error,'warn'));return true;
+    }
+    function settleVerified(){
+      if(providerAttempt){if(hold===providerAttempt.active)providerAttempt.verified=true;return false;}
+      return settle();
     }
     input.presentation.subscribe(state=>{
       if(!hold)return;
-      if(state.events.some(event=>event.id==='backup-verified'&&event.lifecycle==='succeeded'&&Date.parse(String(event.completedAt||''))>=since))settle();
+      if(state.events.some(event=>event.id==='backup-verified'&&event.lifecycle==='succeeded'&&Date.parse(String(event.completedAt||''))>=since))settleVerified();
     });
-    async function restore(){if(input.session.hasBlocking()){await input.session.suspend();if(input.session.hasBlocking())return false;}return await input.presentation.openRestore();}
-    return freeze({format:'study-director.storage-reset-recovery' as const,contractVersion:1 as const,canonicalEmpty,offerDeviceRecovery,connectDevice,ensureDeviceInstalled,unresolved,handle,resume,settle,restore,connectionsChanged});
+    async function restore(assertOrigin?:()=>void){
+      try{
+        const check=assertOrigin||captureHoldOrigin(hold,'opening storage recovery');check();
+        if(input.session.hasBlocking()){await input.session.suspend();check();if(input.session.hasBlocking())return false;}
+        return await input.presentation.openRestore();
+      }catch(error){input.diagnostics.capture('storage-reset.stale-decision',error,'warn');return false;}
+    }
+    return freeze({format:'study-director.storage-reset-recovery' as const,contractVersion:1 as const,canonicalEmpty,offerDeviceRecovery,connectDevice,ensureDeviceInstalled,unresolved,handle,resume,settle,settleVerified,restore,connectionsChanged});
   }
 
   function createHost(input:RecoveryHostInput){

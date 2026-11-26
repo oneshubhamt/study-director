@@ -3284,7 +3284,7 @@ function storageResetUnresolved(){return StorageResetRecovery?StorageResetRecove
 function storageResetConnectionsChanged(){return StorageResetRecovery?.connectionsChanged()||false;}
 function handleBrowserStorageReset(event={}){return requireStorageResetRecovery().handle(event);}
 function resumeUnresolvedStorageReset(){return StorageResetRecovery?.resume()||false;}
-function settleStorageReset(){return StorageResetRecovery?.settle()||false;}
+function settleStorageReset(){return StorageResetRecovery?.settleVerified()||false;}
 function restoreAfterStorageReset(){return requireStorageResetRecovery().restore();}
 
 type DeviceBackupHooksInput=Parameters<typeof BackupActionsHostModule.createDeviceHooks>[0];
@@ -3337,7 +3337,7 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<S
     history:(id,options)=>BackupProviderRuntime.history(id,options),
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),
-    syncRepositoryProvider:id=>BackupProviderRuntime.syncRepositoryProvider(id),
+    syncRepositoryProvider:(id,options)=>BackupProviderRuntime.syncRepositoryProvider(id,options),
     list:()=>BackupProviderRuntime.list(),locationStatus:id=>BackupProviderRuntime.locationStatus(id),
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),connected:id=>BackupProviderRuntime.connected(id)
   }),

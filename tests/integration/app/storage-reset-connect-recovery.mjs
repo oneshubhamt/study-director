@@ -11,13 +11,13 @@ const now=Date.parse('2026-11-07T08:01:00.000Z');
 const checkpoint='cp_'+'a'.repeat(32);
 
 async function drain(){
-  for(let index=0;index<12;index++)await Promise.resolve();
+  await new Promise(resolve=>setImmediate(resolve));
 }
 
 function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missing={cancelled:false,verified:true,added:1,assetsRestored:0,exportedAt:clearedAt},restore={cancelled:false,verified:true},confirm=true,driveConnected=false,driveBusy=false,deviceConnected=false}={}){
-  const state={owner:true,revision:1,empty,afterConfirm:()=>{},driveConnected,driveBusy,deviceConnected,health:{lastStudyDataSaveAt:'2026-11-06T12:00:00.000Z',browserDataClearedAt:clearedAt},resets:1,startedFresh:false};
+  const state={owner:true,revision:1,empty,afterConfirm:()=>{},duringProvider:async()=>{},afterWriteback:async()=>true,driveConnected,driveBusy,deviceConnected,health:{lastStudyDataSaveAt:'2026-11-06T12:00:00.000Z',browserDataClearedAt:clearedAt},resets:1,startedFresh:false};
   const calls={syncs:[],missing:[],history:0,restores:[],confirms:0,decisions:0,successes:0,captures:[],suspends:0,releases:0,wakes:[],remember:0,installs:0,refreshes:0};
-  let listener=()=>{},timerSequence=0;
+  let listener=()=>{},timerSequence=0;const notices=[];
   const locations=()=>freeze([
     freeze({id:'google-drive',label:'Google Drive',connected:state.driveConnected}),
     freeze({id:'device-folder',label:'Device Folder',connected:state.deviceConnected})
@@ -35,7 +35,7 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
       noteDeletions:async()=>freeze([])
     }),
     writeback:freeze({
-      installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,
+      installationKeep:()=>state.afterWriteback(),notesRecover:()=>{calls.noteWritebacks=(calls.noteWritebacks||0)+1;return true;},planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,
       writeLiveDraft:async()=>freeze({ok:true,value:null,error:null,storage:freeze({idb:true})})
     }),
     provider:freeze({
@@ -43,9 +43,9 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
         assert.equal(id,'device-folder');assert.equal(options.interactive,false);calls.history++;
         return freeze({available:true,entries:freeze([freeze({exportedAt:clearedAt,location:freeze({tier:'latest',checkpointId:checkpoint,exportedAt:clearedAt})})])});
       },
-      restoreRepositoryProviderVersion:async(id,options)=>{options.assertOrigin();calls.restores.push([id,options]);return restore;},
-      bringInRepositoryProvider:async(id,options)=>{calls.missing.push([id,options]);if(missing instanceof Error)throw missing;return missing;},
-      syncRepositoryProvider:async id=>{calls.syncs.push(id);if(sync instanceof Error)throw sync;return sync;},
+      restoreRepositoryProviderVersion:async(id,options)=>{options.assertOrigin();calls.restores.push([id,options]);await state.duringProvider(options);options.assertOrigin();return restore;},
+      bringInRepositoryProvider:async(id,options)=>{options.assertOrigin();calls.missing.push([id,options]);await state.duringProvider(options);options.assertOrigin();if(missing instanceof Error)throw missing;return missing;},
+      syncRepositoryProvider:async(id,options)=>{options.assertOrigin();calls.syncs.push(id);await state.duringProvider(options);options.assertOrigin();if(sync instanceof Error)throw sync;return sync;},
       list:locations,
       locationStatus:id=>id==='google-drive'?freeze({connected:state.driveConnected,engineBusy:state.driveBusy}):id==='device-folder'?freeze({connected:state.deviceConnected}):null,
       suspendBackground:reason=>{assert.equal(reason,'storage-reset');calls.suspends++;let released=false;return freeze({settled:Promise.resolve(),release:()=>{if(released)return false;released=true;calls.releases++;return true;}});},
@@ -69,7 +69,7 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
       openRestore:async()=>true,
       confirm:async()=>{calls.confirms++;state.afterConfirm();return confirm;},
       notify:()=>true,
-      emit:event=>{if(event.id==='detected')calls.decisions++;if(event.id==='restored')calls.successes++;return true;},
+      emit:event=>{if(event.id==='detected'){calls.decisions++;notices.push(event);}if(event.id==='restored')calls.successes++;return true;},
       resolve:()=>true,
       subscribe:next=>{listener=next;return ()=>{};}
     }),
@@ -86,7 +86,7 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
     })
   }));
   return {
-    controller,state,calls,
+    controller,state,calls,notices,
     begin(){assert.equal(controller.resume(),true,'stored unresolved clear must resume through the checked owner');assert.equal(calls.suspends,1,'resumption must pause provider background work');},
     connectDrive(){state.driveConnected=true;return controller.connectionsChanged();},
     disconnectDrive(){state.driveConnected=false;return controller.connectionsChanged();},
@@ -174,4 +174,39 @@ for(const [label,change] of [
   cases.push('stale Device Folder confirmation: '+label);
 }
 
+// The actual recovery owner forwards its captured hold/lease to provider
+// admission and does not let verified-journal notifications retire it early.
+for(const empty of [true,false]){
+  const h=harness({empty,sync:freeze({cancelled:false,verified:true})});h.begin();
+  h.state.duringProvider=async options=>{
+    assert.equal(h.controller.settleVerified(),false);
+    assert.equal(h.controller.unresolved(),true,'journal proof cannot retire its own live request');
+    options.assertOrigin();
+  };
+  h.connectDrive();await drain();assert.equal(h.controller.unresolved(),false);assert.equal(h.calls.releases,1);assert.equal(h.calls.successes,1);
+  cases.push('verified journal defers hold retirement: '+(empty?'sync':'missing'));
+}
+for(const empty of [true,false]){
+  const h=harness({empty,sync:freeze({cancelled:false,verified:true})});h.begin();
+  h.state.duringProvider=async()=>{h.state.revision++;};
+  h.connectDrive();await drain();assert.equal(h.controller.unresolved(),true);assert.equal(h.calls.releases,0);assert.equal(h.calls.successes,0);
+  cases.push('successor ownership cancels '+(empty?'sync':'missing'));
+}
+{
+  const h=harness({empty:true,sync:freeze({cancelled:false,verified:true})});h.begin();
+  let release,entered;const ready=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  h.state.duringProvider=async()=>{entered();await gate;};
+  h.connectDrive();await ready;const old=h.notices.at(-1);
+  h.controller.settle();h.state.health.browserDataClearedAt=clearedAt;
+  h.state.driveConnected=false;assert.equal(h.controller.resume(),true);
+  old.secondaryAction.run();assert.equal(h.controller.unresolved(),true,'a stale notice cannot settle the successor hold');
+  release();await drain();assert.equal(h.controller.unresolved(),true);assert.equal(h.calls.releases,1);assert.equal(h.calls.successes,0);
+  cases.push('retired hold and stale notice cannot settle successor recovery');
+}
+{
+  const h=harness();h.state.afterWriteback=async()=>{h.state.revision++;return true;};
+  await h.controller.handle({detectedAt:clearedAt});assert.equal(h.calls.noteWritebacks||0,0,'a successor cannot inherit the remaining writeback steps');
+  assert.equal(h.controller.unresolved(),true);assert.equal(h.calls.releases,0);
+  cases.push('writeback stops at originating ownership loss');
+}
 console.log(JSON.stringify({status:'PASS',suite:'storage-reset-connect-recovery',productionOwner:'backup-recovery-host',cases},null,2));

@@ -40,7 +40,7 @@ const reset=Recovery.createStorageReset(freeze({
     history:(id,options)=>runtime.history(id,options),
     restoreRepositoryProviderVersion:(id,options)=>runtime.restoreRepositoryProviderVersion(id,options),
     bringInRepositoryProvider:(id,options)=>runtime.bringInRepositoryProvider(id,options),
-    syncRepositoryProvider:id=>runtime.syncRepositoryProvider(id),
+    syncRepositoryProvider:(id,options)=>runtime.syncRepositoryProvider(id,options),
     list:()=>runtime.list(),locationStatus:id=>runtime.locationStatus(id),
     suspendBackground:reason=>runtime.suspendBackground(reason),connected:id=>runtime.connected(id)
   }),
