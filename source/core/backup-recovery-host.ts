@@ -484,7 +484,7 @@ const createModule=()=>{
       return next;
     }
     const steps:Readonly<Record<StepName,(assertOrigin:()=>void)=>boolean|PromiseLike<boolean>>>=freeze({
-      device:()=>input.writeback.installationKeep(),notes:()=>input.writeback.notesRecover(),plans:assertOrigin=>input.writeback.planRewrite(assertOrigin),settings:assertOrigin=>input.writeback.settingsFlush(assertOrigin),
+      device:()=>input.writeback.installationKeep(),notes:assertOrigin=>input.writeback.notesRecover(assertOrigin),plans:assertOrigin=>input.writeback.planRewrite(assertOrigin),settings:assertOrigin=>input.writeback.settingsFlush(assertOrigin),
       session:async assertOrigin=>{if(!input.writeback.hasTasks())return true;const result=await input.writeback.writeLiveDraft(assertOrigin);return !!(result&&result.ok&&result.storage?.idb===true);}
     });
     async function writeBack(active:Hold,assertOrigin:()=>void){

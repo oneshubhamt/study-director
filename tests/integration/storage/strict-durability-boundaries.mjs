@@ -197,6 +197,25 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   assert.equal(events.length,before,'former owner must not publish a canonical completion notification');
 }
 
+// The recovery/transfer request may retire while local tab ownership remains.
+// Assert that the originating guard is checked inside the actual IDB CAS, not
+// just by the controller, and that a physical commit is reported accurately.
+for(const stage of ['read','committed']){
+  const date='2026-09-15',stamp='2026-09-15T12:00:00.000Z';
+  const events=[],controls={onCanonicalCommit:event=>events.push(event)},h=createHarness(new Map(),null,controls);
+  const session={id:'active',version:1,revision:1,date,status:'active',scheduleText:'',snapshot:{date,elapsedMs:1},updatedAt:stamp};
+  assert.equal((await h.app.activeSession.save(session)).ok,true);
+  const before=structuredClone(h.stores.session.get('active')),count=events.length;
+  let current=true;
+  const assertOrigin=()=>{if(!current)throw new Error('recovery request changed');};
+  if(stage==='read')controls.onTransactionRead=({store,key,mode})=>{if(mode==='readwrite'&&store==='session'&&key==='active'){delete controls.onTransactionRead;current=false;}};
+  else controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&stores.includes('session')){delete controls.onTransactionComplete;current=false;}};
+  const saved=await h.app.activeSession.save({...before,revision:2},{expectedCanonical:before,strictDurability:true,assertOrigin});
+  assert.equal(saved.ok,false);assert.match(saved.error.message,/recovery request changed/u);
+  assert.equal(saved.storage.idb,stage==='committed');
+  assert.equal(h.stores.session.get('active').revision,stage==='committed'?2:1);
+  assert.equal(events.length,count,'no stale completion');assert.equal(h.sharedLocal.has('recovery'),false);
+}
 // Explicit absence is a real CAS precondition. A successor in canonical or
 // emergency storage cannot be removed or replaced by an older operation.
 {

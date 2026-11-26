@@ -1277,7 +1277,8 @@ const createModule=(input:ProviderModuleInput)=>{
     try{
       assertOrigin?.();protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});
       if(!protectedFile||!(protectedFile.blob instanceof Blob)||protectedFile.blob.size<=0||protectedFile.blob.size>SESSION_CLAIM_MAX_BYTES)throw new Error('Active-session ownership claim is too large.');
-      const checkProtection=async()=>{assertOrigin?.();signal?.throwIfAborted();await protectedFile!.checkProtection?.();assertOrigin?.();signal?.throwIfAborted();};
+      const prepared=protectedFile;
+      const checkProtection=async()=>{assertOrigin?.();signal?.throwIfAborted();await prepared.checkProtection?.();assertOrigin?.();signal?.throwIfAborted();};
       await checkProtection();
       const digest=await Exports.run('checksum',{value:protectedFile.blob},{signal});await checkProtection();onWrite?.();
       const item=repositoryProviderItem(await selected.repository.uploadSessionClaim!(freeze({kind:'session-claim',id,name:id+'.sdsessionclaim',blob:protectedFile.blob,size:protectedFile.blob.size,digest,exportedAt:normalized.claimedAt,appVersion:APP_VERSION,knownAbsent:true,checkProtection})),'session-claim');

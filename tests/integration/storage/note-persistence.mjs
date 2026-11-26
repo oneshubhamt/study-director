@@ -66,6 +66,27 @@ const deletionRecord=key=>({key:`noteDeletion:${key}`,version:1,value:{format:'s
   assert.deepEqual(reports,[],'a storage-loss rewrite does not manufacture conflicts');
 }
 
+// Originating storage-loss decisions reach the real Notes transaction.
+for(const stage of ['queued','read','committed']){
+  const {app,stores,clock,controls,sharedLocal}=await setup();
+  const events=[];controls.onCanonicalCommit=event=>events.push(event);
+  app.notes.update('surviving','Surviving','accepted evidence','');await app.notes.flush({strict:true});await clock.advance(1000);
+  const id=app.notes.get('surviving').id,initial=events.length;clearSiteData(stores);recreateEpoch(stores);
+  let current=true;
+  const check=()=>{if(!current)throw new Error('recovery hold changed');};
+  if(stage==='read')controls.onTransactionRead=({store,key,mode})=>{if(store==='area'&&key===id&&mode==='readwrite'){delete controls.onTransactionRead;current=false;}};
+  if(stage==='committed')controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&stores.includes('area')){delete controls.onTransactionComplete;current=false;}};
+  const recovering=app.notes.recoverAfterStorageLoss(check);
+  if(stage==='queued')current=false;
+  await assert.rejects(recovering,/recovery hold changed/u);
+  if(stage==='committed')assert.equal(stores.area.get(id)?.text,'accepted evidence','physical committed evidence remains');
+  else assert.equal(stores.area.has(id),false,'stale recovery cannot write a note');
+  assert.equal(events.length,initial,'no stale completion notification');
+  assert.equal(sharedLocal.has('noteRescue'),false,'stale recovery cannot publish a rescue');
+  assert.equal(app.notes.get(id).text,'accepted evidence','accepted memory survives');
+  current=true;await app.notes.flush({strict:true});
+  assert.equal(stores.area.get(id)?.text,'accepted evidence','a new authorized flush preserves the note');
+}
 // 4. A save that failed while storage was disappearing is recovered by the
 // strict flush that restore/update preparation requires.
 {

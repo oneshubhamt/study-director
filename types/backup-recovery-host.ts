@@ -80,7 +80,7 @@ export interface StorageResetInput{
     savedDayDeletions():Promise<readonly unknown[]>;noteDeletions():Promise<readonly unknown[]>;
   }>;
   readonly writeback:Readonly<{
-    installationKeep():boolean|PromiseLike<boolean>;notesRecover():boolean|PromiseLike<boolean>;planRewrite(assertOrigin:()=>void):boolean|PromiseLike<boolean>;
+    installationKeep():boolean|PromiseLike<boolean>;notesRecover(assertOrigin?:()=>void):boolean|PromiseLike<boolean>;planRewrite(assertOrigin:()=>void):boolean|PromiseLike<boolean>;
     settingsFlush(assertOrigin:()=>void):boolean|PromiseLike<boolean>;hasTasks():boolean;writeLiveDraft(assertOrigin:()=>void):Promise<SessionResult>;
   }>;
   readonly provider:Readonly<{

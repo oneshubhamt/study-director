@@ -3332,7 +3332,7 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<S
     savedDayDeletions:()=>AppData.deletionRecovery.savedDays(),noteDeletions:()=>AppData.deletionRecovery.notes()
   }),
   writeback:Object.freeze<StorageResetInput['writeback']>({
-    installationKeep:()=>InstallationIdentity.keep(),notesRecover:()=>AppData.notes.recoverAfterStorageLoss(),planRewrite:assertOrigin=>PlanData.rewriteAfterStorageReset(assertOrigin),
+    installationKeep:()=>InstallationIdentity.keep(),notesRecover:assertOrigin=>AppData.notes.recoverAfterStorageLoss(assertOrigin),planRewrite:assertOrigin=>PlanData.rewriteAfterStorageReset(assertOrigin),
     settingsFlush:assertOrigin=>{assertOrigin();protectedPreferencesDirty=true;return flushProtectedPreferences({assertOrigin});},hasTasks:()=>TASKS.length>0,
     writeLiveDraft:async assertOrigin=>{const result=await writeLiveDraftNow({markChanged:false,assertOrigin});if(!result)throw new Error('Active Session write did not return a canonical result.');return result;}
   }),

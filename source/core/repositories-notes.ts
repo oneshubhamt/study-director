@@ -260,13 +260,19 @@ const repository=(()=>{
     if(!Object.keys(current).length)return LocalStorageContract.remove(STORAGE_KEYS.noteRescue);
     return persistIndependentRescue(current);
   }
-  function markDirty(key:string,baseRevision?:unknown){
+  type NoteSaveRequest=Readonly<{token:WriteToken;assertOrigin?:()=>void}>;
+  function assertNoteSave(request:NoteSaveRequest,reason:string){request.assertOrigin?.();hooks.assertWriteToken(request.token,reason);}
+  function scheduleNoteSave(assertOrigin?:()=>void){
+    if(!appCanMutate())return false;
+    assertOrigin?.();return lane.schedule(freeze({token:hooks.issueWriteToken('scheduling Notes'),...(assertOrigin?{assertOrigin}:{})}));
+  }
+  function markDirty(key:string,baseRevision?:unknown,schedule=true){
     const safeKey=String(key||'');
     if(!safeKey)return;
     if(!dirtyBaseRevisions.has(safeKey))dirtyBaseRevisions.set(safeKey,String(baseRevision===undefined?revision(notes[safeKey]):baseRevision||''));
     dirtyKeys.add(safeKey);
     syncState(safeKey,'saving');
-    if(appCanMutate())lane.schedule();
+    if(schedule)scheduleNoteSave();
   }
   // Two live notes never share a title. Where a collection brings two (a
   // backup, or a write this tab could not see), the one edited last keeps the
@@ -319,16 +325,16 @@ const repository=(()=>{
     for(let index=1;index<100;index+=1){const label=`${base} (unsaved copy${index>1?` ${index}`:''})`;if(!taken(normalizeAreaName(label)))return label;}
     for(;;){const label=`${copyLabelBase(entry,36)} (unsaved copy ${uniqueStamp()})`;if(!taken(normalizeAreaName(label)))return label;}
   }
-  async function idbApplyDelta(keys:readonly string[],expectedRevisions:ReadonlyMap<string,string>,token:WriteToken){
+  async function idbApplyDelta(keys:readonly string[],expectedRevisions:ReadonlyMap<string,string>,request:NoteSaveRequest){
     const uniqueKeys=[...new Set((keys||[]).map(key=>String(key||'')).filter(Boolean))];
     const canonical=new Map(uniqueKeys.map(key=>[key,canonicalEntrySnapshot(notes[key],key)]));
     return idbStrictTransaction<DeltaResult>([DB_NOTES_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-      hooks.assertWriteToken(token,'opening the Notes save transaction');
+      assertNoteSave(request,'opening the Notes save transaction');
       const store=tx.objectStore(DB_NOTES_STORE),meta=Meta.view(tx),conflicts:NoteConflict[]=[],committed=KeyedRecord.create<NoteRecord|null>(),evicted:string[]=[],changed=new Set<string>(),deletedAt=new Date().toISOString(),storageLost=storageLossKnown();
       let stopped=false;
       const guard=()=>{
         if(stopped)return false;
-        try{hooks.assertWriteToken(token,'committing the Notes save transaction');return true;}
+        try{assertNoteSave(request,'committing the Notes save transaction');return true;}
         catch(error){stopped=true;try{tx.abort();}catch{}finish(false,error);return false;}
       };
       const failOn=<T>(request:IDBRequest<T>,message:string)=>{request.onerror=()=>finish(false,request.error||new Error(message));};
@@ -452,7 +458,7 @@ const repository=(()=>{
     if(appCanMutate())for(const {key,label} of separateTitles(notes)){const entry=notes[key]!;setNote(key,{...entry,label,updatedAt:nextRevision(entry.updatedAt)});markDirty(key,revision(entry));touchSnapshot();}
     everLoaded=true;
     purgeExpiredTrash();
-    if(dirtyKeys.size&&appCanMutate())lane.schedule();
+    if(dirtyKeys.size&&appCanMutate())scheduleNoteSave();
     refreshNoteConsumers();
     return true;
   }
@@ -485,10 +491,10 @@ const repository=(()=>{
   // Writes one batch of notes in one transaction. A committed note stays
   // pending while this tab already holds something newer than what was written.
   // Returns the notes whose clash could not be settled yet.
-  async function commitNotes(deltaKeys:readonly string[],token:WriteToken,options:FlushOptions={}){
+  async function commitNotes(deltaKeys:readonly string[],request:NoteSaveRequest,options:FlushOptions={}){
     const expectedRevisions=new Map(deltaKeys.map(key=>[key,dirtyBaseRevisions.has(key)?String(dirtyBaseRevisions.get(key)||''):revision(notes[key])]));
-    const result=await idbApplyDelta(deltaKeys,expectedRevisions,token);
-    hooks.assertWriteToken(token,'acknowledging the Notes save');
+    const result=await idbApplyDelta(deltaKeys,expectedRevisions,request);
+    assertNoteSave(request,'acknowledging the Notes save');
     const conflicts=new Map(result.conflicts.map(item=>[item.key,item]));
     const savedKeys=deltaKeys.filter(key=>!conflicts.has(key));
     let canonicalRefreshNeeded=false,movedEdits=false;const settledKeys:string[]=[],unresolved:string[]=[],reported:{key:string;label:string;copyLabel:string}[]=[];
@@ -525,7 +531,7 @@ const repository=(()=>{
     if(canonicalRefreshNeeded||reported.length)touchSnapshot();
     if(canonicalRefreshNeeded||reported.length)refreshNoteConsumers();
     reported.forEach(info=>reportNoteConflict(info));
-    if(dirtyKeys.size&&!unresolved.length)lane.schedule();
+    if(dirtyKeys.size&&!unresolved.length)lane.schedule(request);
     return unresolved;
   }
   function clashWithoutRoom(keys:readonly string[]){
@@ -534,17 +540,18 @@ const repository=(()=>{
   }
   // The lane's write: every note changed since the last batch. A failed batch
   // stays unsaved, goes to the browser copy, and the lane retries it.
-  async function saveDirtyNotes(_value:void,options:FlushOptions={}){
+  async function saveDirtyNotes(request:NoteSaveRequest,options:FlushOptions={}){
     if(!appCanMutate())return false;
-    const token=hooks.issueWriteToken('saving Notes');
+    try{assertNoteSave(request,'starting the queued Notes save');}catch{return false;}
     const keys=[...new Set([...dirtyKeys].map(key=>String(key||'')).filter(Boolean))];dirtyKeys.clear();
     if(!keys.length)return true;
     let unresolved;
-    try{unresolved=await commitNotes(keys,token,options);}
+    try{unresolved=await commitNotes(keys,request,options);}
     catch(error){
       keys.forEach(key=>dirtyKeys.add(key));
-      // Keep accepted edits pending, but do not publish shared rescue or
-      // completion effects using a newer lease than the failed batch.
+      // Keep accepted edits pending. A stale request is not retried with a
+      // successor's token; a fresh edit or explicit flush can admit them.
+      try{assertNoteSave(request,'reporting Notes save failure');}catch{return false;}
       if(!hooks.isOwnershipLostError(error)){
         protectUnsaved();
         recordFailure(error&&(error as {message?:unknown}).message?(error as {message?:unknown}).message:'note database failed');
@@ -554,7 +561,7 @@ const repository=(()=>{
     if(!unresolved.length)return true;
     const error=clashWithoutRoom(unresolved);protectUnsaved();recordFailure(error.message);throw error;
   }
-  const lane=SaveLane.createLane<void,boolean>(freeze({label:'Notes',write:saveDirtyNotes,onState:()=>{},environment:freeze({setTimeout:(callback:()=>void,delay:number)=>setTimeout(callback,delay),clearTimeout:(timer:number)=>clearTimeout(timer)})}));
+  const lane=SaveLane.createLane<NoteSaveRequest,boolean>(freeze({label:'Notes',write:saveDirtyNotes,onState:()=>{},environment:freeze({setTimeout:(callback:()=>void,delay:number)=>setTimeout(callback,delay),clearTimeout:(timer:number)=>clearTimeout(timer)})}));
   // An edit names the note by its title (plan Areas, Execute and the Library
   // find notes that way) or by its stored key. A title without a note starts
   // one; the label follows the spelling given as long as the title stays.
@@ -628,22 +635,26 @@ const repository=(()=>{
   // Everything this tab still holds is now the best copy: write every note
   // back. Missing rows are accepted; present rows still
   // follow the ordinary revision check.
-  async function recoverAfterStorageLoss(){
+  async function recoverAfterStorageLoss(assertOrigin?:()=>void){
     const resets=Number(storageResets())||0;
     // Without write control this tab's notes are not the authoritative copy: the
     // tab in control writes its notes back, so this one only acknowledges.
     if(!appCanMutate()){acknowledgedResets=Math.max(acknowledgedResets,resets);return false;}
+    assertOrigin?.();
+    const token=hooks.issueWriteToken('recovering Notes after storage loss'),request=freeze({token,...(assertOrigin?{assertOrigin}:{})});
     storageLossSignalled=true;
-    for(const key of Object.keys(notes))markDirty(key);
-    await flush();
-    const recovered=!saveFailed&&!dirtyKeys.size;
+    for(const key of Object.keys(notes))markDirty(key,undefined,false);
+    if(dirtyKeys.size)lane.schedule(request);
+    const saved=await flush();
+    assertNoteSave(request,'acknowledging Notes storage recovery');
+    const recovered=saved&&!saveFailed&&!dirtyKeys.size;
     if(recovered){storageLossSignalled=false;acknowledgedResets=Math.max(acknowledgedResets,resets);}
     return recovered;
   }
   function flush(options:FlushOptions={}):Promise<boolean>{
     const strict=!!(options&&options.strict),backupCapture=options&&options.backupCapture===true;
     if(!appCanMutate())return strict?Promise.reject(new Error('notes cannot flush without write ownership')):lane.settled();
-    const writeNow=()=>{if(dirtyKeys.size&&!lane.pending())lane.schedule();return lane.flush({backupCapture}).then(()=>true,()=>false);};
+    const writeNow=()=>{if(dirtyKeys.size&&!lane.pending())scheduleNoteSave();return lane.flush({backupCapture}).then(result=>result!==false,()=>false);};
     const pending=writeNow();
     if(!strict)return pending;
     return pending.then(async()=>{
