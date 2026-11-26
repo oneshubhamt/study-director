@@ -34,24 +34,30 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
     if(mode==='readwrite'&&((Array.isArray(names)&&names.includes('daily'))||names==='daily')&&controls.failNextDailyWrite){controls.failNextDailyWrite=false;reject(new Error('QA_FIXTURE injected daily-record write failure'));return;}
     if(mode==='readwrite'&&names==='meta'&&controls.failNextMetaOnlyWrite){controls.failNextMetaOnlyWrite=false;reject(new Error('QA_FIXTURE injected appMeta-only write failure'));return;}
     if(mode==='readwrite'&&((Array.isArray(names)&&names.includes('meta'))||names==='meta')&&controls.failNextMetaWrite){controls.failNextMetaWrite=false;reject(new Error('QA_FIXTURE injected appMeta write failure'));return;}
-    let settled=false,outstanding=0,completed=false;
+    let settled=false,outstanding=0,completed=false,aborted=false;
+    // This harness models request completion and explicit abort, not IndexedDB's
+    // cross-connection transaction scheduler. Remember only rows this transaction changes.
+    const undo=new Map();
+    const remember=(map,key)=>{let rows=undo.get(map);if(!rows){rows=new Map();undo.set(map,rows);}if(!rows.has(key))rows.set(key,{present:map.has(key),value:map.get(key)});};
+    const write=(map,key,value)=>{remember(map,key);map.set(key,structuredClone(value));};
+    const remove=(map,key)=>{remember(map,key);map.delete(key);};
     const finish=(ok,value)=>{if(settled)return;settled=true;ok?resolve(value):reject(value instanceof Error?value:new Error(String(value||'transaction failed')))};
     // Like IndexedDB, the transaction completes once no request is outstanding,
     // so requests issued from a callback still belong to it.
-    const complete=()=>queueMicrotask(()=>{if(!completed&&outstanding===0){completed=true;controls.onTransactionComplete?.({stores:names,mode});tx.oncomplete?.();}});
-    const request=run=>{const req={result:undefined,error:null,onsuccess:null,onerror:null};outstanding++;queueMicrotask(()=>{try{run(req);}finally{outstanding--;complete();}});return req;};
-    const tx={oncomplete:null,onabort:null,onerror:null,objectStore(name){
+    const complete=()=>queueMicrotask(()=>{if(!aborted&&!completed&&outstanding===0){completed=true;undo.clear();controls.onTransactionComplete?.({stores:names,mode});tx.oncomplete?.();}});
+    const request=run=>{const req={result:undefined,error:null,onsuccess:null,onerror:null};outstanding++;queueMicrotask(()=>{try{if(!aborted)run(req);}finally{outstanding--;complete();}});return req;};
+    const tx={oncomplete:null,onabort:null,onerror:null,abort(){if(completed||aborted)throw new Error('QA_FIXTURE transaction inactive');aborted=true;for(const [map,rows] of undo)for(const [key,before] of rows){if(before.present)map.set(key,before.value);else map.delete(key);}undo.clear();queueMicrotask(()=>{tx.onabort?.();finish(false,new Error('QA_FIXTURE transaction aborted'));});},objectStore(name){
       const map=storeMap(name);
       const inRange=(key,range)=>!range||(String(key)>=range.lower&&String(key)<=range.upper);
       return {
         get(key){return request(req=>{req.result=map.get(key);controls.onTransactionRead?.({store:name,key,mode});req.onsuccess?.();});},
-        add(value,key){const resolved=key===undefined?(value.key??value.date??value.id):key;return request(req=>{if(map.has(resolved)){req.error=new Error('QA_FIXTURE ConstraintError: key already exists');req.onerror?.();return;}map.set(resolved,structuredClone(value));req.onsuccess?.();});},
+        add(value,key){const resolved=key===undefined?(value.key??value.date??value.id):key;return request(req=>{if(map.has(resolved)){req.error=new Error('QA_FIXTURE ConstraintError: key already exists');req.onerror?.();return;}write(map,resolved,value);req.onsuccess?.();});},
         count(){return request(req=>{req.result=map.size;req.onsuccess?.();});},
-        put(value,key){if(name==='meta'&&value.key==='dataMaintenance'&&value.value?.status==='completed'&&controls.failNextMaintenanceCompletion){controls.failNextMaintenanceCompletion=false;const req={error:new Error('QA_FIXTURE maintenance completion write failure'),onerror:null};queueMicrotask(()=>req.onerror?.());return req;}const resolved=key===undefined?(name==='session'?value.id:(value.key??value.date??value.id)):key;if(name==='meta'&&value?.value?.format==='study-director.area-note-recovery')idbWrites.recovery++;map.set(resolved,structuredClone(value));return {};},
+        put(value,key){if(name==='meta'&&value.key==='dataMaintenance'&&value.value?.status==='completed'&&controls.failNextMaintenanceCompletion){controls.failNextMaintenanceCompletion=false;const req={error:new Error('QA_FIXTURE maintenance completion write failure'),onerror:null};queueMicrotask(()=>req.onerror?.());return req;}const resolved=key===undefined?(name==='session'?value.id:(value.key??value.date??value.id)):key;if(name==='meta'&&value?.value?.format==='study-director.area-note-recovery')idbWrites.recovery++;write(map,resolved,value);return request(req=>{req.result=resolved;req.onsuccess?.();});},
         getAll(range=null){if(name==='meta'){idbReads.metaGetAll++;range?idbReads.boundedMetaGetAll++:idbReads.unboundedMetaGetAll++;}return request(req=>{req.result=[...map.entries()].filter(([key])=>inRange(key,range)).map(([,value])=>structuredClone(value));controls.onTransactionRead?.({store:name,key:'*',mode});req.onsuccess?.();});},
         getAllKeys:name==='daily'&&controls.dailyKeyEnumeration!==true?undefined:function(range=null,count=Infinity){return request(req=>{req.result=[...map.keys()].filter(key=>inRange(key,range)).sort().slice(0,count);req.onsuccess?.();});},
-        openCursor(){const entries=[...map.entries()];let index=0;const req={result:undefined,error:null,onsuccess:null,onerror:null};const pump=()=>{if(index>=entries.length){req.result=null;req.onsuccess?.({target:req});return;}const [key,value]=entries[index];req.result={key,value:structuredClone(value),update(next){map.set(key,structuredClone(next));return {};},delete(){map.delete(key);return {};},continue(){index++;pump();}};req.onsuccess?.({target:req});};queueMicrotask(pump);return req;},
-        delete:key=>{if(key&&typeof key==='object'&&'lower' in key&&'upper' in key){for(const candidate of [...map.keys()])if(String(candidate)>=String(key.lower)&&String(candidate)<=String(key.upper))map.delete(candidate);}else map.delete(key);return request(req=>{req.onsuccess?.();});},clear:()=>{map.clear();return {};}
+        openCursor(){const entries=[...map.entries()];let index=0;const req={result:undefined,error:null,onsuccess:null,onerror:null};const pump=()=>{if(aborted)return;if(index>=entries.length){req.result=null;req.onsuccess?.({target:req});return;}const [key,value]=entries[index];req.result={key,value:structuredClone(value),update(next){write(map,key,next);return request(req=>{req.onsuccess?.();});},delete(){remove(map,key);return request(req=>{req.onsuccess?.();});},continue(){index++;pump();}};req.onsuccess?.({target:req});};queueMicrotask(pump);return req;},
+        delete:key=>{if(key&&typeof key==='object'&&'lower' in key&&'upper' in key){for(const candidate of [...map.keys()])if(String(candidate)>=String(key.lower)&&String(candidate)<=String(key.upper))remove(map,candidate);}else remove(map,key);return request(req=>{req.onsuccess?.();});},clear:()=>{for(const key of map.keys())remove(map,key);return request(req=>{req.onsuccess?.();});}
       };
     }};
     try{operation(tx,(ok=true,value=true)=>finish(ok,value));complete();}catch(error){finish(false,error)}
