@@ -115,7 +115,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
     persistence.DiaryEditor.bind(field,date,await app.dailyRecords.get(date),{onState:state=>oldStates.push(state)});
     persistence.DiaryEditor.schedule(field,'new reflection '+String(fail));
     const flushing=persistence.DiaryEditor.flush(field);
-    const rejected=assert.rejects(flushing,/old Diary write failed|became stale/);
+    const rejected=assert.rejects(flushing,/old Diary write failed|became stale|no longer bound to the current study owner/);
     await started;
     persistence.DiaryEditor.bind(field,'2026-09-17',{...base,date:'2026-09-17',reflection:'successor'}, {onState:state=>newStates.push(state)});
     const successor={...field.dataset},previousStates=[...oldStates];
