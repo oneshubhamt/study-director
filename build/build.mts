@@ -374,7 +374,7 @@ function verifyPwaTarget(files:FileMap,pwa:PwaIdentity,label:string){
   for(const asset of pwa.precache){
     const name=asset.path.replace(/^\.\//,'');
     invariant(files.has(name),`${label} precache asset is missing: ${name}.`);
-    invariant(sha256(files.get(name))===asset.sha256,`${label} precache hash drifted: ${name}.`);
+    invariant(sha256(required(files,name))===asset.sha256,`${label} precache hash drifted: ${name}.`);
   }
   invariant(serviceWorker.includes(`const PRECACHE=parsePrecache('${JSON.stringify(pwa.precache)}')`),`${label} service worker asset manifest drifted.`);
 }
@@ -477,8 +477,8 @@ export function buildManifest(build:ReturnType<typeof renderBuild>){
     format:'study-director-build-manifest',version:2,
     release:build.identity.release,releaseId:build.identity.id,buildId:build.identity.buildId,sourceCommit:build.identity.sourceCommit,main:build.identity.main,
     sourceDateEpoch:releaseConfig.sourceDateEpoch,minified:false,
-    privateModuleOrder:privateModules.map(row=>row.id),cacheableCoreFiles:privateModules.map(row=>required(build.privateNames,row.id)),cacheableStyleFiles:styleModules.map(row=>build.required(styleNames,row.id)),externalRuntimeFiles:externalModules.map(row=>build.required(externalNames.deployment,row.id)),externalExecution:Object.fromEntries(externalModules.map(row=>[row.id,row.execution])),
-    developmentRuntimeFiles:[...privateModules.map(row=>build.required(privateNames,row.id)),...externalModules.map(row=>build.required(externalNames.development,row.id))],
+    privateModuleOrder:privateModules.map(row=>row.id),cacheableCoreFiles:privateModules.map(row=>required(build.privateNames,row.id)),cacheableStyleFiles:styleModules.map(row=>required(build.styleNames,row.id)),externalRuntimeFiles:externalModules.map(row=>required(build.externalNames.deployment,row.id)),externalExecution:Object.fromEntries(externalModules.map(row=>[row.id,row.execution])),
+    developmentRuntimeFiles:[...privateModules.map(row=>required(build.privateNames,row.id)),...externalModules.map(row=>required(build.externalNames.development,row.id))],
     runtimeDependencies:Object.fromEntries(privateModules.map(row=>[row.id,[...dependencyList(row.id)]])),
     pwa:Object.freeze({
       development:Object.freeze({releaseId:build.pwa.development.releaseId,assetId:build.pwa.development.assetId,precache:build.pwa.development.precache}),
