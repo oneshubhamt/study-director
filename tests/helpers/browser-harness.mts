@@ -289,7 +289,7 @@ export class CdpPage{
   }
   async screenshot(file:string,clip:ScreenshotClip|null=null){
     const params:Row={format:'png',captureBeyondViewport:false,fromSurface:true};
-    if(clip)params.clip={x:clip.x,y:clip.y,width:clip.width,height:clip.height,scale:clip.scale||1};
+    if(clip)params['clip']={x:clip.x,y:clip.y,width:clip.width,height:clip.height,scale:clip.scale||1};
     const result=await this.send('Page.captureScreenshot',params);
     fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,Buffer.from(str(result['data']),'base64'));return file;
   }
