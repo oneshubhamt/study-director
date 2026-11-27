@@ -6,6 +6,14 @@
 
 The [pinned Stage 1 handoff](https://github.com/oneshubhamt/study-director/blob/d5a53bc4/TS-CONVERSION-EXECUTION.md) retains the original per-pass objectives, last-JS anchors, historical analytical differences, failure/repair checkpoints and their verification. The [Stage 2 checkpoint before closure](https://github.com/oneshubhamt/study-director/blob/66cffde8/docs/typescript/REVIEW-P5-STAGE-2.md) preserves interim observations and environment limits.
 
+## P6.0 · In progress
+
+Inventory and benchmark the checked tooling, runners, contracts, tests and workflows against runtime `66cffde8`, documentation head `81efb6af` and F33 `d69f2053`. The four intervening files are documentation only. Protect existing behavior, data-safety floors, failure reporting and isolated browser contracts. End this pass with a measured baseline and a bounded P6.1 handoff.
+
+- In a disposable archive, replacing the canonical-sort mutation with identical source let the test survive (runner exit 1). Adding an unrelated missing import to the test made the same neutral edit report KILLED (runner exit 0). P6.1 must distinguish infrastructure failure from a proven behavioral failure.
+- With the production generated-case helper, seed 20261103 following 20261102 produced random draw 243 and generated device-1. Replaying 20261103 alone produced the same draw and device-0. Retention and sync consume the index; compare serialized inputs on replay.
+- Corrected the restore requirement in the phase register against the actual provider branch and durable-byte assertions. Remaining work includes full file ownership/selection inventory, F33 mapping, timing and coverage/mutation baseline dispositions.
+
 ## Programme obligations
 
 - F-001: each feature owns its host callbacks/callers; P5.13 receives thin composition only.
