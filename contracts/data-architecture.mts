@@ -210,9 +210,9 @@ export const DATA_ARCHITECTURE=freeze({
 
 type RegistryEntry=Readonly<{name:string;kind:'exact'|'prefix';key:string;owner:string;validatorOwner:string;schema:string;protection:string}>;
 function keyOf(keys:Readonly<Record<string,string>>,name:string):string{const key=keys[name];if(typeof key!=='string'||!key)throw new Error(`Missing storage identity: ${name}`);return key;}
-export const APP_META_RUNTIME_REGISTRY:Readonly<Record<string,RegistryEntry>>=freeze(Object.fromEntries([
-  ...Object.entries(DATA_ARCHITECTURE.appMeta.exact).map(([name,value])=>[name,freeze({name,kind:'exact',key:keyOf(APP_META_KEYS,name),owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema||'',protection:value.protection})]),
-  ...Object.entries(DATA_ARCHITECTURE.appMeta.prefixes).map(([name,value])=>[name,freeze({name,kind:'prefix' as const,key:keyOf(APP_META_KEYS,name),owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema||'',protection:value.protection})])
+export const APP_META_RUNTIME_REGISTRY:Readonly<Record<string,RegistryEntry>>=freeze(Object.fromEntries<RegistryEntry>([
+  ...Object.entries(DATA_ARCHITECTURE.appMeta.exact).map(([name,value])=>[name,freeze({name,kind:'exact' as const,key:keyOf(APP_META_KEYS,name),owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema||'',protection:value.protection})] as const),
+  ...Object.entries(DATA_ARCHITECTURE.appMeta.prefixes).map(([name,value])=>[name,freeze({name,kind:'prefix' as const,key:keyOf(APP_META_KEYS,name),owner:value.owner,validatorOwner:appMetaValidationOwner(name),schema:value.schema||'',protection:value.protection})] as const)
 ]));
 
 export function assertDataArchitecture(contract=DATA_ARCHITECTURE,keys:Readonly<Record<string,string>>=APP_META_KEYS,localKeys:Readonly<Record<string,string>>=LOCAL_STORAGE_KEYS,validationOwners:Readonly<Record<string,readonly string[]>>=APP_META_VALIDATION_OWNERS){
