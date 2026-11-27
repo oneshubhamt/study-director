@@ -1,5 +1,11 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 residual correction pass — OPEN · 2026-11-27
+
+- Baseline `62c867a297260b7d9d1af4857b44761837dcd404`; preceding Diary/repair commits `73ce633fd7b63781f22ec3f49b385bc27e0ea708` and `62c867a297260b7d9d1af4857b44761837dcd404`. Exact-head [repository checks](https://github.com/oneshubhamt/study-director/actions/runs/45938097740/job/140305862221) executed 45 files: 43 passed, two failed (stale Diary source assertions and read-back outcome expectation). Other exact-head workflows not yet credited.
+- Objectives: update the structural tests to prove the stronger composed owner/retained-session and canonical CAS guards, and assert the coded committed-unverified outcome including the original read-back cause. Trace confirmation-to-persistence Diary mutation and scrub-origin publication completion; correct demonstrated stale-authority gaps at actual mutation boundaries with deterministic witnesses. Reconcile exact-head evidence and remaining historical work; no Phase 6 or promotion.
+- The previous pass objectives and baseline remain below. Preserve the current canonical format, normal emergency fallback and existing safety assertions. No test deletion or retry-as-proof.
+
 ## REVIEW-P5 · Stage 1 Diary/repair completion — OPEN · 2026-11-27
 
 - Baseline `7a8a898f64409a4fdaf06c45ddb93c6e6bb4e082` (41 commits after documentation `7a7db53174272d8684ed71f2c33de968b6869e68`). Predecessor `3abb89950ddb7eef54d8a663abc0e65df9839bd3`: all nine workflows terminal success, including all ten audit browser legs ([audit](https://github.com/oneshubhamt/study-director/actions/runs/45931627858)). Newer head introduces origin-fenced remote repair, conditional Study Day publication and Diary single-writer guard; do not duplicate these changes.
