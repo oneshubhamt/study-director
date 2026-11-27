@@ -1,12 +1,13 @@
 type Timer={id:number;at:number;run:()=>void};
 export function createFakeClock(start='2026-09-01T00:00:00.000Z'){
-  let now=Date.parse(start),nextId=0;
+  const NativeDate=Date;
+  let now=NativeDate.parse(start),nextId=0;
   if(!Number.isFinite(now))throw new TypeError('Fake clock start must be a valid date.');
   const timers=new Map<number,Timer>();
-  class FakeDate extends Date{
+  class FakeDate extends NativeDate{
     constructor(...args:unknown[]){
-      const date:unknown=Reflect.construct(Date,args.length?args:[now]);
-      if(!(date instanceof Date))throw new Error('Native Date constructor returned an invalid instance.');
+      const date:unknown=Reflect.construct(NativeDate,args.length?args:[now]);
+      if(!(date instanceof NativeDate))throw new Error('Native Date constructor returned an invalid instance.');
       super(date.getTime());
     }
     static override now(){return now;}
