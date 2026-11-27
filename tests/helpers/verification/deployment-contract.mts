@@ -19,7 +19,7 @@ const deploymentIndex=build.deployment.get(build.identity.main),richTextName=bui
 assert.ok(typeof deploymentIndex==='string');assert.ok(deploymentIndex.includes(`<link rel="preload" as="script" href="${richTextName}">`),'deployment must preload the blocking RichText runtime');
 assert.equal(build.deployment.has('firebase.json'),false,'generated Firebase project configuration must remain outside public build output');
 assert.equal(Object.prototype.hasOwnProperty.call(jsonObject(merge['hosting']),'public'),false,'the merge file must not replace the existing public directory setting');
-const headers=new Map(merge.hosting.headers.map(item=>[item.source,new Map(item.headers.map(row=>[row.key.toLowerCase(),row.value]))]));
+const headers=new Map(hostingHeaders(merge).map(item=>[item.source,new Map(item.headers.map(row=>[row.key.toLowerCase(),row.value]))]));
 assert.match(headers.get('/sw.js')?.get('cache-control')??'',/no-cache.*no-store.*must-revalidate/);
 assert.match(headers.get('/index.html')?.get('cache-control')??'',/no-cache.*must-revalidate/);
 assert.match(headers.get('/manifest.webmanifest')?.get('content-type')??'',/application\/manifest\+json/);
@@ -34,7 +34,7 @@ const isolatedRoot=path.join(temp,'repo');
 try{
   fs.cpSync(root,isolatedRoot,{recursive:true,filter:source=>{
     const relative=path.relative(root,source).split(path.sep)[0];
-    return !['dist','node_modules','.git','tests'].includes(relative);
+    return !['dist','node_modules','.git','tests'].includes(relative??'');
   }});
   const staged=captureProcess(process.execPath,['build/stage-firebase.mjs'],{cwd:isolatedRoot,encoding:'utf8',env:{...process.env,SD_SOURCE_COMMIT:sourceCommit}});
   assert.equal(staged.status,0,staged.stderr||staged.stdout);

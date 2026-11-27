@@ -10,7 +10,7 @@ import {DEPENDENCY_AUDIT_POLICY,DEPENDENCY_INVENTORY,VENDORED_DEPENDENCIES} from
 
 const lock=jsonFile('package-lock.json'),packages=jsonObject(lock['packages']);
 const packageName=(path:string)=>path.replace(/^node_modules\//,'');
-const locked=Object.entries(packages).filter(([path])=>path.startsWith('node_modules/')).map(([path,raw])=>{const value=jsonObject(raw);return {name:packageName(path),...(value['link']?jsonObject(packages[jsonString(value['resolved'])]??{}):value),...value};});
+const locked=Object.entries(packages).filter(([path])=>path.startsWith('node_modules/')).map(([path,raw])=>{const value=jsonObject(raw);return {name:packageName(path),...(value['link']?jsonObject(packages[jsonString(value['resolved'])]??{}):value),...value,version:value['version']??(value['link']?jsonObject(packages[jsonString(value['resolved'])]??{})['version']:undefined),license:value['license']??(value['link']?jsonObject(packages[jsonString(value['resolved'])]??{})['license']:undefined)};});
 const inventoryByName=new Map(DEPENDENCY_INVENTORY.map(row=>[row.name,row]));
 const rootDevDependencies=jsonObject(jsonObject(packages[''])['devDependencies']??{});
 assert.equal(Object.hasOwn(rootDevDependencies,'wordgard'),false,'Vendored Wordgard source must not be installed as a local npm package.');
