@@ -259,7 +259,9 @@ function fixture(options={}){
   await assert.rejects(persistence.DailyReflectionPersistence.commit(date,'Fallback only',{expectedCanonical:'Old'}),/emergency recovery storage/u);
   assert.equal(verifyCalls,0,'fallback receipt is refused before canonical verification');
   receipt='indexeddb';current=study;verifyFailure=true;
-  await assert.rejects(persistence.DailyReflectionPersistence.commit(date,'Committed but unverified',{expectedCanonical:'Old'}),/read-back failed/u);
+  await assert.rejects(persistence.DailyReflectionPersistence.commit(date,'Committed but unverified',{expectedCanonical:'Old'}),error=>error.code==='DAILY_RECORD_COMMITTED_UNVERIFIED'&&/read-back failed/u.test(error.cause?.message||''));
+  assert.equal(current.reflection,'Committed but unverified','read-back failure does not undo the canonical write');
+  assert.deepEqual(current.results,study.results,'the committed reflection retains Study Day evidence');
   verifyFailure=false;current=study;saveCalls=[];
   const updated=await persistence.DailyReflectionPersistence.commit(date,'New',{expectedCanonical:'Old',backupCapture:true});
   assert.equal(updated.canonical,'New');assert.deepEqual(saveCalls[0][0].results,study.results,'Diary editing a study day preserves richer study evidence');
