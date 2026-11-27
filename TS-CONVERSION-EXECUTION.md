@@ -1,5 +1,14 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 consolidated authority and retirement closure — OPEN · 2026-11-27
+
+- Start `b5531ef2c69b8b8b9a6ac2bfe0a0050562f9f336`, application/test baseline `57354d58965c204683ec68768b260f65026a21df`; all nine workflows terminal SUCCESS (including [P5.7](https://github.com/oneshubhamt/study-director/actions/runs/45926479296)). No Phase 6.
+- Objectives: review delayed reminder and acknowledgement origin, durable canonical write fencing, PWA hidden follower acquisition versus controller activation (prove controlled ordering; preserve primary checks and ordinary takeover), historical storage reset/integrity and Notes/export caller reconciliation; targeted regression and consolidated exact-head evidence. Do not claim original intermittent cause from green repetitions alone.
+- Confirmed Review host hazard: delayed acknowledgement catch unconditionally restores previous savedRevision even if runtime ownership/lifecycle/date changed; delayed reminder can publish for a retired date. Canonical write wrapper currently drops the supplied assertOrigin. Correct through the checked host and actual erased-owner regression, preserving legitimate progress and newer successors.
+- Restore journal ledger concern resolved by source trace: actual AppMeta transaction get validates the registered current restoreJournalPayload schema before readRestoreJournal normalizes the three ledgers; missing/malformed arrays fail closed, not silently dropped. Source/core/app-meta.ts, repository-journals.ts and backup-recovery-host.ts; no new migration or data contract change.
+- Keep unresolved items open pending evidence. Stage 2 independent; Phase 7/8 boundaries unchanged.
+
+
 ## 2026-11-27 — REVIEW-P5 Stage 1 continuation: exact-revision verification checkpoint (gate OPEN)
 
 Application/test revision: `57354d58965c204683ec68768b260f65026a21df`; prior documentation checkpoint: `c6e92fd29baf9a71d48ec4d3cf79d7b5224c7598`. This checkpoint is documentation only. Starting revision, baseline, earlier comparison pins, confirmed repairs and scope limits remain in the preceding record. No Phase 6 work or promotion.
