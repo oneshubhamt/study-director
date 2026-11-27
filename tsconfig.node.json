@@ -43,6 +43,11 @@
     "build/wordgard-metadata.mts",
     "build/typescript-projects.mts",
     "tests/helpers/core-script.mts",
-    "tests/helpers/bug-regression-policy.mts"
+    "tests/helpers/bug-regression-policy.mts",
+    "tests/helpers/browser-tests.mts",
+    "tests/helpers/browser-executable.mts",
+    "release.config.mts",
+    "tests/helpers/browser-suite.mts",
+    "tests/helpers/browser-coverage.mts"
   ]
 }

@@ -21,14 +21,14 @@ function fn(value:unknown):CoverageFunction{
   if(!record(value)||typeof value['functionName']!=='string'||typeof value['isBlockCoverage']!=='boolean'||!Array.isArray(value['ranges'])||!value['ranges'].length)throw new Error('Invalid V8 coverage function.');
   return {functionName:value['functionName'],isBlockCoverage:value['isBlockCoverage'],ranges:value['ranges'].map(range)};
 }
-function script(value:unknown):CoverageScript{
+export function parseCoverageScript(value:unknown):CoverageScript{
   if(!record(value)||typeof value['url']!=='string'||!Array.isArray(value['functions']))throw new Error('Invalid V8 coverage script.');
   return {url:value['url'],functions:value['functions'].map(fn)};
 }
 export function parseRawCoverage(raw:string):RawCoverage{
   const value:unknown=JSON.parse(raw);
   if(!record(value)||!text(value['runId'])||!text(value['test'])||!Array.isArray(value['result'])||!value['result'].length)throw new Error('Incomplete V8 coverage artifact.');
-  const result=value['result'].map(script);
+  const result=value['result'].map(parseCoverageScript);
   if(!result.some(row=>row.functions.some(f=>f.ranges.some(r=>r.count>0))))throw new Error('V8 artifact contains no executed code.');
   return {runId:value['runId'],test:value['test'],result};
 }
@@ -47,7 +47,7 @@ export function sourceIdentity(root:string):SourceIdentity{
       hash.update(stat.isSymbolicLink()?fs.readlinkSync(absolute):digest(fs.readFileSync(absolute))).update('\0');
     }
   }
-  const roots=['source','portable','rich-text','build','tests','types','contracts','generated','vendor','package.json','package-lock.json','release.config.mjs','.oxlintrc.json',...fs.readdirSync(root).filter(name=>/^tsconfig.*\.json$/u.test(name))];
+  const roots=['source','portable','rich-text','build','tests','types','contracts','generated','vendor','package.json','package-lock.json','release.config.mjs','release.config.mts','.oxlintrc.json',...fs.readdirSync(root).filter(name=>/^tsconfig.*\.json$/u.test(name))];
   for(const relative of [...new Set(roots)].sort())if(fs.existsSync(path.join(root,relative)))visit(relative);
   const git=spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'});
   const sha=git.status===0&&/^[0-9a-f]{40}$/u.test(git.stdout.trim())?git.stdout.trim():null;

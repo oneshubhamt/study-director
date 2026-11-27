@@ -1,3 +1,4 @@
+import {resolveChromiumExecutable} from './browser-executable.mts';
 import {readRuntimeSource} from './runtime-source.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -262,23 +263,7 @@ export function studyTimezone(at=new Date()){
   const offset=12-at.getUTCHours();
   return offset===0?'Etc/UTC':`Etc/GMT${offset>0?'-':'+'}${Math.abs(offset)}`;
 }
-export function resolveChromiumExecutable(preferred=''){
-  const candidates=[
-    preferred,
-    process.env.CHROMIUM_PATH,
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/google-chrome',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    '/tmp/chromium'
-  ].filter(Boolean);
-  const match=candidates.find(candidate=>{try{return fs.existsSync(candidate)&&fs.statSync(candidate).isFile();}catch{return false;}});
-  if(!match)throw new Error(`Chromium is unavailable. Checked: ${candidates.join(', ')}`);
-  return match;
-}
+export {resolveChromiumExecutable};
 
 // Chromium can create DevToolsActivePort before it has written the port, so
 // read until the file holds one; under CPU load that gap gets longer.
