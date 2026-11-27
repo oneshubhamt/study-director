@@ -93,7 +93,8 @@ export function assertProductionLimits(value=PRODUCTION_LIMITS){
   if(!Object.isFrozen(value))throw new TypeError('Production limits must be frozen.');
   for(const [name,limit] of Object.entries(value)){
     if(name==='minSupportedSavedDate')continue;
-    if(typeof limit!=='number'||!Number.isFinite(limit)||limit<=0)throw new TypeError(`Production limit ${name} is invalid.`);
+    // Number.isFinite rejects every non-number, so the right operand is narrowed by the runtime guard.
+    if(!Number.isFinite(limit)||(limit as number)<=0)throw new TypeError(`Production limit ${name} is invalid.`);
   }
   if(value.backupMaxCompressedBytes>value.backupMaxUncompressedBytes)throw new RangeError('Compressed backup limit exceeds the uncompressed safety limit.');
   if(value.backupMaxEntryBytes>value.backupMaxLineBytes)throw new RangeError('Backup entry limit exceeds the line limit.');

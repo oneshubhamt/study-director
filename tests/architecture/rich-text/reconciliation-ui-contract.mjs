@@ -9,7 +9,7 @@ const ui=read('source/core/reconciliation-ui.ts');
 const backup=readScript('source/core/backup.ts');
 const app=readHostHtml();
 const styles=read('source/styles/core.css');
-const manifest=read('build/module-manifest.mjs');
+const manifest=read('build/module-manifest.mts');
 
 assert.match(editor,/RangeSet/,'Scratch diff decorations must use Wordgard RangeSet state.');
 assert.match(editor,/Decoration\.Range\.wrapper\('span'/,'Differences must be editor decorations, not persisted marks.');
