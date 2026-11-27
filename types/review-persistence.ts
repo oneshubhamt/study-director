@@ -9,6 +9,7 @@ export interface DiaryDraft extends DiaryRecord{readonly dayOfWeek:number;readon
 export interface DiaryEditorCallbacks{
   readonly onSaved?:((record:SavedDayRecord|null)=>void)|null;
   readonly onState?:((state:SaveState,message:string)=>void)|null;
+  readonly assertWrite?:(()=>void)|null;
 }
 export interface DiaryEditorBinding{
   readonly date:string;readonly revision:number;
@@ -31,7 +32,7 @@ export interface DiaryEditor{
   bind(field:HTMLTextAreaElement,date:string,record:SavedDayRecord,callbacks?:DiaryEditorCallbacks):Readonly<DiaryEditorBinding>|null;
   capture(field:HTMLTextAreaElement,event?:Event):string;
   clear(field:HTMLTextAreaElement):boolean;
-  deleteEntry(date:string,options?:Readonly<{backupCapture?:boolean}>):Promise<boolean>;
+  deleteEntry(date:string,options?:Readonly<{backupCapture?:boolean;assertWrite?:(()=>void)|null}>):Promise<boolean>;
   documentFor(field:HTMLTextAreaElement):Readonly<DiaryEditorDocument>|null;
   draft(date:string):Readonly<DiaryDraft>|null;
   flush(field:HTMLTextAreaElement,options?:FlushOptions):Promise<SavedDayRecord|null|void>;
