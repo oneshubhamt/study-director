@@ -836,11 +836,11 @@ const createModule=(input:ProviderModuleInput)=>{
     }
   }
 
-  async function saveRepositoryProvider(selected:Provider,{interactive=true,excludedObjectIds=null,retention=null,signal=null,preemptBackground=true,foregroundPriority=false,recoveryProgress=null,repositorySnapshot=null,pendingIntent=null}:{interactive?:boolean;excludedObjectIds?:readonly string[]|null;retention?:import('../../types/managed-repository.ts').RetentionInput|null;signal?:AbortSignal|null;preemptBackground?:boolean;foregroundPriority?:boolean;recoveryProgress?:((value:Progress)=>void)|null;repositorySnapshot?:Snapshot|null;pendingIntent?:PendingEntry|null}={}):Promise<SavedPublication>{
+  async function saveRepositoryProvider(selected:Provider,{interactive=true,excludedObjectIds=null,retention=null,signal=null,preemptBackground=true,foregroundPriority=false,recoveryProgress=null,repositorySnapshot=null,pendingIntent=null,assertOrigin=null}:{interactive?:boolean;excludedObjectIds?:readonly string[]|null;retention?:import('../../types/managed-repository.ts').RetentionInput|null;signal?:AbortSignal|null;preemptBackground?:boolean;foregroundPriority?:boolean;recoveryProgress?:((value:Progress)=>void)|null;repositorySnapshot?:Snapshot|null;pendingIntent?:PendingEntry|null;assertOrigin?:(()=>void)|null}={}):Promise<SavedPublication>{
     const presentationId=foregroundView()?.operationId||'';
-    if(preemptBackground)await preemptProviderBackground(selected);
-    const publicationOwner=selected;selected=repositoryOperationSelected(selected,{signal});
-    await synchronizeRepositoryScope(selected);
+    assertOrigin?.();if(preemptBackground)await preemptProviderBackground(selected);assertOrigin?.();
+    const publicationOwner=selected;selected=repositoryOperationSelected(selected,{signal,checkProtection:assertOrigin});
+    await synchronizeRepositoryScope(selected);assertOrigin?.();
     const role=retention?.role==='before-restore'?'before-restore':'normal',previousPublication=providerPublications.get(selected.id)?.continuation.status();
     if(previousPublication?.invalidated||previousPublication?.pending&&previousPublication.role!==role)await discardProviderPublication(selected);
     let publication=null,continuation=null;
@@ -892,35 +892,35 @@ const createModule=(input:ProviderModuleInput)=>{
       const publishCheckpoint=retention?.role==='before-restore'?RepositoryCheckpointPipeline.publishInline:RepositoryCheckpointPipeline.publish;
       published=await publishCheckpoint(history,{interactive,availableObjectIds,excludedObjectIds:excluded,retention,signal,continuation,shared,baseUpdate:shared||sharingActive(),reuse},Object.freeze({
         writeObject:async (entry,prepared)=>{
-          requireBackupMutationControl('saving to '+selected.label);await entry.checkProtection?.();
+          assertOrigin?.();requireBackupMutationControl('saving to '+selected.label);assertOrigin?.();await entry.checkProtection?.();assertOrigin?.();
           if(!objectCount){const fresh=prepared.objects.filter(object=>!object.reused);objectCount=fresh.length;totalBytes=fresh.reduce((sum,object)=>sum+object.storedBytes,0);}
           const index=++objectStarted;OperationDiagnostics.mark('provider-object-upload-start',{provider:selected.id,index,count:objectCount,bytes:entry.storedBytes});
           progress(retention?.role==='before-restore'?'safety-upload':'upload',retention?.role==='before-restore'?`Saving safety version in ${selected.label}…`:`Uploading backup data to ${selected.label}…`,{current:objectCompleted,total:objectCount,completedBytes:uploadedBytes,totalBytes});
           const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'object',id:entry.objectId,name:entry.objectId+'.sdobject',blob:entry.blob,size:entry.storedBytes,digest:entry.storedChecksum,exportedAt:prepared.exportedAt,appVersion:APP_VERSION,checkProtection:entry.checkProtection})),'object');
-          await verifyUploadedRepositoryObject(selected,entry,item,{signal,index,count:objectCount,onProgress:progress});uploadedBytes+=entry.storedBytes;objectCompleted+=1;rememberRepositoryObjectReceipt(selected,item);OperationDiagnostics.mark('provider-object-upload-complete',{provider:selected.id,index,count:objectCount,bytes:entry.storedBytes,completed:objectCompleted});
+          await verifyUploadedRepositoryObject(selected,entry,item,{signal,index,count:objectCount,onProgress:progress});assertOrigin?.();uploadedBytes+=entry.storedBytes;objectCompleted+=1;rememberRepositoryObjectReceipt(selected,item);OperationDiagnostics.mark('provider-object-upload-complete',{provider:selected.id,index,count:objectCount,bytes:entry.storedBytes,completed:objectCompleted});
           progress(retention?.role==='before-restore'?'safety-upload':'upload',retention?.role==='before-restore'?`Saving safety version in ${selected.label}…`:`Uploading backup data to ${selected.label}…`,{current:objectCompleted,total:objectCount,completedBytes:uploadedBytes,totalBytes});return item;
         },
         writeManifest:async file=>{
           // An uncommitted manifest is invisible to every reader, so the lease is
           // asserted once, before the commit that makes the version real.
-          requireBackupMutationControl('saving to '+selected.label);await file.checkProtection?.();await file.checkSource?.();
+          assertOrigin?.();requireBackupMutationControl('saving to '+selected.label);assertOrigin?.();await file.checkProtection?.();assertOrigin?.();await file.checkSource?.();assertOrigin?.();
           OperationDiagnostics.mark('provider-manifest-upload-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-manifest':'manifest',retention?.role==='before-restore'?`Finalizing safety version in ${selected.label}…`:`Uploading and verifying the backup version in ${selected.label}…`);
           const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;
           // Uploads can reuse committed identities or succeed before their response
           // fails; ownership is uncertain. Only verified maintenance may delete.
           const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:file.blob,size:file.blob.size,digest,exportedAt:file.exportedAt,appVersion:APP_VERSION,checkProtection:file.checkProtection,checkSource:file.checkSource,historySummary:Object.freeze({format:Number(file.manifest.version)||0,logicalFingerprint:file.manifest.logicalFingerprint,counts:file.manifest.counts,encrypted:file.manifest.encrypted===true,retention:file.manifest.retention,origin:String(file.manifest.installationId||''),attachmentsMissing:(Array.isArray(file.manifest.assets)?file.manifest.assets as readonly import('../../types/managed-repository.ts').RepositoryAsset[]:[]).filter(asset=>asset?.missing===true).length})})),'checkpoint');
-          const verifiedManifest=await verifyUploadedRepositoryManifest(selected,item,file.manifest,digest,signal);await file.checkSource?.();
+          const verifiedManifest=await verifyUploadedRepositoryManifest(selected,item,file.manifest,digest,signal);assertOrigin?.();await file.checkSource?.();assertOrigin?.();
           const projected=Object.freeze([...history.map(manifest=>Object.freeze({id:manifest.checkpoint.checkpointId,manifest})),Object.freeze({id:verifiedManifest.checkpoint.checkpointId,manifest:verifiedManifest})]);if(RepositoryCheckpointPipeline.selectRetention(projected,{now:new Date(Date.parse(verifiedManifest.exportedAt))}).remove.length)maintenanceNeeded=true;
           rememberVerifiedHistory(selected,item,Object.freeze({kind:'checkpoint',value:verifiedManifest}),item.verificationScope||null);uploadedManifest=verifiedManifest;OperationDiagnostics.mark('provider-manifest-upload-complete',{provider:selected.id});return item;
         },
         commit:async marker=>{
-          requireBackupMutationControl('saving to '+selected.label);await marker.checkProtection?.();await marker.checkSource?.();if(publicationRenewal)await publicationRenewal.beforeCommit();
+          assertOrigin?.();requireBackupMutationControl('saving to '+selected.label);assertOrigin?.();await marker.checkProtection?.();assertOrigin?.();await marker.checkSource?.();assertOrigin?.();if(publicationRenewal)await publicationRenewal.beforeCommit();assertOrigin?.();
           // Drive may have moved on while this upload ran (another device's
           // Sync now, or this device frozen past its turn). A commit now
           // would build on a version this device never took in: it catches
           // up first, and its retry reuses the pieces it uploaded.
           if(shared){
-            const current=await repositoryProviderInventory(selected,{signal});
+            const current=await repositoryProviderInventory(selected,{signal});assertOrigin?.();
             if(current.overflow)throw new Error('Backup history could not be read completely. Backup was stopped safely.');
             if(await sharedAhead(current,selected)){
               if(uploadedManifest)overtakenByProvider.set(selected.id,freeze({manifest:uploadedManifest,at:Date.now()}));
@@ -931,7 +931,7 @@ const createModule=(input:ProviderModuleInput)=>{
           OperationDiagnostics.mark('provider-commit-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-commit':'commit',retention?.role==='before-restore'?`Committing safety version in ${selected.label}…`:`Committing and verifying the backup in ${selected.label}…`);
           // A commit might already be visible if its verification fails. Never
           // retract a potentially reused or already-published identity here.
-          const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);await marker.checkSource?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;
+          assertOrigin?.();const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);assertOrigin?.();await marker.checkSource?.();assertOrigin?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;
         },
         onCommitted:async context=>{if(shared)overtakenByProvider.delete(selected.id);OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||'',attachmentsComplete:!(context.manifest?.assets||[]).some(item=>item.missing===true)}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
         cleanup:deferredMaintenance?async()=>{if(!maintenanceNeeded)return Object.freeze({warning:''});const scheduler=providerMaintenanceScheduler(selected);if(maintenanceDeferred&&maintenancePendingState&&scheduler){const due=Date.parse(String(maintenancePendingState.nextEligibleAt||'')),delay=Number.isFinite(due)?Math.max(1000,due-Date.now()):MAINTENANCE_POLICY.contentionMs;scheduler.schedule(delay,maintenanceReason||'repository-state','earliest');maintenanceQueued=true;}else maintenanceQueued=await scheduler?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'earliest'})===true;return Object.freeze({warning:maintenanceQueued?'':'Backup cleanup is still pending and will be retried on a later backup.'});}:async context=>{progress('finish',`Finishing ${selected.label} backup…`);const after=await repositoryProviderState(selected,{interactive:false}),warning=await cleanupRepositoryProvider(selected,after,context.manifest.checkpoint.checkpointId,{reuseObjectInventory:true});return Object.freeze({warning});},
@@ -1737,16 +1737,16 @@ const createModule=(input:ProviderModuleInput)=>{
     const scope=String(await reader()||'');if(!scope||scope.length>320)throw new Error('Backup repository identity is unavailable.');return scope;
   }
   async function scrubRepositoryProvider(id:string,options:PreparedScrub={}){
-    const providerSelected=providers.get(safeId(id));if(!providerSelected||!providerSelected.repository)throw new Error('Repository backup provider is unavailable.');
-    const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null});
-    const state=await repositoryProviderState(selected,{interactive:false,signal:options&&options.signal||null});
+    options.assertOrigin?.();const providerSelected=providers.get(safeId(id));if(!providerSelected||!providerSelected.repository)throw new Error('Repository backup provider is unavailable.');
+    const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null,checkProtection:options.assertOrigin||null});
+    const state=await repositoryProviderState(selected,{interactive:false,signal:options&&options.signal||null});options.assertOrigin?.();
     // Integrity scrub is read-only. Verify every committed version we can prove
     // valid even when unrelated incomplete/orphan publication debris exists.
     // An incomplete listing is different: we cannot prove which committed
     // versions exist, so that remains fail-closed. Destructive maintenance has
     // its own stricter anomaly gates and is deliberately unchanged here.
     if(state.overflow)throw new Error('Repository history could not be listed completely; integrity verification is unavailable.');
-    const actualScope=typeof selected.repository.scope==='function'?String(await selected.repository.scope()||''):'';
+    const actualScope=typeof selected.repository.scope==='function'?String(await selected.repository.scope()||''):'';options.assertOrigin?.();
     if(options.repositoryScope&&options.repositoryScope!==actualScope){const error=new Error('The backup repository changed.');fields(error)['code']='REPOSITORY_CHANGED';throw error;}
     const history=Object.freeze(state.rows.map(row=>row.manifest));
     const anomalousHistory=Math.max(0,Number(state.ignored)||0)+Number(state.invalid?.length||0)+Number(state.uncommitted?.length||0)+Number(state.orphanCommits?.length||0)+Number(state.unreadable?.length||0);
@@ -1761,7 +1761,7 @@ const createModule=(input:ProviderModuleInput)=>{
     try{return await RepositoryCheckpointPipeline.scrub(history,readObject,{...options,readRange,storedDigest:entry=>digests.get(entry.objectId)||''});}
     catch(error){
       const objectId=/^obj_[a-f0-9]{32}$/u.test(String(error&&fields(error)['repositoryObjectId']||''))?String(fields(error)['repositoryObjectId']):'';
-      if(objectId&&['REPOSITORY_INTEGRITY_CORRUPT','REPOSITORY_OBJECT_MISSING'].includes(String(fields(error)['code']||''))&&(!options.repositoryScope||options.repositoryScope===await repositoryScope(id))){try{const repair=await saveRepositoryProvider(providerSelected,{excludedObjectIds:[objectId],signal:options&&options.signal||null,preemptBackground:false});fields(error)['repositoryRepaired']=true;fields(error)['repositoryRepairCheckpointId']=String(repair&&repair.name||'');}catch(repairFailure){fields(error)['repositoryRepaired']=false;fields(error)['repositoryRepairError']=String(repairFailure&&fields(repairFailure)['message']||repairFailure);AppDiagnostics.capture('backup-provider.repository-integrity-repair',repairFailure,'warn');}}
+      if(objectId&&['REPOSITORY_INTEGRITY_CORRUPT','REPOSITORY_OBJECT_MISSING'].includes(String(fields(error)['code']||''))){try{options.assertOrigin?.();const currentScope=await repositoryScope(id);options.assertOrigin?.();if(options.repositoryScope&&options.repositoryScope!==currentScope)throw Object.assign(new Error('The backup repository changed.'),{code:'REPOSITORY_CHANGED'});const repair=await saveRepositoryProvider(providerSelected,{excludedObjectIds:[objectId],signal:options&&options.signal||null,preemptBackground:false,assertOrigin:options.assertOrigin||null});fields(error)['repositoryRepaired']=true;fields(error)['repositoryRepairCheckpointId']=String(repair&&repair.name||'');}catch(repairFailure){fields(error)['repositoryRepaired']=false;fields(error)['repositoryRepairError']=String(repairFailure&&fields(repairFailure)['message']||repairFailure);AppDiagnostics.capture('backup-provider.repository-integrity-repair',repairFailure,'warn');}}
       throw error;
     }
   }
