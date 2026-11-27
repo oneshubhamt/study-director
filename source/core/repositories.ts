@@ -1208,7 +1208,7 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMut
   const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
   if(!rec||!isValidIsoDate(rec.date))throw new Error('Invalid daily record date');
   const finishWrite=beginAuthoritativeWrite();
-  let stored=false;
+  let stored=false,idbCommitted=false;
   try{
   assertWriteToken(ownershipToken,'preparing the daily record');
   const updatedAt=normalizeTimestamp(rec.updatedAt,normalizeTimestamp(rec.savedAt,new Date().toISOString()));
@@ -1220,13 +1220,14 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMut
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record save precondition failed canonical validation.');
   try{
       assertWriteToken(ownershipToken,'the daily-record IndexedDB write');
-    await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{}),...(assertOrigin?{assertOrigin}:{})});
+    await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{}),...(assertOrigin?{assertOrigin}:{})});idbCommitted=true;
     assertOrigin?.();assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
     cleanupCommittedDailyRecords([clean]);
     reportCanonicalCommit('dailyRecord','upsert',null,{backupCapture:options.backupCapture===true});
     stored=true;return freeze({ok:true,storage:'indexeddb'});
   }
   catch(e){
+    if(idbCommitted)throw Object.assign(new Error('Daily Record reached canonical IndexedDB, but post-write completion could not be verified.'),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED',cause:e});
     assertOrigin?.();if(isOwnershipLostError(e)||conditional&&String((e as {code?:unknown}|null|undefined)?.code||'')==='DAILY_RECORD_CHANGED')throw e;
     assertWriteToken(ownershipToken,'the daily-record fallback write');
     const existing=fallbackDailyRecordsGet(),arr=existing.filter(r=>r.date!==clean.date);arr.push(clean);
