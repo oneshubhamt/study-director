@@ -177,7 +177,7 @@ function assertCanonicalSource(){
   const position=new Map(ids.map((id,index)=>[id,index]));
   for(const id of ids){
     const dependencies=dependencyList(id);
-    invariant(Array.isArray(dependencies)&&Object.isFrozen(dependencies),`Runtime dependencies for ${id} must be a frozen array.`);
+    invariant(Boolean(Array.isArray(dependencies))&&Object.isFrozen(dependencies),`Runtime dependencies for ${id} must be a frozen array.`);
     invariant(new Set(dependencies).size===dependencies.length,`Runtime dependencies for ${id} contain a duplicate edge.`);
     for(const dependency of dependencies){
       invariant(position.has(dependency),`Runtime dependency ${id} -> ${dependency} is undeclared.`);

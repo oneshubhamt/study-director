@@ -21,13 +21,15 @@ export function trustedTypesEnforcementCandidate(config:HostingConfig){
   const candidate=decodeHostingConfig(JSON.parse(JSON.stringify(config)) as unknown);
   let changed=false;
   for(const rule of candidate.hosting?.headers||[]){
-    const enforced=rule.headers?.find(item=>item.key==='Content-Security-Policy');
-    const report=rule.headers?.find(item=>item.key==='Content-Security-Policy-Report-Only');
+    const headers=rule.headers;
+    if(!headers)continue;
+    const enforced=headers.find(item=>item.key==='Content-Security-Policy');
+    const report=headers.find(item=>item.key==='Content-Security-Policy-Report-Only');
     if(enforced?.value.includes("require-trusted-types-for 'script'")&&!report){changed=true;continue;}
     if(!enforced||!report)continue;
     if(!report.value.startsWith("require-trusted-types-for 'script'; trusted-types "))throw Error('Unexpected diagnostics policy.');
     enforced.value+='; '+report.value;
-    rule.headers=rule.headers.filter(item=>item!==report);
+    rule.headers=headers.filter(item=>item!==report);
     changed=true;
   }
   if(!changed)throw Error('No report-only Trusted Types policy found.');
