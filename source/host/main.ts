@@ -1042,7 +1042,7 @@ function writeActiveSessionNow(snapshot:Parameters<NonNullable<typeof ActiveSess
 function writeLiveDraftNow(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeNow']>[0]={}){return requireActiveSessionRuntime().writeNow(options);}
 function saveLiveDraft(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['saveLiveDraft']>[0]={}){return requireActiveSessionRuntime().saveLiveDraft(options);}
 function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPendingLiveDraftSave()||false;}
-function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
+function flushLiveDraft(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['flushLiveDraft']>[0]={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
 function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
 function applySessionSnapshot(snapshot:Parameters<NonNullable<typeof ActiveSessionRuntime>['applySnapshot']>[0]){return ActiveSessionRuntime?.applySnapshot(snapshot)||false;}
 function restoreLiveDraftIfAny(...args:Parameters<typeof SessionActions.restoreLiveDraftIfAny>){return SessionActions.restoreLiveDraftIfAny(...args);}

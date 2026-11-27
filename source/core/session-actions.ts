@@ -626,7 +626,7 @@ function restoreSessionAction(){
 function uploadSoonAfterPlanApply(result:boolean|PromiseLike<boolean>,assertOrigin=captureSessionActionOrigin()){
   const done=(applied:boolean)=>{
     if(!sessionActionCurrent(assertOrigin))return false;
-    if(applied)void Promise.resolve(ports.ActiveSessionRuntime.flushLiveDraft()).catch(error=>ports.AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>{if(sessionActionCurrent(assertOrigin))notifyBackupChange({urgent:true,reason:'plan-apply'});});
+    if(applied)void Promise.resolve(ports.ActiveSessionRuntime.flushLiveDraft({assertOrigin})).catch(error=>{if(sessionActionCurrent(assertOrigin))ports.AppDiagnostics.capture('backup.plan-apply-flush',error,'warn');}).then(()=>{if(sessionActionCurrent(assertOrigin))notifyBackupChange({urgent:true,reason:'plan-apply'});});
     return applied;
   };
   return typeof result==='boolean'?done(result):Promise.resolve(result).then(done);

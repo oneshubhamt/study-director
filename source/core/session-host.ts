@@ -251,6 +251,15 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
       return saved;
     }catch(error){options.assertOrigin?.();persistence.warn(`Live session could not be saved (${String((error as {message?:unknown}|null)?.message||error)}). Keep this tab open.`);throw error;}
   }
+  // A queued intent belongs to the owner and lifecycle that admitted it.
+  // Fresh requests can coalesce current flags, never flags from a retired one.
+  function draftOrigin(options:Readonly<LiveDraftWriteOptions>){
+    const owner=persistence.ownershipRevision(),life=lifecycle.revision();
+    return ()=>{options.assertOrigin?.();if(persistence.ownershipRevision()!==owner||lifecycle.revision()!==life)throw new Error('The Live Draft save was superseded.');};
+  }
+  function draftOriginCurrent(assertOrigin:(()=>void)|undefined){
+    try{assertOrigin?.();return true;}catch{return false;}
+  }
   function cancelPendingLiveDraftSave(){
     const pending=liveDraftSaveTimer!==null;
     if(liveDraftSaveTimer!==null){environment.clearTimeout(liveDraftSaveTimer);liveDraftSaveTimer=null;}
@@ -258,19 +267,24 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   function saveLiveDraft(options:Readonly<LiveDraftWriteOptions>={}){
     if(blocked(options))return false;
+    const assertOrigin=draftOrigin(options);if(!draftOriginCurrent(assertOrigin))return false;
+    if(pendingOptions&&!draftOriginCurrent(pendingOptions.assertOrigin))cancelPendingLiveDraftSave();
     const delay=Math.max(0,Number.isFinite(Number(options.delayMs))?Number(options.delayMs):Math.round(configuration.debounceMs)),due=clock.nowMs()+delay;
-    pendingOptions=mergeOptions(pendingOptions,options);
+    pendingOptions={...mergeOptions(pendingOptions,options),assertOrigin};
     if(liveDraftSaveTimer!==null&&liveDraftSaveDueAt<=due)return true;
     if(liveDraftSaveTimer!==null)environment.clearTimeout(liveDraftSaveTimer);
     liveDraftSaveDueAt=due;
     liveDraftSaveTimer=environment.setTimeout(()=>{
-      const pending=pendingOptions||{};liveDraftSaveTimer=null;liveDraftSaveDueAt=0;pendingOptions=null;void writeNow(pending);
+      const pending=pendingOptions;liveDraftSaveTimer=null;liveDraftSaveDueAt=0;pendingOptions=null;
+      if(pending&&draftOriginCurrent(pending.assertOrigin))void writeNow(pending).catch(()=>{});
     },delay);return true;
   }
   async function flushLiveDraft(options:Readonly<LiveDraftWriteOptions>={}):Promise<SessionResult|null>{
     if(blocked(options))return null;
-    const pending=mergeOptions(pendingOptions,options);cancelPendingLiveDraftSave();
-    return writeNow({...pending,emergency:true});
+    const assertOrigin=draftOrigin(options);assertOrigin();
+    const base=pendingOptions&&draftOriginCurrent(pendingOptions.assertOrigin)?pendingOptions:null;
+    const pending=mergeOptions(base,options);cancelPendingLiveDraftSave();
+    return writeNow({...pending,emergency:true,assertOrigin});
   }
   function maybeSnapshotRunningTimer(){
     if(persistenceSuppressed()||persistence.recoveryQuiesced()||persistence.recoveryWorkActive()||!persistence.timerSnapshotEligible())return false;

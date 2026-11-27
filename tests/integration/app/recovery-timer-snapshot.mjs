@@ -14,11 +14,11 @@ const taskState={
   getField(i,k){return fields.get(`${i}:${k}`)},setField(i,k,v){fields.set(`${i}:${k}`,v);return true},deleteField(){return true},indexSnapshot(){return{}},resolvedState(i){return resolved.get(i)||null},setResolved(i,v){if(v)resolved.set(i,v);else resolved.delete(i);return true},isDone(i){return resolved.get(i)==='done'},isSkipped(i){return resolved.get(i)==='skipped'},isResolved(i){return resolved.has(i)},toggleDone(){return'done'},resolvedIndices(){return[]},indices(){return[]},clear(){fields.clear();resolved.clear()}
 };
 const timerState={contentRevision:3,savedRevision:1,adjustedSchedule:{},pendingRestore:null,currentIndex:0,projectSessionSnapshot(input){return structuredClone({...input,currentTaskId:tasks[this.currentIndex]?.id||null,contentRevision:this.contentRevision,savedRevision:this.savedRevision,scheduleAdjustments:{}})}};
-let repoValue=null,revision=10,saveMode='idb',lastSaveOptions=null,clearMode='idb',readFailure=false,ownerRevision=1,lifeRevision=0;
+let repoValue=null,revision=10,saveMode='idb',lastSaveOptions=null,clearMode='idb',readFailure=false,ownerRevision=1,lifeRevision=0,beforeSave=null,saveCount=0,reportCount=0;
 const result=value=>({ok:true,value,error:null,storage:{local:false,idb:true}});
 const repo={
  async save(value,options={}){
-  lastSaveOptions=options;
+  lastSaveOptions=options;options.assertOrigin?.();if(beforeSave)await beforeSave();options.assertOrigin?.();saveCount++;
   if(Object.hasOwn(options,'expectedCanonical')&&JSON.stringify(options.expectedCanonical)!==JSON.stringify(repoValue))return {ok:false,value,error:new Error('Active Session changed'),storage:{local:false,idb:false}};
   if(saveMode==='local'&&Object.hasOwn(options,'expectedCanonical')&&!options.recoveryFallback)return {ok:false,value,error:new Error('idb unavailable'),storage:{local:false,idb:false}};
   repoValue=structuredClone(value);
@@ -41,7 +41,7 @@ const input={
  repository:repo,canonical:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
  snapshot:{tasks:()=>tasks,ensureTaskIds(){},taskIdentity:{idAt:i=>tasks[i]?.id||null,indexMap:()=>new Map(tasks.map((t,i)=>[t.id,i])),indexForId:(id,map)=>map?.get(String(id))??null},taskState,timerState,captureEvidence:()=>({actualTime:{'0':42},actualRecords:{},taskEvidence:{}}),timerPayload:()=>null,reviewSnapshot:()=>review,practiceSnapshot:()=>practice,practiceRestore:v=>{practice=v||{active:null,runs:[]}},getReviewDate:()=>reviewDateOverride??studyDate,scheduleFingerprint:()=>`fp:${appliedText}`,sessionFingerprint:s=>`fp:${s.scheduleText}`,appliedScheduleText:()=>appliedText,getCarryForward:()=>carry,setCarryForward:v=>{carry=v},clearProgress:()=>taskState.clear(),sanitizeAdjustedSchedule:v=>v,invalidateScheduleDerived(){},setCurrentTask:i=>{timerState.currentIndex=i},timerRestoreValid:()=>false},
  domain:{normalizeCompletionSource:v=>['manual','time','units','skipped'].includes(v)?v:'none',clampCompletion:v=>Math.max(0,Math.min(100,Number(v)||0)),cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),clampText:(v,max)=>String(v??'').slice(0,max),isCanonicalScheduleText:v=>String(v).trim().length>0,isValidIsoDate:v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v)),todayISO:()=>studyDate},
- persistence:{canMutate:()=>canMutate,ownsSession:()=>canMutate,canProject:()=>canMutate||hydrating,ownershipRevision:()=>ownerRevision,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){},warn:m=>warnings.push(m)},
+ persistence:{canMutate:()=>canMutate,ownsSession:()=>canMutate,canProject:()=>canMutate||hydrating,ownershipRevision:()=>ownerRevision,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){reportCount++},warn:m=>warnings.push(m)},
  lifecycle:{revision:()=>lifeRevision,async run(_k,_o,op){lifeRevision++;return op()},runSync(_k,_o,op){lifeRevision++;return op()}},
  apply:{readPlanDraft:()=>planDraft,writePlanDraft:v=>{planDraft=v},previewPlanDraft(){},setStudyDate:d=>{studyDate=d},applySessionSchedule({snapshot,scheduleText}){applyCount++;appliedText=scheduleText;controller.applySnapshot(snapshot);return true}},
  reset:{stopTimerPresentation(){},invalidatePresentation(){},resetCountdown(){},setCurrentTask:i=>{timerState.currentIndex=i},resetBreak(){},setEmptyTimerMode(){},clearTimerSession(){timerState.contentRevision=0;timerState.savedRevision=0},hydrateReview(){review={reflection:'',studyQuality:null}},invalidateSchedule(){},resetPlanSession(){resetCount++},clearProgress:()=>taskState.clear(),clearCarryForward:()=>{carry=''},resetPractice:()=>{practice={active:null,runs:[]}},pausePracticeForSessionEnd(){if(practice?.active)practice={...practice,active:{...practice.active,pauseCause:'session'}}}},
@@ -75,6 +75,30 @@ fields.clear();resolved.clear();carry='';repoValue=structuredClone(canonical);pl
 assert.equal(controller.restoreLocalRecovery(),true);assert.equal(fields.get('0:completion'),75);assert.equal(resolved.get(1),'skipped');assert.equal(carry,'carry');assert.equal(planDraft,'draft survives reload');
 // Queued strict durability is not discarded by a later ordinary save request.
 controller.saveLiveDraft({strictDurability:true,markChanged:false});controller.saveLiveDraft();await runTimers();assert.equal(lastSaveOptions.strictDurability,true);assert.ok(marked>0);
+// A queued debounce is not authorization to write under a successor.
+{
+  const before=saveCount,beforeMarked=marked,beforeReports=reportCount;
+  controller.saveLiveDraft({strictDurability:true});ownerRevision++;await runTimers();
+  assert.equal(saveCount,before,'retired owner cannot execute a queued checkpoint');
+  assert.equal(marked,beforeMarked);assert.equal(reportCount,beforeReports);
+  controller.saveLiveDraft({strictDurability:true});lifeRevision++;
+  controller.saveLiveDraft();await runTimers();
+  assert.equal(saveCount,before+1,'fresh lifecycle owns its new queued write');
+  assert.equal(lastSaveOptions.strictDurability,false,'stale request flags do not leak into successor');
+  const origin=ownerRevision,assertOrigin=()=>{if(origin!==ownerRevision)throw new Error('origin retired');};
+  ownerRevision++;controller.saveLiveDraft({strictDurability:true});
+  await assert.rejects(controller.flushLiveDraft({assertOrigin}),/origin retired/u);
+  await runTimers();assert.equal(saveCount,before+2,'retired flush must not cancel the current debounce');
+  assert.equal(lastSaveOptions.strictDurability,true);
+  const currentOrigin=ownerRevision,guard=()=>{if(currentOrigin!==ownerRevision)throw new Error('origin retired');};
+  let entered,release;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  beforeSave=()=>{entered();return gate;};const beforeValue=structuredClone(repoValue),beforeReport=reportCount,beforeWarnings=warnings.length;
+  const writing=controller.flushLiveDraft({assertOrigin:guard});await waiting;
+  assert.equal(typeof lastSaveOptions.assertOrigin,'function','flush forwards the actual origin through the repository port');
+  ownerRevision++;release();await assert.rejects(writing,/origin retired/u);beforeSave=null;
+  assert.deepEqual(repoValue,beforeValue);assert.equal(saveCount,before+2);assert.equal(reportCount,beforeReport);assert.equal(warnings.length,beforeWarnings);
+  assert.equal((await controller.flushLiveDraft()).ok,true,'fresh owner can still flush');
+}
 // Recovery barriers block ordinary checkpoints. The explicit recovery authorization
 // is reserved for recovery-owned checkpoints that must settle canonical Review state.
 recovery=true;
@@ -168,4 +192,4 @@ for(const action of ['suspend','finish']){
   assert.equal(planDraft,'newer independent draft');
   input.apply.applySessionSchedule=original;
 }
-console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-failure-rollback','suspend-restore','reset-clear','reset-failure-rollback']}));
+console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','queued-origin-retirement','guarded-flush','recovery-snapshot-gate','canonical-fail-closed','suspend-failure-rollback','suspend-restore','reset-clear','reset-failure-rollback']}));
