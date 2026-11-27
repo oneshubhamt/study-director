@@ -538,7 +538,7 @@ function buildDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.snapsho
 async function commitDailyRecord(evidence:ReviewEvidence,label:string,assertOrigin:()=>void){
   assertOrigin();const review=currentReviewState();
   let doc=projectDailyRecord(evidence,review);
-  const existing=await AppData.dailyRecords.get(doc.date);assertOrigin();
+  const existing=(await AppData.dailyRecords.get(doc.date))??null;assertOrigin();
   if(existing?.recordKind==='diary'){
     const existingReflection=String(existing.reflection||''),reviewReflection=String(doc.reflection||'');
     if(existingReflection.trim()&&reviewReflection.trim()&&existingReflection!==reviewReflection)throw new Error('A different reflection already exists for this date. Open Diary and resolve it before saving the Study Day.');
