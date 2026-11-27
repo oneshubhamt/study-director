@@ -52,10 +52,10 @@ const noop=()=>{};
 // Commit succeeds before refresh/cleanup. A later error must never say that the
 // locally committed record was not saved, or emit a success followed by failure.
 {
-  const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true,failAck=false,failClear=false,failCheckpoint=false,acknowledged=0,clears=0,checkpoints=0,expectBlockedAtCommit=false;
+  const {coordinator,port}=createNotifications('review');let failCommit=false,failCommittedReadback=false,failFollowup=true,failAck=false,failClear=false,failCheckpoint=false,acknowledged=0,clears=0,checkpoints=0,expectBlockedAtCommit=false;
   const context={notifications:port,saveDayInProgress:false,rolloverSaveInProgress:false,captureStudySaveOrigin:()=>()=>{},assertCheckpointCurrent:noop,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,
     flushFinalActiveSessionCheckpoint:async()=>{assert.equal(context.activeSessionPersistenceBlocked,false,'final checkpoint must run before later Active Session writes are blocked');checkpoints++;if(failCheckpoint)throw new Error('checkpoint unavailable');return {date:'2026-09-30',snapshot:{contentRevision:1}};},
-    ReviewView:{refresh:()=>({evidence:{date:'2026-09-30'}}),sync:noop},commitDailyRecord:async()=>{assert.equal(context.activeSessionPersistenceBlocked,expectBlockedAtCommit,'close paths block only after the verified checkpoint');if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error)};
+    ReviewView:{refresh:()=>({evidence:{date:'2026-09-30'}}),sync:noop},commitDailyRecord:async()=>{assert.equal(context.activeSessionPersistenceBlocked,expectBlockedAtCommit,'close paths block only after the verified checkpoint');if(failCommit)throw new Error('disk full');if(failCommittedReadback)throw Object.assign(new Error('read-back unavailable'),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED'});return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error),errorCode:error=>String(error?.code||'')};
   vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function saveDayRecord('),review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */')),context);
   assert.equal(await context.saveDayRecord(),false);
   let event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/saved locally.*follow-up/i);assert.equal(coordinator.eventStatus().toasts.length,1);
@@ -69,7 +69,36 @@ const noop=()=>{};
   event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed','a saved Day with an uncleared suspended session is not called complete');failClear=false;
   failCheckpoint=true;const commitsBeforeCheckpointFailure=checkpoints;assert.equal(await context.saveDayRecord({closeSession:true}),false);assert.equal(context.activeSessionPersistenceBlocked,false);assert.equal(checkpoints,commitsBeforeCheckpointFailure+1);failCheckpoint=false;
   expectBlockedAtCommit=false;failCommit=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-failed');assert.equal(event.persistent,true);assert.match(event.message,/Keep this tab open/);
-  coordinator.dismissEvent(event.key,event.deliveryId);assert.equal(await context.saveDayRecord(),false);assert.equal(coordinator.eventStatus().toasts.length,1,'a new failed attempt re-arms the dismissed warning');coordinator.clear();
+  coordinator.dismissEvent(event.key,event.deliveryId);assert.equal(await context.saveDayRecord(),false);assert.equal(coordinator.eventStatus().toasts.length,1,'a new failed attempt re-arms the dismissed warning');
+  failCommit=false;failCommittedReadback=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed','canonical commit followed by uncertain read-back must never be reported as not saved');assert.match(event.message,/reached canonical storage/i);failCommittedReadback=false;coordinator.clear();
+}
+
+
+// Study Day publication uses the same optimistic-concurrency fence as Diary
+// reflection edits. A newer same-owner Diary record must survive, and a
+// read-back failure after an IndexedDB receipt is explicitly post-commit.
+{
+  const date='2026-10-04',existing=Object.freeze({version:16,recordKind:'diary',date,reflection:'Diary baseline',savedAt:'2026-10-04T10:00:00.000Z',updatedAt:'2026-10-04T10:00:00.000Z'}),newer=Object.freeze({...existing,reflection:'Newer Diary edit',updatedAt:'2026-10-04T10:00:01.000Z'});
+  let current=existing,saveOptions=null,mode='conflict';
+  const context={Object,Error,freeze:Object.freeze,errorMessage:error=>String(error?.message||error),currentReviewState:()=>({reflection:'',studyQuality:null,unfinished:''}),
+    projectDailyRecord:()=>({version:16,recordKind:'study',date,reflection:'',savedAt:'2026-10-04T10:00:02.000Z',updatedAt:'2026-10-04T10:00:02.000Z',sourceRevision:7,schedule:[],results:{},practiceRuns:[],carryForwardDraft:''}),
+    materializeDailyRecordView:value=>value,
+    AppData:{dailyRecords:{
+      get:async()=>existing,
+      save:async(doc,options)=>{saveOptions=options;if(mode==='conflict'){current=newer;throw Object.assign(new Error('Daily Record changed before this save.'),{code:'DAILY_RECORD_CHANGED'});}current=doc;return {storage:'indexeddb'};},
+      verifyCanonical:async()=>{if(mode==='readback')throw new Error('read-back unavailable');return true;}
+    }}
+  };
+  vm.createContext(context);
+  const start=review.indexOf('async function commitDailyRecord('),end=review.indexOf('async function saveReflectionOnlyRecord(',start);
+  vm.runInContext(review.slice(start,end),context);
+  await assert.rejects(context.commitDailyRecord({date},'canonical daily record',noop),{code:'DAILY_RECORD_CHANGED'});
+  assert.equal(saveOptions.expectedCanonical,existing,'Study Day save must compare against the exact record it read');
+  assert.equal(current,newer,'a newer Diary edit must not be overwritten by stale Study Day evidence');
+  mode='readback';current=existing;saveOptions=null;
+  await assert.rejects(context.commitDailyRecord({date},'canonical daily record',noop),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED'});
+  assert.equal(saveOptions.expectedCanonical,existing);
+  assert.equal(current.recordKind,'study','the canonical transaction completed before the read-back ambiguity');
 }
 
 
