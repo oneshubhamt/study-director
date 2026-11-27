@@ -149,7 +149,7 @@ function fixture(options={}){
       Runtime:{setSafetyMessage:value=>{safety=value;},currentIndex:()=>0},PracticePacer:{finalizeForDayClose(){}},
       captureTodayState(){},captureReviewInputs(){},syncUnfinishedNoteDraft(){},saveReviewState(){},stopTimerExecution(){},cancelPendingLiveDraftSave(){},
       markStorageHealthTimestamp(){},clearSaveReminder(){},setSessionPanelMode(){},refreshPlanAfterSessionReset(){},setPlanStatus(){},refreshStorageFallbackWarning(){},
-      markDayContentSaved(){},notifyUser(){},syncReviewSurfaceMode(){},setStatus(){},prettyDate:x=>x,durationLabel:()=>'',displayPercent:()=>'',errorMessage:e=>e.message,
+      markDayContentSaved(){},notifyUser(){},syncReviewSurfaceMode(){},setStatus(){},prettyDate:x=>x,durationLabel:()=>'',displayPercent:()=>'',errorMessage:e=>e.message,errorCode:e=>String(e?.code||''),
       notifications:{begin:()=>({finish:(kind,message)=>events.push([kind,message])})},AppDiagnostics:{capture(){}},
       saveDayInProgress:false,rolloverSaveInProgress:false,activeSessionPersistenceBlocked:false
     });
