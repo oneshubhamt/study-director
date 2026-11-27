@@ -142,12 +142,16 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
     },IDLE_RETIRE_MS);
     return true;
   };
-  const enrichRecords=(records:readonly InsightRecord[])=>records.map(record=>{
-    const tasks=(record.tasks||[]).map(task=>({...task,__sdOutcome:api.logic.classifyTaskOutcome(task)}));
-    let practiceSummary:PracticeRunInsightSummary|undefined;
-    try{practiceSummary=api.logic.summarizePracticeRuns(record.practiceRuns||[]);}catch{}
-    return {...record,tasks,...(practiceSummary?{__sdPracticeSummary:practiceSummary}:{})};
-  });
+  const enrichRecords=(input:readonly InsightRecord[])=>{
+    const records:readonly InsightRecord[]=Array.isArray(input)?input:[];
+    return records.map(record=>{
+      const rawTasks:NonNullable<InsightRecord['tasks']>=Array.isArray(record?.tasks)?record.tasks:[];
+      const tasks=rawTasks.map(task=>({...task,__sdOutcome:api.logic.classifyTaskOutcome(task)}));
+      let practiceSummary:PracticeRunInsightSummary|undefined;
+      try{practiceSummary=api.logic.summarizePracticeRuns(Array.isArray(record?.practiceRuns)?record.practiceRuns:[]);}catch{}
+      return {...record,tasks,...(practiceSummary?{__sdPracticeSummary:practiceSummary}:{})};
+    });
+  };
   const fallback=(records:readonly InsightRecord[],prepared:PreparedInsights,options:InsightsBuildOptions,started:number,mode:string):InsightsComputeResult=>{
     try{
       const model=engine.buildPrepared(records,prepared,options);

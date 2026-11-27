@@ -67,6 +67,13 @@ const dirtyCanonicalInput=[
 ];
 assert.equal(Primitives.dateDay('2026-02-29'),null,'a non-leap February cannot roll into March');
 assert.equal(Primitives.dateDay('2024-03-01')-Primitives.dateDay('2024-02-29'),1);
+const malformedCollections=[{date:'2024-02-29',tasks:{}},boundaryRecords[0]];
+assert.deepEqual(Array.from(Records.normalizeRecords({})),[]);
+assert.deepEqual(Array.from(Records.normalizeSummaries({})),[]);
+const malformedEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+for(const result of [malformedEngine.prepare(malformedCollections),await malformedEngine.prepareAsync(malformedCollections)]){
+  assert.deepEqual(Array.from(result.records,row=>row.tasks.length),[0,1]);
+}
 const dirtyCanonicalBefore=JSON.stringify(dirtyCanonicalInput);
 const normalizedDirty=Records.normalizeRecords(dirtyCanonicalInput);
 assert.equal(JSON.stringify(dirtyCanonicalInput),dirtyCanonicalBefore,'canonical preparation must not mutate caller-owned input');

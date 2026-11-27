@@ -256,6 +256,10 @@ for(const failure of ['unreadable','missing report fields']){
     practiceRuns:index%5===0?[{taskId:'a',targetMs:60000,totalUnits:3,unitMs:[55000,60000,65000]}]:[]
   }));
   const computation=context.StudyDirectorInsightsComputeBridge.create(api,engine,{yieldTask:()=>Promise.resolve()});
+  assert.deepEqual(Array.from(computation.enrichRecords({})),[]);
+  const guarded=computation.enrichRecords([{date:'2024-02-29',tasks:{},practiceRuns:{}},input[0]]);
+  assert.equal(guarded[0].tasks.length,0);
+  assert.equal(guarded[1].tasks.length,input[0].tasks.length);
   const prepared=engine.prepare(computation.enrichRecords(input),'reuse-r1'),records=prepared.records;
   const reference=context.StudyDirectorInsightsModel.ModelEngine.createInsightsEngine(logic);
   const raw=reference.prepare(input,'reference'),options={currentStudyDate:records.at(-1).date};

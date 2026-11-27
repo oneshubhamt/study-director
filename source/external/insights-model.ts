@@ -971,22 +971,28 @@ function createInsightsModelRuntime(global:typeof globalThis){
     if(sA!==sB)return sB>sA?candidate:existing;
     return stableRecordSignature(candidate)>stableRecordSignature(existing)?candidate:existing;
   }
+  function arrayInput<T>(value:readonly T[]|null|undefined):readonly T[]{
+    return Array.isArray(value)?value:[];
+  }
+  function normalizedTasks(record:InsightRecord){
+    return arrayInput(record.tasks).filter(task=>task&&typeof task==='object'&&taskPlanned(task)>0);
+  }
   function normalizeRecords(records:readonly InsightRecord[]|null|undefined){
     const byDate=new Map<string,InsightRecord>();
-    (records??[])
+    arrayInput(records)
       .filter(r=>r&&typeof r==='object'&&isIsoDate(r.date))
-      .map(r=>({...r,tasks:(r.tasks??[]).filter(t=>taskPlanned(t)>0)}))
+      .map(r=>({...r,tasks:normalizedTasks(r)}))
       .forEach(record=>byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record)));
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
   async function normalizeRecordsAsync(records:readonly InsightRecord[]|null|undefined,yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null,batchSize=64){
-    const source=records??[],byDate=new Map<string,InsightRecord>(),size=Math.max(8,Math.min(256,Math.floor(Number(batchSize)||64)));
+    const source=arrayInput(records),byDate=new Map<string,InsightRecord>(),size=Math.max(8,Math.min(256,Math.floor(Number(batchSize)||64)));
     for(let start=0;start<source.length;start+=size){
       const end=Math.min(source.length,start+size);
       for(let index=start;index<end;index+=1){
         const row=source[index];
         if(!row||typeof row!=='object'||!isIsoDate(row.date))continue;
-        const record={...row,tasks:(row.tasks??[]).filter(task=>taskPlanned(task)>0)};
+        const record={...row,tasks:normalizedTasks(row)};
         byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record));
       }
       if(end<source.length&&typeof yieldTask==='function')await yieldTask();
@@ -994,7 +1000,7 @@ function createInsightsModelRuntime(global:typeof globalThis){
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
   function normalizeSummaries(summaries:readonly InsightSummary[]|null|undefined){
-    return (summaries??[]).filter(s=>s&&typeof s==='object'&&isIsoDate(s.date)).sort((a,b)=>a.date.localeCompare(b.date));
+    return arrayInput(summaries).filter(s=>s&&typeof s==='object'&&isIsoDate(s.date)).sort((a,b)=>a.date.localeCompare(b.date));
   }
   function revisionHash(value:unknown){
     const text=String(value||'');let hash=2166136261;

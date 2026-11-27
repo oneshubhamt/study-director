@@ -1,0 +1,16 @@
+# REVIEW-P5 · Independent Stage 2
+
+**Open.** Baseline `d5a53bc4dbacf4a853ad796aa015a2660d1722c3`. The last Stage 1 production revision is `0ece1780`. Compare against `de4872a` and each feature's last authored JavaScript. Continue from the latest checkpoint below. The [Stage 1 handoff](../../TS-CONVERSION-EXECUTION.md) owns the implementor's findings.
+
+## REVIEW-P5 · Stage B independent Insights checkpoint · 2026-11-26
+
+Stage B began against `93884c5c4c0a84159b2001f0dbbeb9ce2833ea87` while Stage 1 continued. Scope here is the P5.8–P5.10 Insights model, preparation and compute boundary. The overall review remains open. Reconcile subsequent Stage 1 changes and verify the exact final candidate before deciding the Phase 6 gate.
+
+- Compared the actual `de4872a` JavaScript model and current TS model with the same production outcome and Practice Pacer providers. Compared serialized dashboard and lazy Lab results across 136 combinations of history lengths (0, 1, 2, 6, 7, 8, 11, 12, 23, 24, 29, 30, 31, 32, 89, 90, 91), all/7/30/90 windows and two completion patterns. Synthetic histories began 2024-02-15, skipped one day per six records, varied work durations and included practice runs. Direct sums of duration, duration × completion / 100 and actual seconds / 60 matched the TS overview in every case. The only observed serialized differences were the two added overview eligibility counts and the workload forecast explanation in the model and Lab. These additions preserve information.
+- Exercised the actual page bridge, protocol decoder, worker handler and model via an in-process message adapter with 185 days. Complete, 30-day and 7-day outputs matched direct computation. The first build sent 185 records in two messages. Both window changes reused those records.
+- Confirmed a lost JavaScript guard. A non-array task collection threw in both sync and async TS preparation where the JS owner kept the date with zero tasks. Non-array record and summary collections also threw in synchronous normalization. The page enrichment step had independently lost collection validation. Restored array checks at the read-only analytical boundary and added regression assertions to `insights-scaling` and `insights-transport-lifecycle`. Mixed valid/malformed input retained the valid tasks, and all 136 differential comparisons and the worker-path checks were repeated after correction. Canonical storage readers retain their own validation.
+- Environment: the cloud exec service was unavailable. These independent probes ran fetched source in V8 using TypeScript 5.0.4 solely for type erasure and controlled provider/worker wiring. Repository-pinned strict/lint, build, full test files, real worker/browser and performance checks require separate verification. Carry those results and later Stage 1 deltas into the next Stage B checkpoint.
+
+## Handoff reconciliation · 2026-11-27
+
+The shell and local repository are accessible again. All four Insights source and regression files above were byte-identical from `e12ad44f` to the final Stage 1 handoff. Applied the independent correction on the final base. Pinned strict compilation passed (five projects, 246 files). Next verify typed lint, fresh build, fast suites and affected browser gates, then reconcile the remaining feature owners and Stage 1 repairs before deciding closure.
