@@ -46,7 +46,7 @@ const createModule=()=>{
     functions(input.diagnostics,['capture','guard'],'App ownership diagnostics');
     functions(input.hooks,[
       'render','refreshStorage','stopExecution','isInitialized','admitHydration','hydrate','finalizeHydration','resume','refreshCore',
-      'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled',...(Object.hasOwn(input.hooks,'peerStorageReset')?['peerStorageReset']:[])
+      'scheduleMaintenance','practiceRender','blocked','invalidate','flush','settled',...(Object.hasOwn(input.hooks,'peerStorageReset')?['peerStorageReset']:[]),...(Object.hasOwn(input.hooks,'deferAutomaticAcquisition')?['deferAutomaticAcquisition']:[])
     ],'App ownership hooks');
     const config=input.config;
     const env=input.environment;
@@ -273,6 +273,8 @@ const createModule=()=>{
       post({type:'owner-probe',probeId,targetClaimId:owner!.claimId,targetPageId:owner!.pageId||''});
       return promise;
     }
+    // Only an automatic acquisition by a read-only tab may be deferred.
+    function automaticAcquisitionDeferred(){return state===OWNERSHIP_STATES.SECONDARY&&hooks.deferAutomaticAcquisition?.()===true;}
     function acquireWebLock(force=false,hydrate=true){
       if(reloadRequired)return Promise.resolve(false);
       if(!webLocks)return Promise.resolve(writeLease({force,hydrate}));
@@ -294,7 +296,8 @@ const createModule=()=>{
       }else options.ifAvailable=true;
       win.navigator.locks!.request(config.webLockName,options,async lock=>{
         if(timeout)env.clearTimeout(timeout);
-        if(!lock){resolveAttempt(false);return;}
+        // A controller change can arrive while the lock request is pending.
+        if(!lock||!force&&automaticAcquisitionDeferred()){resolveAttempt(false);return;}
         webLockHeld=true;
         let unlock!:()=>void;
         const hold=new Promise<void>(done=>{unlock=done;});
@@ -319,15 +322,17 @@ const createModule=()=>{
       if(reloadRequired)return Promise.resolve(false);
       if(takeoverPending)return Promise.resolve(false);
       if(evaluationPending)return evaluationPending;
+      if(automaticAcquisitionDeferred())return Promise.resolve(false);
       evaluationPending=(async()=>{
         if(webLocks){
           const ok=await acquireWebLock(false,true);
-          if(!ok)setPrimary(false);
+          if(!ok&&state!==OWNERSHIP_STATES.SECONDARY)setPrimary(false);
           return ok;
         }
         const owner=readOwner();
         if(otherActive(owner)){
           if(await probeOwner(owner)){setPrimary(false);return false;}
+          if(automaticAcquisitionDeferred())return false;
           removeIfMatches(owner);
         }else clearStale(owner);
         return writeLease({hydrate:true});

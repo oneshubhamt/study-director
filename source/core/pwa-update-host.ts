@@ -47,7 +47,7 @@ interface UpdateDiagnostics{readonly nextCheckAt:number;readonly lastSuccessfulC
 export interface PwaUpdateHostController{
  readonly format:'study-director.pwa-update-host';readonly contractVersion:1;readonly lifecycle:PwaLifecycleController;
  install():Promise<void>;scheduleEvaluation(delay?:number):boolean;scheduleCheck(minimumDelay?:number):boolean;clearCheckTimer():void;
- applyFromUi():Promise<boolean>;evaluateAutomatic():Promise<boolean>;reservationActive():boolean;updateReady():boolean;diagnostics():UpdateDiagnostics;
+ applyFromUi():Promise<boolean>;evaluateAutomatic():Promise<boolean>;reservationActive():boolean;deferAutomaticOwnership():boolean;updateReady():boolean;diagnostics():UpdateDiagnostics;
  blockReason(options?:Readonly<Record<string,unknown>>):string;reserve(context:PwaUpdateContext):PwaUpdateGuard;prepare(context?:Partial<PwaUpdateContext>):Promise<PwaPreparationResult>;
  retryDelay():number;checkIfDue(options?:Readonly<{force?:boolean}>):Promise<boolean>;renderStatus(state:PwaLifecycleStatus):void;
 }
@@ -65,13 +65,23 @@ const sdPwaUpdateHostFactory=(()=>{
    functions(input.persistence,['settleDiary','flushPlanDraft','planAuthoredText','planReadDraft','savePlanDraft','settlePlanData','readStoredPlan','flushPendingReview','settleReviewEditor','writeLiveDraft','flushNotes','noteFailure','flushDeletionRecovery','settleActiveSession','loadActiveSession','activeSessionIssue'],'PWA update persistence ports');
    functions(input.effects,['automaticBackupsWaiting','flushAutomaticBackups','pauseTimer','togglePacer','scheduleSyncStatus','publishNotice','capture','localGet','localSet'],'PWA update effect ports');
    const {configuration,environment,state,reservation,persistence,effects}=input,doc=environment.document,win=environment.window;
-   const READY_DELAY=650,SAFETY_RETRY=5*60*1000,EXTERNAL_RETRY=5000,CHECK_INTERVAL=24*60*60*1000,CHECK_RETRY_BASE=5*60*1000,CHECK_RETRY_MAX=60*60*1000,BACKUP_WAIT=60*1000,CHECK_LOCK='study-director-pwa-update-check-v1',EDIT_IDLE=1800;
+   const READY_DELAY=650,SAFETY_RETRY=5*60*1000,EXTERNAL_RETRY=5000,EXTERNAL_OWNERSHIP_GRACE=30000,CHECK_INTERVAL=24*60*60*1000,CHECK_RETRY_BASE=5*60*1000,CHECK_RETRY_MAX=60*60*1000,BACKUP_WAIT=60*1000,CHECK_LOCK='study-director-pwa-update-check-v1',EDIT_IDLE=1800;
    let latest:PwaLifecycleStatus|null=null,retryTimer:number|null=null,evaluationRunning=false,automaticBlock='',checkTimer:number|null=null,checkDueAt=0,checkRunning=false,lastEditableAt=0,lastSuccessMemory=0,failureCount=0,retryAt=0;
    type ReservationToken={requestId:string;ownerRevision:number;ownerState:string;workRevision:number|null;authority:UpdateAuthority|null;follower:boolean};
    let activeReservation:ReservationToken|null=null;
    let lifecycle:PwaLifecycleController;
+   let externalOwnershipDeadline:number|null=null;
 
    const now=()=>environment.now();
+   // Keep an established hidden follower read-only while it crosses the release boundary.
+   // Inspect live controller identity, not just the last rendered status; never defer
+   // foreground or initial acquisition, and never indefinitely prevent takeover.
+   function deferAutomaticOwnership(){
+    if(!lifecycle.status().externalUpdate){externalOwnershipDeadline=null;return false;}
+    if(!state.startupReady()||state.ownership().state!==configuration.secondaryState||!doc.hidden)return false;
+    externalOwnershipDeadline??=now()+EXTERNAL_OWNERSHIP_GRACE;
+    return now()<externalOwnershipDeadline;
+   }
    function ownerCurrent(origin:OwnershipStatus){const current=state.ownership();return current.state===origin.state&&current.revision===origin.revision&&!current.hydrating&&!current.takeoverPending&&!current.resolving;}
    function recentEditable(){return lastEditableAt>0&&now()-lastEditableAt<EDIT_IDLE;}
    function appliedPlanEnded(){
@@ -174,7 +184,7 @@ const sdPwaUpdateHostFactory=(()=>{
    doc.addEventListener('input',event=>{const target=event.target;if(!target||typeof target!=='object'||!('matches' in target))return;const element=target as HTMLElement;if(!(element.isContentEditable||element.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')))return;lastEditableAt=now();scheduleEvaluation(EDIT_IDLE+50);},true);
    doc.addEventListener('visibilitychange',()=>{if(!doc.hidden){scheduleCheck(250);scheduleEvaluation(250);}});
    win.addEventListener('focus',()=>{scheduleCheck(250);scheduleEvaluation(250);});win.addEventListener('online',()=>{scheduleCheck(250);scheduleEvaluation(250);});win.addEventListener('storage',event=>{if(event.key===configuration.updateCheckStorageKey)scheduleCheck();});
-   const controller:Readonly<PwaUpdateHostController>=Object.freeze({format:'study-director.pwa-update-host',contractVersion:1,lifecycle,install:async()=>{await lifecycle.install();scheduleCheck(750);},scheduleEvaluation,scheduleCheck,clearCheckTimer,applyFromUi,evaluateAutomatic,reservationActive:()=>!!activeReservation,updateReady:()=>!!(latest?.updateReady&&!latest.applying),diagnostics:()=>Object.freeze({nextCheckAt:checkDueAt,lastSuccessfulCheckAt:lastCheckAt(),failureCount}),blockReason,reserve,prepare,retryDelay,checkIfDue,renderStatus});
+   const controller:Readonly<PwaUpdateHostController>=Object.freeze({format:'study-director.pwa-update-host',contractVersion:1,lifecycle,install:async()=>{await lifecycle.install();scheduleCheck(750);},scheduleEvaluation,scheduleCheck,clearCheckTimer,applyFromUi,evaluateAutomatic,reservationActive:()=>!!activeReservation,deferAutomaticOwnership,updateReady:()=>!!(latest?.updateReady&&!latest.applying),diagnostics:()=>Object.freeze({nextCheckAt:checkDueAt,lastSuccessfulCheckAt:lastCheckAt(),failureCount}),blockReason,reserve,prepare,retryDelay,checkIfDue,renderStatus});
    return controller;
   };
   return Object.freeze({format:'study-director.pwa-update-host-module' as const,contractVersion:1 as const,createController});

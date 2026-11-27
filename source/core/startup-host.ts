@@ -49,8 +49,8 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
   exactObject(input.hydration,['hydratePlanData','hydratePlanRuntime','renderSavedPlans','hydratePrimary','censusUnsupported','hydrateSavedDrafts'],'Startup ownership hydration');
   functions(input.hydration,['hydratePlanData','hydratePlanRuntime','renderSavedPlans','hydratePrimary','censusUnsupported','hydrateSavedDrafts'],'Startup ownership hydration');
   functions(input.recovery,['readLibraryClear','readRestore','failClosed'],'Startup recovery admission');
-  exactObject(input.hooks,['render','refreshStorage','stopExecution','resume','refreshCore','scheduleMaintenance','practiceRender','blocked','peerStorageReset','invalidate','flush','settled'],'Startup ownership hooks');
-  functions(input.hooks,['render','refreshStorage','stopExecution','resume','refreshCore','scheduleMaintenance','practiceRender','blocked','peerStorageReset','invalidate','flush','settled'],'Startup ownership hooks');
+  exactObject(input.hooks,['render','refreshStorage','stopExecution','resume','refreshCore','scheduleMaintenance','practiceRender','blocked','peerStorageReset','invalidate','flush','settled',...(Object.hasOwn(input.hooks,'deferAutomaticAcquisition')?['deferAutomaticAcquisition']:[])],'Startup ownership hooks');
+  functions(input.hooks,['render','refreshStorage','stopExecution','resume','refreshCore','scheduleMaintenance','practiceRender','blocked','peerStorageReset','invalidate','flush','settled',...(Object.hasOwn(input.hooks,'deferAutomaticAcquisition')?['deferAutomaticAcquisition']:[])],'Startup ownership hooks');
   if(!Object.isFrozen(input.config)||!Object.isFrozen(input.environment)||!Object.isFrozen(input.local)||!Object.isFrozen(input.diagnostics)||!Object.isFrozen(input.activation)||!Object.isFrozen(input.lifecycle)||!Object.isFrozen(input.hydration)||!Object.isFrozen(input.recovery)||!Object.isFrozen(input.hooks))throw new TypeError('Startup ownership contracts must be frozen.');
   if(input.module.format!=='study-director.ownership'||input.module.contractVersion!==1)throw new TypeError('Ownership module is unavailable or incompatible.');
   if(input.activation.format!=='study-director.activation-contract'||input.activation.contractVersion!==1)throw new TypeError('Activation contract is unavailable or incompatible.');
@@ -98,6 +98,7 @@ function createOwnershipController(input:Readonly<OwnershipHostInput>){
       practiceRender:input.hooks.practiceRender,
       blocked:input.hooks.blocked,
       peerStorageReset:(detectedAt:string)=>{void Promise.resolve().then(()=>input.hooks.peerStorageReset(detectedAt)).catch(error=>input.diagnostics.capture('storage-reset.peer',error,'error'));},
+      ...(input.hooks.deferAutomaticAcquisition?{deferAutomaticAcquisition:input.hooks.deferAutomaticAcquisition}:{}),
       invalidate:input.hooks.invalidate,
       flush:input.hooks.flush,
       settled:input.hooks.settled

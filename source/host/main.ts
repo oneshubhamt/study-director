@@ -780,6 +780,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Own
     practiceRender:()=>PracticePacer.render(),
     blocked:(status,reason)=>renderPrimaryTabBlock(status,reason),
     peerStorageReset:detectedAt=>handleBrowserStorageReset({detectedAt,peer:true}),
+    deferAutomaticAcquisition:()=>PwaRuntime.deferAutomaticOwnership(),
     invalidate:context=>SessionLifecycle.invalidate('primary-tab-loss',{...context,reconcile:false}),
     flush:()=>StartupLifecycle.flush(),
     settled:()=>settleCurrentProfileWriters()

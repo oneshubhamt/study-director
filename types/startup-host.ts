@@ -31,6 +31,7 @@ export interface OwnershipPassThroughHooks{
   practiceRender:OwnershipInput['hooks']['practiceRender'];
   blocked:OwnershipInput['hooks']['blocked'];
   peerStorageReset:(detectedAt:string)=>unknown;
+  deferAutomaticAcquisition?:()=>boolean;
   invalidate:OwnershipInput['hooks']['invalidate'];
   flush:OwnershipInput['hooks']['flush'];
   settled:OwnershipInput['hooks']['settled'];

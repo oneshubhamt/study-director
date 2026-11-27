@@ -112,6 +112,32 @@ ownershipSettleFailure=false;
   const token=tab.issueWriteToken('peer released');tab.release();assert.throws(()=>tab.assertWriteToken(token),error=>ownershipModule.isOwnershipLostError(error));
 }
 
+// A hidden follower can receive a replacement service worker while a routine
+// ownership request is in flight. The actual lock callback must not acquire a
+// new write epoch after the update handoff policy becomes active.
+for(const useWebLocks of [true,false]){
+  const values=new Map(),sessions=new Map();let defer=false,gate=null,grant=null,requests=0,timer=null;
+  const locks={request:async(_name,_options,callback)=>{requests++;if(gate)await gate;return callback({});}};
+  const tab=ownershipModule.createOwnershipController(Object.freeze({...ownershipInput,
+    hooks:Object.freeze({...ownershipInput.hooks,deferAutomaticAcquisition:()=>defer}),
+    environment:Object.freeze({...ownershipInput.environment,document:{documentElement:{dataset:{}}},window:{sessionStorage:{getItem:key=>sessions.get(key)||null,setItem:(key,value)=>sessions.set(key,value)},navigator:useWebLocks?{locks}:{},addEventListener:()=>{}},setTimeout:fn=>{timer=fn;return 1;}}),
+    local:Object.freeze({getJson:(key,fallback)=>values.get(key)||fallback,setJson:(key,value)=>{values.set(key,value);return true;},remove:key=>values.delete(key),lastError:()=>null})
+  }));
+  const secondary=tab.status();defer=true;
+  assert.equal(await tab.evaluate(),false);assert.equal(requests,0);assert.equal(values.size,0);
+  if(useWebLocks){
+    defer=false;gate=new Promise(resolve=>grant=resolve);const pending=tab.evaluate();
+    defer=true;grant();assert.equal(await pending,false);await Promise.resolve();await Promise.resolve();
+    gate=null;assert.equal(values.size,0);
+  }
+  assert.equal(tab.status().revision,secondary.revision);assert.equal(tab.canMutate(),false);
+  // A deliberate takeover is not subject to the automatic acquisition policy.
+  const explicit=tab.takeOwnership(true);timer();assert.equal(await explicit,true);
+  assert.equal(tab.canMutate(),true);assert.equal(tab.writeLease(),true);
+  tab.release();tab.setPrimary(false);await Promise.resolve();
+  defer=false;assert.equal(await tab.evaluate(),true);tab.release();
+}
+
 // Only the current lease shape names an owner. A lease without a page id or
 // with another version is not a live owner, so this tab can take over.
 for(const lease of [{version:1,tabId:'old-tab',claimId:'old-claim',expiresAt:ownershipNow+10000},{version:2,tabId:'old-tab',claimId:'old-claim',expiresAt:ownershipNow+10000}]){

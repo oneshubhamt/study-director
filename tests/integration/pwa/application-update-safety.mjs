@@ -89,8 +89,27 @@ function makeHarness(options={}){
     setOwnership:value=>{ownership={...ownership,...value};},setMutation:value=>{mutation={...mutation,...value};},
     setSession:value=>{session={...session,...value};},setWorkRevision:value=>{workRevision=value;},
     setBackupBusy:value=>{backupBusy=value;},setProviderBusy:value=>{providerBusy=value;},setTasks:value=>{tasks=value;},
-    setNow:value=>{now=value;},local
+    setNow:value=>{now=value;},setHidden:value=>{document.hidden=value;},setUnrenderedLifecycle:value=>{lifecycleStatus={...lifecycleStatus,...value};},local
   };
+}
+
+// The actual controller can change before the UI is notified. Only an initialized,
+// hidden secondary receives a bounded acquisition grace; no primary save check is bypassed.
+{
+  const t=makeHarness();t.setOwnership({state:'secondary'});t.setHidden(true);
+  assert.equal(t.controller.deferAutomaticOwnership(),false);
+  t.setUnrenderedLifecycle({externalUpdate:true});
+  assert.equal(t.controller.deferAutomaticOwnership(),true);
+  t.setHidden(false);assert.equal(t.controller.deferAutomaticOwnership(),false);
+  t.setHidden(true);t.setOwnership({state:'primary'});assert.equal(t.controller.deferAutomaticOwnership(),false);
+  t.setOwnership({state:'secondary'});t.setNow(129999);assert.equal(t.controller.deferAutomaticOwnership(),true);
+  t.setNow(130000);assert.equal(t.controller.deferAutomaticOwnership(),false);
+  t.setNow(150000);assert.equal(t.controller.deferAutomaticOwnership(),false);
+  t.setUnrenderedLifecycle({externalUpdate:false});assert.equal(t.controller.deferAutomaticOwnership(),false);
+}
+{
+  const t=makeHarness({startupReady:false,lifecycle:{externalUpdate:true}});t.setHidden(true);t.setOwnership({state:'secondary'});
+  assert.equal(t.controller.deferAutomaticOwnership(),false);
 }
 
 // Non-timer blockers are rejected before Pause & Update mutates timer state.
