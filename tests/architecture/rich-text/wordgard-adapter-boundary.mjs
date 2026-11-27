@@ -12,7 +12,7 @@ function walk(dir){
   });
 }
 
-for(const file of ['rich-text/wordgard-adapter.ts','rich-text/typography.ts','rich-text/wordgard-patches/inert-html.ts','rich-text/wordgard-patches/cut.ts','build/wordgard-source-patches.mjs'])
+for(const file of ['rich-text/wordgard-adapter.ts','rich-text/typography.ts','rich-text/wordgard-patches/inert-html.ts','rich-text/wordgard-patches/cut.ts','build/wordgard-source-patches.mts'])
   assert.ok(fs.existsSync(file),`Missing Wordgard architecture boundary: ${file}`);
 
 const editor=read('rich-text/editor.ts');
@@ -53,7 +53,7 @@ assert.match(read('rich-text/wordgard-adapter.ts'),/export \{cutHandling\}[^\n]*
 assert.match(editor,/tableCore,history\(\),cutHandling,/u,'The editor installs the adapter cut handling.');
 assert.match(read('rich-text/wordgard-source/command.ts'),/killToLineEnd, yankKilled/,'Command facade must resolve keymap imports without enabling the default keymap.');
 
-const buildSource=read('build/runtime-bundle.mjs');
+const buildSource=read('build/runtime-bundle.mts');
 assert.match(buildSource,/plugins:wordgardGlobal\?\[wordgardGlobalPlugin\(\)\]:\[wordgardSourcePatchPlugin\(\{root:ROOT\}\)\]/,'Wordgard builds apply the explicit source patch layer; the editor reads Wordgard from its module.');
 // The Wordgard module re-exports Wordgard packages and nothing of Study Director's.
 const wordgardModule=read('rich-text/wordgard-module.ts').replace(/^\s*\/\/.*$/gmu,'').trim().split('\n');

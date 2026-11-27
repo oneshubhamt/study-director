@@ -7,7 +7,7 @@ const runtime=read('source/external/insights-runtime.ts');
 const host=read('source/core/insights-host.ts');
 const publicApiHost=read('source/core/public-api-host.ts');
 const app=readHostHtml();
-const manifest=read('build/module-manifest.mjs');
+const manifest=read('build/module-manifest.mts');
 
 assert.match(runtime,/StudyDirector\?\.data\?\.deviceState/u,'Insights runtime must consume only the public bounded device-state capability');
 assert.match(host,/function createDeviceState\(input[\s\S]{0,620}readInsightsWindow:[\s\S]{0,140}input\.readWindow[\s\S]{0,220}writeInsightsWindow:[\s\S]{0,140}input\.writeWindow/u,'checked Insights host owns bounded window persistence');
