@@ -62,6 +62,9 @@
     "tests/helpers/browser-harness.mts",
     "build/security-candidate.mts",
     "build/stage-firebase.mts",
-    "build/verify-build.mts"
+    "build/verify-build.mts",
+    "build/typecheck.mts",
+    "build/wordgard-declarations.mts",
+    "tests/helpers/hermetic-worker.mts"
   ]
 }

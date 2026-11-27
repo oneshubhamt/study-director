@@ -38,7 +38,7 @@ try{
  for(const directory of ['build','types'])fs.mkdirSync(path.join(declarationTemp,directory));
  fs.cpSync(path.join(root,'vendor'),path.join(declarationTemp,'vendor'),{recursive:true});
  fs.copyFileSync(path.join(root,'tsconfig.wordgard-declarations.json'),path.join(declarationTemp,'tsconfig.wordgard-declarations.json'));
- fs.copyFileSync(path.join(root,'build/wordgard-declarations.mjs'),path.join(declarationTemp,'build/wordgard-declarations.mjs'));
+ for(const file of ['wordgard-declarations.mjs','wordgard-declarations.mts'])fs.copyFileSync(path.join(root,'build',file),path.join(declarationTemp,'build',file));
  fs.symlinkSync(path.join(root,'node_modules'),path.join(declarationTemp,'node_modules'),'dir');
  const run=(...args)=>spawnSync(process.execPath,['build/wordgard-declarations.mjs',...args],{cwd:declarationTemp,encoding:'utf8'});
  const generated=run('--write');assert.equal(generated.status,0,generated.stderr);assert.equal(run().status,0);
