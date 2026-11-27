@@ -24,7 +24,7 @@ assert.ok(CAPACITY_PROFILES.denseTextMetadata.dailyRecords<PRODUCTION_LIMITS.max
 assert.equal(CAPACITY_PROFILES.denseTextMetadata.assetCount,0);
 assert.equal(Object.prototype.hasOwnProperty.call(CAPACITY_PROFILES.denseTextMetadata,'reflectionDrafts'),false);
 assert.equal(CAPACITY_PROFILES.countBoundaries.includes('reflectionDrafts'),false);
-const app=readHostHtml(),build=fs.readFileSync('build/build.mjs','utf8'),editor=fs.readFileSync('rich-text/editor.ts','utf8');
+const app=readHostHtml(),build=fs.readFileSync('build/build.mts','utf8'),editor=fs.readFileSync('rich-text/editor.ts','utf8');
 assert.match(app,/productionLimits:decodeBuildJson\('@@SD_PRODUCTION_LIMITS_URI@@','production limits'\)/,'The production-limit manifest must cross the checked data-bootstrap configuration boundary.');
 assert.match(build,/import \{PRODUCTION_LIMITS,assertProductionLimits\}/);
 assert.match(editor,/PRODUCTION_LIMITS\.richAssetMaxBytes/);
