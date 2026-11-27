@@ -183,7 +183,7 @@ jobs:
         run: |
           state=failure
           if [ "$AUDIT_FAST" = success ] && [ "$SESSION_BROWSER" = success ]; then state=success; fi
-          body=$(printf '{"state":"%s","context":"REVIEW-P5 Stage 1 audit","description":"audit-fast=%s; session-browser=%s"}' "$state" "$AUDIT_FAST" "$SESSION_BROWSER")
+          body=$(printf '{"state":"%s","context":"REVIEW-P5 Stage 1 audit","description":"audit-fast=%s; session-browser=%s","target_url":"https://github.com/%s/actions/runs/%s"}' "$state" "$AUDIT_FAST" "$SESSION_BROWSER" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
           curl --fail-with-body --silent --show-error \
             -X POST \
             -H "Accept: application/vnd.github+json" \
