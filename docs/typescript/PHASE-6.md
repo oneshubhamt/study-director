@@ -1,6 +1,6 @@
 # Phase 6 · Typed tooling and the test-suite overhaul
 
-**Planned. Start after REVIEW-P5 closes.** Convert remaining first-party tooling and tests and improve the tests as each owner is converted. The actual Phase 5 exit SHA is the baseline. Full application and device certification follows in Phase 7. F33 product behavior, deployed-data compatibility and SDVC1 are Phase 8 work.
+**Ready for P6.0.** The [independently audited runtime baseline](REVIEW-P5-STAGE-2.md) is `66cffde8`. Convert remaining first-party tooling and tests and improve the tests as each owner is converted. Full application and device certification follows in Phase 7. F33 product behavior, deployed-data compatibility and SDVC1 are Phase 8 work.
 
 ## Intake and design review
 
