@@ -70,7 +70,7 @@ function isolatedEnvironment(tempRoot:string,relative:string):NodeJS.ProcessEnv{
     XDG_CACHE_HOME:path.join(tempRoot,'cache'),SD_TEST_ARTIFACT_DIR:path.join(tempRoot,'artifacts'),
     SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0'
   });
-  if(process.env['SD_COVERAGE_DIR']){env.SD_COVERAGE_DIR=path.resolve(process.env['SD_COVERAGE_DIR']);env['SD_COVERAGE_TEST_ID']=relative;}
+  if(process.env['SD_COVERAGE_DIR']){env['SD_COVERAGE_DIR']=path.resolve(process.env['SD_COVERAGE_DIR']);env['SD_COVERAGE_TEST_ID']=relative;}
   for(const directory of [env['HOME']!,env['TMPDIR']!,env['XDG_CACHE_HOME']!,env['SD_TEST_ARTIFACT_DIR']!])fs.mkdirSync(directory,{recursive:true});
   return env;
 }

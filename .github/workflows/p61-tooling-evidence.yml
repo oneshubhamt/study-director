@@ -37,8 +37,10 @@ jobs:
       - name: Calibrate real mutation runner
         if: ${{ !cancelled() }}
         run: |
-          export TMPDIR=$(mktemp -d "$RUNNER_TEMP/p61-mutation-XXXXXX")
           npm run test:mutation -- --probe
+          export TMPDIR=$(mktemp -d "$RUNNER_TEMP/p61-mutation-XXXXXX")
+          node tests/helpers/mutation.mjs --probe
+          find "$TMPDIR" -mindepth 1 -print
           test -z "$(find "$TMPDIR" -mindepth 1 -print -quit)"
           rmdir "$TMPDIR"
       - name: Verify all permanent mutation witnesses
