@@ -1,5 +1,11 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 historical host reconciliation / Live Draft origin — OPEN · 2026-11-27
+
+- Start `8b9af4521ce209ac43f41deebd47b1197f7f556e`, exact application/test baseline `e53e61ce9546c96bc8064ba13d96967f96b71e91`: [repository checks](https://github.com/oneshubhamt/study-director/actions/runs/45939070827) terminal SUCCESS. Remaining exact workflows not yet terminal; do not credit them. Programme comparator `de4872a88c2015bc8833e0244c0ab8ce6e6b5998`.
+- Objectives: reconcile remaining old host-helper groups (task evidence store, storage health/verified copies/canonical commit, session debounce/claim, retained files/recovery quiescence/maintenance, note navigation and startup/diagnostic ports) against checked owners and their actual callers, identify intentional behavioral deltas and reuse exact applicable witnesses. Compare old and new named occurrence inventories; counts are not semantic equivalence.
+- Confirmed in session-host.ts:47–55,259–273: `LiveDraftWriteOptions.assertOrigin` is accepted by the checked contract but discarded by queued/flush option merge. Old main.js:2525–2545 coalesced flags and relied on current authority; current owner/lifecycle ports permit a precise fence. Preserve coalesced durability flags for current requests; retire stale queued owner/lifecycle, never let stale flush cancel a current queue, pass admitted origin through actual write/readback and Plan-apply follow-up. Use existing recovery-timer-snapshot actual owner and deterministic delayed-write/queue witnesses. No new persistence topology or timing change; no Phase 6.
+
 ## REVIEW-P5 · Stage 1 residual correction pass — OPEN · 2026-11-27
 
 - Baseline `62c867a297260b7d9d1af4857b44761837dcd404`; objective checkpoint `639175f81246f20e45e8ebe042478441809c2bde`. Baseline [repository checks](https://github.com/oneshubhamt/study-director/actions/runs/45938097740/job/140305862221) 43/45 passed, failed stale Diary source contract and read-back outcome expectation. Scope: repair both failures, confirm Diary mutation identity and scrub-origin completion through actual writes, preserve canonical topology, emergency fallback and previous safety assertions.
