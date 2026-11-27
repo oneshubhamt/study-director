@@ -65,6 +65,15 @@
     "build/verify-build.mts",
     "build/typecheck.mts",
     "build/wordgard-declarations.mts",
-    "tests/helpers/hermetic-worker.mts"
+    "tests/helpers/hermetic-worker.mts",
+    "tests/helpers/verification/generated-syntax-check.mts",
+    "tests/helpers/verification/host-source.mts",
+    "tests/helpers/verification/production-limits.mts",
+    "tests/helpers/verification/syntax-check.mts",
+    "tests/helpers/verification/terser-compression-contracts.mts",
+    "tests/helpers/verification/rich-text-bundle.mts",
+    "tests/helpers/verification/typescript-pipeline.mts",
+    "tests/helpers/verification/typescript-gates.mts",
+    "tests/helpers/verification/performance-budgets.mts"
   ]
 }
