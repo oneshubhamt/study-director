@@ -31,34 +31,34 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   function assertReflectionOwner(revision:number){
     if(!ownership.canMutate()||ownership.revision()!==revision)throw new Error('Daily Reflection ownership changed. Reopen it before editing.');
   }
-  async function commit(date:string,value:string,options:Readonly<{expectedCanonical?:string;backupCapture?:boolean}>={}){
+  async function commit(date:string,value:string,options:Readonly<{expectedCanonical?:string;backupCapture?:boolean;assertOrigin?:(()=>void)|null}>={}){
     if(!ownership.canMutate())throw new Error('Use the primary tab to edit Daily Reflections.');
-    const ownerRevision=ownership.revision();
+    const ownerRevision=ownership.revision(),assertOrigin=options.assertOrigin||null;assertOrigin?.();
     if(!dates.isSupported(date))throw new Error('That reflection date is not available.');
     const candidate=text.clampEditorContent(value,limits.maxReflectionChars);
     if(!text.editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
     const current=await records.get(date,{strict:true}),currentCanonical=String(current?.reflection||'');
-    assertReflectionOwner(ownerRevision);
+    assertReflectionOwner(ownerRevision);assertOrigin?.();
     if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     const hasContent=!!String(candidate||'').trim(),backupCapture=options.backupCapture===true;
     if(currentCanonical===candidate){
-      if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);
+      if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);assertOrigin?.();
       return snapshot(current);
     }
     if(current?.recordKind==='study'){
       const next={...current,reflection:candidate,updatedAt:environment.nowIso()};
-      const receipt=await records.save(next,{backupCapture,expectedCanonical:current});durableReceipt(receipt,'Daily Reflection');
+      const receipt=await records.save(next,{backupCapture,expectedCanonical:current,...(assertOrigin?{assertOrigin}:{})});durableReceipt(receipt,'Daily Reflection');
       await records.verifyCanonical(next);
     }else if(hasContent){
       const diary=codec.createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
       if(!diary)throw new Error('Daily Reflection failed canonical validation.');
-      const receipt=await records.save(diary,{backupCapture,expectedCanonical:current});durableReceipt(receipt,'Daily Reflection');
+      const receipt=await records.save(diary,{backupCapture,expectedCanonical:current,...(assertOrigin?{assertOrigin}:{})});durableReceipt(receipt,'Daily Reflection');
       await records.verifyCanonical(diary);
     }else if(current?.recordKind==='diary'){
-      await records.remove(date,{backupCapture,expectedCanonical:current});
+      await records.remove(date,{backupCapture,expectedCanonical:current,...(assertOrigin?{assertOrigin}:{})});
       await records.verifyCanonicalAbsent(date);
     }
-    const fresh=await canonicalRecord(date);
+    assertOrigin?.();const fresh=await canonicalRecord(date);assertOrigin?.();
     if(hasContent&&String(fresh?.reflection||'')!==candidate)throw new Error('Daily Reflection did not pass its canonical save read-back check.');
     if(!hasContent&&current?.recordKind==='study'&&(!fresh||fresh.recordKind!=='study'||String(fresh.reflection||'').trim()))throw new Error('Daily Reflection clear did not pass its canonical save read-back check.');
     if(!hasContent&&current?.recordKind==='diary'&&fresh)throw new Error('Daily Reflection deletion did not pass its canonical save read-back check.');
@@ -68,7 +68,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
 
   type EditorState={
     date:string;canonical:string;revision:number;recordKind:'diary'|'study';ownershipRevision:number;
-    onSaved:((record:SavedDayRecord|null)=>void)|null;onState:((state:'saving'|'saved'|'error',message:string)=>void)|null;
+    onSaved:((record:SavedDayRecord|null)=>void)|null;onState:((state:'saving'|'saved'|'error',message:string)=>void)|null;assertWrite:(()=>void)|null;
     lane:Readonly<SaveLane<string,SavedDayRecord|null>>;
   };
   const bindings=new WeakMap<HTMLTextAreaElement,EditorState>();
@@ -92,10 +92,10 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     const value:DiaryDraft={version:dataContract.schemas.DailyRecord.version,recordKind:'diary',date,savedAt:now,updatedAt:now,sourceRevision:0,reflection:'',dayOfWeek:meta.dayOfWeek,dayName:meta.dayName};return freeze(value);
   }
   async function write(field:HTMLTextAreaElement,state:EditorState,value:string,options:FlushOptions={}){
-    if(activeState(field)!==state||!ownership.canMutate())throw new Error('This Diary editor is no longer bound to the current study owner.');
+    const assertOrigin=()=>{if(activeState(field)!==state||!ownership.canMutate())throw new Error('This Diary editor is no longer bound to the current study owner.');state.assertWrite?.();};assertOrigin();
     const candidate=text.clampEditorContent(value,limits.maxReflectionChars);
     if(!text.editorContentWithinLimits(candidate))throw new Error('Diary reflection exceeds the rich-text limit.');
-    const saved=await commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true});
+    const saved=await commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true,assertOrigin});
     if(activeState(field)!==state)throw new Error('This Diary editor became stale while its save was completing.');
     const fresh=(saved.record||null) as SavedDayRecord|null;
     state.canonical=saved.canonical;state.revision=Number((saved as {revision?:unknown}).revision)||0;state.recordKind=saved.recordKind==='study'?'study':'diary';
@@ -116,7 +116,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
       onState:(status:SaveState,error:unknown)=>laneState(field,state,status,error),
       environment:freeze({setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout})
     }));
-    state={date,canonical,revision,recordKind:record.recordKind==='diary'?'diary':'study',ownershipRevision,onSaved:callbacks.onSaved||null,onState:callbacks.onState||null,lane};
+    state={date,canonical,revision,recordKind:record.recordKind==='diary'?'diary':'study',ownershipRevision,onSaved:callbacks.onSaved||null,onState:callbacks.onState||null,assertWrite:callbacks.assertWrite||null,lane};
     bindings.set(field,state);
     field.dataset['diaryDate']=date;field.dataset['diaryRevision']=String(revision);field.dataset['diaryOwnershipRevision']=String(ownershipRevision);
     field.dataset['richSyncState']=ownership.canMutate()?'saved':'read-only';field.dataset['richSyncStatus']=ownership.canMutate()?'Saved':'Read-only';
@@ -136,13 +136,13 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   }
   function schedule(field:HTMLTextAreaElement,value:string){const state=activeState(field);return state&&ownership.canMutate()?state.lane.schedule(String(value??'')):false;}
   function flush(field:HTMLTextAreaElement,options:FlushOptions={}){const state=activeState(field);return state&&ownership.canMutate()?state.lane.flush(options):Promise.reject(new Error('Diary editor is no longer active for the current study owner.'));}
-  async function deleteEntry(date:string,options:Readonly<{backupCapture?:boolean}>={}){
+  async function deleteEntry(date:string,options:Readonly<{backupCapture?:boolean;assertWrite?:(()=>void)|null}>={}){
     if(!ownership.canMutate()||!dates.isSupported(date))return false;
-    const ownerRevision=ownership.revision();
+    const ownerRevision=ownership.revision(),assertOrigin=()=>{assertReflectionOwner(ownerRevision);options.assertWrite?.();};assertOrigin();
     const current=await records.get(date,{strict:true});
-    assertReflectionOwner(ownerRevision);
+    assertOrigin();
     if(!current){await records.verifyCanonicalAbsent(date);return true;}
-    const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true});
+    const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true,assertOrigin});
     return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
   }
   async function settled(field:HTMLTextAreaElement){const state=bindings.get(field);if(!state)return true;return state.lane.settled();}
