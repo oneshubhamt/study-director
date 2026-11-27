@@ -34,7 +34,7 @@ export interface ReviewSavedDayCoordinatorInput{
   readonly document:Document;readonly day:ReviewDayState;
   readonly runtime:Readonly<{
     tasks:()=>readonly Task[];timerState:ReviewDayStateInput['timerState'];isTrackableBlock:(task:Task|undefined)=>boolean;
-    captureSessionSnapshot:()=>SessionSnapshot|null;appliedScheduleText:()=>string;appCanMutate:()=>boolean;
+    captureSessionSnapshot:()=>SessionSnapshot|null;appliedScheduleText:()=>string;appCanMutate:()=>boolean;ownershipRevision:()=>number;lifecycleRevision:()=>number;
     panelMode:()=>string;safetyMessage:()=>string;setSafetyMessage:(value:string)=>void;
     isSuspended:(session:ActiveSession|null)=>boolean;activeSessionSnapshot:(session:ActiveSession|null)=>SessionSnapshot|null;
     applyStoredSessionSnapshot:(session:ActiveSession,snapshot:SessionSnapshot,options:Readonly<{source:string;reviewOnly:true}>)=>boolean|PromiseLike<boolean>;
@@ -50,7 +50,7 @@ export interface ReviewSavedDayCoordinatorInput{
     savedDayCoversSessionEvidence:(record:DailyRecord|undefined,subject:SessionEvidence,options:Readonly<{allowAdvances:true}>)=>boolean;
   }>;
   readonly session:Readonly<{
-    writeCanonicalNow:(label:string,options:Readonly<{markChanged:false}>)=>PromiseLike<Readonly<{value?:ActiveSession|null;error?:unknown}>>;
+    writeCanonicalNow:(label:string,options:Readonly<{markChanged:false;assertOrigin:()=>void}>)=>PromiseLike<Readonly<{value?:ActiveSession|null;error?:unknown}>>;
     clearCanonicalAfterSavedDay:()=>PromiseLike<unknown>;
     clearSafetyMessage:(prefix:string)=>unknown;
   }>;

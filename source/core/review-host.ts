@@ -79,6 +79,10 @@ function createDayState(input:import('../../types/review-host.ts').ReviewDayStat
 function createSavedDayCoordinator(input:import('../../types/review-host.ts').ReviewSavedDayCoordinatorInput){
   exactObject(input,['document','day','runtime','repositories','codecs','session','review','view','activation'],'Review saved-day coordinator input');
   const {document,day,runtime,repositories,codecs,session,review,view,activation}=input;
+  function captureOrigin(){
+    const date=day.getReviewDate(),studyDate=runtime.timerState.studyDate,owner=runtime.ownershipRevision(),life=runtime.lifecycleRevision();
+    return ()=>day.getReviewDate()===date&&runtime.timerState.studyDate===studyDate&&runtime.ownershipRevision()===owner&&runtime.lifecycleRevision()===life;
+  }
   function liveEvidence(date:string){
     if(date!==day.getReviewDate()||runtime.timerState.studyDate!==date||!runtime.tasks().some(runtime.isTrackableBlock))return null;
     try{
@@ -111,9 +115,10 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
   }
   async function savedRecordExistsForDate(date:string){try{return await savedDayCoversWork(date);}catch(error){view.diagnostics('session.saved-day-reminder',error,'warn');return false;}}
   async function promptSaveToday(){
-    const date=day.getReviewDate(),reminder=day.reminder;
-    if(!runtime.tasks().some(runtime.isTrackableBlock)||reminder.date===date)return;
-    if(await savedRecordExistsForDate(date)||reminder.date===date)return;
+    const date=day.getReviewDate(),reminder=day.reminder,generation=reminder.generation,originCurrent=captureOrigin();
+    const current=()=>originCurrent()&&runtime.appCanMutate()&&runtime.timerState.studyDate===date&&runtime.tasks().some(runtime.isTrackableBlock)&&reminder.generation===generation&&reminder.date!==date;
+    if(!current())return;
+    if(await savedRecordExistsForDate(date)||!current())return;
     let evidence:SessionEvidence|null=null;
     try{
       const loaded=await repositories.loadActiveSession(0,{strict:true});
@@ -121,38 +126,42 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
           day.cleanRevision(loaded.value.snapshot?.contentRevision)===day.cleanRevision(runtime.timerState.contentRevision))evidence=codecs.sanitizeSession(loaded.value);
     }catch(error){view.diagnostics('session.save-reminder-evidence',error,'warn');}
     if(!evidence)evidence=liveEvidence(date);
-    if(reminder.date===date)return;
+    if(!current())return;
     reminder.date=date;reminder.evidence=evidence;reminder.generation+=1;
     runtime.setSafetyMessage(`Review reminder: ${view.prettyDate(date)} has unsaved study data. Open Review and Save Today to Library.`);
     view.refreshStorageWarning();view.notifyUser('Save today’s study record','Open Review and save today to Library.',`sdm-save-${date}`);
     view.setStatus('save-status','Review is ready. Save today to Library when you are done.');view.openDetails(true);
   }
   function clearSaveReminder(date=day.getReviewDate(),revision:unknown=runtime.timerState.contentRevision){
-    const reminder=day.reminder;if(reminder.date===date){reminder.date='';reminder.evidence=null;reminder.generation+=1;}
-    day.markSaved(date,revision);if(runtime.safetyMessage().includes('Review reminder'))runtime.setSafetyMessage('');view.refreshStorageWarning();return true;
+    const reminder=day.reminder;
+    if(reminder.date===date){reminder.date='';reminder.evidence=null;reminder.generation+=1;if(runtime.safetyMessage().startsWith('Review reminder:'))runtime.setSafetyMessage('');}
+    day.markSaved(date,revision);view.refreshStorageWarning();return true;
   }
   async function revalidateSaveReminder(){
-    const reminder=day.reminder,date=reminder.date,evidence=reminder.evidence,generation=reminder.generation;
+    const reminder=day.reminder,date=reminder.date,evidence=reminder.evidence,generation=reminder.generation,originCurrent=captureOrigin(),contentRevision=runtime.timerState.contentRevision;
     if(!date||!runtime.safetyMessage().startsWith('Review reminder:'))return false;
     try{
       if(!await savedDayCoversWork(date,evidence))return false;
-      if(reminder.date!==date||reminder.generation!==generation||!runtime.safetyMessage().startsWith('Review reminder:'))return false;
+      if(!originCurrent()||runtime.timerState.contentRevision!==contentRevision||reminder.date!==date||reminder.generation!==generation||!runtime.safetyMessage().startsWith('Review reminder:'))return false;
       reminder.date='';reminder.evidence=null;reminder.generation+=1;session.clearSafetyMessage('Review reminder:');
       if(view.staleSaveStatus())view.setStatus('save-status','');return true;
     }catch(error){view.diagnostics('session.reminder-convergence',error,'warn');return false;}
   }
   async function acknowledgeSavedStudyDay(date:string,revision:unknown){
-    const covered=day.cleanRevision(revision),previous=runtime.timerState.savedRevision;
-    if(!runtime.tasks().length||day.getReviewDate()!==date||runtime.timerState.studyDate!==date||
+    const covered=day.cleanRevision(revision),previous=runtime.timerState.savedRevision,originCurrent=captureOrigin();
+    if(!runtime.appCanMutate()||!runtime.tasks().length||day.getReviewDate()!==date||runtime.timerState.studyDate!==date||
         !Number.isSafeInteger(Number(revision))||Number(revision)<0||covered>day.cleanRevision(runtime.timerState.contentRevision)||covered<day.cleanRevision(previous)){
       throw new Error('The Saved Day and Active Session revision no longer identify the same study evidence.');
     }
     runtime.timerState.savedRevision=covered;
+    const current=()=>originCurrent()&&runtime.appCanMutate()&&runtime.timerState.savedRevision===covered&&day.cleanRevision(runtime.timerState.contentRevision)>=covered;
+    const assertOrigin=()=>{if(!current())throw new Error('The Saved Day acknowledgement was superseded; newer study progress was preserved.');};
     try{
-      const saved=await session.writeCanonicalNow('acknowledging the Saved Day',{markChanged:false});
+      const saved=await session.writeCanonicalNow('acknowledging the Saved Day',{markChanged:false,assertOrigin});
+      assertOrigin();
       if(!saved?.value||saved.value.date!==date||day.cleanRevision(saved.value.snapshot?.savedRevision)<covered)throw saved?.error||new Error('The Saved Day acknowledgement was not saved in the Active Session.');
       clearSaveReminder(date,covered);return true;
-    }catch(error){runtime.timerState.savedRevision=previous;throw error;}
+    }catch(error){if(current())runtime.timerState.savedRevision=previous;throw error;}
   }
   function clearCanonicalSessionAfterSavedDay(){return session.clearCanonicalAfterSavedDay();}
   async function saveDayRecord(){

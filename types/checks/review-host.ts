@@ -84,7 +84,7 @@ void lifecycle.status().canWrite;
 
 const coordinator=host.createSavedDayCoordinator(Object.freeze({
   document,day,
-  runtime:Object.freeze({tasks:()=>tasks,timerState,isTrackableBlock,captureSessionSnapshot,appliedScheduleText,appCanMutate,panelMode,safetyMessage,setSafetyMessage,isSuspended,activeSessionSnapshot,applyStoredSessionSnapshot,setPanelMode,setTimerDone,updateSessionControls}),
+  runtime:Object.freeze({tasks:()=>tasks,timerState,isTrackableBlock,captureSessionSnapshot,appliedScheduleText,appCanMutate,ownershipRevision:()=>0,lifecycleRevision:()=>lifecycle.revision,panelMode,safetyMessage,setSafetyMessage,isSuspended,activeSessionSnapshot,applyStoredSessionSnapshot,setPanelMode,setTimerDone,updateSessionControls}),
   repositories:Object.freeze({
     loadActiveSession:appData.activeSession.load,
     dailyDocuments:appData.dailyRecords.documents,

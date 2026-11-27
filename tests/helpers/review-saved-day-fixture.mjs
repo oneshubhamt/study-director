@@ -27,14 +27,14 @@ export function createSavedDayFixture(options={}){
   }));
   let active=options.active===undefined?{date,status:'active',snapshot:{contentRevision:7,savedRevision:timerState.savedRevision}}:options.active;
   let dayRecord=options.dayRecord??null,activeReads=0,clears=0,writes=0,panelMode=options.panel||'none',safety=options.safetyMessage||'';
-  const events=[];
+  const events=[];let ownershipRevision=1,lifecycleRevision=1,canMutate=options.canMutate!==false;
   if(options.reminder){day.reminder.date=date;day.reminder.evidence=options.reminderEvidence??null;day.reminder.generation=options.reminderGeneration??1;}
   const coordinator=loaded.module.createSavedDayCoordinator(Object.freeze({
     document,day,
     runtime:Object.freeze({
       tasks:()=>tasks,timerState,isTrackableBlock:task=>task?.kind==='work',
       captureSessionSnapshot:()=>typeof options.liveSnapshot==='function'?options.liveSnapshot():options.liveSnapshot??null,
-      appliedScheduleText:()=>options.scheduleText??'valid plan',appCanMutate:()=>options.canMutate!==false,
+      appliedScheduleText:()=>options.scheduleText??'valid plan',appCanMutate:()=>canMutate,ownershipRevision:()=>ownershipRevision,lifecycleRevision:()=>lifecycleRevision,
       panelMode:()=>panelMode,safetyMessage:()=>safety,setSafetyMessage:value=>{safety=value;},
       isSuspended:session=>session?.status==='suspended',activeSessionSnapshot:session=>session?.snapshot||null,
       applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);return options.hydrate!==false;},
@@ -45,7 +45,7 @@ export function createSavedDayFixture(options={}){
       loadActiveSession:async()=>{
         activeReads++;
         if(options.activeReadFailure)return {ok:false,value:null,error:new Error('active read failed'),storage:{idb:false,local:false}};
-        const value=typeof options.activeValue==='function'?options.activeValue(activeReads,active):active;
+        const value=typeof options.activeValue==='function'?await options.activeValue(activeReads,active):active;
         return {ok:true,value,error:null,storage:{idb:options.activeInIdb!==false,local:true}};
       },
       dailyDocuments:async()=>{
@@ -66,6 +66,7 @@ export function createSavedDayFixture(options={}){
     session:Object.freeze({
       writeCanonicalNow:async(label,writeOptions)=>{
         writes++;if(label!=='acknowledging the Saved Day'||writeOptions.markChanged!==false)throw new Error('unexpected acknowledgement write');
+        writeOptions.assertOrigin();if(options.writeGate)await options.writeGate();writeOptions.assertOrigin();
         if(options.writeFailure)throw new Error('IndexedDB unavailable');
         const savedRevision=options.mismatchedWrite?Math.max(0,timerState.savedRevision-1):timerState.savedRevision;
         active={...active,date,snapshot:{...(active?.snapshot||{}),savedRevision}};return {ok:true,value:active,storage:{idb:true}};
@@ -90,7 +91,8 @@ export function createSavedDayFixture(options={}){
   }));
   return {
     date,coordinator,day,timerState,events,
-    setActive:value=>{active=value;},setDayRecord:value=>{dayRecord=value;},
+    setActive:value=>{active=value;},setDayRecord:value=>{dayRecord=value;},setDate:value=>{input.value=value;timerState.studyDate=value;},
+    setOwnership:value=>{ownershipRevision++;canMutate=value;},advanceLifecycle:()=>{lifecycleRevision++;},
     state:()=>({active,dayRecord,panelMode,safety,clears,writes,activeReads})
   };
 }

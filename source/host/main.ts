@@ -2658,7 +2658,7 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<R
   document,day:ReviewDayState,
   runtime:Object.freeze<ReviewSavedDayInput['runtime']>({
     tasks:()=>TASKS,timerState:TimerState,isTrackableBlock,captureSessionSnapshot:()=>captureSessionSnapshot(),
-    appliedScheduleText:()=>PlanRuntime.appliedScheduleText(),appCanMutate:()=>appCanMutate(),panelMode:()=>sessionPanelMode,
+    appliedScheduleText:()=>PlanRuntime.appliedScheduleText(),appCanMutate:()=>appCanMutate(),ownershipRevision:()=>AppOwnership.revision,lifecycleRevision:()=>SessionLifecycle.revision,panelMode:()=>sessionPanelMode,
     safetyMessage:()=>sessionSafetyMessage,setSafetyMessage:value=>{sessionSafetyMessage=String(value||'');},
     isSuspended:session=>isSuspendedActiveSession(session),activeSessionSnapshot:session=>activeSessionSnapshot(session),
     applyStoredSessionSnapshot:async(session,snapshot,options)=>(await applyStoredSessionSnapshot(session,snapshot,options))!==false,

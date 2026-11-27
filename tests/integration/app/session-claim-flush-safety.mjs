@@ -24,7 +24,7 @@ function fixture(options={}){
     document,day,
     runtime:Object.freeze({
       tasks:()=>tasks,timerState,isTrackableBlock:task=>task?.kind==='work',captureSessionSnapshot:()=>options.liveSnapshot??null,
-      appliedScheduleText:()=> 'valid plan',appCanMutate:()=>options.canMutate!==false,panelMode:()=>panelMode,
+      appliedScheduleText:()=> 'valid plan',appCanMutate:()=>options.canMutate!==false,ownershipRevision:()=>1,lifecycleRevision:()=>1,panelMode:()=>panelMode,
       safetyMessage:()=>safety,setSafetyMessage:value=>{safety=value;},isSuspended:session=>session?.status==='suspended',
       activeSessionSnapshot:session=>session?.snapshot||null,
       applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);return options.hydrate!==false;},
@@ -44,7 +44,7 @@ function fixture(options={}){
     session:Object.freeze({
       writeCanonicalNow:async(label,writeOptions)=>{
         writes++;assert.equal(label,'acknowledging the Saved Day');assert.equal(writeOptions.markChanged,false);
-        if(options.writeFailure)throw new Error('IndexedDB unavailable');
+        writeOptions.assertOrigin();if(options.writeFailure)throw new Error('IndexedDB unavailable');
         const savedRevision=options.mismatchedWrite?Math.max(0,timerState.savedRevision-1):timerState.savedRevision;
         stored={...stored,date,snapshot:{...(stored?.snapshot||{}),savedRevision}};
         return {ok:true,value:stored,storage:{idb:true}};

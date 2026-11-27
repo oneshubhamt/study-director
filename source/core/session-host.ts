@@ -295,10 +295,11 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   async function writeCanonicalNow(operation:string,options:Readonly<Omit<LiveDraftWriteOptions,'strictDurability'>>={}):Promise<SessionResult>{
     if(blocked(options))throw new Error(`The Active Session cannot be saved while ${operation}.`);
+    options.assertOrigin?.();
     if(options.markChanged!==false)persistence.markContentChanged();
     const value=persistence.snapshotForWrite(),session=payload(value);if(!session)throw new Error(`No canonical Active Session is available while ${operation}.`);
     cancelPendingLiveDraftSave();lastTimerSnapshotMs=clock.nowMs();
-    return saveCanonicalSession(session,operation,{backupCapture:options.backupCapture===true});
+    return saveCanonicalSession(session,operation,{backupCapture:options.backupCapture===true,...(options.assertOrigin?{assertOrigin:options.assertOrigin}:{})});
   }
   async function clearCanonical(operation:string,options:Readonly<{expectedCanonical?:ActiveSession|null}>={},authority?:TransitionAuthority,committed?:()=>void):Promise<SessionResult>{
     if(authority)assertTransition(authority);

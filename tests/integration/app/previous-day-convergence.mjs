@@ -180,6 +180,50 @@ for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] o
   assert.equal(trial.day.reminder.date,day,label+' still displays an honest reminder');
 }
 
+// Delay real Saved-Day host work across ownership, lifecycle, date and successor
+// changes. Neither an obsolete prompt nor an acknowledgement may publish or
+// restore a revision belonging to the replacement session.
+function deferred(){
+  let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};
+}
+for(const change of ['ownership','lifecycle','date']){
+  const gate=deferred(),entered=deferred();
+  const trial=createSavedDayFixture({date:day,activeValue:async(read,value)=>{if(read===1){entered.resolve();await gate.promise;}return value;},coverage:()=>false});
+  const pending=trial.coordinator.promptSaveToday();await entered.promise;
+  if(change==='ownership'){trial.setOwnership(false);trial.setOwnership(true);}
+  else if(change==='lifecycle')trial.advanceLifecycle();
+  else trial.setDate(today);
+  gate.resolve();await pending;
+  assert.equal(trial.day.reminder.date,'',change+' retires an old prompt');
+  assert.equal(trial.events.some(event=>event[0]==='notify'),false);
+}
+for(const change of ['ownership','lifecycle','date','successor','failure','progress']){
+  const gate=deferred(),entered=deferred();
+  const trial=createSavedDayFixture({date:day,writeGate:async()=>{entered.resolve();await gate.promise;},writeFailure:change==='failure'});
+  const pending=trial.coordinator.acknowledgeSavedStudyDay(day,7);await entered.promise;
+  if(change==='ownership'){trial.setOwnership(false);trial.setOwnership(true);}
+  else if(change==='lifecycle')trial.advanceLifecycle();
+  else if(change==='date')trial.setDate(today);
+  if(['ownership','lifecycle','date','successor'].includes(change)){
+    trial.timerState.contentRevision=10;trial.timerState.savedRevision=9;
+  }else if(change==='progress')trial.timerState.contentRevision=8;
+  gate.resolve();
+  if(change==='progress'){assert.equal(await pending,true);assert.equal(trial.timerState.savedRevision,7);assert.equal(trial.day.isDirty(),true);}
+  else{
+    await assert.rejects(pending,/superseded|IndexedDB unavailable/u);
+    assert.equal(trial.timerState.savedRevision,change==='failure'?0:9,change+' preserves the correct runtime revision');
+  }
+}
+{
+  const gate=deferred(),entered=deferred();
+  const trial=createSavedDayFixture({date:day,savedRevision:7,reminder:true,safetyMessage:'Review reminder: current work',dayRecord:{date:day,recordKind:'study'},verifyDaily:async()=>{entered.resolve();await gate.promise;}});
+  const pending=trial.coordinator.revalidateSaveReminder();await entered.promise;
+  trial.timerState.contentRevision=8;gate.resolve();
+  assert.equal(await pending,false);assert.equal(trial.day.reminder.date,day);
+  trial.coordinator.clearSaveReminder(today,7);
+  assert.equal(trial.state().safety,'Review reminder: current work','another date cannot clear the current reminder');
+}
+
 // Historical Review never reaches the rollover service; active Review does.
 for(const mode of ['previous','active']){
   const trial=createSavedDayFixture({date:day,panel:mode,rolloverResult:true});
