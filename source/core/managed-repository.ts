@@ -805,9 +805,11 @@ function adoptRepositoryPreparation(prepared:Prepared,checkpointId:string){
   return true;
 }
 // This version is now what this device and Drive share.
-async function establishRepositoryBase(checkpointId:string){
+async function establishRepositoryBase(checkpointId:string,assertOrigin?:()=>void){
+  assertOrigin?.();
   const id=String(checkpointId||''),candidate=repositoryBaseCandidate;if(!/^cp_[a-f0-9]{32}$/u.test(id)||!candidate||candidate.checkpointId!==id||!candidate.update)return false;
-  const written=await AppData.reconciliationBase.write(id,candidate.update)!==false,index=repositoryPreparationIndex;
+  const written=await AppData.reconciliationBase.write(id,candidate.update,assertOrigin)!==false;
+  assertOrigin?.();const index=repositoryPreparationIndex;
   if(index)repositoryPreparationIndex=freeze({...index,...(written&&index.checkpointId===id?{baseCheckpointId:id,sinceBase:freeze([])}:{sinceBase:null})});
   return written;
 }
@@ -1158,8 +1160,8 @@ async function publishRepositoryCheckpoint<W,P,C,B,L>(history:readonly Manifest[
   if(!state||state.invalidated||state.busy)throw new TypeError('Repository publication continuation is unavailable or already running.');
   state.busy=true;let settle!:()=>void;state.settled=new Promise<void>(resolve=>{settle=resolve;});
   let prepared=state.prepared,manifestFile=state.manifestFile,publication:P|null=null,commitReceipt:C|null=null,committed=false,retained=false;const written:{entry:PreparedObject;receipt:W}[]=[],warnings:string[]=[];
-  const check=()=>{throwIfImportAborted(options.signal);if(state.invalidated)throw Object.assign(new Error('Repository publication was retired.'),{name:'AbortError',code:'BACKUP_SOURCE_FENCE_CHANGED'});};
-  const postCommit=async<T>(phase:string,message:string,work:()=>Promise<T>)=>{try{return await work();}catch(error){warnings.push(message);AppDiagnostics.capture(`repository.publication-${phase}`,error,'warn');return null;}};
+  const check=()=>{options.assertOrigin?.();throwIfImportAborted(options.signal);if(state.invalidated)throw Object.assign(new Error('Repository publication was retired.'),{name:'AbortError',code:'BACKUP_SOURCE_FENCE_CHANGED'});};
+  const postCommit=async<T>(phase:string,message:string,work:()=>Promise<T>)=>{try{options.assertOrigin?.();const result=await work();options.assertOrigin?.();return result;}catch(error){warnings.push(message);AppDiagnostics.capture(`repository.publication-${phase}`,error,'warn');return null;}};
   try{
     check();
     if(prepared){await refreshRepositoryPublicationProtection(state,options);prepared=state.prepared!;manifestFile=state.manifestFile;}
@@ -1172,7 +1174,7 @@ async function publishRepositoryCheckpoint<W,P,C,B,L>(history:readonly Manifest[
       const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
       adoptRepositoryPreparation(prepared,checkpointId);
       const baseEstablished=!options.shared||await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',async()=>{
-        if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');
+        if(!await establishRepositoryBase(checkpointId,options.assertOrigin))throw new Error('The shared base could not be recorded.');
         return true;
       })===true;
       const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
@@ -1205,9 +1207,9 @@ async function publishRepositoryCheckpoint<W,P,C,B,L>(history:readonly Manifest[
     await manifestFile.checkSource?.();
     check();const commitMarker=state.commitMarker||(state.commitMarker=await createRepositoryCommitMarker(manifestFile.manifest,{checkProtection:manifestFile.checkProtection,checkSource:manifestFile.checkSource,signal:options.signal||null}));check();
     commitReceipt=await transport.commit(commitMarker,prepared,publication);
-    committed=true;
+    committed=true;options.assertOrigin?.();
     const checkpointId=manifestFile.manifest.checkpoint.checkpointId;adoptRepositoryPreparation(prepared,checkpointId);
-    const baseEstablished=!options.shared||(await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;}))===true;
+    const baseEstablished=!options.shared||(await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId,options.assertOrigin))throw new Error('The shared base could not be recorded.');return true;}))===true;
     const context=freeze({prepared,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten});
     const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The checkpoint was saved and verified, but local backup status could not be updated. A later backup will retry completion bookkeeping.',()=>transport.onCommitted!(context)):null;
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup!(freeze({...context,committedResult}))):null;

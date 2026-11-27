@@ -142,7 +142,8 @@ const createModule=()=>{
       return freeze(out);
     }
     const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days','sessionContentFingerprint','semanticDays'];
-    async function write(checkpointId:unknown,spec:unknown){
+    async function write(checkpointId:unknown,spec:unknown,assertOrigin?:()=>void){
+      assertOrigin?.();
       const id=String(checkpointId||'');
       if(!/^cp_[a-f0-9]{32}$/u.test(id)||!exactKeys(spec,SPEC_KEYS)||spec["version"]!==4||
         spec["format"]!=='study-director.reconciliation-base-update')return false;
@@ -177,11 +178,14 @@ const createModule=()=>{
         sessionFingerprint:kept(session,current&&current.sessionFingerprint),
         sessionContentFingerprint:session===null?current?.sessionContentFingerprint??null:semanticSession});
       if(!headerFor(null))return false;
-      return meta.transaction('readwrite',(view,tx,finish)=>{
+      assertOrigin?.();
+      return meta.transaction<boolean>('readwrite',(view,tx,finish)=>{
+        assertOrigin?.();
         const currentHandle=view.get(families.header),noteHandle=full?view.getAll(families.notes):null,dayHandle=full?view.getAll(families.days):null,handles=[currentHandle,...(noteHandle?[noteHandle]:[]),...(dayHandle?[dayHandle]:[])];let ready=0;
         const fail=(error:unknown)=>{try{tx.abort();}catch{}finish(false,error);};
         const apply=()=>{
           if(++ready<handles.length)return;
+          try{assertOrigin?.();}catch(error){fail(error);return;}
           let current:BaselineHeader|null=null,notes:readonly (MetaEntry|null)[]=[],dayRows:readonly (MetaEntry|null)[]=[];try{current=codec.normalizeHeader(currentHandle.value());if(full){notes=noteHandle!.entries();dayRows=dayHandle!.entries();}}catch(error){fail(error);return;}
           if(!full&&(!current||current.checkpointId!==baseCheckpointId)){tx.oncomplete=()=>finish(true,false);return;}
           // A full base rewrites only rows that differ.
@@ -190,7 +194,9 @@ const createModule=()=>{
           for(const key of deletes)view.remove(families.notes,encodeURIComponent(key));
           for(const [key,state] of Object.entries(updates)){const suffix=encodeURIComponent(key),old=noteRows.get(suffix);if(old&&old.label===state.label&&old.text===state.text)continue;view.put(families.notes,noteValue(key,state),{suffix,updatedAt:establishedAt});}
           for(const [month,value] of Object.entries(days)){if(value===null){view.remove(families.days,month);continue;}const before=monthRows.get(month),evidence=semanticDays[month];if(sameDays(before?.days,value)&&sameDays(before?.semanticDays,evidence))continue;view.put(families.days,dayValue(month,value,evidence),{suffix:month,updatedAt:establishedAt});}
-          view.put(families.header,headerFor(current),{updatedAt:establishedAt});tx.oncomplete=()=>finish(true,true);
+          const header=view.put(families.header,headerFor(current),{updatedAt:establishedAt});
+          if(assertOrigin)header.onsuccess=()=>{try{assertOrigin();}catch(error){fail(error);}};
+          tx.oncomplete=()=>{try{assertOrigin?.();finish(true,true);}catch(error){finish(false,error);}};
         };
         for(const handle of handles){handle.request.onerror=()=>fail(handle.request.error||new Error('Reconciliation baseline read failed.'));handle.request.onsuccess=apply;}
       },{strict:true,abortMessage:'reconciliation baseline update aborted'});

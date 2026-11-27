@@ -890,7 +890,7 @@ const createModule=(input:ProviderModuleInput)=>{
       OperationDiagnostics.mark('checkpoint-preparation-start',{provider:selected.id,beforeRestore:retention?.role==='before-restore'});
       if(resuming)OperationDiagnostics.mark('provider-publication-resumed',{provider:selected.id,status:'running'});
       const publishCheckpoint=retention?.role==='before-restore'?RepositoryCheckpointPipeline.publishInline:RepositoryCheckpointPipeline.publish;
-      published=await publishCheckpoint(history,{interactive,availableObjectIds,excludedObjectIds:excluded,retention,signal,continuation,shared,baseUpdate:shared||sharingActive(),reuse},Object.freeze({
+      published=await publishCheckpoint(history,{interactive,availableObjectIds,excludedObjectIds:excluded,retention,signal,continuation,shared,baseUpdate:shared||sharingActive(),reuse,...(assertOrigin?{assertOrigin}:{})},Object.freeze({
         writeObject:async (entry,prepared)=>{
           assertOrigin?.();requireBackupMutationControl('saving to '+selected.label);assertOrigin?.();await entry.checkProtection?.();assertOrigin?.();
           if(!objectCount){const fresh=prepared.objects.filter(object=>!object.reused);objectCount=fresh.length;totalBytes=fresh.reduce((sum,object)=>sum+object.storedBytes,0);}
@@ -905,7 +905,7 @@ const createModule=(input:ProviderModuleInput)=>{
           // asserted once, before the commit that makes the version real.
           assertOrigin?.();requireBackupMutationControl('saving to '+selected.label);assertOrigin?.();await file.checkProtection?.();assertOrigin?.();await file.checkSource?.();assertOrigin?.();
           OperationDiagnostics.mark('provider-manifest-upload-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-manifest':'manifest',retention?.role==='before-restore'?`Finalizing safety version in ${selected.label}…`:`Uploading and verifying the backup version in ${selected.label}…`);
-          const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;
+          const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;assertOrigin?.();
           // Uploads can reuse committed identities or succeed before their response
           // fails; ownership is uncertain. Only verified maintenance may delete.
           const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:file.blob,size:file.blob.size,digest,exportedAt:file.exportedAt,appVersion:APP_VERSION,checkProtection:file.checkProtection,checkSource:file.checkSource,historySummary:Object.freeze({format:Number(file.manifest.version)||0,logicalFingerprint:file.manifest.logicalFingerprint,counts:file.manifest.counts,encrypted:file.manifest.encrypted===true,retention:file.manifest.retention,origin:String(file.manifest.installationId||''),attachmentsMissing:(Array.isArray(file.manifest.assets)?file.manifest.assets as readonly import('../../types/managed-repository.ts').RepositoryAsset[]:[]).filter(asset=>asset?.missing===true).length})})),'checkpoint');
@@ -922,7 +922,7 @@ const createModule=(input:ProviderModuleInput)=>{
           if(shared){
             const current=await repositoryProviderInventory(selected,{signal});assertOrigin?.();
             if(current.overflow)throw new Error('Backup history could not be read completely. Backup was stopped safely.');
-            if(await sharedAhead(current,selected)){
+            const ahead=await sharedAhead(current,selected);assertOrigin?.();if(ahead){
               if(uploadedManifest)overtakenByProvider.set(selected.id,freeze({manifest:uploadedManifest,at:Date.now()}));
               OperationDiagnostics.mark('provider-commit-overtaken',{provider:selected.id});
               throw syncError('REPOSITORY_SYNC_BEHIND',`${selected.label} has newer changes to take in first.`);
@@ -933,15 +933,17 @@ const createModule=(input:ProviderModuleInput)=>{
           // retract a potentially reused or already-published identity here.
           assertOrigin?.();const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);assertOrigin?.();await marker.checkSource?.();assertOrigin?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;
         },
-        onCommitted:async context=>{if(shared)overtakenByProvider.delete(selected.id);OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||'',attachmentsComplete:!(context.manifest?.assets||[]).some(item=>item.missing===true)}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
-        cleanup:deferredMaintenance?async()=>{if(!maintenanceNeeded)return Object.freeze({warning:''});const scheduler=providerMaintenanceScheduler(selected);if(maintenanceDeferred&&maintenancePendingState&&scheduler){const due=Date.parse(String(maintenancePendingState.nextEligibleAt||'')),delay=Number.isFinite(due)?Math.max(1000,due-Date.now()):MAINTENANCE_POLICY.contentionMs;scheduler.schedule(delay,maintenanceReason||'repository-state','earliest');maintenanceQueued=true;}else maintenanceQueued=await scheduler?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'earliest'})===true;return Object.freeze({warning:maintenanceQueued?'':'Backup cleanup is still pending and will be retried on a later backup.'});}:async context=>{progress('finish',`Finishing ${selected.label} backup…`);const after=await repositoryProviderState(selected,{interactive:false}),warning=await cleanupRepositoryProvider(selected,after,context.manifest.checkpoint.checkpointId,{reuseObjectInventory:true});return Object.freeze({warning});},
+        onCommitted:async context=>{assertOrigin?.();if(shared)overtakenByProvider.delete(selected.id);OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||'',attachmentsComplete:!(context.manifest?.assets||[]).some(item=>item.missing===true)}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
+        cleanup:deferredMaintenance?async()=>{assertOrigin?.();if(!maintenanceNeeded)return Object.freeze({warning:''});const scheduler=providerMaintenanceScheduler(selected);if(maintenanceDeferred&&maintenancePendingState&&scheduler){const due=Date.parse(String(maintenancePendingState.nextEligibleAt||'')),delay=Number.isFinite(due)?Math.max(1000,due-Date.now()):MAINTENANCE_POLICY.contentionMs;scheduler.schedule(delay,maintenanceReason||'repository-state','earliest');maintenanceQueued=true;}else maintenanceQueued=await scheduler?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'earliest'})===true;return Object.freeze({warning:maintenanceQueued?'':'Backup cleanup is still pending and will be retried on a later backup.'});}:async context=>{assertOrigin?.();progress('finish',`Finishing ${selected.label} backup…`);const after=await repositoryProviderState(selected,{interactive:false});assertOrigin?.();const warning=await cleanupRepositoryProvider(selected,after,context.manifest.checkpoint.checkpointId,{reuseObjectInventory:true,...(assertOrigin?{checkMaintenance:async()=>assertOrigin()}: {})});return Object.freeze({warning});},
         retainOnFailure:error=>{
+          try{assertOrigin?.();}catch{return false;}
           const code=String(fields(error)['code']||''),cancelCode=String(fields(signal?.reason)['code']||'');
           if(code==='PROVIDER_FOREGROUND_CANCELLED'||cancelCode==='PROVIDER_FOREGROUND_CANCELLED')return false;
           return !fields(error)['studyDirectorDriveNoRetry']||code==='REPOSITORY_BACKGROUND_PREEMPTED'||/authorization/i.test(String(fields(error)['message']||''));
         },
         onFailure:async(_error,context)=>{
           if(context.committed)return;
+          try{assertOrigin?.();}catch{return;}
           if(context.retained){
             OperationDiagnostics.mark('provider-publication-retained',{provider:selected.id,status:'pending',beforeRestore:role==='before-restore'});
             if(role==='normal')try{if(!await pendingRetryState(publicationOwner))await markPendingRetry(publicationOwner);}finally{schedulePendingProviderBackup(publicationOwner,1000,{trigger:'publication-failure'});}
@@ -954,17 +956,17 @@ const createModule=(input:ProviderModuleInput)=>{
           if(deferredMaintenance)await providerMaintenanceScheduler(selected)?.request('failure-cleanup',MAINTENANCE_POLICY.continuationMs,{mode:'earliest'});
         }
       }));
-      if(shared&&sessionOwnershipState?.releaseAfterCommit)await settlePublishedSessionClaim(selected,sessionOwnershipState.current,{signal});
+      assertOrigin?.();if(shared&&sessionOwnershipState?.releaseAfterCommit)await settlePublishedSessionClaim(selected,sessionOwnershipState.current,{signal,...(assertOrigin?{assertOrigin}:{})});
     // Cleanup that waited for uploads runs soon after this one ends, unless
     // another device's live upload still holds it; then it keeps its time.
-    }finally{if(continuation&&!continuation.status().pending)await discardProviderPublication(publicationOwner);if(publicationLease){const lease=publicationRenewal?await publicationRenewal.stop():publicationLease;publicationLease=null;publicationRenewal=null;OperationDiagnostics.mark('provider-publication-release-start',{provider:selected.id});const released=await endRepositoryPublication(signal&&signal.aborted?publicationOwner:selected,lease);OperationDiagnostics.mark('provider-publication-release-complete',{provider:selected.id,released});if(released&&maintenanceHooks){const pending=await maintenanceState(publicationOwner);if(pending&&String(pending.reason||'')==='publication-contention'&&!maintenanceActionable(pending)&&!(await repositoryPublicationSafety(publicationOwner)).blocked)await providerMaintenanceScheduler(publicationOwner)?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'replace'});}}}
+    }finally{if(continuation&&!continuation.status().pending)await discardProviderPublication(publicationOwner);if(publicationLease){const lease=publicationRenewal?await publicationRenewal.stop():publicationLease;publicationLease=null;publicationRenewal=null;OperationDiagnostics.mark('provider-publication-release-start',{provider:selected.id});let originCurrent=true;try{assertOrigin?.();}catch{originCurrent=false;}const released=await endRepositoryPublication(!originCurrent||signal&&signal.aborted?publicationOwner:selected,lease);OperationDiagnostics.mark('provider-publication-release-complete',{provider:selected.id,released});if(released&&maintenanceHooks&&originCurrent){const pending=await maintenanceState(publicationOwner);if(pending&&String(pending.reason||'')==='publication-contention'&&!maintenanceActionable(pending)&&!(await repositoryPublicationSafety(publicationOwner)).blocked){try{assertOrigin?.();}catch{originCurrent=false;}if(originCurrent)await providerMaintenanceScheduler(publicationOwner)?.request('repository-state',MAINTENANCE_POLICY.busyMs,{mode:'replace'});}}}}
     // A valid commit may still carry intentionally missing attachment bytes.
     // Distinguish that partial recovery from an all-bytes-verified checkpoint.
     const missingAssets=(published?.manifest?.assets||[]).filter(row=>row?.missing===true);
     const missingWarning=missingAssets.length
       ?`Partial attachment recovery: ${missingAssets.length} attachment${missingAssets.length===1?'':'s'} missing. Saved Days and Notes remain recoverable, but these files cannot be restored from this backup.`:'';
     const warning=[String(published&&published.warning||''),String(published&&published.cleanupResult&&published.cleanupResult.warning||''),String(published?.manifest?.warning||''),...(!String(published?.manifest?.warning||'').includes('Partial attachment recovery:')?[missingWarning]:[])].filter(Boolean).join(' '),item=published&&published.publication||{};
-    clearRecentHistory(selected);if(role==='normal'&&publicationOwner.shared)sharedAncestryOutcome(publicationOwner,published.sharedBaseEstablished);
+    assertOrigin?.();clearRecentHistory(selected);if(role==='normal'&&publicationOwner.shared)sharedAncestryOutcome(publicationOwner,published.sharedBaseEstablished);
     return Object.freeze({name:String(fields(item)['name']||published.checkpointId),unchanged:('unchanged' in published)&&published.unchanged===true,checkpointId:published.checkpointId,manifest:published.manifest,sharedBaseEstablished:published.sharedBaseEstablished===true,warning,maintenancePending:deferredMaintenance&&maintenanceQueued,sourceRevision:published.sourceRevision,requestId:publication?.requestId||String(pendingIntent?.requestedAt||''),objectsWritten:published.objectsWritten,objectsReused:published.objectsReused,writtenBytes:published.writtenBytes,attachmentBytesWritten:published.attachmentBytesWritten});
   }
   // The protected safety version of the device that made checkpointId.
@@ -1364,14 +1366,15 @@ const createModule=(input:ProviderModuleInput)=>{
     if(!local?.value&&await sessionClaimToken('owner',sessionOwnershipHooks.installationId(),{signal})===claim.ownerToken)return freeze({current,releaseAfterCommit:true});
     throw syncError('REPOSITORY_SESSION_OWNERSHIP_AHEAD',`Today’s Active Session is owned by another device in ${selected.label}; this device must take in that ownership before publishing.`);
   }
-  async function settlePublishedSessionClaim(selected:Provider,current:Awaited<ReturnType<typeof readRepositorySessionClaim>>,{signal=null}:{signal?:AbortSignal|null}={}){
+  async function settlePublishedSessionClaim(selected:Provider,current:Awaited<ReturnType<typeof readRepositorySessionClaim>>,{signal=null,assertOrigin}:{signal?:AbortSignal|null;assertOrigin?:()=>void}={}){
     if(!current||current.claim.state==='released')return false;
     const attemptRevision=canonicalConvergenceRevision();
     try{
       const claim=current.claim,released=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken:claim.sessionToken,epoch:claim.epoch+1,state:'released',ownerToken:claim.ownerToken,revision:claim.revision,observedOwnerToken:claim.ownerToken,observedRevision:claim.revision,observedContentFingerprint:claim.observedContentFingerprint,handoffToken:claim.handoffToken,claimedAt:new Date().toISOString()});
-      await writeRepositorySessionClaim(selected,released,{signal});return true;
+      await writeRepositorySessionClaim(selected,released,{signal,...(assertOrigin?{assertOrigin}:{})});return true;
     }catch(error){
       AppDiagnostics.capture('backup-provider.session-claim-settle',error,'warn');
+      try{assertOrigin?.();}catch{return false;}
       const owner=providers.get(safeId(selected&&selected.id))||selected;
       try{if(pendingRetryHooks){if(!await pendingRetryState(owner))await markPendingRetry(owner);schedulePendingProviderBackup(owner,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,trigger:'session-claim-settle'});}}catch(retryError){AppDiagnostics.capture('backup-provider.session-claim-settle-retry',retryError,'warn');}
       return false;

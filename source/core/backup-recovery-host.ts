@@ -292,7 +292,7 @@ const createModule=()=>{
       deletionRecoveryNotes:()=>input.appData.deletionRecovery.notes(),deletionRecoveryReplaceNotes:values=>input.appData.deletionRecovery.replaceNotes(values),deletionRecoveryAttachments:()=>input.appData.deletionRecovery.attachments(),
       deletionRecoveryReplaceAttachments:values=>input.appData.deletionRecovery.replaceAttachments(values),deletionRecoveryClearAttachment:assetId=>input.appData.deletionRecovery.clearAttachment(assetId),
       reconciliationBaseRead:()=>input.baseline.readHeader(),reconciliationBaseReadNotes:keys=>input.baseline.readNotes(keys),reconciliationBaseReadDayAncestry:(dates,checkpointId)=>input.baseline.readDayAncestry(dates,checkpointId),
-      reconciliationBaseWrite:(checkpointId,spec)=>input.baseline.write(checkpointId,spec),pendingReviewsList:()=>input.appData.pendingReviews.list(),pendingReviewsReadItems:ids=>input.appData.pendingReviews.readItems(ids),
+      reconciliationBaseWrite:(checkpointId,spec,assertOrigin)=>input.baseline.write(checkpointId,spec,assertOrigin),pendingReviewsList:()=>input.appData.pendingReviews.list(),pendingReviewsReadItems:ids=>input.appData.pendingReviews.readItems(ids),
       pendingReviewsMerge:values=>input.appData.pendingReviews.merge(values),pendingReviewsReplace:values=>input.appData.pendingReviews.replace(values),pendingReviewsResolve:ids=>input.appData.pendingReviews.resolve(ids)
     } satisfies BackupRuntimeInput['ports']['persistence']);
     const assets=freeze({

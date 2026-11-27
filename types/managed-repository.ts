@@ -51,7 +51,7 @@ export type BlobLease={blob:Blob;release:Release};
 export type ReadObject=(entry:ObjectEntry)=>Promise<Blob|BlobLease|null>;
 export type Copy={manifestBlob:Blob;checkpointId:string;current?:boolean;readObject(entry:ObjectEntry):Promise<BlobLease>};
 export type PrepareOptions={interactive?:boolean;availableObjectIds?:ReadonlySet<string>|null;excludedObjectIds?:readonly string[]|null;retention?:RetentionInput|null;signal?:AbortSignal|null|undefined;baseUpdate?:boolean;reuse?:readonly Manifest[]|null};
-export type PublishOptions=PrepareOptions&{continuation?:Continuation|null;copy?:Copy|null;shared?:boolean};
+export type PublishOptions=PrepareOptions&{continuation?:Continuation|null;copy?:Copy|null;shared?:boolean;assertOrigin?:()=>void};
 export type PublicationContext<P,C>={prepared:Prepared;manifest:Manifest;sourceRevision:string;exportedAt:string;publication:P|{name:string;unchanged:true};commitReceipt:C|null;objectsWritten:number;objectsReused:number;writtenBytes:number;attachmentBytesWritten:number;unchanged?:boolean};
 export type Transport<W,P,C,B,L>={writeObject(entry:PreparedObject,prepared:Prepared):Promise<W>;writeManifest(file:ManifestFile,prepared:Prepared):Promise<P>;commit(file:CommitFile,prepared:Prepared,publication:P):Promise<C>;onCommitted?(context:PublicationContext<P,C>):Promise<B>;cleanup?(context:PublicationContext<P,C>&{committedResult:B|null}):Promise<L>;retainOnFailure?(error:unknown):boolean|Promise<boolean>;onFailure?(error:unknown,context:{prepared:Prepared|null;publication:P|null;commitReceipt:C|null;committed:boolean;retained:boolean;written:readonly {entry:PreparedObject;receipt:W}[]}):Promise<unknown>};
 export type ReadOptions=ProtectionOptions&{opened?:BlobLease|undefined};

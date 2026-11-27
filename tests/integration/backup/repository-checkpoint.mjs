@@ -101,8 +101,8 @@ async function publishLocal(history,options={},hooks={}){
   const publication=runtime.repository.publish(history,{interactive:false,...options,...(options.shared===true?{baseUpdate:true}:{})},freeze({
     writeObject:async entry=>{if(entry.kind!=='attachment')await runtime.repository.verifyObject(entry.blob,entry);written.push(entry);localRepositoryObjects.set(entry.objectId,entry.blob);return freeze({id:entry.objectId});},
     writeManifest:async file=>{await runtime.repository.inspectManifest(file.blob,{interactive:false});manifestWrites+=1;return freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'});},
-    commit:async marker=>{await runtime.repository.inspectCommit(marker.blob);return freeze({name:marker.checkpointId+'.sdcommit'});},
-    onCommitted:async()=>{hooks.onCommitted?.();return null;},cleanup:async()=>null,onFailure:async()=>null
+    commit:async marker=>{await runtime.repository.inspectCommit(marker.blob);hooks.afterCommit?.();return freeze({name:marker.checkpointId+'.sdcommit'});},
+    onCommitted:async()=>{hooks.onCommitted?.();return null;},cleanup:async()=>{hooks.cleanup?.();return null;},onFailure:async()=>null
   }));
   const result=await Promise.race([publication,new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Repository publication deadlocked during read-back verification.')),3000);})]).finally(()=>clearTimeout(deadline));
   assert.equal(exclusive.status().busy,false,'publication must release its exclusive file job after nested read-back verification');
@@ -1364,6 +1364,17 @@ const ancestryPublicationCases=[];
     assert.equal(reconciliationBase.checkpointId,next.result.checkpointId);
     assert.equal(bookkeeping,2);
     ancestryPublicationCases.push('new-recovered');
+    // A remote commit may succeed just as the scrub owner retires. Preserve
+    // that remote identity but never adopt its ancestry or complete locally.
+    const priorBase=reconciliationBase;
+    notes={Subject:freeze({...notes.Subject,text:'Retired origin checkpoint',updatedAt:'2026-10-05T01:02:00.000Z'})};
+    snapshotRevision='ancestry-retired-origin';sourceRevision='2026-10-05T01:02:00.000Z';
+    let origin=true,retiredCleanup=0,commits=0;
+    await assert.rejects(publishLocal([next.manifest],{shared:true,availableObjectIds:newer,assertOrigin:()=>{if(!origin)throw new Error('scrub origin retired');}},{afterCommit:()=>{commits++;origin=false;},onCommitted:()=>bookkeeping++,cleanup:()=>retiredCleanup++}),/scrub origin retired/u);
+    assert.equal(commits,1,'remote commit receipt preceded ownership loss');assert.equal(bookkeeping,2,'retired origin cannot mark completion');
+    assert.equal(retiredCleanup,0,'retired origin cannot initiate retention cleanup');
+    assert.equal(reconciliationBase,priorBase,'retired origin cannot adopt shared ancestry');
+    ancestryPublicationCases.push('origin-retired-after-remote-commit');
   }finally{
     baselineWriteFailure=original.baselineWriteFailure;
     reconciliationBase=original.reconciliationBase;reconciliationBaseNotes=original.reconciliationBaseNotes;

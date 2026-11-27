@@ -9,7 +9,7 @@ import {noteKeys,noteId} from '../../helpers/note-ids.mjs';
 for(const file of ['source/core/internal.ts','source/core/reconciliation-baseline.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],BaselineModule=registry.require('reconciliation-baseline',1),freeze=Object.freeze;
 const sharedStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const harness=createHarness(new Map(),sharedStores),gateway=harness.appMetaGateway;
+const controls={},harness=createHarness(new Map(),sharedStores,controls),gateway=harness.appMetaGateway;
 const limits=freeze({maxAreaNameChars:160,maxRichTextBytes:2*1024*1024,maxNotes:1000});
 const codec=BaselineModule.createCodec(freeze({limits,isNoteKey:noteKeys.isKey}));
 // Coercing an array containing a hash must not invent field ancestry.
@@ -41,6 +41,18 @@ const cur=spec=>freeze({...spec,version:4,sessionContentFingerprint:spec.session
 const seed=cur({format:'study-director.reconciliation-base-update',version:4,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',personalFingerprint:'',personalFields:null,sessionFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v1'}),[P]:freeze({label:'Polity',text:'polity v1'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(1),seed),true);
 const first=await store.readHeader();
+// A delayed full ancestry update must not clear or replace the successor's
+// existing header, notes or month rows after its originating owner retires.
+{
+  const prior=structuredClone([...sharedStores.meta]);let origin=true;
+  const assertOrigin=()=>{if(!origin)throw new Error('ancestry origin retired');};
+  controls.onTransactionRead=({store:name,mode})=>{if(name==='meta'&&mode==='readwrite')origin=false;};
+  await assert.rejects(store.write(cp(99),seed,assertOrigin),/ancestry origin retired/u);
+  controls.onTransactionRead=null;assert.deepEqual([...sharedStores.meta],prior,'lost origin during ancestor reads leaves all existing rows intact');
+  origin=true;let checks=0;
+  await assert.rejects(store.write(cp(99),seed,()=>{if(++checks===5)throw new Error('ancestry origin retired');}),/ancestry origin retired/u);
+  assert.deepEqual([...sharedStores.meta],prior,'lost origin at the final header request aborts the whole transaction');
+}
 assert.equal(first.version,5);assert.equal(first.personalFields,null,'no per-field ancestry is invented when a verified checkpoint contains no Personal Data');assert.equal(first.checkpointId,cp(1));assert.equal(first.noteCount,2);assert.match(first.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.text,'ethics v1');assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.label,'Ethics','the base keeps each note’s title too');
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+P).value.text,'polity v1');
