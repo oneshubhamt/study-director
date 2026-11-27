@@ -51,7 +51,7 @@ export interface ReviewSavedDayCoordinatorInput{
   }>;
   readonly session:Readonly<{
     writeCanonicalNow:(label:string,options:Readonly<{markChanged:false;assertOrigin:()=>void}>)=>PromiseLike<Readonly<{value?:ActiveSession|null;error?:unknown}>>;
-    clearCanonicalAfterSavedDay:()=>PromiseLike<unknown>;
+    clearCanonicalAfterSavedDay:(options:Readonly<{expectedCanonical:ActiveSession|null;assertOrigin:()=>void}>)=>PromiseLike<unknown>;
     clearSafetyMessage:(prefix:string)=>unknown;
   }>;
   readonly review:Readonly<{saveService:ReviewSaveService;editor:Pick<ReviewEditor,'selectDate'>;closeReflectionEditor:()=>unknown}>;
@@ -66,7 +66,7 @@ export interface ReviewSavedDayCoordinatorInput{
 export interface ReviewSavedDayCoordinator{
   promptSaveToday():Promise<boolean|void>;clearSaveReminder(date?:string,revision?:unknown):boolean;
   revalidateSaveReminder():Promise<boolean>;acknowledgeSavedStudyDay(date:string,revision:unknown):Promise<boolean>;
-  clearCanonicalSessionAfterSavedDay():PromiseLike<unknown>;saveDayRecord():Promise<boolean>;handleStudyDayRollover():Promise<boolean>;
+  clearCanonicalSessionAfterSavedDay(options:Readonly<{expectedCanonical:ActiveSession|null;assertOrigin:()=>void}>):PromiseLike<unknown>;saveDayRecord():Promise<boolean>;handleStudyDayRollover():Promise<boolean>;
   selectReviewDate():unknown;savedRecordExistsForDate(date:string):Promise<boolean>;
 }
 export interface ReviewHostModule{

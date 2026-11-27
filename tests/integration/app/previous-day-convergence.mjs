@@ -29,7 +29,7 @@ function prepare(current,{covered=false,choice=null,changeDuringChoice=false}={}
     AppDiagnostics:{capture(scope,error){events.push([scope,String(error)]);}},PlanScheduleGateway:{hasLiveState:()=>false},
     markStorageHealthError(){},setPlanStatus(message){events.push(message);},prettyDate:x=>x,refreshStorageFallbackWarning(){},notifyBackupChange(){},
     updateExecuteSessionStatus(){},refreshExecuteIdleDisplay(){},updateSessionControls(){},scheduleSyncStatus(){},goTab(){},appCanMutate:()=>true,ownershipRevision:()=>1,
-    storageHealthTime:x=>x,deviceName:()=>'',navigator:{onLine:true},clearCanonicalSessionAfterSavedDay:async()=>{clears++;stored=null;}
+    storageHealthTime:x=>x,deviceName:()=>'',navigator:{onLine:true},SessionLifecycle:{revision:1},clearCanonicalSessionAfterSavedDay:async({expectedCanonical,assertOrigin})=>{assertOrigin();assert.deepEqual(expectedCanonical,stored);clears++;stored=null;}
   };
   return {controller:SessionActions.createController(ports),ports,state,events,counts:()=>({applies,claims,clears,restores,exclusive}),chosen:()=>chosen};
 }

@@ -163,17 +163,22 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
       clearSaveReminder(date,covered);return true;
     }catch(error){if(current())runtime.timerState.savedRevision=previous;throw error;}
   }
-  function clearCanonicalSessionAfterSavedDay(){return session.clearCanonicalAfterSavedDay();}
+  function clearCanonicalSessionAfterSavedDay(options:Parameters<typeof session.clearCanonicalAfterSavedDay>[0]){return session.clearCanonicalAfterSavedDay(options);}
   async function saveDayRecord(){
     let suspended:ActiveSession|null=null;
+    const owner=runtime.ownershipRevision();let life=runtime.lifecycleRevision(),date=day.getReviewDate();
+    const current=()=>runtime.ownershipRevision()===owner&&runtime.lifecycleRevision()===life&&day.getReviewDate()===date;
     if(!runtime.tasks().length||runtime.panelMode()==='suspended'){
       const loaded=await repositories.loadActiveSession(0,{strict:true}),candidate=loaded?.value||null;
+      if(!current())return false;
       if(candidate&&runtime.isSuspended(candidate)){
         if(!runtime.appCanMutate()){view.setStatus('save-status','Take control in this tab before saving the suspended session.',false);return false;}
         if(!runtime.tasks().length){
           const snapshot=runtime.activeSessionSnapshot(candidate);
           if(!snapshot){view.setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
-          if(await runtime.applyStoredSessionSnapshot(candidate,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true})===false){
+          const applied=await runtime.applyStoredSessionSnapshot(candidate,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true});
+          life+=1;date=candidate.date;if(!current()||!runtime.appCanMutate())return false;
+          if(applied===false){
             view.setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;
           }
         }
@@ -182,10 +187,12 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
     }
     const saved=await review.saveService.saveToday({closeSession:!!suspended});
     if(!suspended)return saved;
+    if(!current()||!runtime.appCanMutate())return false;
     if(!saved){
       try{
-        const loaded=await repositories.loadActiveSession(0,{strict:true}),current=loaded?.value||null;
-        if(runtime.isSuspended(current))runtime.setPanelMode('suspended',current);else if(loaded?.ok&&!current)runtime.setPanelMode('none');
+        const loaded=await repositories.loadActiveSession(0,{strict:true}),candidate=loaded?.value||null;
+        if(!current()||!runtime.appCanMutate())return false;
+        if(runtime.isSuspended(candidate))runtime.setPanelMode('suspended',candidate);else if(loaded?.ok&&!candidate)runtime.setPanelMode('none');
       }catch(error){view.diagnostics('review.suspended-session-status',error,'warn');}
       return false;
     }

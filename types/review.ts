@@ -1,5 +1,5 @@
 import type {CompletionResult,CompletionSource,Task,TaskOutcome} from './domain.ts';
-import type {ActualRecord,ClockRecord,DailyRecord,DailyResult,KeyedRecord,Limits,PauseEvent,PracticeRun,RealTimeSnapshot,RecordHelpers,StoredSchedule} from './record-models.ts';
+import type {ActiveSession,ActualRecord,ClockRecord,DailyRecord,DailyResult,KeyedRecord,Limits,PauseEvent,PracticeRun,RealTimeSnapshot,RecordHelpers,StoredSchedule} from './record-models.ts';
 import type {CompletionEvidenceController,TaskIdentityPort,TaskSessionStore} from './execution-host.ts';
 import type {SaveLaneModule} from './pilot.ts';
 import type {SessionContext,SessionOptions} from './session-lifecycle.ts';
@@ -28,11 +28,11 @@ export interface ReviewDailyReflectionPort{
 export interface ReviewStorageReceipt{readonly storage?:string;readonly [key:string]:unknown}
 export interface ReviewDailyRecordsPort{
   get(date:string):PromiseLike<DailyRecord|null|undefined>;
-  save(value:DailyRecord):PromiseLike<ReviewStorageReceipt>;
+  save(value:DailyRecord,options?:Readonly<{assertOrigin?:()=>void}>):PromiseLike<ReviewStorageReceipt>;
   verifyCanonical(value:DailyRecord):PromiseLike<unknown>;
 }
 export interface ReviewAppDataPort{
-  readonly activeSession:Readonly<{settled():PromiseLike<unknown>}>;
+  readonly activeSession:Readonly<{settled():PromiseLike<unknown>;load(retry?:number,options?:Readonly<{strict?:boolean}>):PromiseLike<SessionResult>}>;
   readonly dailyRecords:Readonly<ReviewDailyRecordsPort>;
 }
 export interface ReviewDiagnosticsPort{capture(scope:string,error:unknown,level?:'warn'|'error'):void}
@@ -169,12 +169,12 @@ export interface ReviewSubsystemInput{
       actualRecordsSnapshot():Readonly<Record<string,ReviewActualRecord>>;applicableNotesForTask(task:Task|ReviewTaskRow):ReviewNoteInfo;recordCurrentActiveToTask(index:number,reason:string):unknown;updateTimerFocusMetrics(metrics?:ReviewMetrics):unknown;
     }>;
     session:Readonly<{
-      acknowledgeSavedStudyDay(date:string,revision:number):PromiseLike<unknown>;clearCanonicalSessionAfterSavedDay():PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;clearSaveReminder(date:string,revision:number):unknown;
+      acknowledgeSavedStudyDay(date:string,revision:number):PromiseLike<unknown>;clearCanonicalSessionAfterSavedDay(options:Readonly<{expectedCanonical:ActiveSession|null;assertOrigin:()=>void}>):PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;clearSaveReminder(date:string,revision:number):unknown;
       flushLiveDraft(options?:Readonly<Record<string,unknown>>):unknown|PromiseLike<unknown>;getLifecycleRevision():number;getOwnershipRevision():number;getReviewDate():string;
       lifecycleCanWrite():boolean;markDayContentChanged():unknown;markDayContentSaved(date:string,revision:number):unknown;resetRuntimeSessionState(options:Readonly<Record<string,unknown>>):unknown;
       runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;
       saveLiveDraft(options?:Readonly<Record<string,unknown>>):unknown;setReviewDateTitle(date:string):unknown;setSessionPanelMode(mode:string,value?:unknown):unknown;stopTimerExecution():unknown;
-      appCanMutate():boolean;writeCanonicalNow(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean}>):PromiseLike<SessionResult|null>;writeLiveDraftNow(options?:Readonly<{markChanged?:boolean;backupCapture?:boolean;allowDuringRecoveryQuiescence?:boolean}>):PromiseLike<SessionResult|null>;
+      appCanMutate():boolean;writeCanonicalNow(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean;assertOrigin?:()=>void}>):PromiseLike<SessionResult|null>;writeLiveDraftNow(options?:Readonly<{markChanged?:boolean;backupCapture?:boolean;allowDuringRecoveryQuiescence?:boolean}>):PromiseLike<SessionResult|null>;
     }>;
     notesDefaults:Readonly<{
       noteStoredValueForKey(key:string):string;bindTaskNoteEditor(field:HTMLTextAreaElement,index:number,source:string):unknown;closeRichTextField(field:HTMLTextAreaElement|null):unknown;

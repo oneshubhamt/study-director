@@ -2678,7 +2678,7 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<R
   }),
   session:Object.freeze<ReviewSavedDayInput['session']>({
     writeCanonicalNow:(label,options)=>requireActiveSessionRuntime().writeCanonicalNow(label,options),
-    clearCanonicalAfterSavedDay:()=>requireActiveSessionRuntime().clearCanonical('clearing the saved study session'),
+    clearCanonicalAfterSavedDay:options=>requireActiveSessionRuntime().clearCanonical('clearing the saved study session',options),
     clearSafetyMessage:prefix=>clearSessionSafetyMessage(prefix)
   }),
   review:Object.freeze<ReviewSavedDayInput['review']>({

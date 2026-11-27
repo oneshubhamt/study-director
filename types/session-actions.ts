@@ -49,7 +49,7 @@ export interface SessionActionInput{
   isTrackableBlock:ScheduleModel['isTrackable'];makeTaskId:DomainModule['makeTaskId'];shortTaskLabel(task:Task):string;
   isValidIsoDate:TimeModel['isValidIsoDate'];todayISO():string;DecisionClock:{nowMs():number};SLEEP_GAP_THRESHOLD_MS:number;HANDOFF_RETRY_MESSAGE:string;
   navigator:Pick<Navigator,'onLine'>;
-  clearCanonicalSessionAfterSavedDay():unknown;scheduleFingerprint():string;
+  clearCanonicalSessionAfterSavedDay(options:Readonly<{expectedCanonical:ActiveSession|null;assertOrigin:()=>void}>):unknown;scheduleFingerprint():string;
 }
 
 export interface SessionLifecycleViewInput{

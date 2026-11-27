@@ -24,7 +24,7 @@ const subsystemInput=Object.freeze({
     ...baseSubsystemInput.ports,
     session:Object.freeze({
       ...baseSubsystemInput.ports.session,
-      writeCanonicalNow:(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean}>)=>sessionController.writeCanonicalNow(operation,options)
+      writeCanonicalNow:(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean;assertOrigin?:()=>void}>)=>sessionController.writeCanonicalNow(operation,options)
     })
   })
 }) satisfies Readonly<ReviewSubsystemInput>;
@@ -94,7 +94,7 @@ const coordinator=host.createSavedDayCoordinator(Object.freeze({
   codecs:Object.freeze({sanitizeSession:activeCodec.sanitizeCurrent,savedDayCoversSessionEvidence:dailyCodec.savedDayCoversSessionEvidence}),
   session:Object.freeze({
     writeCanonicalNow:(label:string,options:Readonly<{markChanged:false}>)=>sessionController.writeCanonicalNow(label,options),
-    clearCanonicalAfterSavedDay:()=>sessionController.clearCanonical('clearing the saved study session'),
+    clearCanonicalAfterSavedDay:(options:Parameters<SessionHostController['clearCanonical']>[1])=>sessionController.clearCanonical('clearing the saved study session',options),
     clearSafetyMessage
   }),
   review:Object.freeze({saveService:subsystem.ReviewSaveService,editor:subsystem.ReviewEditor,closeReflectionEditor}),

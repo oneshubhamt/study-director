@@ -301,16 +301,17 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     cancelPendingLiveDraftSave();lastTimerSnapshotMs=clock.nowMs();
     return saveCanonicalSession(session,operation,{backupCapture:options.backupCapture===true,...(options.assertOrigin?{assertOrigin:options.assertOrigin}:{})});
   }
-  async function clearCanonical(operation:string,options:Readonly<{expectedCanonical?:ActiveSession|null}>={},authority?:TransitionAuthority,committed?:()=>void):Promise<SessionResult>{
-    if(authority)assertTransition(authority);
+  async function clearCanonical(operation:string,options:Readonly<{expectedCanonical?:ActiveSession|null;assertOrigin?:()=>void}>={},authority?:TransitionAuthority,committed?:()=>void):Promise<SessionResult>{
+    const assertOrigin=()=>{options.assertOrigin?.();if(authority)assertTransition(authority);};
+    assertOrigin();
     cancelPendingLiveDraftSave();
-    const cleared=await repository.clear(options);
-    if(authority)assertTransition(authority);
+    const cleared=await repository.clear({...options,...(options.assertOrigin||authority?{assertOrigin}:{})});
+    assertOrigin();
     if(!cleared||cleared.ok!==true||cleared.error||cleared.storage.idb!==true)throw cleared?.error||new Error(`The Active Session was not durably cleared while ${operation}.`);
     committed?.();
     const readBack=await repository.load(0,{strict:true});
     if(!readBack||readBack.ok!==true||readBack.error||readBack.value)throw readBack?.error||new Error(`The Active Session clear could not be verified after ${operation}.`);
-    if(authority)assertTransition(authority);
+    assertOrigin();
     return report(cleared,'clear');
   }
   async function withPersistenceSuppressed<T>(operation:()=>T|PromiseLike<T>):Promise<T>{

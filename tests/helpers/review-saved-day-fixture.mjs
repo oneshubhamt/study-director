@@ -37,7 +37,7 @@ export function createSavedDayFixture(options={}){
       appliedScheduleText:()=>options.scheduleText??'valid plan',appCanMutate:()=>canMutate,ownershipRevision:()=>ownershipRevision,lifecycleRevision:()=>lifecycleRevision,
       panelMode:()=>panelMode,safetyMessage:()=>safety,setSafetyMessage:value=>{safety=value;},
       isSuspended:session=>session?.status==='suspended',activeSessionSnapshot:session=>session?.snapshot||null,
-      applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);return options.hydrate!==false;},
+      applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);lifecycleRevision++;input.value=session.date;timerState.studyDate=session.date;return options.hydrate!==false;},
       setPanelMode:(mode,session)=>{panelMode=mode;events.push(['panel',mode,session]);},
       setTimerDone:()=>events.push(['done']),updateSessionControls:()=>events.push(['controls'])
     }),

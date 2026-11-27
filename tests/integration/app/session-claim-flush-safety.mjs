@@ -19,15 +19,15 @@ function fixture(options={}){
     todayISO:()=>date,fullWeekdayNames:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   }));
   let stored=options.active===undefined?{date,snapshot:{contentRevision:7,savedRevision:0},status:'active'}:options.active;
-  const events=[],panel=options.panel||'none';let panelMode=panel,safety='',clears=0,writes=0;
+  const events=[],panel=options.panel||'none';let panelMode=panel,safety='',clears=0,writes=0,life=1;
   const coordinator=ReviewHost.createSavedDayCoordinator(Object.freeze({
     document,day,
     runtime:Object.freeze({
       tasks:()=>tasks,timerState,isTrackableBlock:task=>task?.kind==='work',captureSessionSnapshot:()=>options.liveSnapshot??null,
-      appliedScheduleText:()=> 'valid plan',appCanMutate:()=>options.canMutate!==false,ownershipRevision:()=>1,lifecycleRevision:()=>1,panelMode:()=>panelMode,
+      appliedScheduleText:()=> 'valid plan',appCanMutate:()=>options.canMutate!==false,ownershipRevision:()=>1,lifecycleRevision:()=>life,panelMode:()=>panelMode,
       safetyMessage:()=>safety,setSafetyMessage:value=>{safety=value;},isSuspended:session=>session?.status==='suspended',
       activeSessionSnapshot:session=>session?.snapshot||null,
-      applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);return options.hydrate!==false;},
+      applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);life++;return options.hydrate!==false;},
       setPanelMode:(mode,session)=>{panelMode=mode;events.push(['panel',mode,session]);},
       setTimerDone:()=>events.push(['done']),updateSessionControls:()=>events.push(['controls'])
     }),
@@ -49,7 +49,7 @@ function fixture(options={}){
         stored={...stored,date,snapshot:{...(stored?.snapshot||{}),savedRevision}};
         return {ok:true,value:stored,storage:{idb:true}};
       },
-      clearCanonicalAfterSavedDay:async()=>{clears++;if(options.clearFailure)throw new Error('IndexedDB unavailable');stored=null;return true;},
+      clearCanonicalAfterSavedDay:async({expectedCanonical,assertOrigin})=>{assertOrigin();assert.deepEqual(expectedCanonical,stored);clears++;if(options.clearFailure)throw new Error('IndexedDB unavailable');stored=null;return true;},
       clearSafetyMessage:prefix=>{if(safety.startsWith(prefix))safety='';}
     }),
     review:Object.freeze({
@@ -76,8 +76,9 @@ function fixture(options={}){
   const host=readRuntimeSource('source/host/main.ts');
   assert.match(host,/writeCanonicalNow:\(operation,options\)=>requireActiveSessionRuntime\(\)\.writeCanonicalNow\(operation,options\),writeLiveDraftNow/u);
   const review=readRuntimeSource('source/core/review.ts');
-  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the Study Day Active Session checkpoint'\);\s*if\(closesSession\)activeSessionPersistenceBlocked=true/u);
-  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the rollover Active Session checkpoint'\);[\s\S]{0,420}await runLifecycle\('study-day-rollover'[\s\S]{0,700}activeSessionPersistenceBlocked=true/u);
+  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the Study Day Active Session checkpoint',assertOrigin\);\s*if\(closesSession\)activeSessionPersistenceBlocked=true/u);
+  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the rollover Active Session checkpoint',assertOrigin\);[\s\S]*?await runLifecycle\('study-day-rollover'[\s\S]*?activeSessionPersistenceBlocked=true/u);
+  assert.equal((review.match(/clearCanonicalSessionAfterSavedDay\(\{expectedCanonical:checkpoint,assertOrigin:check\}\)/gu)||[]).length,2,'both closing paths use the original verified checkpoint');
   assert.doesNotMatch(review,/activeSessionPersistenceBlocked=true;\s*stopTimerExecution\(\);\s*cancelPendingLiveDraftSave\(\)/u);
 }
 
@@ -91,8 +92,8 @@ function fixture(options={}){
     await assert.rejects(trial.coordinator.acknowledgeSavedStudyDay(date,7),/IndexedDB unavailable|acknowledgement was not saved/u);
     assert.equal(trial.timerState.savedRevision,0,fault+' must not mark the session saved');
   }
-  const cleared=fixture();await cleared.coordinator.clearCanonicalSessionAfterSavedDay();assert.equal(cleared.state().clears,1);
-  await assert.rejects(fixture({clearFailure:true}).coordinator.clearCanonicalSessionAfterSavedDay(),/IndexedDB unavailable/u);
+  const cleared=fixture();await cleared.coordinator.clearCanonicalSessionAfterSavedDay({expectedCanonical:cleared.state().stored,assertOrigin:()=>{}});assert.equal(cleared.state().clears,1);
+  const failed=fixture({clearFailure:true});await assert.rejects(failed.coordinator.clearCanonicalSessionAfterSavedDay({expectedCanonical:failed.state().stored,assertOrigin:()=>{}}),/IndexedDB unavailable/u);
 }
 
 // Reminder checks reread canonical storage. A prior positive result cannot hide
@@ -111,6 +112,73 @@ function fixture(options={}){
   const rescue=fixture({savedRevision:7,active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:false,dayRecord:current,
     coverage:()=>true});
   assert.equal(await rescue.coordinator.savedRecordExistsForDate(date),false);
+}
+
+
+// Execute the actual erased Review save and rollover functions with controlled
+// async boundaries. The fixture preserves the real flow's checkpoint/commit/
+// lifecycle calls, but supplies deterministic persistence and runtime ports.
+{
+  const source=readRuntimeSource('source/core/review.ts');
+  const take=(start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a);assert.ok(a>=0&&b>a,start);return source.slice(a,b);};
+  const code=take('function captureStudySaveOrigin(){','function projectDailyRecord(')
+    +take('async function commitDailyRecord(','async function saveReflectionOnlyRecord(')
+    +take('async function saveDayRecord(','/* ROLLOVER SAVE ORCHESTRATION */')
+    +take('function hasSaveableStudyDay(){','function reviewRichInputPlain(')
+    +'\nObject.assign(globalThis,{saveDayRecord,handleStudyDayRollover});';
+  function deferred(){let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};}
+  function harness({boundary='',close=true,rollover=false,change='owner',fallback=false}={}){
+    const today='2026-08-28',day=close||rollover?'2026-08-27':today,entered=deferred(),gate=deferred();
+    let owner=1,life=1,reviewDate=day,stored=null,committed=null,clears=0,resets=0,saves=0,ack=0,safety='';
+    const session={studyDate:day,contentRevision:7},events=[];
+    async function hold(name){if(boundary===name){entered.resolve();await gate.promise;}}
+    const check=fn=>{if(fn)fn();};
+    const context=vm.createContext({
+      Error,Number,Object,Date,Promise,freeze:Object.freeze,document:{querySelector:()=>null,getElementById:()=>null},
+      SessionState:session,TASKS:[{kind:'work'}],getReviewDate:()=>reviewDate,getOwnershipRevision:()=>owner,getLifecycleRevision:()=>life,appCanMutate:()=>true,
+      cleanDayRevision:Number,todayISO:()=>today,reviewHasStudyDay:()=>true,isTrackableBlock:()=>true,isLiveTrackableTimer:()=>false,
+      SessionEvidenceGateway:{snapshot:()=>({date:session.studyDate,contentRevision:session.contentRevision})},
+      ReviewView:{refresh:()=>({evidence:{date:session.studyDate,contentRevision:session.contentRevision}}),sync(){}},
+      currentReviewState:()=>({reflection:''}),projectDailyRecord:e=>({date:e.date,sourceRevision:e.contentRevision,reflection:'',recordKind:'study'}),materializeDailyRecordView:r=>r,
+      AppData:{dailyRecords:{get:async()=>{await hold('read');return null;},save:async(doc,{assertOrigin})=>{await hold('write');check(assertOrigin);saves++;if(fallback)return {storage:'fallback'};committed=doc;return {storage:'indexeddb'};},verifyCanonical:async()=>{await hold('verify');}},activeSession:{load:async()=>({ok:true,value:stored,storage:{idb:true}})}},
+      writeCanonicalNow:async(_operation,{assertOrigin})=>{await hold('checkpoint');check(assertOrigin);stored={date:session.studyDate,revision:7,snapshot:{contentRevision:session.contentRevision}};return {ok:true,value:stored,storage:{idb:true}};},
+      reflectionLane:{pending:()=>false,cancel(){}},clearCanonicalSessionAfterSavedDay:async({expectedCanonical,assertOrigin})=>{await hold('clear');check(assertOrigin);if(stored!==expectedCanonical)throw Error('Active Session changed');stored=null;clears++;},
+      acknowledgeSavedStudyDay:async()=>{ack++;},refreshLibraryAfterSave:()=>hold('refresh'),
+      runLifecycle:async(_name,_options,run)=>{await hold('lifecycle');life++;return run({revision:life});},
+      resetRuntimeSessionState:()=>{resets++;session.studyDate=today;},inputById:()=>null,syncReviewDateMode:()=>{reviewDate=today;},
+      Runtime:{setSafetyMessage:value=>{safety=value;},currentIndex:()=>0},PracticePacer:{finalizeForDayClose(){}},
+      captureTodayState(){},captureReviewInputs(){},syncUnfinishedNoteDraft(){},saveReviewState(){},stopTimerExecution(){},cancelPendingLiveDraftSave(){},
+      markStorageHealthTimestamp(){},clearSaveReminder(){},setSessionPanelMode(){},refreshPlanAfterSessionReset(){},setPlanStatus(){},refreshStorageFallbackWarning(){},
+      markDayContentSaved(){},notifyUser(){},syncReviewSurfaceMode(){},setStatus(){},prettyDate:x=>x,durationLabel:()=>'',displayPercent:()=>'',errorMessage:e=>e.message,
+      notifications:{begin:()=>({finish:(kind,message)=>events.push([kind,message])})},AppDiagnostics:{capture(){}},
+      saveDayInProgress:false,rolloverSaveInProgress:false,activeSessionPersistenceBlocked:false
+    });
+    vm.runInContext(code,context);
+    const run=()=>rollover?context.handleStudyDayRollover():context.saveDayRecord({closeSession:close});
+    return {run,entered:entered.promise,release:gate.resolve,mutate(){
+      if(change==='owner')owner+=2;
+      else if(change==='lifecycle')life++;
+      else if(change==='date'){reviewDate=today;session.studyDate=today;}
+      else if(change==='progress')session.contentRevision++;
+      else if(change==='successor')stored={date:today,revision:99,snapshot:{contentRevision:99}};
+    },state:()=>({stored,committed,clears,resets,saves,ack,safety,events})};
+  }
+  for(const rollover of [false,true]){
+    for(const boundary of ['checkpoint','read','write','verify','clear','lifecycle',...(!rollover?['refresh']:[])]){
+      const t=harness({rollover,boundary,change:'owner'}),pending=t.run();await t.entered;t.mutate();t.release();
+      assert.equal(await pending,false,rollover+' '+boundary);
+      assert.equal(t.state().resets,0,'retired save must not reset a successor');
+      assert.equal(t.state().clears,boundary==='lifecycle'&&!rollover?1:0,'retired operation cannot clear a successor');
+    }
+    for(const change of ['progress','successor']){
+      const t=harness({rollover,boundary:'clear',change}),pending=t.run();await t.entered;t.mutate();t.release();
+      assert.equal(await pending,false);assert.equal(t.state().clears,0);assert.ok(t.state().stored);
+    }
+    const normal=harness({rollover});assert.equal(await normal.run(),true);assert.equal(normal.state().clears,1);assert.equal(normal.state().resets,1);
+    const rescue=harness({rollover,fallback:true});assert.equal(await rescue.run(),false);assert.equal(rescue.state().clears,0);assert.ok(rescue.state().stored);
+  }
+  const continuing=harness({close:false,boundary:'write',change:'progress'}),pending=continuing.run();await continuing.entered;continuing.mutate();continuing.release();
+  assert.equal(await pending,true);assert.equal(continuing.state().ack,1);assert.equal(continuing.state().clears,0);
 }
 
 // Repository canonical receipts normalize a materialized Saved-Day view, reject

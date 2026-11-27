@@ -5,8 +5,8 @@ import type {WriteToken} from '../../types/ownership.ts';
 import type {DailyRecord,ActiveSession,SavedPlans,PendingReview,PersonalData} from '../../types/record-models.ts';
 import type {RepositoriesInput,ValidatorInput,RepositoryMetadata,MetadataFields,SessionResult,RecoveryEnvelope,DeletionEntry,DayDeletion,NoteDeletion,AttachmentDeletion,WriteOptions,BatchOptions,RevisionValue,RevisionState,MaintenanceOptions,MaintenanceResult,WindowOptions,ImportOptions,CanonicalReadOptions,DailyView,DailySummary,SummaryView,PortablePreferences} from '../../types/repositories.ts';
 type RawFields=MetadataFields&Partial<Record<'kind'|'id'|'entries'|'shell'|'snapshot'|'revision'|'type'|'scheduleText'|'runningOn'|'suspendedAt'|'savedAt'|'entityType'|'entityId'|'schemaVersion'|'deviceId'|'createdAt'|'deleted'|'syncStatus'|'dayOfWeek'|'dayName',unknown>>;
-type DailyRecordBatchOptions=BatchOptions&{expectedCanonical?:DailyRecord|null};
-type DailyRecordMutationOptions={backupCapture?:boolean;expectedCanonical?:DailyRecord|DailyView|null};
+type DailyRecordBatchOptions=BatchOptions&{expectedCanonical?:DailyRecord|null;assertOrigin?:()=>void};
+type DailyRecordMutationOptions={backupCapture?:boolean;expectedCanonical?:DailyRecord|DailyView|null;assertOrigin?:()=>void};
 // Inspection only: properties stay unknown until the existing validators accept them.
 const repositoryFields=(value:unknown)=>value as RawFields|null|undefined;
 const sdRepositoriesFactory=(()=>{
@@ -747,7 +747,7 @@ function currentDailyRecordDocuments(records:unknown,label:string='Daily Records
   return docs as DailyRecord[];
 }
 async function idbPutDailyRecordBatch(records:readonly unknown[],options:DailyRecordBatchOptions={}){
-  const {bumpRevision=true,ownershipToken=null,preserveNewer=false}=options;
+  const {bumpRevision=true,ownershipToken=null,preserveNewer=false,assertOrigin}=options;
   const docs=currentDailyRecordDocuments(records,'Daily Record batch');
   if(!docs.length)return true;
   const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
@@ -755,11 +755,14 @@ async function idbPutDailyRecordBatch(records:readonly unknown[],options:DailyRe
   const expected=conditional?options.expectedCanonical??null:null;
   const stores=[DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE];
   return idbStrictTransaction<{ok:true}>(stores,'readwrite',(tx,finish)=>{
-    if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record transaction');
+    assertOrigin?.();if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record transaction');
     const recordStore=tx.objectStore(DB_DAILY_RECORD_STORE),summaryStore=tx.objectStore(DB_DAILY_SUMMARY_STORE),meta=Meta.view(tx);
     let revisionState:RevisionState|null=null;
     stageCanonicalMutationEpoch(tx,[...new Set(docs.map(doc=>dailyPreparationUnit(doc.date)))]);
-    const write=(doc:DailyRecord)=>{recordStore.put(doc);summaryStore.put(buildDailyRecordSummary(doc));meta.remove('savedDayDeletionPrefix',doc.date);};
+    const write=(doc:DailyRecord)=>{
+      assertOrigin?.();const request=recordStore.put(doc);summaryStore.put(buildDailyRecordSummary(doc));meta.remove('savedDayDeletionPrefix',doc.date);
+      if(assertOrigin)request.onsuccess=()=>{try{assertOrigin();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+    };
     docs.forEach(doc=>{
       if(conditional){
         const request=recordStore.get(doc.date);
@@ -895,12 +898,13 @@ async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:Wri
   },'active session write aborted');
 }
 function idbGetActiveSession(){return idbGet(DB_ACTIVE_SESSION_STORE,ACTIVE_SESSION_ID,'active session read failed');}
-async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expectedCanonical:ActiveSession|null|undefined=undefined,prepare?:()=>void){
+async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null,expectedCanonical:ActiveSession|null|undefined=undefined,prepare?:()=>void,assertOrigin?:()=>void){
   return idbStrictTransaction<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
-    if(ownershipToken)assertWriteToken(ownershipToken,'the active-session deletion');
+    assertOrigin?.();if(ownershipToken)assertWriteToken(ownershipToken,'the active-session deletion');
     const remove=()=>{
-      stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.delete(ACTIVE_SESSION_ID);request.onerror=()=>finish(false,request.error||new Error('active session delete failed'));
+      assertOrigin?.();stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.delete(ACTIVE_SESSION_ID);request.onerror=()=>finish(false,request.error||new Error('active session delete failed'));
+      if(assertOrigin)request.onsuccess=()=>{try{assertOrigin();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
     };
     tx.oncomplete=()=>finish(true,undefined);
     if(expectedCanonical===undefined){remove();return;}
@@ -1046,11 +1050,11 @@ async function loadActiveSessionRecord(retry:number=0,options:{strict?:boolean}=
   }
 }
 
-async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:ActiveSession|null}={}):Promise<SessionResult>{
+async function clearActiveSessionRecord({expectedCanonical,assertOrigin}:{expectedCanonical?:ActiveSession|null;assertOrigin?:()=>void}={}):Promise<SessionResult>{
   const expected=expectedCanonical===undefined?undefined:expectedCanonical===null?null:ActiveSessionCodec.sanitizeCurrent(expectedCanonical);
   if(expectedCanonical!=null&&!expected)return {ok:false,value:null,error:new Error('Active Session deletion precondition is invalid.'),storage:{local:false,idb:false}};
   let ownershipToken:WriteToken;
-  try{ownershipToken=issueWriteToken('clearing the active session');}
+  try{assertOrigin?.();ownershipToken=issueWriteToken('clearing the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
   const writeEpoch=++activeSessionMutationEpoch;
   const finishWrite=beginAuthoritativeWrite();
@@ -1058,7 +1062,7 @@ async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID);
     let staged=false,localCleared=false,idbCleared=false,idbError:unknown=null;
     try{
-      assertWriteToken(ownershipToken,'staging the active-session deletion');
+      assertOrigin?.();assertWriteToken(ownershipToken,'staging the active-session deletion');
       if(expected===undefined){
         staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
         assertWriteToken(ownershipToken,'the active-session deletion');
@@ -1070,16 +1074,17 @@ async function clearActiveSessionRecord({expectedCanonical}:{expectedCanonical?:
         // Remove only the compared recovery copy, before deleting its canonical
         // counterpart. Failure leaves the IndexedDB record intact; a crash
         // after the transaction commits cannot resurrect the removed copy.
-        if(writeEpoch!==activeSessionMutationEpoch)throw Object.assign(new Error('Active Session advanced during deletion.'),{code:'ACTIVE_SESSION_CHANGED'});
+        assertOrigin?.();if(writeEpoch!==activeSessionMutationEpoch)throw Object.assign(new Error('Active Session advanced during deletion.'),{code:'ACTIVE_SESSION_CHANGED'});
         localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
         if(!localCleared)throw LocalStorageContract.lastError||new Error('Active Session recovery cleanup failed.');
-      });idbCleared=true;
-      assertWriteToken(ownershipToken,'completing the active-session deletion');
+      },assertOrigin);idbCleared=true;
+      assertOrigin?.();assertWriteToken(ownershipToken,'completing the active-session deletion');
       if(expected!==undefined&&writeEpoch!==activeSessionMutationEpoch)
         throw Object.assign(new Error('Active Session advanced during deletion.'),{code:'ACTIVE_SESSION_CHANGED'});
       if(localCleared&&idbCleared)clearDeletionRecoveryKeys([recoveryKey]);
       reportCanonicalCommit('activeSession','delete');
     }catch(e){
+      try{assertOrigin?.();}catch(error){return {ok:false,value:null,error,storage:{local:localCleared,idb:idbCleared}};}
       if(isOwnershipLostError(e))return {ok:false,value:null,error:e,storage:{local:localCleared,idb:idbCleared}};
       idbError=e;
       if(!staged)return {ok:false,value:null,error:e,storage:{local:localCleared,idb:idbCleared}};
@@ -1198,6 +1203,7 @@ async function verifyCanonicalDailyRecordAbsent(date:string){
   return true;
 }
 async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMutationOptions={}){
+  const assertOrigin=options.assertOrigin;assertOrigin?.();
   const ownershipToken=issueWriteToken('saving the daily record');
   const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
   if(!rec||!isValidIsoDate(rec.date))throw new Error('Invalid daily record date');
@@ -1214,14 +1220,14 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMut
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record save precondition failed canonical validation.');
   try{
       assertWriteToken(ownershipToken,'the daily-record IndexedDB write');
-    await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{})});
-    assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
+    await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{}),...(assertOrigin?{assertOrigin}:{})});
+    assertOrigin?.();assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
     cleanupCommittedDailyRecords([clean]);
     reportCanonicalCommit('dailyRecord','upsert',null,{backupCapture:options.backupCapture===true});
     stored=true;return freeze({ok:true,storage:'indexeddb'});
   }
   catch(e){
-    if(isOwnershipLostError(e)||conditional)throw e;
+    assertOrigin?.();if(isOwnershipLostError(e)||conditional)throw e;
     assertWriteToken(ownershipToken,'the daily-record fallback write');
     const existing=fallbackDailyRecordsGet(),arr=existing.filter(r=>r.date!==clean.date);arr.push(clean);
     const capped=capFallbackDailyRecords(arr,rescueRoom(STORAGE_KEYS.fallbackDailyRecords,APP_LIMITS.fallbackDailyRecordsBytes)),retainedDates=new Set(capped.map(record=>record.date));

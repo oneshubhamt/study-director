@@ -7,7 +7,7 @@ import type {
   ReviewRecordViewTask,SavedDayPresentationTask,PracticeTaskRef,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses,ReviewProjectedStudyRecord,ReviewQuality
 } from '../../types/review.ts';
 import type {CompletionSource,Task,TaskOutcome} from '../../types/domain.ts';
-import type {DailyRecord,DailyResult,PauseEvent,PracticeRun} from '../../types/record-models.ts';
+import type {ActiveSession,DailyRecord,DailyResult,PauseEvent,PracticeRun} from '../../types/record-models.ts';
 const sdReviewFactory=(()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'review','study-director.review'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -471,11 +471,24 @@ function captureTodayState(){
   saveReviewState({markChanged:false,strict:true});
   saveLiveDraft();
 }
-async function flushFinalActiveSessionCheckpoint(operation:string){
+function captureStudySaveOrigin(){
+  const owner=getOwnershipRevision(),life=getLifecycleRevision(),date=getReviewDate(),studyDate=SessionState.studyDate;
+  return (advance=0,checkDate=true)=>{
+    if(!appCanMutate()||owner!==getOwnershipRevision()||life+advance!==getLifecycleRevision()||checkDate&&(date!==getReviewDate()||studyDate!==SessionState.studyDate))
+      throw new Error('The Study Day save was superseded; newer study progress was preserved.');
+  };
+}
+async function flushFinalActiveSessionCheckpoint(operation:string,assertOrigin:()=>void){
+  assertOrigin();
   if(reflectionLane.pending())reflectionLane.cancel();
-  const saved=await writeCanonicalNow(operation);
-  if(!saved||saved.ok!==true||saved.error||saved.storage?.idb!==true)throw saved?.error||new Error('The Active Session final checkpoint could not be verified in canonical storage.');
-  return saved;
+  const saved=await writeCanonicalNow(operation,{assertOrigin});
+  assertOrigin();
+  if(!saved||saved.ok!==true||saved.error||saved.storage?.idb!==true||!saved.value)throw saved?.error||new Error('The Active Session final checkpoint could not be verified in canonical storage.');
+  return saved.value;
+}
+function assertCheckpointCurrent(checkpoint:ActiveSession|null,date:string){
+  if(checkpoint&&(checkpoint.date!==date||checkpoint.snapshot.contentRevision!==cleanDayRevision(SessionState.contentRevision)))
+    throw new Error('Study progress changed after the final checkpoint. Save the current Study Day again.');
 }
 function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):ReviewProjectedStudyRecord{
   if(!evidence||!Object.isFrozen(evidence)||!runtimeArray(evidence.reviewTasks)){
@@ -521,10 +534,10 @@ function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):R
 function buildDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:true}),review:ReviewCurrentState=currentReviewState()){
   return projectDailyRecord(evidence,review);
 }
-async function commitDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:true}),label='canonical daily record'){
-  const review=currentReviewState();
+async function commitDailyRecord(evidence:ReviewEvidence,label:string,assertOrigin:()=>void){
+  assertOrigin();const review=currentReviewState();
   let doc=projectDailyRecord(evidence,review);
-  const existing=await AppData.dailyRecords.get(doc.date);
+  const existing=await AppData.dailyRecords.get(doc.date);assertOrigin();
   if(existing?.recordKind==='diary'){
     const existingReflection=String(existing.reflection||''),reviewReflection=String(doc.reflection||'');
     if(existingReflection.trim()&&reviewReflection.trim()&&existingReflection!==reviewReflection)throw new Error('A different reflection already exists for this date. Open Diary and resolve it before saving the Study Day.');
@@ -532,15 +545,15 @@ async function commitDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.
   }
   const rec=materializeDailyRecordView(doc);
   if(!rec)throw new Error('Could not materialize the '+label);
-  const receipt=await AppData.dailyRecords.save(doc);
+  const receipt=await AppData.dailyRecords.save(doc,{assertOrigin});assertOrigin();
   if(receipt?.storage!=='indexeddb'){
     throw new Error('The Study Day reached only emergency recovery storage, not canonical IndexedDB. The recovery copy remains available; retry when storage recovers.');
   }
-  await AppData.dailyRecords.verifyCanonical(doc);
+  await AppData.dailyRecords.verifyCanonical(doc);assertOrigin();
   return freeze({doc,rec});
 }
 async function saveReflectionOnlyRecord(){
-  if(saveDayInProgress)return false;
+  if(saveDayInProgress||rolloverSaveInProgress)return false;
   if(!appCanMutate()){setStatus('save-status','Study control is in another tab. Take control here before saving.',false);return false;}
   if(!reflectionOnlyReady(getReviewDate())){setStatus('save-status','Reflection is still loading. Try again after it finishes.',false);return false;}
   const binding=resolveReviewEditorBinding(getReviewDate());
@@ -571,8 +584,9 @@ async function saveReflectionOnlyRecord(){
 }
 async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
   if(!reviewHasStudyDay())return saveReflectionOnlyRecord();
-  if(saveDayInProgress)return false;
+  if(saveDayInProgress||rolloverSaveInProgress)return false;
   if(!appCanMutate()){setStatus('save-status','Study control is in another tab. Take control here before saving.',false);return false;}
+  const assertOrigin=captureStudySaveOrigin();
   const saveButton=document.querySelector<HTMLButtonElement>('[data-action="save-day"]');
   saveDayInProgress=true;if(saveButton)saveButton.disabled=true;
   const notice=notifications.begin({id:'save-study-day',surfaceId:'save-status',title:'Save Study Day',message:'Saving this day…'});
@@ -586,22 +600,30 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
   try{
     PracticePacer.finalizeForDayClose();
     captureTodayState();
-    await flushFinalActiveSessionCheckpoint('saving the Study Day Active Session checkpoint');
+    const checkpoint=await flushFinalActiveSessionCheckpoint('saving the Study Day Active Session checkpoint',assertOrigin);
     if(closesSession)activeSessionPersistenceBlocked=true;
+    const check=()=>{assertOrigin();if(closesSession)assertCheckpointCurrent(checkpoint,checkpoint.date);};
+    check();
     const metrics=ReviewView.refresh({includeRecords:true,force:true});
-    const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record');committed=rec;
+    if(metrics.evidence.date!==checkpoint.date)throw new Error('The Study Day no longer matches its final checkpoint.');
+    const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record',check);committed=rec;
     markStorageHealthTimestamp('lastStudyDataSaveAt');
-    if(!closesSession)await acknowledgeSavedStudyDay(rec.date,doc.sourceRevision);
-    await refreshLibraryAfterSave(rec.date);
+    if(!closesSession){await acknowledgeSavedStudyDay(rec.date,doc.sourceRevision);check();}
+    await refreshLibraryAfterSave(rec.date);check();
     ReviewView.sync();
     if(closesSession){
-      await clearCanonicalSessionAfterSavedDay();
+      await clearCanonicalSessionAfterSavedDay({expectedCanonical:checkpoint,assertOrigin:check});check();
       clearSaveReminder(rec.date,doc.sourceRevision);
     }
     if(closesPriorDay){
+      await runLifecycle('recovered-day-close',{scheduleIdentity:true,date:todayISO(),autoDate:true,review:true},()=>{
+        assertOrigin(1);
+        resetRuntimeSessionState({lifecycleManaged:true,source:'recovered-day-close',date:todayISO()});
+        clearReviewForNewDay({lifecycleManaged:true});
+        return true;
+      });
+      assertOrigin(1,false);
       Runtime.setSafetyMessage(`Recovered ${prettyDate(rec.date)} was saved to Library. Apply the current study-day schedule when ready.`);
-      resetRuntimeSessionState({source:'recovered-day-close',date:todayISO()});
-      await clearReviewForNewDay();
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset('Recovered previous study day was saved. Apply the current study-day schedule when ready.','New Study Day');
       setPlanStatus('Recovered previous study day saved. Apply the current study-day schedule when ready.');
@@ -632,8 +654,9 @@ function studyDayRolledOver(now:Date=new Date()){
   return !!(SessionState.studyDate&&SessionState.studyDate!==todayISO(now));
 }
 async function handleStudyDayRollover(){
-  if(rolloverSaveInProgress||!appCanMutate())return false;
+  if(rolloverSaveInProgress||saveDayInProgress||!appCanMutate())return false;
   if(!studyDayRolledOver())return false;
+  const assertOrigin=captureStudySaveOrigin();
   stopTimerExecution();
   cancelPendingLiveDraftSave();
   rolloverSaveInProgress=true;
@@ -641,38 +664,48 @@ async function handleStudyDayRollover(){
   if(!endedDate){activeSessionPersistenceBlocked=false;rolloverSaveInProgress=false;return false;}
   const rolloverState:{savedDay:null|{date:string;revision:number}}={savedDay:null};
   try{
-    const saveable=hasSaveableStudyDay();
+    const saveable=hasSaveableStudyDay();let checkpoint:ActiveSession|null=null;
     if(saveable){
       if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
       PracticePacer.finalizeForDayClose();
       captureReviewInputs();
       syncUnfinishedNoteDraft();
       saveReviewState({markChanged:false,strict:true});
-      await flushFinalActiveSessionCheckpoint('saving the rollover Active Session checkpoint');
+      checkpoint=await flushFinalActiveSessionCheckpoint('saving the rollover Active Session checkpoint',assertOrigin);
+    }else{
+      const loaded=await AppData.activeSession.load(0,{strict:true});assertOrigin();
+      if(!loaded.ok||loaded.error||loaded.value&&!loaded.storage.idb)throw loaded.error||new Error('The prior Active Session could not be verified before rollover.');
+      checkpoint=loaded.value;
+      if(checkpoint&&checkpoint.date!==endedDate)throw new Error('The canonical Active Session belongs to another study day.');
     }
+    assertOrigin();assertCheckpointCurrent(checkpoint,endedDate);
     await runLifecycle('study-day-rollover',{
       scheduleIdentity:true,date:todayISO(),autoDate:true,review:true
     },async()=>{
       // Lifecycle entry has now completed its mandatory pending-Review flush.
       // Freeze further Active Session writes only for the authoritative
       // Saved-Day commit / session-retirement window.
-      activeSessionPersistenceBlocked=true;
+      const check=()=>{assertOrigin(1);assertCheckpointCurrent(checkpoint,endedDate);};
+      check();activeSessionPersistenceBlocked=true;
       if(saveable){
-        const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
+        const evidence=SessionEvidenceGateway.snapshot({includeRecords:true});
+        if(evidence.date!==endedDate)throw new Error('The rollover evidence belongs to another study day.');
+        const {doc,rec}=await commitDailyRecord(evidence,'canonical rollover record',check);
         rolloverState.savedDay={date:rec.date,revision:doc.sourceRevision};
         markStorageHealthTimestamp('lastStudyDataSaveAt');
       }else{
         Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
       }
-      await clearCanonicalSessionAfterSavedDay();
+      await clearCanonicalSessionAfterSavedDay({expectedCanonical:checkpoint,assertOrigin:check});check();
       resetRuntimeSessionState({lifecycleManaged:true,source:'study-day-rollover',date:todayISO()});
-      await clearReviewForNewDay({lifecycleManaged:true});
+      clearReviewForNewDay({lifecycleManaged:true});
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset('Previous study day is closed. Apply today’s schedule when ready.','New Study Day');
       setPlanStatus('New study day ready. Apply today’s schedule when ready.');
       refreshStorageFallbackWarning();
       return true;
     });
+    assertOrigin(1,false);
     if(rolloverState.savedDay){
       markDayContentSaved(rolloverState.savedDay.date,rolloverState.savedDay.revision);
       notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
@@ -681,6 +714,7 @@ async function handleStudyDayRollover(){
     return true;
   }catch(e){
     AppDiagnostics.capture('session.rollover-save',e,'error');
+    try{assertOrigin();}catch{try{assertOrigin(1);}catch{return false;}}
     Runtime.setSafetyMessage(rolloverState.savedDay
       ? `Saved ${prettyDate(endedDate)} to Library, but its old session could not be finalized: ${errorMessage(e)}. Keep the recovery data and retry after storage recovers.`
       : `New study day safety check could not auto-save ${prettyDate(endedDate)}: ${errorMessage(e)}. Open Review and save manually before starting a new day.`);

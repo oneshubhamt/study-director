@@ -119,12 +119,17 @@ async function savedDayCoversActiveSession(session:ActiveSession|null){
   }
 }
 async function retireCoveredPreviousActiveSession(session:ActiveSession|null){
-  if(!session||!await savedDayCoversActiveSession(session))return false;
-  const loaded=await ports.AppData.activeSession.load(),current=loaded&&loaded.value?ports.ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
-  if(!current||!ports.CanonicalModule.same(current,ports.ActiveSessionCodec.sanitizeCurrent(session)))return false;
+  const owner=ports.ownershipRevision(),life=ports.SessionLifecycle.revision;
+  const currentOrigin=()=>appCanMutate()&&ports.ownershipRevision()===owner&&ports.SessionLifecycle.revision===life;
+  const assertOrigin=()=>{if(!currentOrigin())throw new Error('Previous-day retirement was superseded; newer progress was preserved.');};
+  if(!session||!await savedDayCoversActiveSession(session)||!currentOrigin())return false;
   try{
-    await clearCanonicalSessionAfterSavedDay();
+    const loaded=await ports.AppData.activeSession.load(0,{strict:true});assertOrigin();
+    const current=loaded?.value?ports.ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+    if(!loaded?.ok||loaded.error||!loaded.storage?.idb||!current||!ports.CanonicalModule.same(current,ports.ActiveSessionCodec.sanitizeCurrent(session)))return false;
+    await clearCanonicalSessionAfterSavedDay({expectedCanonical:current,assertOrigin});assertOrigin();
   }catch(error){
+    if(!currentOrigin())return false;
     const reason=errorMessage(error);
     state.sessionSafetyMessage=`${prettyDate(session.date)} is saved in Library, but its redundant recovery copy could not be verified as cleared: ${reason}`;
     setSessionPanelMode('previous',session);
