@@ -32,7 +32,7 @@ export interface DiaryEditor{
   bind(field:HTMLTextAreaElement,date:string,record:SavedDayRecord,callbacks?:DiaryEditorCallbacks):Readonly<DiaryEditorBinding>|null;
   capture(field:HTMLTextAreaElement,event?:Event):string;
   clear(field:HTMLTextAreaElement):boolean;
-  deleteEntry(date:string,options?:Readonly<{backupCapture?:boolean;assertWrite?:(()=>void)|null}>):Promise<boolean>;
+  deleteEntry(date:string,options?:Readonly<{backupCapture?:boolean;expectedRecord?:Pick<SavedDayRecord,'recordKind'|'reflection'>;assertWrite?:(()=>void)|null}>):Promise<boolean>;
   documentFor(field:HTMLTextAreaElement):Readonly<DiaryEditorDocument>|null;
   draft(date:string):Readonly<DiaryDraft>|null;
   flush(field:HTMLTextAreaElement,options?:FlushOptions):Promise<SavedDayRecord|null|void>;

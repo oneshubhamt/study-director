@@ -31,7 +31,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   function assertReflectionOwner(revision:number){
     if(!ownership.canMutate()||ownership.revision()!==revision)throw new Error('Daily Reflection ownership changed. Reopen it before editing.');
   }
-  async function commit(date:string,value:string,options:Readonly<{expectedCanonical?:string;backupCapture?:boolean;assertOrigin?:(()=>void)|null}>={}){
+  async function commit(date:string,value:string,options:Readonly<{expectedCanonical?:string;expectedRecordKind?:SavedDayRecord['recordKind'];backupCapture?:boolean;assertOrigin?:(()=>void)|null}>={}){
     if(!ownership.canMutate())throw new Error('Use the primary tab to edit Daily Reflections.');
     const ownerRevision=ownership.revision(),assertOrigin=()=>{assertReflectionOwner(ownerRevision);options.assertOrigin?.();};assertOrigin();
     if(!dates.isSupported(date))throw new Error('That reflection date is not available.');
@@ -39,6 +39,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     if(!text.editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
     const current=await records.get(date,{strict:true}),currentCanonical=String(current?.reflection||'');
     assertOrigin();
+    if(options.expectedRecordKind!==undefined&&current?.recordKind!==options.expectedRecordKind)throw new Error('This Daily Reflection changed record type. Reopen it before deleting.');
     const hasContent=!!String(candidate||'').trim(),backupCapture=options.backupCapture===true;
     if(currentCanonical===candidate){
       if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);assertOrigin();
@@ -145,13 +146,14 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   }
   function schedule(field:HTMLTextAreaElement,value:string){const state=activeState(field);return state&&ownership.canMutate()?state.lane.schedule(String(value??'')):false;}
   function flush(field:HTMLTextAreaElement,options:FlushOptions={}){const state=activeState(field);return state&&ownership.canMutate()?state.lane.flush(options):Promise.reject(new Error('Diary editor is no longer active for the current study owner.'));}
-  async function deleteEntry(date:string,options:Readonly<{backupCapture?:boolean;assertWrite?:(()=>void)|null}>={}){
+  async function deleteEntry(date:string,options:Readonly<{backupCapture?:boolean;expectedRecord?:Pick<SavedDayRecord,'recordKind'|'reflection'>;assertWrite?:(()=>void)|null}>={}){
     if(!ownership.canMutate()||!dates.isSupported(date))return false;
     const ownerRevision=ownership.revision(),assertOrigin=()=>{assertReflectionOwner(ownerRevision);options.assertWrite?.();};assertOrigin();
     const current=await records.get(date,{strict:true});
     assertOrigin();
-    if(!current){await records.verifyCanonicalAbsent(date);assertOrigin();return true;}
-    const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true,assertOrigin});
+    if(!current){await records.verifyCanonicalAbsent(date);assertOrigin();return options.expectedRecord?.recordKind!=='study';}
+    if(options.expectedRecord&&(current.recordKind!==options.expectedRecord.recordKind||String(current.reflection||'')!==String(options.expectedRecord.reflection||'')))throw new Error('This Daily Reflection changed after confirmation. Reopen it before deleting.');
+    const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),expectedRecordKind:current.recordKind,backupCapture:options.backupCapture===true,assertOrigin});
     return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
   }
   async function settled(field:HTMLTextAreaElement){const state=bindings.get(field);if(!state)return true;return state.lane.settled();}

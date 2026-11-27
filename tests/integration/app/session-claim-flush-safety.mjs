@@ -227,9 +227,9 @@ function fixture(options={}){
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('review-persistence',1);
   const stamp='2026-08-27T12:00:00.000Z';
   const study={version:16,recordKind:'study',date,savedAt:stamp,updatedAt:stamp,sourceRevision:7,reflection:'Old',quote:'',studyQuality:4,realTimeSnapshot:null,schedule:[],results:{kept:{completion:50}},practiceRuns:[],carryForwardDraft:'keep'};
-  let current=study,receipt='indexeddb',verifyFailure=false,verifyAbsentFailure=false,ownerRevision=1,saveCalls=[],removeCalls=[],verifyCalls=0,absentCalls=0;
+  let current=study,receipt='indexeddb',verifyFailure=false,verifyAbsentFailure=false,ownerRevision=1,saveCalls=[],removeCalls=[],verifyCalls=0,absentCalls=0,recordReads=0,onRecordRead=null;
   const records={
-    get:async()=>current,
+    get:async()=>{recordReads++;onRecordRead?.(recordReads);return current;},
     save:async(value,options)=>{saveCalls.push([structuredClone(value),options]);if(receipt==='indexeddb')current=value;return {ok:true,storage:receipt};},
     remove:async(_date,options)=>{removeCalls.push(options);current=null;return true;},
     verifyCanonical:async()=>{verifyCalls++;if(verifyFailure)throw new Error('read-back failed');return true;},
@@ -279,6 +279,21 @@ function fixture(options={}){
   current=null;absentCalls=0;
   assert.equal(await persistence.DiaryEditor.deleteEntry(date),true);
   assert.equal(absentCalls,1,'an apparently empty Diary date still requires canonical absence proof');
+
+  // The confirmed record is not an authorization to delete a replacement.
+  const confirmedDiary={version:16,recordKind:'diary',date,savedAt:stamp,updatedAt:stamp,sourceRevision:0,reflection:'Old'};
+  for(const replacement of [{...confirmedDiary,reflection:'Newer reflection'},study]){
+    current=replacement;saveCalls=[];removeCalls=[];
+    await assert.rejects(persistence.DiaryEditor.deleteEntry(date,{expectedRecord:confirmedDiary}),/changed after confirmation/u);
+    assert.deepEqual(current,replacement);assert.equal(saveCalls.length+removeCalls.length,0);
+  }
+  current=confirmedDiary;recordReads=0;saveCalls=[];removeCalls=[];
+  onRecordRead=count=>{if(count===2)current=study;};
+  await assert.rejects(persistence.DiaryEditor.deleteEntry(date,{expectedRecord:confirmedDiary}),/changed record type/u);
+  onRecordRead=null;assert.deepEqual(current,study);assert.equal(saveCalls.length+removeCalls.length,0,'a Diary-to-Study successor is not cleared by a stale deletion');
+  current=confirmedDiary;
+  assert.equal(await persistence.DiaryEditor.deleteEntry(date,{expectedRecord:confirmedDiary}),true);
+  assert.equal(current,null,'a matching confirmed Diary can still be deleted');
 
   const field=new FakeTextArea();current=study;ownerRevision=1;
   persistence.DiaryEditor.bind(field,date,study);
