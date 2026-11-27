@@ -44,7 +44,7 @@ for(const id of ['canonical','save-lane','domain','operation-lifecycle','reposit
 const source="import type {NeverExecuted} from './no-runtime-file.ts';\nconst message: string='😀';\nthrow new Error(message);";
 const output=compileScript(source,'offset-probe.ts');
 assert.equal(output.indexOf('throw new Error'),source.indexOf('throw new Error'),'V8 offsets must refer directly to authored source');
-assert.throws(()=>vm.runInNewContext(output,{}, {filename:'offset-probe.ts'}),(error:unknown)=>error instanceof Error&&error.message==='😀'&&Boolean(error.stack?.includes('offset-probe.ts:3')));
+assert.throws(()=>vm.runInNewContext(output,{}, {filename:'offset-probe.ts'}),(error:unknown)=>typeof error==='object'&&error!==null&&'message' in error&&error.message==='😀'&&'stack' in error&&typeof error.stack==='string'&&error.stack.includes('offset-probe.ts:3'));
 assert.throws(()=>compileScript('enum State { Ready }','enum.ts'),/not supported/);
 assert.throws(()=>compileScript("import './runtime.js';",'import.ts'),/import statement/);
 assert.throws(()=>compileScript('export const value: number=1;','export.ts'),/export/);
