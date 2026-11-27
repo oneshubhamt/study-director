@@ -4,7 +4,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {stripTypeScriptTypes} from 'node:module';
 
-function strip(file:string){return stripTypeScriptTypes(readRuntimeSource(file),{mode:'strip',sourceMap:false});}
+function strip(file:string){return stripTypeScriptTypes(readRuntimeSource(file),{mode:'strip'});}
 
 export async function importRichTextReconciliationSource(){
   const temp=fs.mkdtempSync(path.join(process.env['TMPDIR']||'/tmp','sd-rte-reconcile-'));
