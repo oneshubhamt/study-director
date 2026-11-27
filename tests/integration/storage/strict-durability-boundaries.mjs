@@ -197,6 +197,27 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   assert.equal(events.length,before,'former owner must not publish a canonical completion notification');
 }
 
+// A Daily Record uses the same physical-commit truth. If ownership/request
+// authority changes only after IndexedDB completed, the canonical row exists;
+// the caller must get an explicit committed-but-unverified result and the
+// repository must not manufacture a fallback copy or stale completion event.
+{
+  const date='2026-09-18',stamp='2026-09-18T12:00:00.000Z',events=[];
+  const controls={ownershipRevision:1,onCanonicalCommit:event=>events.push(event)},owned=createHarness(new Map(),null,controls);
+  const before={version:1,date,recordKind:'study',reflection:'before',savedAt:stamp,updatedAt:stamp,sourceRevision:1};
+  await owned.app.dailyRecords.save(before);
+  const expected=await owned.app.dailyRecords.get(date,{strict:true}),eventCount=events.length;
+  controls.onTransactionComplete=({stores,mode})=>{
+    if(mode!=='readwrite'||!Array.isArray(stores)||!stores.includes('daily'))return;
+    delete controls.onTransactionComplete;controls.owned=false;controls.ownershipRevision++;
+  };
+  const after={...expected,reflection:'committed after authority change',sourceRevision:2,updatedAt:'2026-09-18T12:01:00.000Z'};
+  await assert.rejects(owned.app.dailyRecords.save(after,{expectedCanonical:expected}),error=>error?.code==='DAILY_RECORD_COMMITTED_UNVERIFIED');
+  assert.equal(owned.stores.daily.get(date).reflection,after.reflection,'the physically committed Daily Record must remain canonical');
+  assert.equal(owned.sharedLocal.has('fallback'),false,'post-commit ambiguity must never create a fallback Daily Record');
+  assert.equal(events.length,eventCount,'the former owner must not publish a stale Daily Record completion event');
+}
+
 // The recovery/transfer request may retire while local tab ownership remains.
 // Assert that the originating guard is checked inside the actual IDB CAS, not
 // just by the controller, and that a physical commit is reported accurately.
@@ -308,4 +329,4 @@ const beforeJournalClear=strictCount();
 await app.restoreJournal.clear(restoreId);
 assert.equal(strictCount(),beforeJournalClear+1,'Restore journal retirement must use strict durability so a verified restore does not retain a stale rollback marker after an abrupt failure');
 
-console.log(JSON.stringify({status:'PASS',suite:'strict-durability-boundaries',strictTransactions:idbDurability.strict,normalTransactions:idbDurability.normal,contracts:['review/session recovery checkpoints stay normal','canonical notes and records are strict','Daily Record conditional writes preserve newer same-date evidence','saved plan library is strict while draft is normal','final session deletion is strict','destructive-operation journal prepare/phase/retirement is strict','mutation lease acquisition is strict while expiring lease cleanup stays normal']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'strict-durability-boundaries',strictTransactions:idbDurability.strict,normalTransactions:idbDurability.normal,contracts:['review/session recovery checkpoints stay normal','canonical notes and records are strict','Daily Record conditional writes preserve newer same-date evidence','Daily Record post-commit authority loss is classified without fallback','saved plan library is strict while draft is normal','final session deletion is strict','destructive-operation journal prepare/phase/retirement is strict','mutation lease acquisition is strict while expiring lease cleanup stays normal']},null,2));
