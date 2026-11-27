@@ -1,0 +1,341 @@
+path	owner	environment	baseline_selection	baseline_check	primary_pass	disposition	cross_checks
+.github/workflows/generated-runtime-targeted.yml	CI/generated-runtime-targeted	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/p511b-targeted.yml	CI/p511b-targeted	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/p512-targeted.yml	CI/p512-targeted	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/p513-targeted.yml	CI/p513-targeted	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/p57-targeted-browser.yml	CI/p57-targeted-browser	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/p58a-targeted.yml	CI/p58a-targeted	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/p59-targeted-insights.yml	CI/p59-targeted-insights	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/qa-fast.yml	CI/qa-fast	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/qa-promotion.yml	CI/qa-promotion	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/review-p5-historical.yml	CI/review-p5-historical	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.github/workflows/review-p5-stage1.yml	CI/review-p5-stage1	GitHub Actions	workflow	YAML + embedded commands	6.1/6.6	verify command/selection parity	-
+.node-version	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+.oxlintrc.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+build/Start-Study-Director.bat	build/Start-Study-Director	Windows cmd	support	native script	6.1	retain native entry and verify consumer	-
+build/Start-Study-Director.command	build/Start-Study-Director	macOS shell	support	native script	6.1	retain native entry and verify consumer	-
+build/build.mjs	build/build	Node	support	unchecked JS	6.1	convert	-
+build/generated-runtime-paths.mjs	build/generated-runtime-paths	Node	support	unchecked JS	6.1	convert	-
+build/host-source.mjs	build/host-source	Node	support	unchecked JS	6.1	convert	-
+build/minify-release.py	build/minify-release	Python	support	native script	6.1	retain native entry and verify consumer	-
+build/module-manifest.mjs	build/module-manifest	Node	support	unchecked JS	6.1	convert	-
+build/runtime-bundle.mjs	build/runtime-bundle	Node	support	unchecked JS	6.1	convert	-
+build/security-candidate.mjs	build/security-candidate	Node	support	unchecked JS	6.1	convert	-
+build/serve-local.py	build/serve-local	Python	support	native script	6.1	retain native entry and verify consumer	-
+build/source-script.mts	build/source-script	Node	support	strict node project	6.1	preserve and verify	-
+build/stage-firebase.mjs	build/stage-firebase	Node	support	unchecked JS	6.1	convert	-
+build/typecheck.mjs	build/typecheck	Node	support	unchecked JS	6.1	convert	-
+build/typescript-projects.mjs	build/typescript-projects	Node	support	unchecked JS	6.1	convert	-
+build/verify-build.mjs	build/verify-build	Node	support	unchecked JS	6.1	convert	-
+build/wordgard-declarations.mjs	build/wordgard-declarations	Node	support	unchecked JS	6.1	convert	-
+build/wordgard-metadata.mjs	build/wordgard-metadata	Node	support	unchecked JS	6.1	convert	-
+build/wordgard-source-patches.mjs	build/wordgard-source-patches	Node	support	unchecked JS	6.1	convert	-
+contracts/canonical-identities.mjs	contracts/canonical-identities	Node	support	unchecked JS	6.1	convert	-
+contracts/data-architecture.mjs	contracts/data-architecture	Node	support	unchecked JS	6.1	convert	-
+contracts/dependency-inventory.mjs	contracts/dependency-inventory	Node	support	unchecked JS	6.1	convert	-
+contracts/format-ledger.mjs	contracts/format-ledger	Node	support	unchecked JS	6.1	convert	-
+contracts/performance-budgets.mjs	contracts/performance-budgets	Node	support	unchecked JS	6.1	convert	-
+contracts/production-limits.d.mts	contracts/production-limits.d	Node	support	checked declaration	6.1	reconcile with typed producer	-
+contracts/production-limits.mjs	contracts/production-limits	Node	support	unchecked JS	6.1	convert	-
+package-lock.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+package.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+release.config.mjs	release identity	Node	support	unchecked JS	6.1	convert	-
+tests/README.md	QA guidance	repository	support	document	6.6	maintain	-
+tests/architecture/app/backup-limits-wiring.mjs	app	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/app/insights-runtime-boundary.mjs	app	Node	fast/architecture	unchecked JS	6.5	convert	source-reader
+tests/architecture/app/internal-module-boundary.mjs	app	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/app/presentation-contracts.mjs	app	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/app/protected-mutation-ui-contract.mjs	app	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/app/runtime-boundaries.mjs	app	Node	fast/architecture	unchecked JS	6.3	convert	push-target,source-reader
+tests/architecture/app/workspace-contracts.mjs	app	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/backup/host-export-port.mjs	backup	Node	fast/architecture	unchecked JS	6.2	convert	source-reader,VM
+tests/architecture/build/dependency-assurance.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/deployment-contract.mjs	build	Node	release	unchecked JS	6.1	convert	source-reader
+tests/architecture/build/generated-syntax-check.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/host-source.mjs	build	Node	fast/architecture	unchecked JS	6.1	convert	source-reader
+tests/architecture/build/performance-budgets.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/production-limits.mjs	build	Node	fast/architecture	unchecked JS	6.1	convert	source-reader
+tests/architecture/build/rich-text-bundle.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/syntax-check.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/terser-compression-contracts.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/typescript-gates.mjs	build	Node	release	unchecked JS	6.1	convert	-
+tests/architecture/build/typescript-pipeline.mjs	build	Node	fast/architecture	unchecked JS	6.1	convert	source-reader,VM
+tests/architecture/build/verify-minified-release.mjs	build	Node	release	unchecked JS	6.1	convert	VM
+tests/architecture/exports/export-hash-boundary.mjs	exports	Node	fast/architecture	unchecked JS	6.2	convert	-
+tests/architecture/exports/file-worker-bundle.mjs	exports	Node	fast/architecture	unchecked JS	6.2	convert	-
+tests/architecture/pwa/pwa-updater-contract.mjs	pwa	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/rich-text/image-policy.mjs	rich-text	Node	fast/architecture	unchecked JS	6.4	convert	source-reader
+tests/architecture/rich-text/reconciliation-ui-contract.mjs	rich-text	Node	fast/architecture	unchecked JS	6.4	convert	source-reader
+tests/architecture/rich-text/wordgard-adapter-boundary.mjs	rich-text	Node	fast/architecture	unchecked JS	6.4	convert	source-reader
+tests/architecture/rich-text/wordgard-upstream-integrity.mjs	rich-text	Node	fast/architecture	unchecked JS	6.4	convert	-
+tests/architecture/security/security-policy.mjs	security	Node	fast/architecture	unchecked JS	6.3	convert	source-reader
+tests/architecture/storage/attachment-aware-reconciliation.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/background-work-contract.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/architecture/storage/backup-recovery-ux-contract.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	push-target,source-reader
+tests/architecture/storage/cleer-integration.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/data-architecture.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/diagnostics-labels.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/format-ledger.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/managed-recovery-contract.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	push-target,source-reader
+tests/architecture/storage/managed-version-history-contract.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/persistence-boundary.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/storage/runtime-authority-contract.mjs	storage	Node	fast/architecture	unchecked JS	6.2	convert	source-reader
+tests/architecture/test-suite/suite-governance.mjs	test-suite	Node	fast/architecture	unchecked JS	6.1	convert	push-target
+tests/architecture/test-suite/suite-policy.mjs	test-suite	Node	fast/architecture	unchecked JS	6.1	convert	push-target
+tests/architecture/test-suite/suite-structure.mjs	test-suite	Node	fast/architecture	unchecked JS	6.1	convert	push-target
+tests/browser/app/core-flow.mjs	app	Node+Chromium	browser/smoke	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/app/session-draft-edit.mjs	app	Node+Chromium	browser/smoke	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/app/session-merge-timer.mjs	app	Node+Chromium	browser/smoke	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/attachments/attachment-editor.mjs	attachments	Node+Chromium	browser/smoke	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/attachments/attachments.mjs	attachments	Node+Chromium	browser/extended	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/backup/cold-start-drive-recovery.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,alone
+tests/browser/backup/complete-library.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,source-reader
+tests/browser/backup/encryption.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,alone
+tests/browser/backup/pwa-device-backup.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,source-reader
+tests/browser/backup/recovery-takeover.mjs	backup	Node+Chromium	browser/smoke	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/backup/restore-session-safety.mjs	backup	Node+Chromium	browser/smoke	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/backup/session-handoff-journeys.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,alone
+tests/browser/backup/session-plan-sync.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,alone
+tests/browser/backup/sync-and-profiles.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/backup/sync-journeys.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,alone
+tests/browser/backup/sync-kept-reviews.mjs	backup	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/exports/exports.mjs	exports	Node+Chromium	browser/smoke	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/exports/generated-runtime.mjs	exports	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/insights/insights-maximum-import.mjs	insights	Node+Chromium	browser/extended	unchecked JS	6.5	convert	browser-consolidation/6.4
+tests/browser/insights/insights-performance.mjs	insights	Node+Chromium	browser/extended	unchecked JS	6.5	convert	browser-consolidation/6.4,alone
+tests/browser/insights/insights-populated-ui.mjs	insights	Node+Chromium	browser/feature	unchecked JS	6.5	convert	browser-consolidation/6.4
+tests/browser/library/library-selection.mjs	library	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4,source-reader
+tests/browser/library/note-picker-authority.mjs	library	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4,source-reader
+tests/browser/library/notes-at-limit.mjs	library	Node+Chromium	browser/extended	unchecked JS	6.4	convert	browser-consolidation/6.4,alone
+tests/browser/library/notes-management.mjs	library	Node+Chromium	browser/smoke	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/plans/saved-plans-ui.mjs	plans	Node+Chromium	browser/smoke	unchecked JS	6.5	convert	browser-consolidation/6.4
+tests/browser/pwa/install-capture.mjs	pwa	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/pwa/pwa-offline.mjs	pwa	Node+Chromium	browser/smoke	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/pwa/pwa-update.mjs	pwa	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4,alone
+tests/browser/rich-text/image-bridge.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/image-controls.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/image-memory.mjs	rich-text	Node+Chromium	browser/extended	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/image-persistence.mjs	rich-text	Node+Chromium	browser/smoke	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/image-resize-toolbar.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/link-context.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/mobile-rich-editor.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4,source-reader
+tests/browser/rich-text/native-overlays.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/paste-sanitization.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/readonly-maintenance.mjs	rich-text	Node+Chromium	browser/extended	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/rich-editor-completion.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/rich-editor-hotpath.mjs	rich-text	Node+Chromium	browser/extended	unchecked JS	6.4	convert	browser-consolidation/6.4,alone
+tests/browser/rich-text/rich-editor-interactions.mjs	rich-text	Node+Chromium	browser/smoke	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/table-capacity.mjs	rich-text	Node+Chromium	browser/extended	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/table-resize-controls.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/typography-refinement.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4
+tests/browser/rich-text/workspace-overlay.mjs	rich-text	Node+Chromium	browser/feature	unchecked JS	6.4	convert	browser-consolidation/6.4,source-reader
+tests/browser/security/runtime-boundary.mjs	security	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/storage/canonical-storage.mjs	storage	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/storage/capacity.mjs	storage	Node+Chromium	browser/extended	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/storage/multi-tab.mjs	storage	Node+Chromium	browser/smoke	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/storage/site-data-clear.mjs	storage	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,alone
+tests/browser/storage/storage-failure-recovery.mjs	storage	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4,source-reader
+tests/browser/storage/unsupported-data.mjs	storage	Node+Chromium	browser/feature	unchecked JS	6.2	convert	browser-consolidation/6.4
+tests/browser/ui/app-sounds.mjs	ui	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/ui/interactions.mjs	ui	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4,source-reader
+tests/browser/ui/notification-stack.mjs	ui	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/ui/populated-accessibility.mjs	ui	Node+Chromium	browser/extended	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/ui/presentation-accessibility.mjs	ui	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/browser/ui/profile-panel.mjs	ui	Node+Chromium	browser/feature	unchecked JS	6.3	convert	browser-consolidation/6.4
+tests/fixtures/README.md	QA guidance	repository	support	document	6.6	maintain	-
+tests/helpers/artifacts.mjs	QA/artifacts	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/async-tools.mjs	QA/async-tools	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/backup-fixture-choices.mjs	QA/backup-fixture-choices	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/backup-presentation.mjs	QA/backup-presentation	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/baseline-roundtrip.mjs	QA/baseline-roundtrip	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/branch-coverage.mjs	QA/branch-coverage	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/browser-coverage.mjs	QA/browser-coverage	Node/browser harness	support	unchecked JS	6.1	convert	-
+tests/helpers/browser-harness.mjs	QA/browser-harness	Node/browser harness	support	unchecked JS	6.1	convert	-
+tests/helpers/browser-suite.mjs	QA/browser-suite	Node/browser harness	support	unchecked JS	6.1	convert	-
+tests/helpers/browser-tests.mjs	QA/browser-tests	Node/browser harness	support	unchecked JS	6.1	convert	-
+tests/helpers/bug-regression-policy.mjs	QA/bug-regression-policy	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/core-script.mjs	QA/core-script	Node	support	unchecked JS	6.1	convert; retire slicing at owning pass	source-reader
+tests/helpers/coverage-risk.mjs	QA/coverage-risk	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/coverage-runtime.mjs	QA/coverage-runtime	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/coverage-selection.mjs	QA/coverage-selection	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/coverage.mjs	QA/coverage	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/current-codec-fixture.mjs	QA/current-codec-fixture	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/device-folder-world.mjs	QA/device-folder-world	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/drive-browser.mjs	QA/drive-browser	Node/browser harness	support	unchecked JS	6.2	convert	-
+tests/helpers/drive-harness.mjs	QA/drive-harness	Node/browser harness	support	unchecked JS	6.2	convert	-
+tests/helpers/fake-clock.mjs	QA/fake-clock	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/file-processing.mjs	QA/file-processing	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/generated-cases.mjs	QA/generated-cases	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/hermetic-loader.mjs	QA/hermetic-loader	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/hermetic-runtime.mjs	QA/hermetic-runtime	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/hermetic-worker.cjs	QA/hermetic-worker	Node CJS preload	support	unchecked JS	6.1	preserve preload contract; prove TS admission	-
+tests/helpers/insights-model-runtime.mjs	QA/insights-model-runtime	Node	support	unchecked JS	6.5	convert	-
+tests/helpers/insights-providers.mjs	QA/insights-providers	Node	support	unchecked JS	6.5	convert	-
+tests/helpers/memory-directory.mjs	QA/memory-directory	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/mutation.mjs	QA/mutation	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/note-ids.mjs	QA/note-ids	Node	support	unchecked JS	6.4	convert	-
+tests/helpers/note-snapshot-harness.mjs	QA/note-snapshot-harness	Node	support	unchecked JS	6.4	convert	-
+tests/helpers/notifications.mjs	QA/notifications	Node	support	unchecked JS	6.3	convert	-
+tests/helpers/output-paths.mjs	QA/output-paths	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/pending-review-codec.mjs	QA/pending-review-codec	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/pwa-variant.mjs	QA/pwa-variant	Node/browser harness	support	unchecked JS	6.3	convert	-
+tests/helpers/quarantine.mjs	QA/quarantine	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/release-tests.mjs	QA/release-tests	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/repository-harness.mjs	QA/repository-harness	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/review-saved-day-fixture.mjs	QA/review-saved-day-fixture	Node	support	unchecked JS	6.3	convert	-
+tests/helpers/rich-text-runtime.mjs	QA/rich-text-runtime	Node	support	unchecked JS	6.4	convert; retire slicing at owning pass	source-reader
+tests/helpers/run-category.mjs	QA/run-category	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/runtime-source.mjs	QA/runtime-source	Node	support	unchecked JS	6.1	convert; retire slicing at owning pass	source-reader
+tests/helpers/session-ownership-claim-regression.mjs	QA/session-ownership-claim-regression	Node	support	unchecked JS	6.2	convert	-
+tests/helpers/subprocess.mjs	QA/subprocess	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/sync-journey-world.mjs	QA/sync-journey-world	Node/browser harness	support	unchecked JS	6.2	convert	-
+tests/helpers/test-discovery.mjs	QA/test-discovery	Node	support	unchecked JS	6.1	convert	-
+tests/helpers/typescript-source.mjs	QA/typescript-source	Node	support	unchecked JS	6.1	convert; retire slicing at owning pass	source-reader
+tests/integration/app/execution-host.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/app/ownership-hydration-fail-closed.mjs	app	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/app/previous-day-convergence.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/app/profiles-host.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/app/public-api-host.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/app/recovery-timer-snapshot.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/app/runtime-resilience.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/app/session-claim-flush-safety.mjs	app	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/app/session-handoff-runtime.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/app/session-lifecycle-module.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/app/startup-lifecycle-module.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/app/storage-reset-connect-recovery.mjs	app	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/attachments/attachment-archive.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/attachments/attachment-deletion.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/attachments/attachment-library-lifecycle.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/attachments/attachment-storage-dedup.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/attachments/document-host-lifecycle.mjs	attachments	Node	fast/integration	unchecked JS	6.4	convert	push-target,source-reader,VM
+tests/integration/attachments/pdf-reader-lifetime.mjs	attachments	Node	fast/integration	unchecked JS	6.4	convert	push-target,source-reader,VM
+tests/integration/attachments/rich-attachment-api.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	VM
+tests/integration/attachments/worker-behavior.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	VM
+tests/integration/attachments/worker-client-lifetime.mjs	attachments	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/automatic-provider-backup.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/backup-capture-notification.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/backup/backup-persistence.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/backup-reminder.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/binary-backup-capacity.mjs	backup	Node	release	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/capture-safety.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/backup/current-canonical-roundtrip.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	VM
+tests/integration/backup/device-backup.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/backup/device-folder-layout.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/backup/device-folder-storage.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/drive-profile-binding.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/drive-repository-scale.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/backup/drive-security.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/backup/encryption.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/file-lifetimes.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/folder-encryption.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/import-lifecycle.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/no-backup-location.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/pending-provider-recovery.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/portable-backup.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/reconciliation-baseline-v2.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/repository-checkpoint.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/backup/repository-incremental-preparation.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/repository-restore.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/restore-assets.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/rich-backup-portability-boundary.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/backup/sync-shared-base.mjs	backup	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/exports/exports.mjs	exports	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/exports/scratch-gc.mjs	exports	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/insights/guide-preview-canonical.mjs	insights	Node	fast/integration	unchecked JS	6.5	convert	source-reader,VM
+tests/integration/insights/insights-memory-retention.mjs	insights	Node	fast/integration	unchecked JS	6.5	convert	VM
+tests/integration/insights/insights-scaling.mjs	insights	Node	fast/integration	unchecked JS	6.5	convert	VM
+tests/integration/insights/insights-transport-lifecycle.mjs	insights	Node	fast/integration	unchecked JS	6.5	convert	source-reader,VM
+tests/integration/insights/prefetch-lifecycle.mjs	insights	Node	fast/integration	unchecked JS	6.5	convert	source-reader
+tests/integration/insights/render-lifecycle.mjs	insights	Node	fast/integration	unchecked JS	6.5	convert	source-reader
+tests/integration/library/library-clear.mjs	library	Node	fast/integration	unchecked JS	6.4	convert	push-target,source-reader,VM
+tests/integration/plans/plan-host-data.mjs	plans	Node	fast/integration	unchecked JS	6.5	convert	source-reader,VM
+tests/integration/plans/saved-plans-logic.mjs	plans	Node	fast/integration	unchecked JS	6.5	convert	source-reader,VM
+tests/integration/pwa/application-update-safety.mjs	pwa	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/pwa/build-identity.mjs	pwa	Node	fast/integration	unchecked JS	6.3	convert	-
+tests/integration/pwa/native-capabilities.mjs	pwa	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/pwa/pwa-lifecycle.mjs	pwa	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/pwa/service-worker-lifecycle.mjs	pwa	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/review/reflection-session-codec.mjs	review	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/rich-text/attachment-busy-lifecycle.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	VM
+tests/integration/rich-text/editor-mount-lifetime.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	source-reader,VM
+tests/integration/rich-text/editor-persistence.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	-
+tests/integration/rich-text/reconciliation-engine.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	VM
+tests/integration/rich-text/reconciliation-ui.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	source-reader,VM
+tests/integration/rich-text/tags-and-import.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	VM
+tests/integration/rich-text/wg1-codec.mjs	rich-text	Node	release	unchecked JS	6.4	convert	VM
+tests/integration/rich-text/workspace-overlay-behavior.mjs	rich-text	Node	fast/integration	unchecked JS	6.4	convert	source-reader,VM
+tests/integration/search/search-client-lifetime.mjs	search	Node	fast/integration	unchecked JS	6.5	convert	source-reader,VM
+tests/integration/search/search-worker-extreme.mjs	search	Node	release	unchecked JS	6.5	convert	-
+tests/integration/search/search-worker.mjs	search	Node	fast/integration	unchecked JS	6.5	convert	VM
+tests/integration/storage/appmeta-contract.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/storage/asset-storage-contract.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/storage/attachment-integrity-audit.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/attachment-reference-recovery.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/background-gc-reliability.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/canonical-baseline.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/storage/canonical-mutation-epoch.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target
+tests/integration/storage/canonical-schema-separation.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/storage/capacity-profiles.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/storage/data-maintenance.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/deletion-recovery.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target
+tests/integration/storage/indexeddb-topology-retirement.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/storage/installation-identity.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/integrity-continuation.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/largefile-behavior.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/storage/managed-provider-backup-pending.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/note-persistence.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/storage/note-text-checked-once.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/storage/pending-reviews.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/storage/repository-integrity-state.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/storage/repository-journals.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	-
+tests/integration/storage/save-lane.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/strict-durability-boundaries.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/integration/storage/study-data-mark.mjs	storage	Node	fast/integration	unchecked JS	6.2	convert	source-reader,VM
+tests/integration/ui/application-outcomes.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/ui/background-diagnostics.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/ui/interactions.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/ui/kept-versions-c6.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/integration/ui/notification-lifecycle.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/ui/sound-delivery.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/ui/sound-synthesis.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/integration/ui/study-cue-lifecycle.mjs	ui	Node	fast/integration	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/app/canonical.mts	app	Node	fast/unit	strict node project	6.3	preserve and verify	source-reader,VM
+tests/unit/app/domain-model.mjs	app	Node	fast/unit	unchecked JS	6.5	convert	source-reader,VM
+tests/unit/app/foundation-host.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/app/internal-modules.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/app/navigation.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/app/operation-lifecycle.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/unit/app/ownership.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	push-target,source-reader,VM
+tests/unit/app/plan-controller.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/app/practice-pacer.mjs	app	Node	fast/unit	unchecked JS	6.5	convert	source-reader,VM
+tests/unit/app/presentation-defaults.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/app/timer-engine-logic.mjs	app	Node	fast/unit	unchecked JS	6.5	convert	source-reader,VM
+tests/unit/app/timer-state.mjs	app	Node	fast/unit	unchecked JS	6.3	convert	source-reader,VM
+tests/unit/backup/backup-operation-diagnostics.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/backup/backup-recovery-host.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/unit/backup/managed-recovery.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/backup/mutation-coordinator.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/backup/reconciliation.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/backup/repository-background.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/unit/backup/repository-retention.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/backup/sync-status.mjs	backup	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/exports/note-export.mjs	exports	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/exports/processing-contracts.mjs	exports	Node	fast/unit	unchecked JS	6.2	convert	-
+tests/unit/library/library-clear-planner.mjs	library	Node	fast/unit	unchecked JS	6.4	convert	source-reader,VM
+tests/unit/rich-text/image-processing.mjs	rich-text	Node	fast/unit	unchecked JS	6.4	convert	VM
+tests/unit/rich-text/reconciliation.mjs	rich-text	Node	fast/unit	unchecked JS	6.4	convert	-
+tests/unit/security/hashing.mjs	security	Node	fast/unit	unchecked JS	6.3	convert	-
+tests/unit/storage/indexeddb-durability.mjs	storage	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/storage/pending-review-codec.mjs	storage	Node	fast/unit	unchecked JS	6.2	convert	-
+tests/unit/storage/portable-preferences.mjs	storage	Node	fast/unit	unchecked JS	6.2	convert	source-reader,VM
+tests/unit/storage/profile-scope.mjs	storage	Node	fast/unit	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/unit/storage/profiles.mjs	storage	Node	fast/unit	unchecked JS	6.2	convert	push-target,source-reader,VM
+tests/unit/storage/saved-day-evidence.mjs	storage	Node	fast/unit	unchecked JS	6.2	convert	-
+tsconfig.base.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.browser.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.node.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.portable.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.service-worker.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.wordgard-declarations.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-
+tsconfig.worker.json	toolchain	tool configuration	support	configuration	6.1	maintain checked inclusion and pins	-

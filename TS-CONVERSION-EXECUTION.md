@@ -14,6 +14,8 @@ Inventory and benchmark the checked tooling, runners, contracts, tests and workf
 - With the production generated-case helper, seed 20261103 following 20261102 produced random draw 243 and generated device-1. Replaying 20261103 alone produced the same draw and device-0. Retention and sync consume the index; compare serialized inputs on replay.
 - Corrected the restore requirement in the phase register against the actual provider branch and durable-byte assertions. Remaining work includes full file ownership/selection inventory, F33 mapping, timing and coverage/mutation baseline dispositions.
 
+The [path inventory](docs/typescript/P6-BASELINE.tsv) assigns all 340 scoped paths to an environment, checking status, baseline selection and primary pass. Verified the four executable test directories exactly match fast discovery, the release registry and browser tiers. The 170 fast tests passed. The full risk-coverage command exited 1 because a Stage 1 change strengthened Library reference readback while its text anchor still names the old conditional; all 14 module floors passed. In a disposable copy matching the current guard restored the anchor observation. Suppressing that readback entirely still passed both library-clear and attachment-deletion behavioral suites. A separate six-file, zero-hit synthetic raw corpus was accepted by the standalone AST branch reporter (0/6036). P6.1 needs evidence provenance; P6.2 needs a controlled mismatched readback before retiring the safety anchor. Detailed baseline and F33 dispositions follow at handoff.
+
 ## Programme obligations
 
 - F-001: each feature owns its host callbacks/callers; P5.13 receives thin composition only.
