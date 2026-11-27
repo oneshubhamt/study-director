@@ -39,8 +39,8 @@ const PWA_RELEASE_SENTINEL='0'.repeat(24);
 function sourceFile(relative:string){return fs.readFileSync(path.join(SOURCE,relative),'utf8');}
 function sourceBytes(relative:string){return fs.readFileSync(path.join(SOURCE,relative));}
 function generatedRuntimeFile(relative:string){return fs.readFileSync(generatedRuntimePath(WORK,relative),'utf8');}
-function authoredModuleSourceFiles(module:ExternalModule){return Array.isArray(module.sources)?[...module.sources]:module.source?[module.source]:[];}
-function generatedModuleFiles(module:ExternalModule){return Array.isArray(module.generatedSources)?[...module.generatedSources]:module.generated?[module.generated]:[];}
+function authoredModuleSourceFiles(module:ExternalModule){return module.sources?[...module.sources]:module.source?[module.source]:[];}
+function generatedModuleFiles(module:ExternalModule){return module.generatedSources?[...module.generatedSources]:module.generated?[module.generated]:[];}
 function externalModuleFiles(module:ExternalModule){
   const authored=authoredModuleSourceFiles(module),generated=generatedModuleFiles(module);
   invariant((authored.length===0)!==(generated.length===0),`External module ${module.id} must have exactly one source origin.`);
@@ -339,15 +339,15 @@ export function renderBuild(){
 }
 
 function sourceHashes(){
-  return Object.fromEntries([
+  return Object.fromEntries<string>([
     htmlSource,...hostScripts.map(row=>row.source),...privateModules.map(row=>row.source),...authoredExternalSourceFiles(),...styleModules.map(row=>row.source),
     ...Object.values(platformFiles).map(row=>row.source),...staticAssets.map(row=>row.source)
-  ].sort().map(name=>[name,sha256(sourceBytes(name))]));
+  ].sort().map(name=>[name,sha256(sourceBytes(name))] as const));
 }
 function generatedRuntimeHashes(){
-  return Object.fromEntries(generatedRuntimeFiles().sort().map(name=>[name,sha256(fs.readFileSync(generatedRuntimePath(WORK,name)))]));
+  return Object.fromEntries<string>(generatedRuntimeFiles().sort().map(name=>[name,sha256(fs.readFileSync(generatedRuntimePath(WORK,name)))] as const));
 }
-function outputHashes(files:FileMap){return Object.fromEntries([...files].sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)]));}
+function outputHashes(files:FileMap){return Object.fromEntries<string>([...files].sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>[name,sha256(value)] as const));}
 function validateReleaseIdentities(files:FileMap,identity:Identity,label:string){
   const allowed=new Set([identity.release,identity.id,`sd${identity.id}`]);
   for(const [name,value] of files){
@@ -367,7 +367,7 @@ function verifyPwaTarget(files:FileMap,pwa:PwaIdentity,label:string){
   invariant(typeof serviceWorker==='string'&&serviceWorker.split(releaseNeedle).length===2,`${label} service worker release identity drifted.`);
   const normalizedWorker=serviceWorker.replace(releaseNeedle,normalizedRelease);
   invariant(pwa.releaseId===sha256(JSON.stringify({precache:pwa.precache,worker:sha256(normalizedWorker)})).slice(0,24),`${label} worker-inclusive PWA identity drifted from actual output.`);
-  invariant(Array.isArray(pwa.precache)&&pwa.precache.length>0,`${label} precache inventory is empty.`);
+  invariant(Boolean(Array.isArray(pwa.precache))&&pwa.precache.length>0,`${label} precache inventory is empty.`);
   const paths=pwa.precache.map(asset=>asset.path);
   invariant(new Set(paths).size===paths.length,`${label} precache inventory contains duplicates.`);
   invariant(!paths.some(value=>/sw\.js|firebase\.json|\.sdbackup|assets\/licenses\//i.test(value)),`${label} precache inventory contains an excluded asset.`);
