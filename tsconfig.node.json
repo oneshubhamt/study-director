@@ -17,6 +17,14 @@
     "tests/helpers/subprocess.mts",
     "tests/helpers/mutation-observer.mts",
     "tests/helpers/mutation-evidence.mts",
-    "tests/helpers/mutation.mts"
+    "tests/helpers/mutation.mts",
+    "tests/helpers/release-tests.mts",
+    "tests/helpers/test-discovery.mts",
+    "tests/helpers/coverage-selection.mts",
+    "tests/helpers/coverage-risk.mts",
+    "tests/helpers/output-paths.mts",
+    "tests/helpers/coverage-runtime.mts",
+    "tests/helpers/coverage-provenance.mts",
+    "tests/unit/app/coverage-provenance.mts"
   ]
 }

@@ -57,16 +57,16 @@ function repositoryDiff(before,after){
   for(const file of after.keys())if(!before.has(file))changed.push(file);
   return [...new Set(changed)].sort();
 }
-function isolatedEnvironment(tempRoot){
+function isolatedEnvironment(tempRoot,relative){
   const env={...process.env};
-  for(const key of ['NODE_OPTIONS','NODE_PATH','SD_ENCRYPTED_TEST','SD_MINIFIED_TEST','SD_TEST_ARTIFACT_DIR','TEST_JOBS'])delete env[key];
+  for(const key of ['NODE_OPTIONS','NODE_PATH','NODE_V8_COVERAGE','SD_COVERAGE_TEST_ID','SD_ENCRYPTED_TEST','SD_MINIFIED_TEST','SD_TEST_ARTIFACT_DIR','TEST_JOBS'])delete env[key];
   Object.assign(env,{
     TZ:'UTC',TERM:'dumb',LANG:'C.UTF-8',LC_ALL:'C.UTF-8',NO_COLOR:'1',FORCE_COLOR:'0',CI:'1',
     HOME:path.join(tempRoot,'home'),TMPDIR:path.join(tempRoot,'tmp'),TEMP:path.join(tempRoot,'tmp'),TMP:path.join(tempRoot,'tmp'),
     XDG_CACHE_HOME:path.join(tempRoot,'cache'),SD_TEST_ARTIFACT_DIR:path.join(tempRoot,'artifacts'),
     SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0'
   });
-  if(process.env.SD_COVERAGE_DIR)env.SD_COVERAGE_DIR=path.resolve(process.env.SD_COVERAGE_DIR);
+  if(process.env.SD_COVERAGE_DIR){env.SD_COVERAGE_DIR=path.resolve(process.env.SD_COVERAGE_DIR);env.SD_COVERAGE_TEST_ID=relative;}
   for(const directory of [env.HOME,env.TMPDIR,env.XDG_CACHE_HOME,env.SD_TEST_ARTIFACT_DIR])fs.mkdirSync(directory,{recursive:true});
   return env;
 }
@@ -108,7 +108,7 @@ function runFile(relative){
       resolve(result);
     };
     let child;
-    try{child=spawn(process.execPath,args,{cwd:root,env:isolatedEnvironment(tempRoot),stdio:['ignore',stdout,stderr]});}
+    try{child=spawn(process.execPath,args,{cwd:root,env:isolatedEnvironment(tempRoot,relative),stdio:['ignore',stdout,stderr]});}
     catch(error){finish(null,null,error);return;}
     const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},timeoutMs);
     child.once('error',error=>finish(null,null,error));
@@ -123,6 +123,7 @@ if(target==='targeted'){
   for(const file of selected)if(!available.has(file))throw new Error(`Unknown fast-test path: ${file}`);
 }
 runtimePreflight();
+if(process.env.SD_COVERAGE_DIR&&!process.env.SD_COVERAGE_RUN_ID)throw new Error('Coverage instrumentation requires a producer run ID.');
 const files=(target==='targeted'?selected.filter(file=>categories.includes(categoryOf(file))):['fast','targeted'].includes(target)?categories.flatMap(fastFiles):fastFiles(target));
 if(!files.length)throw new Error(`No fast ${target} tests found.`);
 

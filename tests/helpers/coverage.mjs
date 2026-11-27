@@ -1,4 +1,6 @@
-import {coverageSelection} from './coverage-selection.mjs';
+import {coverageSelection} from './coverage-selection.mts';
+import {randomUUID} from 'node:crypto';
+import {artifactInventory,createReceipt,fullTestIds,parseRawCoverage,sourceIdentity,writeReceipt} from './coverage-provenance.mts';
 import {eraseTypes} from '../../build/source-script.mts';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,7 +125,7 @@ function summarize(file,script){
 function loadCoverage(directory){
   const scripts=new Map();
   for(const file of walk(directory).filter(file=>path.basename(file).startsWith('coverage-')&&file.endsWith('.json'))){
-    const json=JSON.parse(fs.readFileSync(file,'utf8'));
+    const json=parseRawCoverage(fs.readFileSync(file,'utf8'));
     for(const script of json.result||[]){
       const normalized=normalizeUrl(script.url);
       if(!normalized)continue;
@@ -132,6 +134,7 @@ function loadCoverage(directory){
       if(old)mergeScript(old,candidate);else scripts.set(normalized,candidate);
     }
   }
+  for(const [file,script] of scripts)if(!script.functions.some(fn=>fn.ranges.some(range=>range.count>0)))scripts.delete(file);
   return scripts;
 }
 function total(rows,key){
@@ -181,19 +184,19 @@ function printTable(rows){
 const keepRawTarget=keepRaw?externalOutputPath(keepRaw,'Raw coverage directory'):null;
 if(keepRawTarget&&fs.existsSync(keepRawTarget)&&fs.readdirSync(keepRawTarget).length)throw new Error(`--keep-raw needs a new or empty directory; ${keepRawTarget} already has files.`);
 const coverageDir=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-coverage-'));
+const runId=randomUUID(),identity=sourceIdentity(root),fullTests=fullTestIds(root),tests=selection.targeted?[...selection.tests].sort():fullTests;
 try{
+  if(tests.some(test=>!fullTests.includes(test)))throw new Error('Coverage selects only discovered unit/integration tests.');
   const runs=selection.targeted?[['targeted',...selection.tests]]:[['unit'],['integration']];
   for(const args of runs){
     const result=spawnSync(process.execPath,['tests/helpers/run-category.mjs',...args],{
-      cwd:root,env:{...process.env,SD_COVERAGE_DIR:coverageDir},stdio:'inherit',timeout:900000
+      cwd:root,env:{...process.env,SD_COVERAGE_DIR:coverageDir,SD_COVERAGE_RUN_ID:runId},stdio:'inherit',timeout:900000
     });
     if(result.error)throw result.error;
-    if(result.status!==0)process.exit(result.status??1);
+    if(result.status!==0)throw new Error(`Coverage test execution failed: ${args.join(' ')} (exit ${result.status})`);
   }
-  if(keepRawTarget){
-    fs.mkdirSync(keepRawTarget,{recursive:true});
-    for(const file of fs.readdirSync(coverageDir))fs.copyFileSync(path.join(coverageDir,file),path.join(keepRawTarget,file));
-  }
+  artifactInventory(coverageDir,runId,tests);
+  if(JSON.stringify(sourceIdentity(root))!==JSON.stringify(identity))throw new Error('Coverage source identity changed during the producer run.');
   const scripts=loadCoverage(coverageDir);
   const rows=[...scripts].map(([file,script])=>summarize(file,script));
   const observed=new Set(scripts.keys());
@@ -210,6 +213,13 @@ try{
     lines:total(rows,'lines'),branches:total(rows,'branches'),functions:total(rows,'functions'),unobservedFiles:unobserved,
     expectedUnobserved,unexpectedUnobserved,risk
   };
+  const receipt=createReceipt({runId,identity,tests,status:summary.status,scope:selection.targeted?'targeted':'full'},coverageDir);
+  if(keepRawTarget){
+    fs.mkdirSync(keepRawTarget,{recursive:true});
+    for(const artifact of receipt.artifacts)fs.copyFileSync(path.join(coverageDir,artifact.file),path.join(keepRawTarget,artifact.file),fs.constants.COPYFILE_EXCL);
+    writeReceipt(keepRawTarget,receipt);
+  }
+  summary.provenance=receipt;
   printTable(rows);
   console.log('\nCoverage totals (observed production files only):');
   console.log(JSON.stringify(summary,null,2));

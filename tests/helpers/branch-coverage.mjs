@@ -5,7 +5,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {parse} from 'acorn';
-import {externalOutputPath} from './output-paths.mjs';
+import {externalOutputPath} from './output-paths.mts';
+import {fullTestIds,parseRawCoverage,sourceIdentity,validateReceipt} from './coverage-provenance.mts';
 
 // --from <dir> reads raw V8 data kept by coverage.mjs --keep-raw instead of
 // running the suite again; without it the unit and integration tests run here.
@@ -27,9 +28,10 @@ function normalize(url){
 }
 function visit(node,fn){if(!node||typeof node!=='object')return;if(typeof node.type==='string')fn(node);for(const [key,value] of Object.entries(node)){if(['start','end','loc'].includes(key))continue;if(Array.isArray(value))for(const child of value)visit(child,fn);else if(value&&typeof value==='object')visit(value,fn);}}
 try{
-  if(!fromDir)for(const category of ['unit','integration']){const run=spawnSync(process.execPath,['tests/helpers/run-category.mjs',category],{cwd:root,env:{...process.env,SD_COVERAGE_DIR:coverageDir},stdio:'inherit',timeout:900000});if(run.error)throw run.error;if(run.status!==0)process.exit(run.status??1);}
+  if(!fromDir){const run=spawnSync(process.execPath,['tests/helpers/coverage.mjs','--keep-raw',coverageDir],{cwd:root,stdio:'inherit',timeout:1800000});if(run.error)throw run.error;if(run.status!==0)throw new Error(`Coverage producer failed (exit ${run.status}).`);}
+  const receipt=validateReceipt(coverageDir,sourceIdentity(root),fullTestIds(root));
   const scripts=new Map();
-  for(const file of fs.readdirSync(coverageDir).filter(name=>name.startsWith('coverage-')&&name.endsWith('.json'))){const json=JSON.parse(fs.readFileSync(path.join(coverageDir,file),'utf8'));for(const script of json.result||[]){const normalized=normalize(script.url);if(!normalized)continue;const list=scripts.get(normalized)||[];list.push(script);scripts.set(normalized,list);}}
+  for(const file of fs.readdirSync(coverageDir).filter(name=>name.startsWith('coverage-')&&name.endsWith('.json'))){const json=parseRawCoverage(fs.readFileSync(path.join(coverageDir,file),'utf8'));for(const script of json.result||[]){const normalized=normalize(script.url);if(!normalized)continue;const list=scripts.get(normalized)||[];list.push(script);scripts.set(normalized,list);}}
   const rows=[];
   for(const [file,observations] of scripts){
     const source=eraseTypes(renderCoverageTemplate(fs.readFileSync(file,'utf8')),file),ast=parse(source,{ecmaVersion:'latest',sourceType:'module',allowHashBang:true});
@@ -49,8 +51,8 @@ try{
   }
   const covered=rows.reduce((n,row)=>n+row.branches.covered,0),total=rows.reduce((n,row)=>n+row.branches.total,0);
   if(!total)throw new Error('AST branch coverage observed no branch edges.');
-  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.ts','source/core/library-clear.ts','source/core/attachments.ts','source/core/backup.ts'])if(!rows.some(row=>row.file===critical))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
-  const summary={status:'PASS',scope:'fast-runtime-ast-branch-edges',branches:{covered,total,percent:Math.round(covered/total*10000)/100},files:rows.sort((a,b)=>a.file.localeCompare(b.file))};
+  for(const critical of ['source/core/canonical.ts','source/core/save-lane.ts','portable/stream-encryption.ts','source/core/library-clear.ts','source/core/attachments.ts','source/core/backup.ts'])if(!rows.some(row=>row.file===critical&&row.branches.covered>0))throw new Error(`Critical branch-coverage module was not observed: ${critical}`);
+  const summary={status:'PASS',provenance:{runId:receipt.runId,identity:receipt.identity,tests:receipt.tests.length,artifacts:receipt.artifacts.length},scope:'fast-runtime-ast-branch-edges',branches:{covered,total,percent:Math.round(covered/total*10000)/100},files:rows.sort((a,b)=>a.file.localeCompare(b.file))};
   console.log(JSON.stringify(summary,null,2));
   const outIndex=process.argv.indexOf('--json');if(outIndex>=0){const target=process.argv[outIndex+1];if(!target)throw new Error('--json requires an output path.');fs.writeFileSync(externalOutputPath(target,'AST branch coverage JSON output'),JSON.stringify(summary,null,2)+'\n');}
 }finally{if(!fromDir)fs.rmSync(coverageDir,{recursive:true,force:true});}
