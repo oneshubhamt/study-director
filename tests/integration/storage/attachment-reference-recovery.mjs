@@ -32,11 +32,11 @@ async function fixture(){
   const controller=IntegrityHost.createController(Object.freeze({
     lifecycle:registry.require('operation-lifecycle',1),
     metadata:Object.freeze({
-      attachment:Object.freeze({owner:'host',read:async()=>durable,write:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;return {family:'integrity',value:state,updatedAt:new clock.Date().toISOString()};}}),
+      attachment:Object.freeze({owner:'host',read:async()=>durable,write:async(_key,state,options)=>{assert.equal(options.strict,true);options.assertOrigin();durable=state;writes++;return {family:'integrity',value:state,updatedAt:new clock.Date().toISOString()};}}),
       repository:Object.freeze({owner:'backup',read:async()=>{throw new Error('repository integrity path is not used by this attachment witness');},transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}})
     }),
     attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',storage:store,references,validAttachmentId:Attachments.validId,
-    data:Object.freeze({datasetRevision:()=>data.dailyRecords.datasetRevision()}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true}),
+    data:Object.freeze({datasetRevision:()=>data.dailyRecords.datasetRevision()}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true,revision:()=>1}),
     background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),backgroundTasks:background,
     provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),
     continuation:Object.freeze({verify:async()=>{throw new Error('repository continuation is unused');}}),normalizeContinuation:()=>null,

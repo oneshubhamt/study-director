@@ -53,9 +53,9 @@ const noop=()=>{};
 // locally committed record was not saved, or emit a success followed by failure.
 {
   const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true,failAck=false,failClear=false,failCheckpoint=false,acknowledged=0,clears=0,checkpoints=0,expectBlockedAtCommit=false;
-  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,
-    flushFinalActiveSessionCheckpoint:async()=>{assert.equal(context.activeSessionPersistenceBlocked,false,'final checkpoint must run before later Active Session writes are blocked');checkpoints++;if(failCheckpoint)throw new Error('checkpoint unavailable');return {ok:true,error:null,storage:{idb:true}};},
-    ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{assert.equal(context.activeSessionPersistenceBlocked,expectBlockedAtCommit,'close paths block only after the verified checkpoint');if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error)};
+  const context={notifications:port,saveDayInProgress:false,rolloverSaveInProgress:false,captureStudySaveOrigin:()=>()=>{},assertCheckpointCurrent:noop,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,
+    flushFinalActiveSessionCheckpoint:async()=>{assert.equal(context.activeSessionPersistenceBlocked,false,'final checkpoint must run before later Active Session writes are blocked');checkpoints++;if(failCheckpoint)throw new Error('checkpoint unavailable');return {date:'2026-09-30',snapshot:{contentRevision:1}};},
+    ReviewView:{refresh:()=>({evidence:{date:'2026-09-30'}}),sync:noop},commitDailyRecord:async()=>{assert.equal(context.activeSessionPersistenceBlocked,expectBlockedAtCommit,'close paths block only after the verified checkpoint');if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error)};
   vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function saveDayRecord('),review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */')),context);
   assert.equal(await context.saveDayRecord(),false);
   let event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/saved locally.*follow-up/i);assert.equal(coordinator.eventStatus().toasts.length,1);
@@ -95,12 +95,12 @@ const noop=()=>{};
 {
   const oldDate='2026-11-12',newDate='2026-11-13',events=[];let reconciledDate=oldDate;
   const context={console,Promise,Object,Date,Error,TypeError,Symbol,
-    rolloverSaveInProgress:false,activeSessionPersistenceBlocked:false,appCanMutate:()=>true,
+    rolloverSaveInProgress:false,saveDayInProgress:false,captureStudySaveOrigin:()=>()=>{},assertCheckpointCurrent:noop,activeSessionPersistenceBlocked:false,appCanMutate:()=>true,
     SessionState:{studyDate:oldDate},todayISO:()=>newDate,stopTimerExecution:()=>events.push('stop'),cancelPendingLiveDraftSave:()=>events.push('cancel'),
     TASKS:[{kind:'work'}],isTrackableBlock:()=>true,isLiveTrackableTimer:()=>false,
     Runtime:{currentIndex:()=>0,setSafetyMessage:message=>events.push(['safety',message])},
     PracticePacer:{finalizeForDayClose:()=>events.push('finalize')},captureReviewInputs:noop,syncUnfinishedNoteDraft:noop,saveReviewState:()=>true,
-    flushFinalActiveSessionCheckpoint:async()=>{events.push('checkpoint');return {ok:true,error:null,storage:{idb:true}};},
+    flushFinalActiveSessionCheckpoint:async()=>{events.push('checkpoint');return {date:oldDate,snapshot:{contentRevision:9}};},
     commitDailyRecord:async()=>{events.push('commit');return {doc:{sourceRevision:9},rec:{date:oldDate}};},
     SessionEvidenceGateway:{snapshot:()=>({date:oldDate})},markStorageHealthTimestamp:noop,
     clearCanonicalSessionAfterSavedDay:async()=>{events.push('clear');throw new Error('canonical clear failed');},
@@ -159,7 +159,7 @@ const noop=()=>{};
 // refresh fails, while a real persistence failure remains a failed save.
 {
   const {coordinator,port}=createNotifications('review');let refreshError=new Error('refresh unavailable'),storageError=null;
-  const context={notifications:port,saveDayInProgress:false,appCanMutate:()=>true,reflectionOnlyReady:()=>true,getReviewDate:()=> '2026-10-01',
+  const context={notifications:port,saveDayInProgress:false,rolloverSaveInProgress:false,appCanMutate:()=>true,reflectionOnlyReady:()=>true,getReviewDate:()=> '2026-10-01',
     resolveReviewEditorBinding:()=>({date:'2026-10-01',reflection:'Committed reflection'}),document:{querySelector:()=>({})},
     flushReflectionOnlySave:async()=>{if(storageError)throw storageError;return {canonical:'Committed reflection',followup:Promise.resolve(refreshError)};},
     ReviewView:{sync:noop},syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error)
