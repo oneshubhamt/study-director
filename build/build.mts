@@ -194,9 +194,9 @@ function assertCanonicalSource(){
       invariant(definitions.length===1,`Private module ${module.id} must define exactly one matching registry entry.`);
     }
   }
-  const required=[...html.matchAll(/INTERNAL_MODULES\.load\('([^']+)'/g)].map(match=>match[1]).sort();
+  const requiredRegistryIds=[...html.matchAll(/INTERNAL_MODULES\.load\('([^']+)'/g)].map(match=>match[1]).sort();
   const expectedRequired=privateModules.filter(module=>module.id!=='internal').map(module=>module.registryId||module.id).sort();
-  invariant(JSON.stringify(required)===JSON.stringify(expectedRequired),'The host must resolve every private application module exactly once and no others.');
+  invariant(JSON.stringify(requiredRegistryIds)===JSON.stringify(expectedRequired),'The host must resolve every private application module exactly once and no others.');
   invariant(!/INTERNAL_MODULES\.require\(/u.test(html),'The host must validate private-module exports through the canonical loader.');
   for(const module of externalModules){
     const value=externalModuleSource(module);
