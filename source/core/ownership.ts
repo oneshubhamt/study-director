@@ -326,7 +326,7 @@ const createModule=()=>{
       evaluationPending=(async()=>{
         if(webLocks){
           const ok=await acquireWebLock(false,true);
-          if(!ok&&state!==OWNERSHIP_STATES.SECONDARY)setPrimary(false);
+          if(!ok)setPrimary(false);
           return ok;
         }
         const owner=readOwner();

@@ -65,7 +65,8 @@ const sdPwaUpdateHostFactory=(()=>{
    functions(input.persistence,['settleDiary','flushPlanDraft','planAuthoredText','planReadDraft','savePlanDraft','settlePlanData','readStoredPlan','flushPendingReview','settleReviewEditor','writeLiveDraft','flushNotes','noteFailure','flushDeletionRecovery','settleActiveSession','loadActiveSession','activeSessionIssue'],'PWA update persistence ports');
    functions(input.effects,['automaticBackupsWaiting','flushAutomaticBackups','pauseTimer','togglePacer','scheduleSyncStatus','publishNotice','capture','localGet','localSet'],'PWA update effect ports');
    const {configuration,environment,state,reservation,persistence,effects}=input,doc=environment.document,win=environment.window;
-   const READY_DELAY=650,SAFETY_RETRY=5*60*1000,EXTERNAL_RETRY=5000,EXTERNAL_OWNERSHIP_GRACE=30000,CHECK_INTERVAL=24*60*60*1000,CHECK_RETRY_BASE=5*60*1000,CHECK_RETRY_MAX=60*60*1000,BACKUP_WAIT=60*1000,CHECK_LOCK='study-director-pwa-update-check-v1',EDIT_IDLE=1800;
+   const READY_DELAY=650,SAFETY_RETRY=5*60*1000,EXTERNAL_RETRY=5000,CHECK_INTERVAL=24*60*60*1000,CHECK_RETRY_BASE=5*60*1000,CHECK_RETRY_MAX=60*60*1000,BACKUP_WAIT=60*1000,CHECK_LOCK='study-director-pwa-update-check-v1',EDIT_IDLE=1800;
+   const EXTERNAL_OWNERSHIP_GRACE=30000;
    let latest:PwaLifecycleStatus|null=null,retryTimer:number|null=null,evaluationRunning=false,automaticBlock='',checkTimer:number|null=null,checkDueAt=0,checkRunning=false,lastEditableAt=0,lastSuccessMemory=0,failureCount=0,retryAt=0;
    type ReservationToken={requestId:string;ownerRevision:number;ownerState:string;workRevision:number|null;authority:UpdateAuthority|null;follower:boolean};
    let activeReservation:ReservationToken|null=null;
