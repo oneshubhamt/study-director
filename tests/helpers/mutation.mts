@@ -134,7 +134,7 @@ const witnesses:Readonly<Record<string,readonly string[]>>={
 
 function isolatedEnvironment(tempRoot:string):NodeJS.ProcessEnv{
   const env={...process.env};
-  for(const key of ['NODE_OPTIONS','NODE_PATH','NODE_V8_COVERAGE','SD_COVERAGE_DIR','SD_ENCRYPTED_TEST','SD_MINIFIED_TEST','SD_TEST_ARTIFACT_DIR','SD_CASE_SEED','SD_CASE_FAMILY'])delete env[key];
+  for(const key of ['NODE_OPTIONS','NODE_PATH','NODE_V8_COVERAGE','SD_COVERAGE_DIR','SD_ENCRYPTED_TEST','SD_MINIFIED_TEST','SD_TEST_ARTIFACT_DIR','SD_CASE_SEED','SD_CASE_FAMILY','SD_CASE_TRACE_SEED','SD_CASE_TRACE_FAMILY'])delete env[key];
   const directories={HOME:path.join(tempRoot,'home'),TMPDIR:path.join(tempRoot,'tmp'),XDG_CACHE_HOME:path.join(tempRoot,'cache'),SD_TEST_ARTIFACT_DIR:path.join(tempRoot,'artifacts')};
   Object.assign(env,directories,{TZ:'UTC',TERM:'dumb',LANG:'C.UTF-8',LC_ALL:'C.UTF-8',NO_COLOR:'1',FORCE_COLOR:'0',CI:'1',TEMP:directories.TMPDIR,TMP:directories.TMPDIR,SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0',SD_MUTATION_EVIDENCE:path.join(tempRoot,'exception.json')});
   for(const directory of Object.values(directories))fs.mkdirSync(directory,{recursive:true});

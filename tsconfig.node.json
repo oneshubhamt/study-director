@@ -34,6 +34,7 @@
     "tests/helpers/artifacts.mts",
     "tests/helpers/quarantine.mts",
     "tests/helpers/coverage.mts",
-    "tests/helpers/branch-coverage.mts"
+    "tests/helpers/branch-coverage.mts",
+    "tests/helpers/promotion-evidence.mts"
   ]
 }

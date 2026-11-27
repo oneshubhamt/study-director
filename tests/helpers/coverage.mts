@@ -16,6 +16,7 @@ const keepRaw=keepRawIndex>=0?selectionArgs[keepRawIndex+1]:null;
 if(keepRawIndex>=0&&(!keepRaw||keepRaw.startsWith('--')))throw new Error('--keep-raw requires a directory outside the repository.');
 if(keepRawIndex>=0)selectionArgs.splice(keepRawIndex,2);
 const selection=coverageSelection(selectionArgs);
+if(!selection.targeted&&(process.env['SD_CASE_SEED']!==undefined||process.env['SD_CASE_FAMILY']!==undefined))throw new Error('Full coverage cannot run a replay-filtered generated suite.');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const runtimeRoots=['source','rich-text','portable'];
 const extensions=new Set(['.js','.mjs','.ts']);
