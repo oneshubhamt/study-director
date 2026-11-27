@@ -5,6 +5,7 @@ on:
     branches: [ts-exp]
     paths:
       - '.github/workflows/p61-tooling-evidence.yml'
+      - 'tests/helpers/verification/terser-compression-contracts.mts'
   workflow_dispatch:
 
 permissions:
