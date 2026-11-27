@@ -269,7 +269,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
   const t=fixture({failAt:'metadata'});
   const preflight=await t.coordinator.preflight({savedDays:false,notes:false,attachments:true});
   await assert.rejects(()=>t.coordinator.execute({selection:preflight.selection,signature:preflight.signature,forceReferenced:true}),/injected metadata/);
-  assert.equal(t.state().restored,1);
+  assert.equal(t.state().restored,1,'metadata failure restores journaled state');
   assert.equal(t.state().journal,null,'successful rollback must clear journal');
   assert.ok(t.order.indexOf('restore')>t.order.indexOf('metadata:'+A+','+B));
   assert.ok(!t.order.includes('sweep'),'failed logical transaction must not sweep OPFS');
@@ -306,7 +306,7 @@ function fixture({failAt='',stale=false,recoveryJournal=null,readFailure=false,c
   const result=await t.coordinator.recoverInterrupted();
   assert.equal(result.recovered,true);
   assert.equal(t.state().journal,null);
-  assert.equal(t.state().restored,1);
+  assert.equal(t.state().restored,1,'startup replays journaled state');
   assert.deepEqual(t.order,['lock:library-clear-recovery','journal:startup-rolling-back','restore','verify:restore','journal:startup-rolled-back','journal:clear','clear-fault']);
   console.log('ok - startup recovery restores and clears interrupted Library journal');
 }

@@ -759,7 +759,8 @@ let syncWorld=null;
   await B.upload();assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'one by A\n\ntwo by B');
   a.notes=note('one, A again\n\ntwo by B');await A.upload();await new Promise(resolve=>setTimeout(resolve,3));b.notes=note('one, B again\n\ntwo by B');
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one, B again\n\ntwo by B','the newer edit shows');
-  const keptNote=b.reviews.open().find(review=>review.subject==='note');assert.equal(keptNote.kept.text,'one, A again\n\ntwo by B','the other edit is kept');
+  const keptNote=b.reviews.open().find(review=>review.subject==='note');
+   assert.equal(keptNote.kept.text,'one, A again\n\ntwo by B','the other edit is kept');
   assert.deepEqual([keptNote.keptFrom,keptNote.keptChangedAt],[a.installationId,a.notes.Shared.updatedAt],'a kept note edit names its device and edit time');assert.equal(keptNote.base.text,'one by A\n\ntwo by B','with what both last shared');
   let offered=null;b.reviewText=(item,options)=>{offered={item,purpose:options.purpose};return 'one, A and B\n\ntwo by B';};
   assert.equal((await B.reviewKept({ref:'Shared'})).reviewed,1);b.reviewText=null;
@@ -2108,7 +2109,9 @@ let mergeRuleCases=0;
       }else{
         const [newer,older]=theirs.ms>mine.ms?[theirs,mine]:[mine,theirs];
         assert.equal(live,newer.text,`${label}: the newer edit shows`);
-        assert.equal(held.length,1,`${label}: the other is kept for review`);assert.equal(held[0].kept.text,older.text,label);assert.equal(held[0].base?.text,baseText(key),`${label}: with what both last shared`);expectedReviews+=1;
+        assert.equal(held.length,1,`${label}: the other is kept for review`); 
+        assert.equal(held[0].kept.text,older.text,label);
+        assert.equal(held[0].base?.text,baseText(key),`${label}: with what both last shared`);expectedReviews+=1;
       }
     }
     for(const date of dates){

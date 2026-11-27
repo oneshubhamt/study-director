@@ -192,7 +192,9 @@ timerState.mode='paused';timerState.paused=true;timerState.breakStartMs=wakeNow+
 timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:wakeNow-90000,durationSec:600,totalPausedMs:0,pausedStartedMs:wakeNow+5000,lastTickMs:futureLast};
 timerState.inactiveGap={id:'gap',taskIdx:0,gapMs:30000,lastMs:wakeNow-30000,detectedAtMs:wakeNow+2000,source:'sleep'};
 assert.equal(engine.syncTimerAfterWake(),false);
-assert.equal(timerState.runtime.lastTickMs,wakeNow);assert.equal(timerState.runtime.startMs,wakeNow-100000);assert.equal(timerState.runtime.pausedStartedMs,wakeNow-5000);assert.equal(timerState.breakStartMs,wakeNow-5000);assert.equal(timerState.activeBreak.startedAtMs,wakeNow-5000);assert.equal(timerState.inactiveGap.lastMs,wakeNow-40000);assert.equal(timerState.inactiveGap.detectedAtMs,wakeNow-8000);
+assert.equal(timerState.runtime.lastTickMs,wakeNow);
+ assert.equal(timerState.runtime.startMs,wakeNow-100000);
+ assert.equal(timerState.runtime.pausedStartedMs,wakeNow-5000);assert.equal(timerState.breakStartMs,wakeNow-5000);assert.equal(timerState.activeBreak.startedAtMs,wakeNow-5000);assert.equal(timerState.inactiveGap.lastMs,wakeNow-40000);assert.equal(timerState.inactiveGap.detectedAtMs,wakeNow-8000);
 assert.equal(practiceEvents.some(event=>event[0]==='rebase'&&event[1]===-10000),true);
 
 // A running timer restored after a cross-device handoff resumes RUNNING on the same task,

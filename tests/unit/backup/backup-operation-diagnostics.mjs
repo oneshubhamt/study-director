@@ -34,7 +34,7 @@ stored='';const concurrent=make(),foregroundId=concurrent.start('device-backup',
 assert.equal(concurrent.mark('ambiguous',{}),false,'an implicit phase must never choose between live operations');
 assert.equal(concurrent.mark('device-write',{target:'device-folder'}),true,'a unique target can route legacy implicit phases');
 for(let index=0;index<8;index++){const id=concurrent.start('other-background','Canonical storage',{background:true});concurrent.finish({status:'pending',reason:'gc-grace'},id);}
-assert.equal(concurrent.snapshot().find(row=>row.id===foregroundId).status,'running','history pressure cannot evict or supersede a running operation');
+assert.equal(concurrent.snapshot().find(row=>row.id===foregroundId)?.status,'running','history pressure cannot evict or supersede a running operation');
 assert.equal(concurrent.snapshot().find(row=>row.id===backgroundId).status,'running');assert.equal(concurrent.status().activeIds.length,2);
 assert.equal(concurrent.finish({status:'yielded',reason:'budget'},backgroundId),true);assert.equal(concurrent.finish({cancelled:true},foregroundId),true);assert.equal(concurrent.mark('late',{},foregroundId),false);
 assert.equal(concurrent.snapshot().length,3);assert.match(concurrent.text(),/yielded/u);assert.match(concurrent.text(),/cancelled/u);

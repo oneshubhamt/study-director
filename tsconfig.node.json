@@ -13,6 +13,10 @@
     "tests/unit/app/canonical.mts",
     "types/checks/node.ts",
     "tests/helpers/generated-cases.mts",
-    "tests/unit/app/generated-cases.mts"
+    "tests/unit/app/generated-cases.mts",
+    "tests/helpers/subprocess.mts",
+    "tests/helpers/mutation-observer.mts",
+    "tests/helpers/mutation-evidence.mts",
+    "tests/helpers/mutation.mts"
   ]
 }

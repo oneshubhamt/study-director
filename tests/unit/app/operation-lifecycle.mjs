@@ -12,7 +12,8 @@ const task=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;r
 const tick=()=>{for(const [id,row] of [...timers]){timers.delete(id);row.fn();}};
 {
   const a=task(),b=task(),wait=lifecycle.waitForSettlement([a.promise,b.promise],clock);let finished=false;wait.then(()=>{finished=true;});
-  a.resolve('one');await Promise.resolve();assert.equal(finished,false);b.resolve('two');assert.deepEqual(await wait,['one','two']);assert.equal(timers.size,0);
+  a.resolve('one');await Promise.resolve();assert.equal(finished,false);b.resolve('two');assert.deepEqual(await wait,['one','two']);
+  assert.equal(timers.size,0,'settled operations clear the deadline');
   cases.push('all real operations must release before the barrier opens');
 }
 {
