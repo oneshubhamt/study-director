@@ -32,6 +32,24 @@ try{
   assert.equal(capture.ok,true,`a backup captures the session (${capture.error||''})`);
   assert.doesNotMatch(capture.warning,/from memory/u,'the session comes from storage, not memory');
 
+  // A saved Study Day whose live/recoverable session is still retained has one
+  // reflection owner: Review. Library may display it, but must not open a
+  // competing editor or delete the reflection until that session is retired.
+  const retainedDay=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));await d.goTab('review');await wait(120);const field=document.getElementById('daily-reflection');field.value='Retained session reflection';d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();if(!await d.saveDayRecord())throw new Error('retained-session Save Today failed');await d.goTab('library');await wait(120);return d.todayISO();})()`);
+  await page.click('#library-tab-days');
+  await waitFor(()=>page.evaluate(`!document.getElementById('library-days').hidden`),{label:'Library Days section'});
+  const diaryOpen=await page.evaluate(`document.getElementById('library-diary').open`);
+  if(!diaryOpen)await page.click('#library-diary > summary');
+  await waitFor(()=>page.evaluate(`!!document.querySelector('#library-diary-list [data-diary-date="${retainedDay}"]')`),{label:'retained Study Day in Diary'});
+  await page.click(`#library-diary-list [data-diary-date="${retainedDay}"]`);
+  await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-diary-editor .library-note-action').length===2`),{label:'retained Study Day Diary actions'});
+  const retainedActions=await page.evaluate(`[...document.querySelectorAll('#library-diary-editor .library-note-action')].map(button=>({text:button.textContent,disabled:button.disabled,label:button.getAttribute('aria-label')}))`);
+  assert.deepEqual(retainedActions,[
+    {text:'Delete',disabled:true,label:'Edit today’s active reflection in Review'},
+    {text:'Edit',disabled:true,label:'Edit today’s active reflection in Review'}
+  ],'a retained session keeps its saved Study Day reflection single-writer in Review');
+  await page.evaluate(`__PWA6.goTab('execute')`);
+
   // While the timer runs on a work block, news (a pop-up that blocks nothing)
   // waits and a blocking one shows; pausing shows the one that waited, and so does
   // moving on to a support block (docs/areas/status-indicator.md, noise rules).
@@ -71,5 +89,5 @@ try{
 
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[],'no session save failed');
   assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
-  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitOnlyDuringWorkBlocks:true,coveredPreviousDayRetired:true,diaryEditsSavedStudyDay:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,retainedStudyDayDiarySingleWriter:true,popUpsWaitOnlyDuringWorkBlocks:true,coveredPreviousDayRetired:true,diaryEditsSavedStudyDay:true}}));
 }finally{await browser.close();await server.close();}
