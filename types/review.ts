@@ -28,7 +28,7 @@ export interface ReviewDailyReflectionPort{
 export interface ReviewStorageReceipt{readonly storage?:string;readonly [key:string]:unknown}
 export interface ReviewDailyRecordsPort{
   get(date:string):PromiseLike<DailyRecord|null|undefined>;
-  save(value:DailyRecord,options?:Readonly<{assertOrigin?:()=>void}>):PromiseLike<ReviewStorageReceipt>;
+  save(value:DailyRecord,options?:Readonly<{assertOrigin?:()=>void;expectedCanonical?:DailyRecord|null}>):PromiseLike<ReviewStorageReceipt>;
   verifyCanonical(value:DailyRecord):PromiseLike<unknown>;
 }
 export interface ReviewAppDataPort{
