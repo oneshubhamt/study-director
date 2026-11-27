@@ -147,6 +147,7 @@ const createModule=():ReviewModuleContract=>{
     }
     function eventElement(event:Event):Element|null{return event.target instanceof Element?event.target:null;}
     function errorMessage(error:unknown):string{return error instanceof Error?error.message:String(error??'');}
+    function errorCode(error:unknown):string{return error&&typeof error==='object'&&'code' in error?String((error as {code?:unknown}).code||''):'';}
     function runtimeArray(value:unknown):boolean{return Array.isArray(value);}
 
     function validReviewDate(value:unknown){
@@ -545,11 +546,12 @@ async function commitDailyRecord(evidence:ReviewEvidence,label:string,assertOrig
   }
   const rec=materializeDailyRecordView(doc);
   if(!rec)throw new Error('Could not materialize the '+label);
-  const receipt=await AppData.dailyRecords.save(doc,{assertOrigin});assertOrigin();
+  const receipt=await AppData.dailyRecords.save(doc,{assertOrigin,expectedCanonical:existing});
   if(receipt?.storage!=='indexeddb'){
     throw new Error('The Study Day reached only emergency recovery storage, not canonical IndexedDB. The recovery copy remains available; retry when storage recovers.');
   }
-  await AppData.dailyRecords.verifyCanonical(doc);assertOrigin();
+  try{assertOrigin();await AppData.dailyRecords.verifyCanonical(doc);assertOrigin();}
+  catch(error){throw Object.assign(new Error('The Study Day reached canonical IndexedDB, but its final read-back could not be verified. '+errorMessage(error)),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED',cause:error});}
   return freeze({doc,rec});
 }
 async function saveReflectionOnlyRecord(){
@@ -631,7 +633,8 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
     }
     notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes??0)} · actual focus ${durationLabel(rec.actualFocusMinutes??0)} · ${displayPercent(rec.completionPercent??0)}`);
   }catch(e){
-    notice.finish('failed',(committed?'Study Day saved locally in Library; follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+errorMessage(e),{title:committed?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committed?'local-save-completed':'local-save-failed'});
+    const committedLocally=!!committed||errorCode(e)==='DAILY_RECORD_COMMITTED_UNVERIFIED';
+    notice.finish('failed',(committedLocally?'Study Day reached canonical storage; final verification or follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+errorMessage(e),{title:committedLocally?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committedLocally?'local-save-completed':'local-save-failed'});
     return false;
   }finally{activeSessionPersistenceBlocked=false;saveDayInProgress=false;syncReviewSurfaceMode();}
   return true;
