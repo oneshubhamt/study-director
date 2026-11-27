@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {buildSearchWorkerBundle,buildLeanRichText} from '../../../build/wordgard-bundle.mjs';
+import {buildSearchWorkerBundle,buildLeanRichText} from '../../../build/runtime-bundle.mts';
 
-const buildSource=fs.readFileSync('build/wordgard-bundle.mjs','utf8');
+const buildSource=fs.readFileSync('build/runtime-bundle.mts','utf8');
 const bundle=await buildLeanRichText();
 const searchWorker=await buildSearchWorkerBundle();
 

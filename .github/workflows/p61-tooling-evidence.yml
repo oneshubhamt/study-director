@@ -53,6 +53,9 @@ jobs:
       - name: Run risk coverage on discovered suite
         if: ${{ !cancelled() }}
         run: npm run test:coverage -- --keep-raw "$RUNNER_TEMP/p61-full" --json "$RUNNER_TEMP/p61-coverage.json"
+      - name: Full fast suite without installed dependencies
+        if: ${{ !cancelled() }}
+        run: npm run test:fast
       - name: Install release toolchain
         if: ${{ !cancelled() }}
         run: npm ci --ignore-scripts
@@ -76,8 +79,12 @@ jobs:
         run: |
           npm run check:types
           npm run test:release:types
+          npm run test:release:bundle
           npm run build
           npm run verify
+          git diff --exit-code -- generated/runtime types/wordgard
+          npm run stage:firebase
+          npm run test:release:deployment
       - name: Publish final calibration
         if: always()
         env:

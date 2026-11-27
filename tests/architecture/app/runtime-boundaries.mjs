@@ -57,7 +57,7 @@ assert.match(owner,/function status\(\)\s*\{return freeze\(\{/u,'public plugin s
 }
 
 { // p5.13b-host-dispatch-and-build-token-closure
-const template=fs.readFileSync('source/app.html','utf8'),hostSource=fs.readFileSync('source/host/main.ts','utf8'),buildSource=fs.readFileSync('build/build.mjs','utf8');
+const template=fs.readFileSync('source/app.html','utf8'),hostSource=fs.readFileSync('source/host/main.ts','utf8'),buildSource=fs.readFileSync('build/build.mts','utf8');
 const dispatchMaps=[
   ['data-action','CLICK_ACTIONS','CHANGE_ACTIONS'],
   ['data-change','CHANGE_ACTIONS','INPUT_ACTIONS'],
