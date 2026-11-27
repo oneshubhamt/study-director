@@ -839,7 +839,7 @@ const createModule=(input:ProviderModuleInput)=>{
   async function saveRepositoryProvider(selected:Provider,{interactive=true,excludedObjectIds=null,retention=null,signal=null,preemptBackground=true,foregroundPriority=false,recoveryProgress=null,repositorySnapshot=null,pendingIntent=null,assertOrigin=null}:{interactive?:boolean;excludedObjectIds?:readonly string[]|null;retention?:import('../../types/managed-repository.ts').RetentionInput|null;signal?:AbortSignal|null;preemptBackground?:boolean;foregroundPriority?:boolean;recoveryProgress?:((value:Progress)=>void)|null;repositorySnapshot?:Snapshot|null;pendingIntent?:PendingEntry|null;assertOrigin?:(()=>void)|null}={}):Promise<SavedPublication>{
     const presentationId=foregroundView()?.operationId||'';
     assertOrigin?.();if(preemptBackground)await preemptProviderBackground(selected);assertOrigin?.();
-    const publicationOwner=selected;selected=repositoryOperationSelected(selected,{signal,checkProtection:assertOrigin?async()=>assertOrigin():null});
+    const publicationOwner=selected,originCheck=assertOrigin;selected=repositoryOperationSelected(selected,{signal,checkProtection:originCheck?async()=>originCheck():null});
     await synchronizeRepositoryScope(selected);assertOrigin?.();
     const role=retention?.role==='before-restore'?'before-restore':'normal',previousPublication=providerPublications.get(selected.id)?.continuation.status();
     if(previousPublication?.invalidated||previousPublication?.pending&&previousPublication.role!==role)await discardProviderPublication(selected);
@@ -1738,7 +1738,7 @@ const createModule=(input:ProviderModuleInput)=>{
   }
   async function scrubRepositoryProvider(id:string,options:PreparedScrub={}){
     options.assertOrigin?.();const providerSelected=providers.get(safeId(id));if(!providerSelected||!providerSelected.repository)throw new Error('Repository backup provider is unavailable.');
-    const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null,checkProtection:options.assertOrigin?async()=>options.assertOrigin!():null});
+    const scrubOrigin=options.assertOrigin;const selected=repositoryOperationSelected(providerSelected,{signal:options&&options.signal||null,checkProtection:scrubOrigin?async()=>scrubOrigin():null});
     const state=await repositoryProviderState(selected,{interactive:false,signal:options&&options.signal||null});options.assertOrigin?.();
     // Integrity scrub is read-only. Verify every committed version we can prove
     // valid even when unrelated incomplete/orphan publication debris exists.
