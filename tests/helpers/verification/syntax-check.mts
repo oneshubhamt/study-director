@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {captureProcess} from '../../helpers/subprocess.mts';
 import {fileURLToPath} from 'node:url';
+import {stripTypeScriptTypes} from 'node:module';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
@@ -14,7 +15,7 @@ function walk(directory:string){
   for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
     const absolute=path.join(directory,entry.name);
     if(entry.isDirectory())walk(absolute);
-    else if(/\.(?:js|mjs|ts|mts)$/.test(entry.name))files.push(absolute);
+    else if(/\.(?:js|mjs|cjs|ts|mts|cts)$/.test(entry.name))files.push(absolute);
   }
 }
 roots.forEach(relative=>walk(path.join(ROOT,relative)));
@@ -35,7 +36,7 @@ function renderSyntaxTemplate(source:string){
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'sd-syntax-'));
 try{
-  let renderedTemplates=0;
+  let renderedTemplates=0,checkedTypeScriptModules=0;
   for(const file of files){
     let target=file;
     if(file.startsWith(path.join(ROOT,'source')+path.sep)){
@@ -46,9 +47,16 @@ try{
         target=path.join(tempRoot,`${renderedTemplates++}-${path.basename(file)}.js`);
         fs.writeFileSync(target,rendered);
       }
+    }else if(/\.(?:ts|mts|cts)$/u.test(file)){
+      // Node's --check is a JavaScript syntax check, not a TS module parser.
+      // Strip erasable types first and check the resulting native module syntax.
+      const stripped=stripTypeScriptTypes(fs.readFileSync(file,'utf8'),{mode:'strip'});
+      const extension=file.endsWith('.cts')?'cjs':'mjs';
+      target=path.join(tempRoot,`module-${checkedTypeScriptModules++}.${extension}`);
+      fs.writeFileSync(target,stripped);
     }
     const checked=captureProcess(process.execPath,['--check',target],{encoding:'utf8'});
     assert.equal(checked.status,0,`Syntax check failed for ${path.relative(ROOT,file)}:\n${checked.stderr||checked.stdout}`);
   }
-  console.log(JSON.stringify({status:'PASS',files:files.length,templateAware:true,renderedTemplates},null,2));
+  console.log(JSON.stringify({status:'PASS',files:files.length,templateAware:true,renderedTemplates,checkedTypeScriptModules},null,2));
 }finally{fs.rmSync(tempRoot,{recursive:true,force:true});}
