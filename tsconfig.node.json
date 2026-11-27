@@ -48,6 +48,14 @@
     "tests/helpers/browser-executable.mts",
     "release.config.mts",
     "tests/helpers/browser-suite.mts",
-    "tests/helpers/browser-coverage.mts"
+    "tests/helpers/browser-coverage.mts",
+    "contracts/production-limits.mts",
+    "contracts/performance-budgets.mts",
+    "contracts/canonical-identities.mts",
+    "contracts/format-ledger.mts",
+    "contracts/dependency-inventory.mts",
+    "build/wordgard-source-patches.mts",
+    "build/runtime-bundle.mts",
+    "tests/helpers/typescript-source.mts"
   ]
 }
