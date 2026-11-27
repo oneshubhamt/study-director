@@ -80,5 +80,5 @@ export const VENDORED_DEPENDENCIES=Object.freeze([
 export const DEPENDENCY_AUDIT_POLICY=Object.freeze({
   failSeverities:Object.freeze(['high','critical']),
   waiverSeverities:Object.freeze(['moderate']),
-  moderateWaivers:Object.freeze([])
+  moderateWaivers:Object.freeze([] as {package:string;advisories:readonly string[];reason:string;expires:string}[])
 });

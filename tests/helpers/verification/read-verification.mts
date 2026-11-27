@@ -17,3 +17,13 @@ export function jsonObject(value:unknown):Record<string,unknown>{
 export function packageScripts():Record<string,unknown>{
   return jsonObject(jsonObject(JSON.parse(fs.readFileSync('package.json','utf8')) as unknown)['scripts']);
 }
+
+export function jsonFile(file:string):Record<string,unknown>{return jsonObject(JSON.parse(fs.readFileSync(file,'utf8')) as unknown);}
+export function jsonArray(value:unknown):unknown[]{if(!Array.isArray(value))throw new Error('Expected JSON array');return value;}
+export function jsonString(value:unknown):string{if(typeof value!=='string')throw new Error('Expected JSON string');return value;}
+export function hostingHeaders(config:Record<string,unknown>){
+  return jsonArray(jsonObject(config['hosting'])['headers']).map(value=>{
+    const rule=jsonObject(value);
+    return {source:jsonString(rule['source']),headers:jsonArray(rule['headers']).map(value=>{const h=jsonObject(value);return {key:jsonString(h['key']),value:jsonString(h['value'])};})};
+  });
+}

@@ -78,6 +78,9 @@
     "tests/helpers/verification/read-verification.mts",
     "tests/helpers/verification/suite-governance.mts",
     "tests/helpers/verification/suite-policy.mts",
-    "tests/helpers/verification/suite-structure.mts"
+    "tests/helpers/verification/suite-structure.mts",
+    "tests/helpers/verification/dependency-assurance.mts",
+    "tests/helpers/verification/deployment-contract.mts",
+    "tests/helpers/verification/verify-minified-release.mts"
   ]
 }
