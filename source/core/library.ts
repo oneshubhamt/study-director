@@ -1230,7 +1230,7 @@ const createModule=():LibraryModuleContract=>{
       const panel=document.getElementById('library-diary-editor');if(!panel)return false;
       const shell=document.createElement('div');shell.className='library-notes-editor-shell';
       const field=document.createElement('textarea');field.className='library-notes-textarea library-diary-textarea ui-field';field.autocomplete='off';field.placeholder='Write this reflection…';shell.appendChild(field);panel.replaceChildren(diaryHeader(record,true),shell);
-      bindDiaryEditor(field,record.date,record,{onSaved:diarySaved,onState:(status,message)=>setDiaryStatus(status==='error'?message:'',status==='error')});field.addEventListener('input',event=>scheduleDiaryEditor(field,captureDiaryEditor(field,event)));field.addEventListener('blur',()=>{void flushDiarySave().catch(()=>{});});field.focus();return true;
+      bindDiaryEditor(field,record.date,record,{onSaved:diarySaved,onState:(status,message)=>setDiaryStatus(status==='error'?message:'',status==='error'),assertWrite:()=>{if(activeSessionOwnsDiaryRecord(record))throw new Error('That Study Day is now owned by retained session state. Edit its reflection in Review.');}});field.addEventListener('input',event=>scheduleDiaryEditor(field,captureDiaryEditor(field,event)));field.addEventListener('blur',()=>{void flushDiarySave().catch(()=>{});});field.focus();return true;
     }
     async function renderDiary(){
       if(attachmentMutationHold){attachmentMutationNeedsDiary=true;return false;}
@@ -1283,7 +1283,7 @@ const createModule=():LibraryModuleContract=>{
         current=await getDailyRecord(date);diaryEditing=false;
       }
       if(current&&activeSessionOwnsDiaryRecord(current)){setDiaryStatus('That Study Day acquired retained session state while deletion was open. Edit its reflection in Review.',false);return false;}
-      if(current)await deleteDiaryEntryRecord(date);
+      if(current){const deleting=current;try{await deleteDiaryEntryRecord(date,{assertWrite:()=>{if(activeSessionOwnsDiaryRecord(deleting))throw new Error('That Study Day is now owned by retained session state. Edit its reflection in Review.');}});}catch(error){setDiaryStatus('Reflection was not deleted: '+errorMessage(error),true);return false;}}
       selectedDiaryDate='';diaryDraftRecord=null;diaryEntryListed=false;invalidateLibrarySummaryCache();setDiaryStatus('');await renderDiary();return true;
     }
     async function settleDiaryEdit(options:Parameters<DiaryEditor['flush']>[1]={}){
