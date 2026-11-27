@@ -12,7 +12,7 @@ const {coordinator:notifications}=createNotifications();
 const practiceModule=registry.require('practice-pacer',1);
 const module=registry.require('timer-engine',2);
 const freeze=Object.freeze,noop=()=>false;
-const clock=createFakeClock('2026-09-13T06:00:00.000Z');
+let clock=createFakeClock('2026-09-13T06:00:00.000Z');
 // The generated cases below move the wall clock back: the engine reads this.
 let clockSkew=0,canMutate=true,toggleDoneCalls=0;
 const practiceEvents=[],modeTransitions=[];let scheduleRows=[];
@@ -51,7 +51,7 @@ const practiceController=practiceModule.createController(freeze({model:practiceM
   view:freeze({document:documentStub,isExecutePaneVisible:()=>false,setElementAttribute:noop,setElementClass:noop,setElementDisabled:noop,setElementHidden:noop,setElementStyle:noop,setElementText:noop,setTextSafe:noop}),
   userPreferences:freeze({notifications,readUserDefaults:()=>({})}),
   ownership:freeze({appCanMutate:()=>true}),
-  clock:freeze({nowMs:clock.now})
+  clock:freeze({nowMs:()=>clock.now()})
 })}));
 const tasks=freeze([{id:'task-1',name:'Focus block'}]);
 const practiceStub=freeze({
@@ -231,8 +231,9 @@ assert.equal(timerState.mode,'paused');assert.equal(timerState.paused,true);asse
 // gives to focus; everything else is paused. Focus + paused (+ a pause or gap
 // still open) = elapsed, focus never goes down, and a clock jump changes
 // neither.
-const timerCases=await checkCases('timer rules',{seed:20261103,count:200},async({int,pick,weighted,chance})=>{
-  scheduleRows=[];clockSkew=0;const now=()=>clock.now()+clockSkew;
+const timerCases=await checkCases('timer rules',{seed:20261103,count:200},async({int,pick,weighted,chance,trace})=>{
+  clock=createFakeClock('2026-09-13T06:00:00.000Z');taskFields.clear();practiceEvents.length=0;modeTransitions.length=0;
+  trace({start:clock.now()});scheduleRows=[];clockSkew=0;const now=()=>clock.now()+clockSkew;
   Object.assign(timerState,{currentIndex:0,mode:'running',paused:false,inactiveGap:null,activeBreak:null,breakStartMs:null,currentBreakSec:0});
   timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:now(),durationSec:4*3600,lastTickMs:now()};
   let focus=0,paused=0,pauseRun=0,gap=null,lastSec=0;
@@ -246,22 +247,22 @@ const timerCases=await checkCases('timer rules',{seed:20261103,count:200},async(
     const op=weighted(gap?{tick:3,away:1,jump:1,classify:4}:timerState.paused?{tick:3,away:1,jump:1,resume:3}:{tick:4,away:2,jump:1,pause:2});
     if(op==='tick'||op==='away'){
       // The app ticks every second; a step longer than 30 s is time away (sleep, a closed page).
-      const ms=op==='tick'?(chance(0.1)?30000:int(1,30000)):(chance(0.1)?30001:int(30001,4*3600000));await clock.advance(ms);
+      const ms=op==='tick'?(chance(0.1)?30000:int(1,30000)):(chance(0.1)?30001:int(30001,4*3600000));trace({step,op,ms});await clock.advance(ms);
       if(gap){if(ms>30000)gap.away+=ms;else gap.prompt+=ms;}
       else if(timerState.paused)pauseRun+=ms;
       else if(ms>30000)gap={away:ms,prompt:0};
       else focus+=ms;
       engine.absorbInactiveTimerGap('tick');
       assert.equal(!!timerState.inactiveGap,!!gap,'time away over 30 s is asked about, and only that');
-    }else if(op==='jump'){clockSkew-=int(1,2*3600000);engine.syncTimerAfterWake();}
-    else if(op==='pause'){assert.equal(engine.beginTimerPause('manual'),true);pauseRun=0;}
+    }else if(op==='jump'){const ms=int(1,2*3600000);trace({step,op,ms});clockSkew-=ms;engine.syncTimerAfterWake();}
+    else if(op==='pause'){trace({step,op});assert.equal(engine.beginTimerPause('manual'),true);pauseRun=0;}
     else if(op==='resume'){
-      const records=pauseCount();engine.togglePause();assert.equal(timerState.paused,false);
+      trace({step,op});const records=pauseCount();engine.togglePause();assert.equal(timerState.paused,false);
       const pauseSec=Math.floor(pauseRun/1000);assert.equal(pauseCount(),records+(pauseSec>0?1:0));if(pauseSec>0)assert.equal(latestPause().seconds,pauseSec,'a countable pause records how long it lasted');
       paused+=pauseRun;pauseRun=0;
     }else{
       const choice=pick(['focus','break','split','ignore']),split=int(0,gap.away+60000),toFocus=choice==='focus'?gap.away:choice==='split'?Math.min(gap.away,split):0;
-      engine.classifyInactiveGap(choice,choice==='split'?split:null);
+      trace({step,op,choice,split});engine.classifyInactiveGap(choice,choice==='split'?split:null);
       focus+=toFocus;paused+=gap.away-toFocus+gap.prompt;gap=null;
       assert.equal(timerState.inactiveGap,null);assert.equal(timerState.mode,'running',`${choice} carries the timer on`);
     }
@@ -272,11 +273,12 @@ const timerCases=await checkCases('timer rules',{seed:20261103,count:200},async(
 // Generated restores: a restored timer never has less focus than was saved,
 // keeps what a running timer had counted when it was saved, and stays within
 // the longest block.
-const restoreCases=await checkCases('restored focus',{seed:20261104,count:200},({int,chance})=>{
-  const maxSec=limits.maxDurationMinutes*60,nowMs=clock.now(),startMs=nowMs-int(0,6*3600000),totalPausedMs=int(0,3600000),recordedSec=int(0,maxSec),paused=chance(0.5);
+const restoreCases=await checkCases('restored focus',{seed:20261104,count:200},({int,chance,trace})=>{
+  clock=createFakeClock('2026-09-13T06:00:00.000Z');clockSkew=0;
+  const maxSec=limits.maxDurationMinutes*60,nowMs=Date.parse('2026-09-13T06:00:00.000Z'),startMs=nowMs-int(0,6*3600000),totalPausedMs=int(0,3600000),recordedSec=int(0,maxSec),paused=chance(0.5);
   const updatedAtMs=startMs+int(0,8*3600000),state={startMs,totalPausedMs,pausedStartedMs:paused&&chance(0.7)?startMs+int(0,6*3600000):null,recordedSec};
   const runtime={mode:paused?'paused':'running',paused,updatedAt:new Date(updatedAtMs).toISOString(),activeBreak:paused&&chance(0.5)?{startedAtMs:startMs+int(0,6*3600000)}:null};
-  const restored=engine.restoredRuntimeRecordedSec(runtime,state);
+  trace({runtime,state,nowMs});const restored=engine.restoredRuntimeRecordedSec(runtime,state);
   assert.ok(restored>=recordedSec,'restoring never lowers the focus time saved');assert.ok(restored<=maxSec,'nor goes past the longest block');
   if(!paused)assert.ok(restored>=Math.min(maxSec,Math.floor((Math.min(updatedAtMs,nowMs)-startMs-totalPausedMs)/1000)),'a running timer keeps the time it had counted when saved');
 });

@@ -126,15 +126,15 @@ assert.ok(afterResume.every((count,index)=>index===0||count===afterResume[index-
 assert.deepEqual(beforeResume(finalHistory).map(row=>row.manifest.retention.calendar.localDate),['2026-07-05'],'four months on, the last day before the break is still kept as Monthly');
 // Generated schedules mixing busy study days, hours, days, weeks, months and
 // half-year breaks, with notes that change at some backups and not at others.
-const retentionCases=await checkCases('retention rules',{seed:20261005,count:40},({random,int,chance},schedule)=>{
+const retentionCases=await checkCases('retention rules',{seed:20261005,count:40},({random,int,chance,trace},schedule)=>{
   const spans=[()=>int(20,90)*60000,()=>random()*2*3600000,()=>DAY,()=>DAY*int(2,13),()=>DAY*int(20,59),()=>DAY*int(60,179)],weights=spans.map(()=>random()),total=weights.reduce((sum,value)=>sum+value,0),times=[],fingerprints=[];
   let at=Date.UTC(2025,0,1)+int(0,364)*DAY,notes='a';
   // Gaps come in runs of one kind, so a busy day holds many backups.
   for(let index=0,count=int(40,159),span=0,run=0;index<count;index++,run--){if(run<=0){let pick=random()*total;span=0;while(pick>weights[span]){pick-=weights[span];span+=1;}run=int(1,15);}at+=Math.max(60000,Math.round(spans[span]()));times.push(at);if(chance(0.75))notes=String.fromCharCode(97+int(0,5));fingerprints.push(notes.repeat(64));}
-  retentionRun(times,50000+schedule*1000,()=>{},index=>fingerprints[index]);
+  trace({schedule,times,fingerprints});retentionRun(times,50000+schedule*1000,()=>{},index=>fingerprints[index]);
   // A whole history read at once, as a location's first cleanup does, cut at a few points.
   const rows=times.map((ms,index)=>{const at=new Date(ms).toISOString();return withNotes(retentionRow(150000+schedule*1000+index,at.slice(0,10),at.slice(11,19)),fingerprints[index]);});
-  for(let cut=0;cut<4;cut++){const end=int(1,rows.length),candidates=rows.slice(0,end),ms=times[end-1],selection=repository.selectRetention(candidates,{now:new Date(ms)});retentionRules(candidates,selection,ms);assert.equal(selection.tiers[candidates.at(-1).id],'latest');}
+  for(let cut=0;cut<4;cut++){const end=int(1,rows.length),candidates=rows.slice(0,end),ms=times[end-1],selection=repository.selectRetention(candidates,{now:new Date(ms)});trace({cut,end});retentionRules(candidates,selection,ms);assert.equal(selection.tiers[candidates.at(-1).id],'latest');}
 });
 const sameDayUnderLimit=[retentionRow(920,'2026-09-20','09:00:00'),retentionRow(921,'2026-09-20','13:00:00'),retentionRow(922,'2026-09-20','18:00:00')],sameDaySelection=repository.selectRetention(sameDayUnderLimit,{now:retentionNow});assert.deepEqual(sameDaySelection.retained.map(row=>sameDaySelection.tiers[row.id]),['hourly','hourly','latest'],'earlier backups of the latest day are kept as Hourly');assert.equal(sameDaySelection.remove.length,0);
 {

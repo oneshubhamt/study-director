@@ -11,6 +11,8 @@
   "files": [
     "build/source-script.mts",
     "tests/unit/app/canonical.mts",
-    "types/checks/node.ts"
+    "types/checks/node.ts",
+    "tests/helpers/generated-cases.mts",
+    "tests/unit/app/generated-cases.mts"
   ]
 }

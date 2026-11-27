@@ -46,8 +46,15 @@ function lane(write){
 { // A failed older write never replaces a newer queued value.
   let rejectFirst;const writes=[],{api}=lane(value=>{writes.push(value);return value==='old'?new Promise((_,reject)=>{rejectFirst=reject;}):Promise.resolve();});
   api.schedule('old');const first=api.flush();assert.equal(api.writing(),true);const failed=assert.rejects(first,/old failed/);await settle();
-  api.schedule('new');const newer=api.flush();rejectFirst(new Error('old failed'));await failed;await newer;await api.flush();
-  assert.deepEqual(writes,['old','new']);
+  api.schedule('new');const newer=api.flush();let newerSettled=false;
+  void newer.then(()=>{newerSettled=true;},()=>{});
+  rejectFirst(new Error('old failed'));await failed;await settle();
+  assert.equal(newerSettled,true,'the newer flush must settle after the older write fails');
+  assert.deepEqual(writes,['old','new'],'only the newer value follows the failed write');
+  // No unbounded wait on a mutant-created pending retry.
+  const final=api.flush();let finalSettled=false;void final.then(()=>{finalSettled=true;},()=>{});await settle();
+  assert.equal(finalSettled,true,'a superseded failed write must not leave a pending retry');
+  assert.deepEqual(writes,['old','new'],'no superseded value may be written again');
 }
 for(const failAfter of [100,SaveLane.DELAY_MS+50]){ // A superseded failure leaves the newer value's timing alone.
   let rejectOld;const writes=[],{api}=lane(value=>{writes.push([clock.now(),value]);return value==='old'?new Promise((_,reject)=>{rejectOld=reject;}):Promise.resolve();});

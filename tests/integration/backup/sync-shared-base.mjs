@@ -2069,8 +2069,8 @@ let mergeRuleCases=0;
   const {device}=syncWorld,T0=Date.parse('2026-09-01T08:00:00.000Z'),iso=ms=>new Date(ms).toISOString();
   const noteRow=(key,text,ms)=>freeze({version:2,key,text,updatedAt:iso(ms)}),baseText=key=>[0,1,2].map(paragraph=>`${key} paragraph ${paragraph}`).join('\n\n');
   const snapshot=state=>freeze({notes:Object.fromEntries(Object.entries(state.notes).map(([key,value])=>[key,value.text]).sort(([x],[y])=>x.localeCompare(y))),days:Object.fromEntries([...state.records].map(([date,value])=>[date,value.reflection]).sort(([x],[y])=>x.localeCompare(y))),reviews:state.reviews.open().map(review=>review.id).sort()});
-  mergeRuleCases=await checkCases('sync merge rules',{seed:20261102,count:30},async({int,weighted,chance},index)=>{
-    syncWorld.drive.clear();
+  mergeRuleCases=await checkCases('sync merge rules',{seed:20261102,count:30},async({int,weighted,chance,trace},index)=>{
+    syncWorld.drive.clear();syncWorld.claims.clear();
     const keys=Array.from({length:int(2,3)},(_,n)=>`Note${n}`),dates=['2026-08-01','2026-08-02'].slice(0,int(1,2));
     const a={installationId:`inst_rule_a_${index}`,records:new Map(dates.map(date=>[date,record(date,`${date} as shared`,iso(T0))])),deletions:[],noteDeletions:[],notes:Object.fromEntries(keys.map(key=>[key,noteRow(key,baseText(key),T0)])),activeSession:null,schedule:'',personal:personal('Rule User'),journal:null};
     const b={installationId:`inst_rule_b_${index}`,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Rule User'),journal:null};
@@ -2089,7 +2089,7 @@ let mergeRuleCases=0;
       const added=chance(0.4)?`Added on ${side}`:null;if(added)state.notes={...state.notes,[added]:noteRow(added,`written on ${side}`,at())};
       return {notes,days,added};
     };
-    const byA=change(a,'A'),byB=change(b,'B');
+    const byA=change(a,'A'),byB=change(b,'B');trace({index,keys,dates,byA,byB});
     await A.upload();assert.equal((await B.sync()).cancelled,false,'a sync never stops to ask');
     const open=b.reviews.open(),kept=(subject,ref)=>open.filter(review=>review.subject===subject&&review.ref===ref);let expectedReviews=0;
     for(const key of keys){
