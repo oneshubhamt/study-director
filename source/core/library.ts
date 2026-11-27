@@ -33,7 +33,7 @@ const createModule=():LibraryModuleContract=>{
     clearLibrary:freeze(['preflight','execute']),
     ownership:freeze(['canMutate','revision']),
     overlays:freeze(['createAnchoredPopover']),
-    session:freeze(['hasActiveSession'])
+    session:freeze(['hasActiveSession','activeDate'])
   });
   function createView(input:Readonly<LibraryInput>):Readonly<LibraryView>{
   type NoteTreeNode={entry:NoteCatalogueEntry;depth:number;parent:NoteTreeNode|null;children:number;holdsActive:boolean;expanded:boolean};
@@ -91,7 +91,7 @@ const createModule=():LibraryModuleContract=>{
     const {canMutate,revision:ownershipRevision}=ports.ownership;
     const currentOwner=(owner:number)=>canMutate()&&ownershipRevision()===owner;
     const {createAnchoredPopover}=ports.overlays;
-    const {hasActiveSession}=ports.session;
+    const {hasActiveSession,activeDate}=ports.session;
 
     // The Library shows one section at a time and remembers it, with whether
     // the Diary panel was open. Only the shown section renders, and only while
@@ -1211,12 +1211,13 @@ const createModule=():LibraryModuleContract=>{
       if(!filled.length)fragment.appendChild(textEl('div','library-notes-zero ui-status','No reflections yet.'));
       list.replaceChildren(fragment);updateDiarySummaryCount(entries);
     }
+    function activeSessionOwnsDiaryRecord(record:LibraryDiaryRecord){return record.recordKind==='study'&&hasActiveSession()&&activeDate()===record.date;}
     function diaryHeader(record:LibraryDiaryRecord,editing:boolean){
       const head=document.createElement('div');head.className='library-notes-editor-head';
       const identity=document.createElement('div');identity.className='library-notes-editor-identity';identity.append(textEl('div','library-notes-editor-title',diaryDateLabel(record.date)),textEl('span','library-notes-editor-meta ui-mono',('dayName' in record?String(record.dayName||''):'')));
-      const tools=document.createElement('div');tools.className='library-notes-editor-tools';
-      const remove=document.createElement('button');remove.type='button';remove.className='library-note-action ui-btn';remove.textContent='Delete';remove.disabled=!canMutate();remove.setAttribute('aria-label','Delete this reflection');remove.addEventListener('click',()=>{void deleteDiaryEntry(record.date);});
-      const action=document.createElement('button');action.type='button';action.className='library-note-action ui-btn';action.textContent=editing?'Done':'Edit';action.disabled=!editing&&!canMutate();action.setAttribute('aria-label',editing?'Finish editing reflection':'Edit reflection');
+      const tools=document.createElement('div');tools.className='library-notes-editor-tools';const activeOwned=activeSessionOwnsDiaryRecord(record);
+      const remove=document.createElement('button');remove.type='button';remove.className='library-note-action ui-btn';remove.textContent='Delete';remove.disabled=!canMutate()||activeOwned;remove.setAttribute('aria-label',activeOwned?'Edit today’s active reflection in Review':'Delete this reflection');remove.addEventListener('click',()=>{void deleteDiaryEntry(record.date);});
+      const action=document.createElement('button');action.type='button';action.className='library-note-action ui-btn';action.textContent=editing?'Done':'Edit';action.disabled=!editing&&(!canMutate()||activeOwned);action.setAttribute('aria-label',editing?'Finish editing reflection':activeOwned?'Edit today’s active reflection in Review':'Edit reflection');
       action.addEventListener('click',()=>{void (editing?finishDiaryEdit():startDiaryEdit(record.date));});tools.append(remove,action);head.append(identity,tools);return head;
     }
     function renderDiaryRead(record:LibraryDiaryRecord){
@@ -1255,7 +1256,7 @@ const createModule=():LibraryModuleContract=>{
     async function startDiaryEdit(date:string,recordOverride:LibraryDiaryRecord|null=null){
       if(!canMutate()){setDiaryStatus('Study control is in another tab. Take control here before editing Diary.',true);return false;}
       if(!isSupportedSavedDate(date))return false;
-      try{const record=recordOverride||await getDailyRecord(date);if(!record)return false;selectedDiaryDate=date;diaryDraftRecord=record.recordKind==='diary'&&!String(record.reflection||'').trim()?record:null;diaryEntryListed=!!String(record.reflection||'').trim();diaryEditing=true;setDiaryStatus('');return renderDiaryEdit(record);}
+      try{const record=recordOverride||await getDailyRecord(date);if(!record)return false;if(activeSessionOwnsDiaryRecord(record)){setDiaryStatus('Today’s active Study Day reflection is edited in Review. Finish or suspend that session before editing it here.',false);return false;}selectedDiaryDate=date;diaryDraftRecord=record.recordKind==='diary'&&!String(record.reflection||'').trim()?record:null;diaryEntryListed=!!String(record.reflection||'').trim();diaryEditing=true;setDiaryStatus('');return renderDiaryEdit(record);}
       catch(error){setDiaryStatus('Diary editor could not open: '+errorMessage(error),true);return false;}
     }
     async function createDiaryEntry(){
@@ -1272,6 +1273,7 @@ const createModule=():LibraryModuleContract=>{
     async function deleteDiaryEntry(date:string){
       if(!canMutate()||!isSupportedSavedDate(date))return false;
       let current=await getDailyRecord(date);if(!current&&!diaryDraftRecord)return false;
+      if(current&&activeSessionOwnsDiaryRecord(current)){setDiaryStatus('Today’s active Study Day reflection is edited in Review. Finish or suspend that session before deleting it here.',false);return false;}
       const confirmed=await confirm({title:'Delete reflection?',message:current?.recordKind==='study'?'The reflection will be removed. The saved Study Day will remain.':'This reflection will be deleted.',confirmLabel:'Delete',cancelLabel:'Cancel',danger:true});
       if(!confirmed||!canMutate())return false;
       if(diaryEditing&&selectedDiaryDate===date){
@@ -1280,6 +1282,7 @@ const createModule=():LibraryModuleContract=>{
         if(field){const writing=settleDiaryEditor(field);clearDiaryEditor(field);await writing;}
         current=await getDailyRecord(date);diaryEditing=false;
       }
+      if(current&&activeSessionOwnsDiaryRecord(current)){setDiaryStatus('Today’s active Study Day changed while deletion was open. Edit it in Review.',false);return false;}
       if(current)await deleteDiaryEntryRecord(date);
       selectedDiaryDate='';diaryDraftRecord=null;diaryEntryListed=false;invalidateLibrarySummaryCache();setDiaryStatus('');await renderDiary();return true;
     }
