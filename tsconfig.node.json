@@ -74,6 +74,10 @@
     "tests/helpers/verification/rich-text-bundle.mts",
     "tests/helpers/verification/typescript-pipeline.mts",
     "tests/helpers/verification/typescript-gates.mts",
-    "tests/helpers/verification/performance-budgets.mts"
+    "tests/helpers/verification/performance-budgets.mts",
+    "tests/helpers/verification/read-verification.mts",
+    "tests/helpers/verification/suite-governance.mts",
+    "tests/helpers/verification/suite-policy.mts",
+    "tests/helpers/verification/suite-structure.mts"
   ]
 }
