@@ -206,7 +206,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   const controls={ownershipRevision:1,onCanonicalCommit:event=>events.push(event)},owned=createHarness(new Map(),null,controls);
   const before={version:1,date,recordKind:'study',reflection:'before',savedAt:stamp,updatedAt:stamp,sourceRevision:1};
   await owned.app.dailyRecords.save(before);
-  const expected=await owned.app.dailyRecords.get(date,{strict:true}),eventCount=events.length;
+  const expected=await owned.app.dailyRecords.get(date,{strict:true}),eventCount=events.length,fallbackBefore=structuredClone(owned.sharedLocal.get('fallback')??null);
   controls.onTransactionComplete=({stores,mode})=>{
     if(mode!=='readwrite'||!Array.isArray(stores)||!stores.includes('daily'))return;
     delete controls.onTransactionComplete;controls.owned=false;controls.ownershipRevision++;
@@ -214,7 +214,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   const after={...expected,reflection:'committed after authority change',sourceRevision:2,updatedAt:'2026-09-18T12:01:00.000Z'};
   await assert.rejects(owned.app.dailyRecords.save(after,{expectedCanonical:expected}),error=>error?.code==='DAILY_RECORD_COMMITTED_UNVERIFIED');
   assert.equal(owned.stores.daily.get(date).reflection,after.reflection,'the physically committed Daily Record must remain canonical');
-  assert.equal(owned.sharedLocal.has('fallback'),false,'post-commit ambiguity must never create a fallback Daily Record');
+  assert.deepEqual(owned.sharedLocal.get('fallback')??null,fallbackBefore,'post-commit ambiguity must not change the fallback Daily Record state');
   assert.equal(events.length,eventCount,'the former owner must not publish a stale Daily Record completion event');
 }
 
