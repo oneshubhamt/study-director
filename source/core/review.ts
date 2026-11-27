@@ -577,7 +577,8 @@ async function saveReflectionOnlyRecord(){
     }
     notice.finish('succeeded',hasContent?'✓ Reflection saved in Diary.':'No reflection saved. Empty reflections are not kept in Diary.',{announce:hasContent,title:'Reflection saved'});return true;
   }catch(error){
-    notice.finish('failed',(committed?'Reflection saved locally; refreshing the view failed. ':'Could not save reflection. Keep this tab open and retry after storage recovers. ')+errorMessage(error),{title:committed?'Reflection saved; follow-up needs attention':'Reflection not saved',outcome:committed?'local-save-completed':'local-save-failed'});
+    const committedLocally=committed||errorCode(error)==='DAILY_RECORD_COMMITTED_UNVERIFIED';
+    notice.finish('failed',(committedLocally?'Reflection reached canonical storage; final verification or follow-up did not complete. ':'Could not save reflection. Keep this tab open and retry after storage recovers. ')+errorMessage(error),{title:committedLocally?'Reflection saved; follow-up needs attention':'Reflection not saved',outcome:committedLocally?'local-save-completed':'local-save-failed'});
     return false;
   }finally{
     saveDayInProgress=false;
@@ -718,8 +719,8 @@ async function handleStudyDayRollover(){
   }catch(e){
     AppDiagnostics.capture('session.rollover-save',e,'error');
     try{assertOrigin();}catch{try{assertOrigin(1);}catch{return false;}}
-    Runtime.setSafetyMessage(rolloverState.savedDay
-      ? `Saved ${prettyDate(endedDate)} to Library, but its old session could not be finalized: ${errorMessage(e)}. Keep the recovery data and retry after storage recovers.`
+    Runtime.setSafetyMessage(rolloverState.savedDay||errorCode(e)==='DAILY_RECORD_COMMITTED_UNVERIFIED'
+      ? `Saved ${prettyDate(endedDate)} to canonical storage, but final verification or old session retirement did not complete: ${errorMessage(e)}. Keep the recovery data and retry after storage recovers.`
       : `New study day safety check could not auto-save ${prettyDate(endedDate)}: ${errorMessage(e)}. Open Review and save manually before starting a new day.`);
     refreshStorageFallbackWarning();
     return false;

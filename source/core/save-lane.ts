@@ -26,7 +26,7 @@ registry.define('save-lane',1,()=>{
   function prepareFlush(){if(!beforeFlush||preparing)return;preparing=true;try{beforeFlush();}catch{}finally{preparing=false;}}
   function reasonOf(error: unknown){return String(error&&(error as {readonly message?: unknown}).message||error||'storage is unavailable').replace(/[.\s]+$/u,'');}
   // The same wording for every lane while a retry is pending.
-  function failureMessage(label: string,error: unknown){return `${label} could not be saved: ${reasonOf(error)}. Study Director keeps retrying; keep this tab open or export a backup.`;}
+  function failureMessage(label: string,error: unknown){return (error as {code?:unknown}|null)?.code==='DAILY_RECORD_COMMITTED_UNVERIFIED'?`${label} reached canonical storage, but verification is incomplete. Reopen the saved record to check it; keep this tab open or export a backup.`:`${label} could not be saved: ${reasonOf(error)}. Study Director keeps retrying; keep this tab open or export a backup.`;}
   function createLane<T, R>(input: Readonly<LaneInput<T, R>>){
     exactObject(input,['label','write','onState','environment'],'Save lane input');
     const environment=exactObject(input.environment,['setTimeout','clearTimeout'],'Save lane environment');

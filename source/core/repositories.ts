@@ -834,17 +834,17 @@ async function getVerifiedIdbDailyRecordSummaries(){
   return clean as DailySummary[];
 }
 function idbGetRecord(date:string){return idbGet(DB_DAILY_RECORD_STORE,date,'record read aborted');}
-async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipToken?:WriteToken|null;deletedAt?:string;expectedCanonical?:DailyRecord|null}={}){
-  const {trackDeletion=true,ownershipToken=null,deletedAt=new Date().toISOString()}=options;
+async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipToken?:WriteToken|null;deletedAt?:string;expectedCanonical?:DailyRecord|null;assertOrigin?:()=>void}={}){
+  const {trackDeletion=true,ownershipToken=null,deletedAt=new Date().toISOString(),assertOrigin}=options;
   const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical'),expected=conditional?options.expectedCanonical??null:null;
   return idbStrictTransaction<{changed:boolean}>([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
-    if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record deletion');
+    assertOrigin?.();if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record deletion');
     const records=tx.objectStore(DB_DAILY_RECORD_STORE),summaries=tx.objectStore(DB_DAILY_SUMMARY_STORE),meta=Meta.view(tx);
     let changed=false,revisionState:RevisionState|null=null;
     const req=records.get(date);
     req.onsuccess=()=>{
       try{
-        if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record deletion callback');
+        assertOrigin?.();if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record deletion callback');
         if(conditional){
           const current=readableDailyRecord(req.result)||null;
           if(current===null?expected!==null:expected===null||!sameDataValue(current,expected)){
@@ -853,7 +853,8 @@ async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipTo
             return;
           }
         }
-        changed=!!req.result;records.delete(date);summaries.delete(date);
+        assertOrigin?.();changed=!!req.result;const deletionRequest=records.delete(date);summaries.delete(date);
+        if(assertOrigin)deletionRequest.onsuccess=()=>{try{assertOrigin();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
         stageCanonicalMutationEpoch(tx,[dailyPreparationUnit(date)]);
         if(trackDeletion){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}else meta.remove('savedDayDeletionPrefix',date);
         if(changed)revisionState=InsightsDatasetRevision.stage(tx,'daily-record-delete');
@@ -1384,14 +1385,15 @@ async function materializeDailyRecordViews(records:DailyRecord[],{yieldProjectio
   }
   return out;
 }
-async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCapture?:boolean;expectedCanonical?:DailyRecord|DailyView|null}={}){
-  const rollback=options&&options.rollback===true,backupCapture=options&&options.backupCapture===true;
+async function removeDailyRecord(date:string,options:DailyRecordMutationOptions&{rollback?:boolean}={}){
+  const {assertOrigin}=options;assertOrigin?.();
+  const rollback=options.rollback===true,backupCapture=options.backupCapture===true;
   const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
   const expected=conditional?(options.expectedCanonical===null?null:sanitizeCurrentDailyRecord(storedDailyRecordFields(options.expectedCanonical))):null;
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record deletion precondition failed canonical validation.');
   const ownershipToken=issueWriteToken('deleting the daily record');
   const finishWrite=beginAuthoritativeWrite();
-  let removed=false;
+  let removed=false,idbCommitted=false;
   try{
     const fallbackBefore=fallbackDailyRecordsRawGet(),fallbackHadRecord=fallbackBefore.some(record=>record.date===date);
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('dailyRecord',date);
@@ -1402,8 +1404,8 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
         if(!fallbackDailyRecordsSet(fallbackBefore.filter(record=>record.date!==date)))throw LocalStorageContract.lastError||new Error('DailyRecord fallback could not be cleared and no durable deletion marker could be established.');
         assertWriteToken(ownershipToken,'the daily-record IndexedDB deletion');
       }
-      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{})});
-      assertWriteToken(ownershipToken,'the daily-record fallback cleanup');
+      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{}),...(assertOrigin?{assertOrigin}:{})});idbCommitted=true;
+      assertOrigin?.();assertWriteToken(ownershipToken,'the daily-record fallback cleanup');
       const fallbackCleared=staged||conditional?fallbackDailyRecordsSet(fallbackDailyRecordsRawGet().filter(r=>r.date!==date)):true;
       if(!fallbackCleared&&!staged)throw LocalStorageContract.lastError||new Error('DailyRecord fallback cleanup failed.');
       if(!rollback&&fallbackCleared)clearDeletionRecoveryKeys([recoveryKey]);
@@ -1412,7 +1414,8 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
       if(fallbackHadRecord&&!(result&&result.changed))InsightsDatasetRevision.invalidateVolatile('fallback-daily-record-delete');
       removed=true;
     }catch(e){
-      if(isOwnershipLostError(e))throw e;
+      if(idbCommitted)throw Object.assign(new Error('Daily Record deletion reached canonical IndexedDB, but post-delete completion could not be verified.'),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED',cause:e});
+      assertOrigin?.();if(isOwnershipLostError(e))throw e;
       if(conditional)throw e;
       if(rollback||!staged)throw e;
       assertWriteToken(ownershipToken,'the daily-record fallback deletion');

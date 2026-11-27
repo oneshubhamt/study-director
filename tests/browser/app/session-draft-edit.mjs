@@ -36,6 +36,10 @@ try{
   // reflection owner: Review. Library may display it, but must not open a
   // competing editor or delete the reflection until that session is retired.
   const retainedDay=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));await d.goTab('review');await wait(120);const field=document.getElementById('daily-reflection');field.value='Retained session reflection';d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();if(!await d.saveDayRecord())throw new Error('retained-session Save Today failed');await d.goTab('library');await wait(120);return d.todayISO();})()`);
+  // Save Today deliberately produces a dismissible confirmation. Close it via
+  // its real UI before testing the underlying Days control's hit target.
+  await page.click('#sd-toast-region [data-key="save-study-day"]:not(.leaving) .interaction-toast-close');
+  await waitFor(()=>page.evaluate(`!document.querySelector('#sd-toast-region [data-key="save-study-day"]')`),{label:'Save Study Day confirmation dismissed'});
   await page.click('#library-tab-days');
   await waitFor(()=>page.evaluate(`!document.getElementById('library-days').hidden`),{label:'Library Days section'});
   const diaryOpen=await page.evaluate(`document.getElementById('library-diary').open`);

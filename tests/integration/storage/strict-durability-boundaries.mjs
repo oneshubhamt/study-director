@@ -218,6 +218,22 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   assert.equal(events.length,eventCount,'the former owner must not publish a stale Daily Record completion event');
 }
 
+// The actual Diary deletion transaction must honor the external request's
+// lifetime independently of tab ownership, including a physical commit.
+for(const stage of ['read','committed']){
+  const date='2026-09-19',stamp='2026-09-19T12:00:00.000Z',events=[];
+  const controls={onCanonicalCommit:event=>events.push(event)},h=createHarness(new Map(),null,controls);
+  await h.app.dailyRecords.save({version:1,recordKind:'diary',date,reflection:'keep the reflection',savedAt:stamp,updatedAt:stamp,sourceRevision:0});
+  const expected=await h.app.dailyRecords.get(date,{strict:true}),count=events.length;
+  let current=true;
+  const assertOrigin=()=>{if(!current)throw new Error('Diary request retired');};
+  if(stage==='read')controls.onTransactionRead=({store,key,mode})=>{if(mode==='readwrite'&&store==='daily'&&key===date){delete controls.onTransactionRead;current=false;}};
+  else controls.onTransactionComplete=({stores,mode})=>{if(mode==='readwrite'&&stores.includes('daily')){delete controls.onTransactionComplete;current=false;}};
+  await assert.rejects(h.app.dailyRecords.remove(date,{expectedCanonical:expected,assertOrigin}),error=>stage==='committed'?error?.code==='DAILY_RECORD_COMMITTED_UNVERIFIED':/Diary request retired/u.test(error?.message));
+  assert.equal(h.stores.daily.has(date),stage==='read','only the physically committed deletion can remove the row');
+  assert.equal(events.length,count,'retired deletion may not publish completion');
+}
+
 // The recovery/transfer request may retire while local tab ownership remains.
 // Assert that the originating guard is checked inside the actual IDB CAS, not
 // just by the controller, and that a physical commit is reported accurately.

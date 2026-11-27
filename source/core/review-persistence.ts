@@ -33,36 +33,42 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   }
   async function commit(date:string,value:string,options:Readonly<{expectedCanonical?:string;backupCapture?:boolean;assertOrigin?:(()=>void)|null}>={}){
     if(!ownership.canMutate())throw new Error('Use the primary tab to edit Daily Reflections.');
-    const ownerRevision=ownership.revision(),assertOrigin=options.assertOrigin||null;assertOrigin?.();
+    const ownerRevision=ownership.revision(),assertOrigin=()=>{assertReflectionOwner(ownerRevision);options.assertOrigin?.();};assertOrigin();
     if(!dates.isSupported(date))throw new Error('That reflection date is not available.');
     const candidate=text.clampEditorContent(value,limits.maxReflectionChars);
     if(!text.editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
     const current=await records.get(date,{strict:true}),currentCanonical=String(current?.reflection||'');
-    assertReflectionOwner(ownerRevision);assertOrigin?.();
+    assertOrigin();
     if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     const hasContent=!!String(candidate||'').trim(),backupCapture=options.backupCapture===true;
     if(currentCanonical===candidate){
-      if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);assertOrigin?.();
+      if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);assertOrigin();
       return snapshot(current);
     }
-    if(current?.recordKind==='study'){
-      const next={...current,reflection:candidate,updatedAt:environment.nowIso()};
-      const receipt=await records.save(next,{backupCapture,expectedCanonical:current,...(assertOrigin?{assertOrigin}:{})});durableReceipt(receipt,'Daily Reflection');
-      await records.verifyCanonical(next);
-    }else if(hasContent){
-      const diary=codec.createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
-      if(!diary)throw new Error('Daily Reflection failed canonical validation.');
-      const receipt=await records.save(diary,{backupCapture,expectedCanonical:current,...(assertOrigin?{assertOrigin}:{})});durableReceipt(receipt,'Daily Reflection');
-      await records.verifyCanonical(diary);
-    }else if(current?.recordKind==='diary'){
-      await records.remove(date,{backupCapture,expectedCanonical:current,...(assertOrigin?{assertOrigin}:{})});
-      await records.verifyCanonicalAbsent(date);
+    let committed=false;
+    try{
+      if(current?.recordKind==='study'){
+        const next={...current,reflection:candidate,updatedAt:environment.nowIso()};
+        const receipt=await records.save(next,{backupCapture,expectedCanonical:current,assertOrigin});durableReceipt(receipt,'Daily Reflection');committed=true;
+        assertOrigin();await records.verifyCanonical(next);
+      }else if(hasContent){
+        const diary=codec.createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
+        if(!diary)throw new Error('Daily Reflection failed canonical validation.');
+        const receipt=await records.save(diary,{backupCapture,expectedCanonical:current,assertOrigin});durableReceipt(receipt,'Daily Reflection');committed=true;
+        assertOrigin();await records.verifyCanonical(diary);
+      }else if(current?.recordKind==='diary'){
+        await records.remove(date,{backupCapture,expectedCanonical:current,assertOrigin});committed=true;
+        assertOrigin();await records.verifyCanonicalAbsent(date);
+      }
+      assertOrigin();const fresh=await canonicalRecord(date);assertOrigin();
+      if(hasContent&&String(fresh?.reflection||'')!==candidate)throw new Error('Daily Reflection did not pass its canonical save read-back check.');
+      if(!hasContent&&current?.recordKind==='study'&&(!fresh||fresh.recordKind!=='study'||String(fresh.reflection||'').trim()))throw new Error('Daily Reflection clear did not pass its canonical save read-back check.');
+      if(!hasContent&&current?.recordKind==='diary'&&fresh)throw new Error('Daily Reflection deletion did not pass its canonical save read-back check.');
+      return snapshot(fresh);
+    }catch(error){
+      if(!committed)throw error;
+      throw Object.assign(new Error('Daily Reflection reached canonical storage, but final verification did not complete.'),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED',cause:error});
     }
-    assertOrigin?.();const fresh=await canonicalRecord(date);assertOrigin?.();
-    if(hasContent&&String(fresh?.reflection||'')!==candidate)throw new Error('Daily Reflection did not pass its canonical save read-back check.');
-    if(!hasContent&&current?.recordKind==='study'&&(!fresh||fresh.recordKind!=='study'||String(fresh.reflection||'').trim()))throw new Error('Daily Reflection clear did not pass its canonical save read-back check.');
-    if(!hasContent&&current?.recordKind==='diary'&&fresh)throw new Error('Daily Reflection deletion did not pass its canonical save read-back check.');
-    return snapshot(fresh);
   }
   const DailyReflectionPersistence=freeze({load,commit});
 
@@ -141,7 +147,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     const ownerRevision=ownership.revision(),assertOrigin=()=>{assertReflectionOwner(ownerRevision);options.assertWrite?.();};assertOrigin();
     const current=await records.get(date,{strict:true});
     assertOrigin();
-    if(!current){await records.verifyCanonicalAbsent(date);return true;}
+    if(!current){await records.verifyCanonicalAbsent(date);assertOrigin();return true;}
     const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true,assertOrigin});
     return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
   }
