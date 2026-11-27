@@ -291,6 +291,23 @@ const noop=()=>{};
   assert.equal(note.text,before,'file read from prior owner does not publish an import');
 }
 
+// A retained session owns the Study Day reflection for its date. Library may
+// still edit historical Study Days and diary-only reflections, but it must not
+// create a second writer for the retained session's Study Day.
+{
+  let retainedDate='2026-11-18';
+  const context={activeDate:()=>retainedDate};
+  vm.createContext(context);
+  const start=library.indexOf('    function activeSessionOwnsDiaryRecord('),end=library.indexOf('    function diaryHeader(',start);
+  assert.ok(start>=0&&end>start,'Library active-session Diary ownership guard must remain independently executable');
+  vm.runInContext(library.slice(start,end),context);
+  const study=date=>({recordKind:'study',date}),diary=date=>({recordKind:'diary',date});
+  assert.equal(context.activeSessionOwnsDiaryRecord(study('2026-11-18')),true,'retained session date owns its saved Study Day reflection');
+  assert.equal(context.activeSessionOwnsDiaryRecord(study('2026-11-17')),false,'historical Study Day remains editable in Diary');
+  assert.equal(context.activeSessionOwnsDiaryRecord(diary('2026-11-18')),false,'diary-only reflection is not mistaken for a saved Study Day');
+  retainedDate='';assert.equal(context.activeSessionOwnsDiaryRecord(study('2026-11-18')),false,'ended/discarded session releases the Diary Study Day');
+}
+
 // P5.6B Saved-Day presentation is request-generation fenced: a slower older
 // read, including a stale failure, cannot replace or error over the newest day.
 {
