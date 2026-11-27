@@ -1,7 +1,7 @@
 /* Shared DOM-free Markdown rendering for editor and portable exports.
    Top-level blocks are separated by a blank line, as Markdown needs: without
    one, two paragraphs read as one and a paragraph after a list joins the list. */
-import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
+import {PRODUCTION_LIMITS} from '../contracts/production-limits.mts';
 import {normalizePlainText} from './wg1-codec';
 // JSON document supplied by the schema decoder. Params stay unknown until their use.
 export type MarkdownNode={type?:unknown;param?:unknown;marks?:Record<string,unknown>;content?:readonly MarkdownNode[]};
