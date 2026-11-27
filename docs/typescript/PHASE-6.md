@@ -1,6 +1,6 @@
 # Phase 6 · Typed tooling and the test-suite overhaul
 
-**P6.0 complete. P6.1 is ready.** The [P6.0 baseline](P6-BASELINE.md) records the measured costs and outstanding failures. The [independently audited runtime baseline](REVIEW-P5-STAGE-2.md) is `66cffde8`. Convert remaining first-party tooling and tests and improve the tests as each owner is converted. Full application and device certification follows in Phase 7. F33 product behavior, deployed-data compatibility and SDVC1 are Phase 8 work.
+**P6.1 complete. P6.2 is ready and not started.** The [P6.0 baseline](P6-BASELINE.md) records the measured costs and outstanding failures. The [independently audited runtime baseline](REVIEW-P5-STAGE-2.md) is `66cffde8`. Convert remaining first-party tooling and tests and improve the tests as each owner is converted. Full application and device certification follows in Phase 7. F33 product behavior, deployed-data compatibility and SDVC1 are Phase 8 work.
 
 ## Intake and design review
 
