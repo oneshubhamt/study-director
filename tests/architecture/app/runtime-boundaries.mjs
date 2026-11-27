@@ -340,7 +340,7 @@ assert.match(reviewHost,/input\.module\.format!=='study-director\.review'[\s\S]*
 assert.match(reviewHost,/!Object\.isFrozen\(input\.subsystem\)/u,'Review host rejects mutable provider composition');
 assert.match(reviewHost,/!Object\.isFrozen\(subsystem\)[\s\S]*subsystem\.format!=='study-director\.review-subsystem'[\s\S]*subsystem\.contractVersion!==1/u,'Review host validates the composed subsystem before publication');
 assert.match(review,/qualityFields\.some\(field=>[\s\S]{0,420}reviewOwnershipRevision[\s\S]{0,240}getOwnershipRevision\(\)[\s\S]{0,240}reviewLifecycleRevision/u,'quality controls are fenced by both ownership and lifecycle revisions before Review persistence');
-const reviewPersistence=readScript('source/core/review-persistence.ts'),repositories=readScript('source/core/repositories.ts');
+const reviewPersistence=readScript('source/core/review-persistence.ts'),repositories=readScript('source/core/repositories.ts'),library=readScript('source/core/library.ts');
 assert.match(host,/const ReviewPersistence=ReviewPersistenceModule\.createPersistence\(Object\.freeze\s*\(\{/u,'Daily Reflection and Diary persistence cross the checked P5.5B owner');
 assert.doesNotMatch(host,/const DailyReflectionPersistence=\(\(\)=>|const LibraryDiaryEditor=\(\(\)=>/u,'the host must not retain parallel untyped reflection or Diary persistence engines');
 assert.match(reviewPersistence,/storage[\s\S]{0,180}indexeddb/u,'reflection persistence refuses fallback-only write receipts');
@@ -354,6 +354,10 @@ assert.match(review,/followup:reflectionLibraryFollowup\(pending\.date\)/u,'Libr
 assert.match(review,/AppData\.dailyRecords\.save\(doc,\{assertOrigin,expectedCanonical:existing\}\)/u,'Study Day save must compare against the exact Saved-Day record read before its asynchronous commit.');
 assert.match(review,/DAILY_RECORD_COMMITTED_UNVERIFIED/u,'Review must distinguish a canonical Saved-Day receipt followed by uncertain read-back from a failed write.');
 assert.ok(repositories.includes("conditional&&String((e as {code?:unknown}|null|undefined)?.code||'')==='DAILY_RECORD_CHANGED'"),'conditional Saved-Day conflicts stay fail-closed while non-conflict IndexedDB failure retains the existing emergency rescue lane.');
+assert.match(library,/function activeSessionOwnsDiaryRecord\(record:LibraryDiaryRecord\)\{const date=activeDate\(\);return record\.recordKind==='study'&&!!date&&date===record\.date;\}/u,'Library has one explicit guard against editing the Study Day owned by retained session state.');
+assert.match(library,/startDiaryEdit[\s\S]{0,500}activeSessionOwnsDiaryRecord\(record\)/u,'Diary Edit consults retained-session ownership before binding a Study Day editor.');
+assert.match(library,/deleteDiaryEntry[\s\S]{0,500}activeSessionOwnsDiaryRecord\(current\)[\s\S]{0,900}activeSessionOwnsDiaryRecord\(current\)/u,'Diary Delete checks retained-session ownership before and after its confirmation await.');
+assert.match(host,/activeDate:\(\)=>String\(TimerState\.studyDate\|\|sessionPanelSession\?\.date\|\|''\)/u,'the real Library port includes both live runtime and retained suspended/previous/elsewhere session dates.');
 assert.match(reviewHost,/function createDayState\(/u,'Review date/revision/reminder state has a checked P5.5B owner');
 assert.ok(host.indexOf("const FULL_WEEKDAY_NAMES=")<host.indexOf("const ReviewDayState=ReviewHostModule.createDayState"),'Review day-state constants must be initialized before checked host composition');
 assert.match(reviewHost,/function createSavedDayCoordinator\(/u,'Saved-Day reminder, acknowledgement, suspended-save and rollover orchestration have one checked P5.5B owner');
