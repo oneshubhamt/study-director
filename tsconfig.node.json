@@ -32,6 +32,8 @@
     "tests/helpers/runtime-source.mts",
     "tests/helpers/async-tools.mts",
     "tests/helpers/artifacts.mts",
-    "tests/helpers/quarantine.mts"
+    "tests/helpers/quarantine.mts",
+    "tests/helpers/coverage.mts",
+    "tests/helpers/branch-coverage.mts"
   ]
 }

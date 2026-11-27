@@ -92,6 +92,7 @@ const witnesses:Readonly<Record<string,readonly string[]>>={
     "assert.equal(timers.size,0,'settled operations clear the deadline');"
   ],
   "diagnostic-history-keeps-live-operations": [
+    "assert.equal(first.snapshot().find(row=>row.id===id)?.status,'running','starting an operation must retain its live record');",
     "assert.equal(concurrent.snapshot().find(row=>row.id===foregroundId)?.status,'running'"
   ],
   "partial-integrity-remains-unfinished": [

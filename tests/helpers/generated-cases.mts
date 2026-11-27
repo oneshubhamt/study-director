@@ -18,6 +18,12 @@ function tools(random: ()=>number, trace: (input: unknown)=>void){
 }
 type CaseTools=ReturnType<typeof tools>;
 type CaseOptions={seed:number;count:number};
+const requestedAtStartup=process.env['SD_CASE_SEED'];
+const familyAtStartup=process.env['SD_CASE_FAMILY'];
+let selectedAtStartup=0;
+if(requestedAtStartup!==undefined)process.once('beforeExit',()=>{
+  if(!selectedAtStartup){console.error(`No generated case matched ${familyAtStartup??'(any family)'} seed ${requestedAtStartup}.`);process.exitCode=1;}
+});
 export async function checkCases(name: string,{seed,count}: CaseOptions,check: (tools: CaseTools,index: number)=>void|Promise<void>): Promise<number>{
   const only=process.env['SD_CASE_SEED'],family=process.env['SD_CASE_FAMILY'];
   if(family&&family!==name)return 0;
@@ -26,10 +32,12 @@ export async function checkCases(name: string,{seed,count}: CaseOptions,check: (
   const cases=Array.from({length:count},(_,index)=>({index,caseSeed:(seed+index)>>>0})).filter(row=>only===undefined||row.caseSeed===Number(only));
   if(family&&only!==undefined&&!cases.length)throw new Error(`Seed ${only} is outside ${name}.`);
   for(const {index,caseSeed} of cases){
+    if(only===requestedAtStartup&&family===familyAtStartup)selectedAtStartup++;
     const draws:number[]=[],inputs:unknown[]=[];
     const random=seededRandom(caseSeed);
     try{
       await check(tools(()=>{const draw=random();draws.push(draw);return draw;},input=>inputs.push(structuredClone(input))),index);
+      if(process.env['SD_CASE_TRACE_SEED']===String(caseSeed)&&(!process.env['SD_CASE_TRACE_FAMILY']||process.env['SD_CASE_TRACE_FAMILY']===name))console.log('CASE-TRACE '+JSON.stringify({family:name,seed:caseSeed,index,draws,inputs}));
     }catch(error){
       const where=`${name}: case ${index+1} of ${count} failed (seed ${caseSeed}; rerun with SD_CASE_FAMILY=${JSON.stringify(name)} SD_CASE_SEED=${caseSeed})`;
       console.error(where);

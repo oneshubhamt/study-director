@@ -13,6 +13,7 @@ const make=()=>DiagnosticsModule.createRecorder(freeze({configuration:freeze({re
 
 const first=make();
 const id=first.start('device-restore','Device Folder',{interactive:true});
+assert.equal(first.snapshot().find(row=>row.id===id)?.status,'running','starting an operation must retain its live record');
 now+=12;assert.equal(first.mark('history-scan-start',{versions:3},id),true);
 now+=28;assert.equal(first.mark('history-scan-complete',{versions:3},id),true);
 now+=10;assert.equal(first.finish({ok:true},id),true);
