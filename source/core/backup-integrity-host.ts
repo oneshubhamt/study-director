@@ -113,29 +113,35 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   }
   function scheduleAttachment(delay:number=15000,trigger:string='scheduled'){return attachmentJob.schedule(delay,trigger,'earliest');}
   const deferred=(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED')=>Object.assign(new Error(message),{code});
+  const ownershipChanged=()=>Object.assign(new Error('Integrity verification belongs to a retired ownership epoch.'),{code:'INTEGRITY_OWNERSHIP_CHANGED'});
+  const ownerCurrent=(revision:number)=>input.authority.revision()===revision;
+  const assertOwner=(revision:number,write=false)=>{if(!ownerCurrent(revision)||write&&!input.authority.canMutate())throw ownershipChanged();};
+  const targetOrigins=new WeakMap<ProviderIntegrityTarget,number>();
+  function targetOrigin(target:ProviderIntegrityTarget|null){const revision=target?targetOrigins.get(target):undefined;if(revision===undefined)throw ownershipChanged();assertOwner(revision,true);return revision;}
   type AttachmentJobResult={status:string;reason?:string;checked?:number;issues?:number};
   async function runAttachment({trigger,nextEligibleAt}:{trigger:string;nextEligibleAt:string}):Promise<AttachmentJobResult>{
     let traceId='',prior:ReturnType<typeof normalizeAttachmentState>|null=null;
+    const owner=input.authority.revision(),assertOrigin=()=>assertOwner(owner,true);
     try{
-      prior=normalizeAttachmentState(await metadata.attachment.read(input.attachmentMetadataName),input.validAttachmentId);
+      prior=normalizeAttachmentState(await metadata.attachment.read(input.attachmentMetadataName),input.validAttachmentId);assertOwner(owner);
       if(!storage.supported()){applyAttachment(prior);return freeze({status:'skipped',reason:'storage-unavailable'});}
       const last=Date.parse(prior.checkedAt||''),now=environment.now();
       if(!prior.progress&&Number.isFinite(last)&&now-last<limits.attachmentIntervalMs){applyAttachment(prior);scheduleAttachment(limits.attachmentIntervalMs-(now-last)+1000);return freeze({status:'skipped',reason:'not-due'});}
       if(!input.authority.canMutate()){applyAttachment(prior);return freeze({status:'skipped',reason:'not-primary'});}
       if(input.background.foregroundBusy())return freeze({status:'skipped',reason:'foreground-busy'});
       traceId=diagnostics.start('attachment-integrity','Attachment storage',freeze({background:true,trigger,nextEligibleAt,actionable:true}));diagnostics.mark('attachment-integrity-eligibility',freeze({trigger,nextEligibleAt,actionable:true}),traceId);
-      const check=()=>{if(!input.authority.canMutate())throw deferred('Attachment integrity audit is awaiting primary-tab control.','ATTACHMENT_INTEGRITY_NOT_PRIMARY');if(input.background.foregroundBusy())throw deferred();};
+      const check=()=>{assertOrigin();if(input.background.foregroundBusy())throw deferred();};
       await backgroundTasks.yieldTask({priority:'background'});check();
-      const revision=input.referenceRevision(),dataset=await input.data.datasetRevision(),refs=await references.sources({includeLive:false,priority:'background',referencesOnly:true});
+      const revision=input.referenceRevision(),dataset=await input.data.datasetRevision();check();const refs=await references.sources({includeLive:false,priority:'background',referencesOnly:true});check();
       if(Object.prototype.toString.call(refs)!=='[object Set]')throw new Error('Attachment reference inventory could not be verified.');
       const audit=await storage.shallowAudit([...refs].filter(input.validAttachmentId),{progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:backgroundTasks.budget(),yieldTask:()=>backgroundTasks.yieldTask({priority:'background'}),check});
-      check();if(revision!==input.referenceRevision()||dataset!==await input.data.datasetRevision())throw deferred();
+      check();const currentDataset=await input.data.datasetRevision();check();if(revision!==input.referenceRevision()||dataset!==currentDataset)throw deferred();
       const complete=audit.complete!==false,state=normalizeAttachmentState({...prior,checkedAt:complete?environment.nowIso():prior.checkedAt,attemptedAt:environment.nowIso(),lastOutcome:complete?'completed':'yielded',progress:complete?null:audit.progress,issues:complete?audit.issues:prior.issues},input.validAttachmentId);
-      await metadata.attachment.write(input.attachmentMetadataName,state,{strict:true});applyAttachment(state);scheduleAttachment(complete?limits.attachmentIntervalMs:2000,complete?'interval':'continue');diagnostics.finish(freeze({status:complete?'completed':'yielded',checked:Number(audit.checked)||0,issues:state.issues.length}),traceId);return freeze({status:complete?'completed':'yielded',reason:'',checked:Number(audit.checked)||0,issues:state.issues.length});
+      await metadata.attachment.write(input.attachmentMetadataName,state,{strict:true,assertOrigin});assertOrigin();applyAttachment(state);scheduleAttachment(complete?limits.attachmentIntervalMs:2000,complete?'interval':'continue');diagnostics.finish(freeze({status:complete?'completed':'yielded',checked:Number(audit.checked)||0,issues:state.issues.length}),traceId);return freeze({status:complete?'completed':'yielded',reason:'',checked:Number(audit.checked)||0,issues:state.issues.length});
     }catch(caught){
       let error=caught as Error&{code?:string;attachmentAuditProgress?:unknown};
-      if(error.attachmentAuditProgress&&prior&&input.authority.canMutate())try{const state=normalizeAttachmentState({...prior,progress:error.attachmentAuditProgress,attemptedAt:environment.nowIso(),lastOutcome:'yielded'},input.validAttachmentId);await metadata.attachment.write(input.attachmentMetadataName,state,{strict:true});applyAttachment(state);}catch(writeError){error=writeError as Error&{code?:string};}
-      if(error.code==='ATTACHMENT_INTEGRITY_NOT_PRIMARY'){if(traceId)diagnostics.finish(freeze({status:'skipped',reason:'not-primary'}),traceId);return freeze({status:'skipped',reason:'not-primary'});}
+      if(error.attachmentAuditProgress&&prior&&ownerCurrent(owner)&&input.authority.canMutate())try{const state=normalizeAttachmentState({...prior,progress:error.attachmentAuditProgress,attemptedAt:environment.nowIso(),lastOutcome:'yielded'},input.validAttachmentId);await metadata.attachment.write(input.attachmentMetadataName,state,{strict:true,assertOrigin});assertOrigin();applyAttachment(state);}catch(writeError){error=writeError as Error&{code?:string};}
+      if(!ownerCurrent(owner)||error.code==='INTEGRITY_OWNERSHIP_CHANGED'||error.code==='ATTACHMENT_INTEGRITY_NOT_PRIMARY'){if(traceId)diagnostics.finish(freeze({status:'skipped',reason:'not-primary'}),traceId);return freeze({status:'skipped',reason:'not-primary'});}
       if(error.code==='ATTACHMENT_INTEGRITY_DEFERRED'){if(traceId)diagnostics.finish(freeze({status:'skipped',reason:'deferred'}),traceId);scheduleAttachment(input.background.foregroundBusy()?0:limits.attachmentRetryMs,'deferred');return freeze({status:'skipped',reason:'deferred'});}
       attachmentView=normalizeAttachmentState({...prior||attachmentView||{},attemptedAt:environment.nowIso(),lastOutcome:'unavailable'},input.validAttachmentId);render();if(traceId)diagnostics.fail(error,freeze({background:true,status:'unavailable'}),traceId);diagnostics.capture('attachments.integrity-audit',error,'warn');input.storageHealth.markError('attachmentIntegrity','Attachment verification is unavailable. Previous findings are retained; Study Director will retry.',{level:'warn'});scheduleAttachment(30*60*1000,'error');return freeze({status:'unavailable',reason:error.message||String(error)});
     }
@@ -156,37 +162,40 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
     else if(failed)input.storageHealth.markError('repositoryIntegrity','Backup verification is incomplete or unavailable. Study Director will retry; keep the local copy until verification succeeds.',{level:'warn'});
     else input.storageHealth.markOk('repositoryIntegrity');return state;
   }
-  function mutateTarget(target:string,change:(current:RepositoryIntegrityTarget)=>unknown):Promise<RepositoryIntegrityTarget>{
+  function mutateTarget(target:string,change:(current:RepositoryIntegrityTarget)=>unknown,owner:number):Promise<RepositoryIntegrityTarget>{
     if(!LOCATION.test(String(target||'')))return Promise.reject(new Error('Unknown backup location.'));
     const task=repositoryWriteChain.catch(()=>{}).then(()=>metadata.repository.transaction<RepositoryIntegrityState>('readwrite',(view,tx,finish)=>{
-      const handle=view.get(input.repositoryMetadataName);let updated:RepositoryIntegrityState|undefined;
+      assertOwner(owner,true);const handle=view.get(input.repositoryMetadataName);let updated:RepositoryIntegrityState|undefined;
       handle.request.onerror=()=>finish(false,handle.request.error||new Error('Integrity metadata could not be read.'));
       handle.request.onsuccess=()=>{try{
-        if(!input.authority.canMutate())throw new Error('Study control is required to save integrity state.');
+        assertOwner(owner,true);
         const state=normalizeRepositoryState(handle.value(),input.normalizeContinuation),next=normalizeRepositoryTarget(change(state.locations[target]||normalizeRepositoryTarget(null,input.normalizeContinuation)),input.normalizeContinuation);
         updated=freeze({...state,locations:freeze({...state.locations,[target]:next})});const write=view.put(input.repositoryMetadataName,updated);write.onerror=()=>finish(false,write.error||new Error('Integrity metadata could not be saved.'));
-      }catch(error){finish(false,error);}};
-      tx.oncomplete=()=>{if(!updated)finish(false,new Error('Integrity metadata transaction produced no state.'));else finish(true,updated);};
-    },{strict:true,abortMessage:'Integrity metadata transaction aborted'})).then(state=>{applyRepository(state);return state.locations[target]!;}).catch(error=>{const problem=error as Error&{code?:string};if(!problem.code)problem.code='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE';input.storageHealth.markError('repositoryIntegrity','Backup verification state could not be saved or read. The previous state is preserved; verification will retry.',{level:'warn'});diagnostics.capture('backup.repository-integrity-state',problem,'warn');throw problem;});
+        write.onsuccess=()=>{try{assertOwner(owner,true);}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+      }catch(error){try{tx.abort();}catch{}finish(false,error);}};
+      tx.oncomplete=()=>{try{assertOwner(owner,true);if(!updated)throw new Error('Integrity metadata transaction produced no state.');finish(true,updated);}catch(error){finish(false,error);}};
+    },{strict:true,abortMessage:'Integrity metadata transaction aborted'})).then(state=>{assertOwner(owner,true);applyRepository(state);return state.locations[target]!;}).catch(error=>{const problem=error as Error&{code?:string};if(!ownerCurrent(owner)||problem.code==='INTEGRITY_OWNERSHIP_CHANGED')throw ownershipChanged();if(!problem.code)problem.code='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE';input.storageHealth.markError('repositoryIntegrity','Backup verification state could not be saved or read. The previous state is preserved; verification will retry.',{level:'warn'});diagnostics.capture('backup.repository-integrity-state',problem,'warn');throw problem;});
     repositoryWriteChain=task.then(()=>{},()=>{});return task;
   }
-  async function readTarget(target:string){
-    const actual=await provider.repositoryScope(target);if(!actual)throw new Error('The backup repository identity is unavailable.');
-    const state=await readRepositoryState(),prior=state.locations[target]||normalizeRepositoryTarget(null,input.normalizeContinuation),same=prior.repositoryScope===actual;
-    if(same&&prior.repositoryScope){boundScopes[target]=prior.repositoryScope;applyRepository(state);return prior;}
-    const scope=String(actual),bound=await mutateTarget(target,current=>{if(current.repositoryScope!==prior.repositoryScope)throw changed();return {...normalizeRepositoryTarget(null,input.normalizeContinuation),repositoryScope:scope};});
-    boundScopes[target]=bound.repositoryScope;applyRepository(await readRepositoryState());return bound;
+  async function readTarget(target:string,owner=input.authority.revision()){
+    assertOwner(owner);const actual=await provider.repositoryScope(target);assertOwner(owner);if(!actual)throw new Error('The backup repository identity is unavailable.');
+    const state=await readRepositoryState();assertOwner(owner);
+    const prior=state.locations[target]||normalizeRepositoryTarget(null,input.normalizeContinuation),same=prior.repositoryScope===actual;
+    if(same&&prior.repositoryScope){boundScopes[target]=prior.repositoryScope;applyRepository(state);targetOrigins.set(prior,owner);return prior;}
+    const scope=String(actual),bound=await mutateTarget(target,current=>{if(current.repositoryScope!==prior.repositoryScope)throw changed();return {...normalizeRepositoryTarget(null,input.normalizeContinuation),repositoryScope:scope};},owner);
+    const refreshed=await readRepositoryState();assertOwner(owner,true);boundScopes[target]=bound.repositoryScope;applyRepository(refreshed);targetOrigins.set(bound,owner);return bound;
   }
-  async function updateTarget(target:string,result:IntegrityResult){
+  async function updateTarget(target:string,result:IntegrityResult,owner:number){
+    assertOwner(owner,true);
     if(!result.repositoryScope)throw new Error('Integrity results require their repository identity.');
-    const bound=await readTarget(target);if(bound.repositoryScope!==result.repositoryScope)throw changed();
-    return mutateTarget(target,current=>projectRepositoryResult(current,result,environment.nowIso()));
+    const bound=await readTarget(target,owner);if(bound.repositoryScope!==result.repositoryScope)throw changed();
+    return mutateTarget(target,current=>projectRepositoryResult(current,result,environment.nowIso()),owner);
   }
   const repositoryHooks=freeze({
     readTarget:(id:string)=>readTarget(id),
-    writeResult:async(id:string,result:IntegrityResult)=>{if(result.complete===true||!Number(result.total))delete live[id];else live[id]=freeze({done:Number(result.done)||0,total:Number(result.total)||0});await updateTarget(id,result);},
+    writeResult:async(id:string,result:IntegrityResult,target:ProviderIntegrityTarget|null)=>{const owner=targetOrigin(target);await updateTarget(id,result,owner);assertOwner(owner,true);if(result.complete===true||!Number(result.total))delete live[id];else live[id]=freeze({done:Number(result.done)||0,total:Number(result.total)||0});render();},
     prepare:async(id:string,target:ProviderIntegrityTarget|null,{trigger,nextEligibleAt}:{trigger:string;nextEligibleAt:string})=>{
-      if(!target)return null;const state=target as RepositoryIntegrityTarget;return freeze({repositoryScope:state.repositoryScope,requestId:state.requestId,scanId:state.scanId,cursor:state.cursor,recheckCursor:state.recheckCursor,partial:state.partial,recheck:state.recheck,verifyIncremental:input.continuation.verify,maxObjects:limits.repositoryBatchObjects,maxBytes:limits.repositoryBatchBytes,skipObjectIds:state.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:async(progress:import('../../types/managed-repository.ts').ScrubProgress)=>{live[id]=freeze({done:Number(progress.checked)||0,total:Number(progress.total)||0});render();return updateTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:state.repositoryScope,requestId:state.requestId});}});
+      if(!target)return null;const owner=targetOrigin(target),state=target as RepositoryIntegrityTarget;return freeze({repositoryScope:state.repositoryScope,requestId:state.requestId,scanId:state.scanId,cursor:state.cursor,recheckCursor:state.recheckCursor,partial:state.partial,recheck:state.recheck,verifyIncremental:input.continuation.verify,maxObjects:limits.repositoryBatchObjects,maxBytes:limits.repositoryBatchBytes,skipObjectIds:state.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:async(progress:import('../../types/managed-repository.ts').ScrubProgress)=>{assertOwner(owner,true);const saved=await updateTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:state.repositoryScope,requestId:state.requestId},owner);assertOwner(owner,true);live[id]=freeze({done:Number(progress.checked)||0,total:Number(progress.total)||0});render();return saved;}});
     },
     isAvailable:(_id:string)=>input.background.backgroundBlocker()||true,
     isUnsafe:(_id:string)=>input.unsafe.mutation()||input.unsafe.attachmentIngest(),
@@ -194,13 +203,13 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
     quarantine:async(id:string)=>(await readTarget(id)).quarantinedObjectIds
   });
   async function requestRepositoryRecheck(target:string){
-    const label=target==='device-folder'?'Device Folder':'Google Drive';rowError[target]='';recheckAsked[target]=true;render();
+    const owner=input.authority.revision(),label=target==='device-folder'?'Device Folder':'Google Drive';rowError[target]='';recheckAsked[target]=true;render();
     try{
       if(!input.authority.canMutate())throw new Error('Use the primary tab to request backup verification.');
       if(!provider.locationStatus(target)?.connected)throw new Error(`Connect ${label} before rechecking it.`);
-      const bound=await readTarget(target);await mutateTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw changed();return {...current,requestId:environment.uuid(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:environment.nowIso()};});
-      provider.requestIntegrity(target);render();return true;
-    }catch(error){recheckAsked[target]=false;rowError[target]=`Recheck did not start: ${String((error as {message?:unknown}|null)?.message||error)}`;render();diagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
+      const bound=await readTarget(target,owner);await mutateTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw changed();return {...current,requestId:environment.uuid(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:environment.nowIso()};},owner);
+      assertOwner(owner,true);provider.requestIntegrity(target);render();return true;
+    }catch(error){recheckAsked[target]=false;if(!ownerCurrent(owner)){render();return false;}rowError[target]=`Recheck did not start: ${String((error as {message?:unknown}|null)?.message||error)}`;render();diagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
   }
   async function installRepository(){try{return applyRepository(await readRepositoryState());}catch(error){diagnostics.capture('backup.repository-integrity-state-read',error,'warn');input.storageHealth.markError('repositoryIntegrity','Backup verification state is unavailable. Study Director will retry.',{level:'warn'});return null;}}
   function diagnosticRows(){

@@ -1866,7 +1866,7 @@ const createModule=(input:ProviderModuleInput)=>{
       preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Backup integrity verification yielded to a higher-priority operation.',
       capture:error=>AppDiagnostics.capture('backup-provider.repository-integrity-background',error,'warn'),
       readTarget:()=>integrityScrubHooks!.readTarget(id),
-      writeResult:result=>integrityScrubHooks!.writeResult(id,result),
+      writeResult:(result,target)=>integrityScrubHooks!.writeResult(id,result,target),
       isAvailable:()=>{const local=integrityScrubHooks!.isAvailable(id);return local===true?providerBackgroundAvailability(selected):String(local||'awaiting-control');},
       isUnsafe:()=>busy||integrityScrubHooks!.isUnsafe(id)===true,
       yieldTask:()=>integrityScrubHooks!.yieldTask(),

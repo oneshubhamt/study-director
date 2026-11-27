@@ -619,7 +619,7 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
       await runLifecycle('recovered-day-close',{scheduleIdentity:true,date:todayISO(),autoDate:true,review:true},()=>{
         assertOrigin(1);
         resetRuntimeSessionState({lifecycleManaged:true,source:'recovered-day-close',date:todayISO()});
-        clearReviewForNewDay({lifecycleManaged:true});
+        applyNewReviewDate(todayISO());
         return true;
       });
       assertOrigin(1,false);
@@ -640,14 +640,14 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
 function hasSaveableStudyDay(){
   return TASKS.some(isTrackableBlock);
 }
+function applyNewReviewDate(date:string){
+  const dd=inputById('day-date');
+  if(dd){dd.value=date;dd.dataset['autoDate']='1';}
+  syncReviewDateMode();
+  return true;
+}
 function clearReviewForNewDay(options:Readonly<{lifecycleManaged?:boolean}>={}){
-  const date=todayISO();
-  const apply=()=>{
-    const dd=inputById('day-date');
-    if(dd){dd.value=date;dd.dataset['autoDate']='1';}
-    syncReviewDateMode();
-    return true;
-  };
+  const date=todayISO(),apply=()=>applyNewReviewDate(date);
   return options.lifecycleManaged?apply():runLifecycle('date-rollover',{date,review:true},apply);
 }
 function studyDayRolledOver(now:Date=new Date()){
@@ -698,7 +698,7 @@ async function handleStudyDayRollover(){
       }
       await clearCanonicalSessionAfterSavedDay({expectedCanonical:checkpoint,assertOrigin:check});check();
       resetRuntimeSessionState({lifecycleManaged:true,source:'study-day-rollover',date:todayISO()});
-      clearReviewForNewDay({lifecycleManaged:true});
+      applyNewReviewDate(todayISO());
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset('Previous study day is closed. Apply today’s schedule when ready.','New Study Day');
       setPlanStatus('New study day ready. Apply today’s schedule when ready.');

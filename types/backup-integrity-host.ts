@@ -40,7 +40,7 @@ export interface BackupIntegrityInput{
   validAttachmentId(value:unknown):boolean;
   readonly data:Readonly<{datasetRevision():Promise<string|number|null>}>;
   referenceRevision():number;
-  readonly authority:Readonly<{canMutate():boolean}>;
+  readonly authority:Readonly<{canMutate():boolean;revision():number}>;
   readonly background:Readonly<{upkeepBlocker():string;backgroundBlocker():string;foregroundBusy():boolean}>;
   readonly backgroundTasks:Readonly<{budget():()=>boolean;yieldTask(options:{priority:'background'}):Promise<unknown>}>;
   readonly provider:Pick<BackupProviders,'backgroundStatus'|'locationStatus'|'repositoryScope'|'requestIntegrity'>;

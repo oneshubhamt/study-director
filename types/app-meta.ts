@@ -3,7 +3,7 @@ export interface MetaDefinition{name:string;kind:'exact'|'prefix';key:string;own
 export interface MetaContext{family:string;key:string;suffix:string;schema:string;owner:string;validatorOwner:string}
 export type MetaValidator=(value:unknown,context:Readonly<MetaContext>)=>boolean;
 export type MetaEntry=Readonly<{family:string;key:string;suffix:string;value:unknown;updatedAt:string}>;
-export type MetaWriteOptions={suffix?:string;updatedAt?:string;strict?:boolean;abortMessage?:string};
+export type MetaWriteOptions={suffix?:string;updatedAt?:string;strict?:boolean;abortMessage?:string;assertOrigin?:()=>void};
 export interface MetaView{
  get(name:string,suffix?:string):Readonly<{request:IDBRequest<unknown>;entry():MetaEntry|null;value():unknown}>;
  getAll(name:string):Readonly<{request:IDBRequest<unknown[]>;entries():readonly (MetaEntry|null)[]}>;

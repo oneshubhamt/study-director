@@ -106,26 +106,26 @@ const integrityModules=integrityContext[Symbol.for('studyDirector.internalModule
   integrityLifecycle=integrityModules.require('operation-lifecycle',1),
   integrityHost=integrityModules.require('backup-integrity-host',1);
 {
-  const clock=createFakeClock(),wrong={owner:'backup',read:async()=>null,write:async()=>({family:'integrity',value:null,updatedAt:new clock.Date().toISOString()})},repository={owner:'backup',read:async()=>null,transaction:async()=>{throw new Error('unused');}};
+  const epoch=1,clock=createFakeClock(),wrong={owner:'backup',read:async()=>null,write:async()=>({family:'integrity',value:null,updatedAt:new clock.Date().toISOString()})},repository={owner:'backup',read:async()=>null,transaction:async()=>{throw new Error('unused');}};
   assert.throws(()=>integrityHost.createController(Object.freeze({
     lifecycle:integrityLifecycle,metadata:Object.freeze({attachment:wrong,repository}),attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',
     storage:Object.freeze({supported:()=>false,shallowAudit:async()=>({status:'completed',complete:true,checked:0,issues:[],progress:null})}),references:Object.freeze({sources:async()=>new Set()}),validAttachmentId:()=>true,
-    data:Object.freeze({datasetRevision:async()=>1}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true}),background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),backgroundTasks:Object.freeze({yieldTask:async()=>{},budget:()=>()=>false}),
+    data:Object.freeze({datasetRevision:async()=>1}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true,revision:()=>epoch}),background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),backgroundTasks:Object.freeze({yieldTask:async()=>{},budget:()=>()=>false}),
     provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),continuation:Object.freeze({verify:async()=>{throw new Error('unused');}}),normalizeContinuation:()=>null,unsafe:Object.freeze({mutation:()=>false,attachmentIngest:()=>false}),storageHealth:Object.freeze({markError(){},markOk(){}}),invalidateAttachmentLibrary(){},diagnostics:Object.freeze({capture(){},start:()=>'',mark(){},finish(){},fail(){}}),document:{getElementById:()=>null,createElement:()=>({})},environment:Object.freeze({now:()=>clock.now(),nowIso:()=>new clock.Date().toISOString(),uuid:()=> '00000000-0000-0000-0000-000000000001',setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),limits:Object.freeze({attachmentIntervalMs:1,attachmentRetryMs:1,repositoryBatchObjects:1,repositoryBatchBytes:1})
   })),/owned by host/,'attachment integrity must reject a backup-owned metadata capability instead of degrading into an unavailable warning');
 }
-for(const failure of ['read','write']){
-  const clock=createFakeClock();let cleared=0,writes=0,failRead=false,failWrite=false;
+for(const failure of ['read','write','retired-scan','retired-write']){
+  const clock=createFakeClock();let cleared=0,writes=0,failRead=false,failWrite=false,epoch=1;
   let persisted={version:2,checkedAt:'',attemptedAt:'',lastOutcome:'completed',progress:null,issues:[{id:'asset-good',kind:'size-mismatch'}]};
-  const attachmentMeta={owner:'host',read:async()=>{if(failRead)throw new Error('read unavailable');return persisted;},write:async(_name,value,options)=>{writes++;assert.equal(options.strict,true);if(failWrite)throw new Error('write unavailable');persisted=value;return {family:'integrity',value,updatedAt:new clock.Date().toISOString()};}};
+  const attachmentMeta={owner:'host',read:async()=>{if(failRead)throw new Error('read unavailable');return persisted;},write:async(_name,value,options)=>{writes++;assert.equal(options.strict,true);options.assertOrigin();if(failure==='retired-write')epoch+=2;options.assertOrigin();if(failWrite)throw new Error('write unavailable');persisted=value;return {family:'integrity',value,updatedAt:new clock.Date().toISOString()};}};
   const repositoryMeta={owner:'backup',read:async()=>{throw new Error('repository integrity path is not used by this attachment witness');},transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}};
   const controller=integrityHost.createController(Object.freeze({
     lifecycle:integrityLifecycle,metadata:Object.freeze({attachment:attachmentMeta,repository:repositoryMeta}),attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',
-    storage:Object.freeze({supported:()=>true,shallowAudit:async()=>({status:'completed',complete:true,checked:1,issues:[],progress:null})}),
+    storage:Object.freeze({supported:()=>true,shallowAudit:async()=>{if(failure==='retired-scan')epoch+=2;return {status:'completed',complete:true,checked:1,issues:[],progress:null};}}),
     references:Object.freeze({sources:async options=>{assert.equal(options.referencesOnly,true);return new Set(['asset-good']);}}),
     validAttachmentId:value=>/^asset-/.test(String(value||'')),
     data:Object.freeze({datasetRevision:async()=>1}),referenceRevision:()=>0,
-    authority:Object.freeze({canMutate:()=>true}),
+    authority:Object.freeze({canMutate:()=>true,revision:()=>epoch}),
     background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),
     backgroundTasks:Object.freeze({yieldTask:async()=>{},budget:()=>()=>false}),
     provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),
@@ -145,8 +145,8 @@ for(const failure of ['read','write']){
   const running=controller.attachmentJob.run('test');
   controller.scheduleAttachment(5000,'new-attachment');
   const attempt=await running;
-  assert.equal(attempt.status,'unavailable');assert.equal(controller.attachmentIssue('asset-good')?.kind,'size-mismatch','failed verification retains prior findings');
-  assert.equal(cleared,0);assert.equal(writes,failure==='write'?1:0);
+  assert.equal(attempt.status,failure.startsWith('retired')?'skipped':'unavailable');assert.equal(controller.attachmentIssue('asset-good')?.kind,'size-mismatch','failed verification retains prior findings');
+  assert.equal(cleared,0);assert.equal(writes,failure==='write'||failure==='retired-write'?1:0);
   assert.equal(clock.nextAt(),clock.now()+5000,'a running audit cannot replace a newer five-second request with its later error retry');
   controller.scheduleAttachment(60000,'interval');
   assert.equal(clock.nextAt(),clock.now()+5000,'a later recurrence cannot postpone pending work');

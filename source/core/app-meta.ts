@@ -123,7 +123,13 @@ registry.define('app-meta',1,()=>{
       }
       function write<T>(name:string,value:T,options:MetaWriteOptions={}){
         const updatedAt=options&&options.updatedAt?new Date(String(options.updatedAt)).toISOString():new Date().toISOString(),writeOptions={...options,updatedAt};
-        return transaction<Readonly<{family:string;value:T;updatedAt:string}>>('readwrite',(view,tx,finish)=>{const request=view.put(name,value,writeOptions);request.onerror=()=>finish(false,request.error||new Error('app metadata write failed'));tx.oncomplete=()=>finish(true,freeze({family:String(name),value,updatedAt}));},{strict:options&&options.strict===true,abortMessage:options&&options.abortMessage||'app metadata write aborted'});
+        const assertOrigin=options.assertOrigin;
+        return transaction<Readonly<{family:string;value:T;updatedAt:string}>>('readwrite',(view,tx,finish)=>{
+          assertOrigin?.();const request=view.put(name,value,writeOptions);
+          request.onerror=()=>finish(false,request.error||new Error('app metadata write failed'));
+          if(assertOrigin)request.onsuccess=()=>{try{assertOrigin();}catch(error){try{tx.abort();}catch{}finish(false,error);}};
+          tx.oncomplete=()=>{try{assertOrigin?.();finish(true,freeze({family:String(name),value,updatedAt}));}catch(error){finish(false,error);}};
+        },{strict:options&&options.strict===true,abortMessage:options&&options.abortMessage||'app metadata write aborted'});
       }
       function remove(name:string,suffix='',options:MetaWriteOptions={}){
         return transaction<boolean>('readwrite',(view,tx,finish)=>{const request=view.remove(name,suffix);request.onerror=()=>finish(false,request.error||new Error('app metadata removal failed'));tx.oncomplete=()=>finish(true,true);},{strict:options&&options.strict===true,abortMessage:options&&options.abortMessage||'app metadata removal aborted'});

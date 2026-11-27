@@ -43,7 +43,7 @@ function fakeDocument(){
 
 function fixture(){
   const dom=fakeDocument(),state={
-    readFailed:false,txReadFailed:false,writeFailed:false,commitFailed:false,owner:true,
+    readFailed:false,txReadFailed:false,writeFailed:false,commitFailed:false,owner:true,epoch:1,txGate:null,putGate:null,
     drive:'drive-one',device:'device-one',driveConnected:true,deviceConnected:true,
     durable:null,writes:0,health:[],transactions:0,queued:[],jobs:[],nowMs:Date.parse(stamp),uuid:requestId
   };
@@ -66,21 +66,26 @@ function fixture(){
           if(state.commitFailed){reject(new Error('commit unavailable'));return;}
           state.durable=next;state.writes++;resolve(value);
         };
-        const tx={oncomplete:null};
+        const tx={oncomplete:null,abort:()=>{}};
         const view={
           get(name){
             assert.equal(name,'repositoryIntegrityScrub');
             const request={error:null,onsuccess:null,onerror:null};
-            queueMicrotask(()=>{
+            queueMicrotask(async()=>{
+              if(state.txGate)await state.txGate();
               if(state.txReadFailed){request.error=new Error('transaction read unavailable');request.onerror?.();return;}
-              request.onsuccess?.();queueMicrotask(()=>{if(!finished)tx.oncomplete?.();});
+              request.onsuccess?.();
             });
             return freeze({request,value:()=>state.durable});
           },
           put(name,value){
             assert.equal(name,'repositoryIntegrityScrub');next=value;
-            const request={error:null,onerror:null};
-            if(state.writeFailed)queueMicrotask(()=>{request.error=new Error('write unavailable');request.onerror?.();});
+            const request={error:null,onerror:null,onsuccess:null};
+            queueMicrotask(async()=>{
+              if(state.putGate)await state.putGate();
+              if(state.writeFailed){request.error=new Error('write unavailable');request.onerror?.();return;}
+              request.onsuccess?.();if(!finished)tx.oncomplete?.();
+            });
             return request;
           }
         };
@@ -99,7 +104,7 @@ function fixture(){
     storage:freeze({supported:()=>false,shallowAudit:async()=>freeze({status:'completed',complete:true,checked:0,issues:freeze([])})}),
     references:freeze({sources:async()=>new Set()}),validAttachmentId:value=>/^asset-[a-z0-9-]+$/u.test(String(value||'')),
     data:freeze({datasetRevision:async()=>0}),referenceRevision:()=>0,
-    authority:freeze({canMutate:()=>state.owner}),
+    authority:freeze({canMutate:()=>state.owner,revision:()=>state.epoch}),
     background:freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),
     backgroundTasks:freeze({budget:()=>()=>false,yieldTask:async()=>{}}),
     provider:freeze({
@@ -129,7 +134,7 @@ function fixture(){
   return {state,controller,dom,diagnostics,normalize};
 }
 const read=(h,id)=>h.controller.repositoryHooks.readTarget(id);
-const write=(h,id,result)=>h.controller.repositoryHooks.writeResult(id,result);
+const write=async(h,id,result)=>h.controller.repositoryHooks.writeResult(id,result,await read(h,id));
 const cases=[];async function test(name,run){await run();cases.push(name);}
 
 await test('read, transactional read, write and commit failures preserve both providers',async()=>{
@@ -212,6 +217,24 @@ await test('lost write ownership and identity-free results fail closed',async()=
   const h=fixture();h.state.owner=false;const before=h.state.durable;
   await assert.rejects(write(h,'device-folder',{repositoryScope:'device-one',status:'completed',complete:true}));assert.equal(h.state.durable,before);
   h.state.owner=true;await assert.rejects(write(h,'device-folder',{status:'completed',complete:true}));assert.equal(h.state.durable,before);
+});
+await test('retired repository scans cannot publish progress, completion or delayed metadata writes',async()=>{
+  const h=fixture(),id='device-folder',result={repositoryScope:'device-one',status:'completed',complete:true};
+  const target=await read(h,id),prepared=await h.controller.repositoryHooks.prepare(id,target,{trigger:'test',nextEligibleAt:stamp});
+  const before=h.state.durable;h.state.epoch+=2;
+  await assert.rejects(h.controller.repositoryHooks.writeResult(id,result,target),{code:'INTEGRITY_OWNERSHIP_CHANGED'});
+  await assert.rejects(prepared.onProgress({checked:1,total:2,cursor:objectId('d'),scanId}),{code:'INTEGRITY_OWNERSHIP_CHANGED'});
+  assert.equal(h.state.durable,before);assert.equal(h.state.writes,0);
+  for(const field of ['txGate','putGate']){
+    const current=await read(h,id);let enter,release;
+    const entered=new Promise(resolve=>enter=resolve),gate=new Promise(resolve=>release=resolve);
+    h.state[field]=async()=>{enter();await gate;};
+    const pending=h.controller.repositoryHooks.writeResult(id,result,current);
+    await entered;h.state.epoch+=2;release();
+    await assert.rejects(pending,{code:'INTEGRITY_OWNERSHIP_CHANGED'});
+    assert.equal(h.state.durable,before);assert.equal(h.state.writes,0);h.state[field]=null;
+  }
+  await write(h,id,result);assert.equal(h.state.writes,1,'fresh primary can still publish');
 });
 await test('Drive executor classifies transport, permission, lock, corruption and budget outcomes',async()=>{
   const source=readScript('source/core/backup-provider.ts'),start=source.indexOf('  async function runConfiguredIntegrityScrub('),end=source.indexOf('  async function backupRepositoryProvider(',start);

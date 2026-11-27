@@ -3427,7 +3427,7 @@ BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze<BackupI
   lifecycle:OperationLifecycle,metadata:Object.freeze<BackupIntegrityInput['metadata']>({attachment:HostAppMeta,repository:BackupAppMeta}),attachmentMetadataName:'attachmentIntegrityAudit',repositoryMetadataName:'repositoryIntegrityScrub',
   storage:AttachmentStorage,references:AttachmentReferences,validAttachmentId:AttachmentsModule.validId,
   data:Object.freeze<BackupIntegrityInput['data']>({datasetRevision:()=>AppData.dailyRecords.datasetRevision()}),referenceRevision:()=>richAssetReferenceRevision,
-  authority:Object.freeze<BackupIntegrityInput['authority']>({canMutate:()=>appCanMutate()}),
+  authority:Object.freeze<BackupIntegrityInput['authority']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
   background:Object.freeze<BackupIntegrityInput['background']>({upkeepBlocker:()=>upkeepBlocker(),backgroundBlocker:()=>backgroundBlocker(),foregroundBusy:()=>backgroundMaintenanceForegroundBusy()}),
   backgroundTasks:Object.freeze<BackupIntegrityInput['backgroundTasks']>({budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options)}),
   provider:BackupProviderRuntime,continuation:Object.freeze<BackupIntegrityInput['continuation']>({verify:options=>{const {signal,...rest}=options;return RepositoryIntegrityContinuation.verify(signal?{...rest,signal}:rest);}}),normalizeContinuation:value=>IntegrityContinuationModule.normalize(value),

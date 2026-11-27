@@ -354,7 +354,7 @@ const createModule=(input:BackgroundModuleInput)=>{
           const dueBase=Date.parse(String(target&&target.completedAt||target&&target.cycleStartedAt||'')),nextEligibleAt=Number.isFinite(dueBase)?new Date(dueBase+INTEGRITY.intervalMs).toISOString():new Date(now).toISOString();
           scope.workBudget.start(Math.max(0,Number(input.budgetMs)||0));
           const checkpoint=integrityCheckpoint(scope,target);
-          stage='execute';const result=await input.execute(freeze({target,trigger,nextEligibleAt,signal:scope.signal,checkpoint}));stage='state-write';await input.writeResult(result);schedule(integrityResultDelay(result),result&&result.reason||result&&result.status||'completed');return result;
+          stage='execute';const result=await input.execute(freeze({target,trigger,nextEligibleAt,signal:scope.signal,checkpoint}));stage='state-write';await input.writeResult(result,target);schedule(integrityResultDelay(result),result&&result.reason||result&&result.status||'completed');return result;
         }finally{scope.release();}
       })().catch(error=>{const yielded=(error as {name?:unknown}|null|undefined)?.name==='AbortError',budgeted=yielded&&String((error as {code?:unknown}|null|undefined)?.code||'')===String(input.budgetCode||''),preempted=yielded&&String((error as {code?:unknown}|null|undefined)?.code||'')===String(input.preemptCode||''),stateFailed=stage!=='execute'||(error as {code?:unknown}|null|undefined)?.code==='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE',changed=(error as {code?:unknown}|null|undefined)?.code==='REPOSITORY_CHANGED';if(!yielded)input.capture(error);
         // Stopped by other work: start again as soon as that work releases the
