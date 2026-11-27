@@ -1227,7 +1227,7 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMut
     stored=true;return freeze({ok:true,storage:'indexeddb'});
   }
   catch(e){
-    assertOrigin?.();if(isOwnershipLostError(e)||conditional)throw e;
+    assertOrigin?.();if(isOwnershipLostError(e)||conditional&&String((e as {code?:unknown}|null|undefined)?.code||'')==='DAILY_RECORD_CHANGED')throw e;
     assertWriteToken(ownershipToken,'the daily-record fallback write');
     const existing=fallbackDailyRecordsGet(),arr=existing.filter(r=>r.date!==clean.date);arr.push(clean);
     const capped=capFallbackDailyRecords(arr,rescueRoom(STORAGE_KEYS.fallbackDailyRecords,APP_LIMITS.fallbackDailyRecordsBytes)),retainedDates=new Set(capped.map(record=>record.date));
