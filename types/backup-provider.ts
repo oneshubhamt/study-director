@@ -76,7 +76,7 @@ export type ConvergenceResult={status:string;reason:string;checkpointId?:string;
 export type PendingHooks={read(id:string):Promise<PendingEntry|null>;mark(id:string):Promise<boolean>;clear(id:string,expected?:PendingEntry|null):Promise<boolean>};
 export type MaintenanceHooks={read(id:string):Promise<MaintenanceState|null>;mark(id:string,state:{reason:string;nextEligibleAt:string;repositoryScope:string;newRequest?:boolean},expected?:MaintenanceState|null):Promise<boolean|'superseded'>;clear(id:string,expected?:MaintenanceState|null):Promise<boolean|'superseded'>};
 export type AutomaticHooks={covered(id:string):unknown;current():unknown;ready?:(()=>boolean|null|PromiseLike<boolean|null>)|null};
-export type PreparedScrub=ScrubOptions&{repositoryScope?:string;requestId?:string};
+export type PreparedScrub=ScrubOptions&{repositoryScope?:string;requestId?:string;assertOrigin?:()=>void};
 export type IntegrityHooks={readTarget(id:string):Promise<IntegrityTarget|null>;writeResult(id:string,value:IntegrityResult,target:IntegrityTarget|null):Promise<unknown>;prepare(id:string,target:IntegrityTarget|null,context:{trigger:string;nextEligibleAt:string}):Promise<PreparedScrub|null>;isAvailable(id:string):boolean|string;isUnsafe(id:string):boolean;yieldTask():Promise<unknown>;quarantine(id:string):Promise<readonly string[]>};
 export type AutomaticState={connected:boolean;noticeShown:boolean;waitingSince:number;urgentSince:number};
 export type SyncState={ancestryPending:boolean;rolledBack:{head:string;retryAt:number}|null;turnOverrideUntil:number;checkedAt:number;review:string;password:string;newer:string;catching:boolean;behind:boolean;failed:boolean;syncedAt:string;turnWaits:number;turnHolder:{device:string;startedAt:string;renewedAt:string}|null};
