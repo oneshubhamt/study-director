@@ -158,8 +158,16 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   async function writeSnapshot(value:SessionSnapshot|null,options:Readonly<LiveDraftWriteOptions>={}):Promise<SessionResult|null>{
     if(blocked(options))return null;
     const session=payload(value);if(!session)return null;
-    try{options.assertOrigin?.();const saved=await repository.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true,...(options.assertOrigin?{assertOrigin:options.assertOrigin}:{})});options.assertOrigin?.();return report(saved,'save');}
-    catch(error){options.assertOrigin?.();const failed:SessionResult={ok:false,value:session,error,storage:{local:false,idb:false}};report(failed,'save');return failed;}
+    const assertOrigin=draftOrigin(options);
+    try{
+      assertOrigin();
+      const saved=await repository.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true,assertOrigin});
+      assertOrigin();return report(saved,'save');
+    }catch(error){
+      options.assertOrigin?.();
+      if(!draftOriginCurrent(assertOrigin))return null;
+      return report({ok:false,value:session,error,storage:{local:false,idb:false}},'save');
+    }
   }
   type TransitionAuthority={owner:number;life:number};
   type LocalTransition={authority:TransitionAuthority;before:ActiveSession|null;rollback:ActiveSession|null;attempted:ActiveSession|null|undefined;runtimeChanged:boolean};

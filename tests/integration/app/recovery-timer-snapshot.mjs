@@ -101,6 +101,19 @@ controller.saveLiveDraft({strictDurability:true,markChanged:false});controller.s
 }
 // Recovery barriers block ordinary checkpoints. The explicit recovery authorization
 // is reserved for recovery-owned checkpoints that must settle canonical Review state.
+// Immediate timer and progress saves cross the same repository wait as queued saves.
+for(const retire of [()=>lifeRevision++,()=>ownerRevision++]){
+  const before=saveCount,reports=reportCount;
+  let entered,release;
+  const waiting=new Promise(resolve=>{entered=resolve;});
+  beforeSave=()=>new Promise(resolve=>{release=resolve;entered();});
+  const write=controller.writeNow({markChanged:false});
+  await waiting;retire();release();
+  assert.equal(await write,null,'a retired immediate checkpoint must be abandoned');
+  assert.equal(saveCount,before,'a retired immediate checkpoint must never reach the repository commit');
+  assert.equal(reportCount,reports,'retired progress must not report into the successor');
+  beforeSave=null;
+}
 recovery=true;
 assert.equal(await controller.withPersistenceSuppressed(()=>controller.writeNow({markChanged:false})),null,'ordinary writes remain blocked under recovery suppression');
 recoveryWork=true;canMutate=false;

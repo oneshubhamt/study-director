@@ -972,7 +972,7 @@ function createInsightsModelRuntime(global:typeof globalThis){
     return stableRecordSignature(candidate)>stableRecordSignature(existing)?candidate:existing;
   }
   function arrayInput<T>(value:readonly T[]|null|undefined):readonly T[]{
-    return Array.isArray(value)?value:[];
+    return Array.isArray(value)?value as readonly T[]:[];
   }
   function normalizedTasks(record:InsightRecord){
     return arrayInput(record.tasks).filter(task=>task&&typeof task==='object'&&taskPlanned(task)>0);

@@ -14,3 +14,9 @@ Stage B began against `93884c5c4c0a84159b2001f0dbbeb9ce2833ea87` while Stage 1 c
 ## Handoff reconciliation · 2026-11-27
 
 The shell and local repository are accessible again. All four Insights source and regression files above were byte-identical from `e12ad44f` to the final Stage 1 handoff. Applied the independent correction on the final base. Pinned strict compilation passed (five projects, 246 files). Next verify typed lint, fresh build, fast suites and affected browser gates, then reconcile the remaining feature owners and Stage 1 repairs before deciding closure.
+
+## Immediate save lifetime and Insights verification
+
+At `516c6ed7` the debounce and explicit flush from Stage 1 guarded the repository write. Direct timer, execution and Practice Pacer writes reached the same queue without a lifecycle callback. Held an immediate write at the repository port, changed the lifecycle, then released the write. The uncorrected owner committed and returned a result. Capture the originating lifecycle and owner at the shared snapshot boundary and pass the check into the repository transaction. A retired ordinary request returns null and suppresses successor reporting. An explicitly retired caller guard retains its refusal. The red/green regression covers lifecycle and ownership changes. Both recovery-timer-snapshot and session-handoff-runtime passed.
+
+The initial Insights patch compiled but typed lint caught array narrowing to any[]. After restoring the declared element type at that validated boundary, local pinned types/lint, fresh build, generated verification/syntax, Insights scaling and transport lifecycle all passed. The first fast-suite attempt detected concurrent edits in its checkout and stopped with zero test failures. Rerun on an isolated clean revision.
