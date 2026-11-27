@@ -1770,7 +1770,7 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<FirstStartInp
   captureOrigin:captureProfileOrigin,
   document,
   profiles:Profiles,
-  backupProtection:Object.freeze({enable:password=>BackupProtection.enable(password)}),
+  backupProtection:Object.freeze({enable:(password,assertOrigin)=>BackupProtection.enable(password,assertOrigin)}),
   provider:Object.freeze<FirstStartInput['provider']>({locationStatus:id=>BackupProviderRuntime.locationStatus(id)}),
   connectDriveForProfile:()=>connectDriveForProfile(),
   getStudentName:()=>getStudentNameFromDisplay(),

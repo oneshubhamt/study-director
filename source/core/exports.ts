@@ -341,9 +341,11 @@ const createModule=(input:ExportsModuleInput)=>{
       if(action==='remove')return removePassword(assertCurrent,record);
     });}
     // First start: the password typed in the form, set before anything uploads.
-    async function enable(password:unknown){return processing.job(async()=>{
+    async function enable(password:unknown,assertOrigin?:()=>void){return processing.job(async()=>{
       if(!canMutate())throw new Error('Take control in this tab before setting the backup password.');
-      const assertCurrent=mutationFence(),record=await refresh();assertCurrent();if(record)return false;
+      const assertMutation=mutationFence();
+      const assertCurrent=()=>{assertOrigin?.();assertMutation();};
+      assertCurrent();const record=await refresh();assertCurrent();if(record)return false;
       const candidate=await processing.run('crypto.key',{password:String(password||'')}),verifier=await processing.run('crypto.verifier.create',{key:candidate});
       assertCurrent();const latest=await refresh();assertCurrent();if(latest)return false;
       const next={version:3,id:globalThis.crypto.randomUUID(),verifier,key:candidate,setAt:new Date().toISOString()};

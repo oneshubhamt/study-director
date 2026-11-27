@@ -111,11 +111,12 @@ try{
         ['first-start-dialog',new FakeDialog()]
       ]);
       let authority=true,releasePassword,finishCalls=0,applyCalls=0,firstStartEpoch=1;
+      let passwordWrites=0;
       let passwordGate=new Promise(resolve=>{releasePassword=resolve;});
       const firstStart=Host.createFirstStart(freeze({
         captureOrigin:()=>{const origin=firstStartEpoch;return ()=>{if(origin!==firstStartEpoch)throw Error('retired owner');};},
         document:{getElementById:id=>nodes.get(id)||null},profiles:freeze({...profiles,finishFirstStart:()=>{finishCalls++;return profile;}}),
-        backupProtection:freeze({enable:async()=>{await passwordGate;return true;}}),provider:freeze({locationStatus:()=>null}),connectDriveForProfile:async()=>true,
+        backupProtection:freeze({enable:async(_password,assertOrigin)=>{await passwordGate;assertOrigin?.();passwordWrites++;return true;}}),provider:freeze({locationStatus:()=>null}),connectDriveForProfile:async()=>true,
         getStudentName:()=>profile.name,isDefaultStudentName:()=>false,applyStudentName:value=>{applyCalls++;return value;},persistUserDefaultName:()=>true,renderProfile:()=>true,reportError:()=>{reportedErrors++;},
         appCanMutate:()=>authority
       }));
@@ -128,6 +129,13 @@ try{
       const stale=firstStart.finish();await Promise.resolve();firstStartEpoch++;releasePassword();assert.equal(await stale,false);assert.equal(finishCalls,0);assert.equal(applyCalls,0);
       passwordGate=new Promise(resolve=>{releasePassword=resolve;});
       const closed=firstStart.finish();await Promise.resolve();firstStart.close();releasePassword();assert.equal(await closed,false);assert.equal(finishCalls,0);
+      assert.equal(passwordWrites,0,'a superseded form cannot commit its pending backup password');
+      nodes.get('first-start-dialog').open=true;
+      passwordGate=new Promise(resolve=>{releasePassword=resolve;});
+      const connecting=firstStart.connect();await Promise.resolve();firstStart.skip();releasePassword();
+      assert.equal(await connecting,false);assert.equal(passwordWrites,0,'Skip also retires password setup started by Connect');
+      nodes.get('first-start-dialog').open=true;
+      assert.equal(await firstStart.finish(),true);assert.equal(passwordWrites,1,'a fresh First Start action can still set the password');
     }finally{
       if(priorInput===undefined)delete globalThis.HTMLInputElement;else globalThis.HTMLInputElement=priorInput;
       if(priorDialog===undefined)delete globalThis.HTMLDialogElement;else globalThis.HTMLDialogElement=priorDialog;

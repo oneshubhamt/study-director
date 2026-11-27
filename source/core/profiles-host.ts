@@ -12,7 +12,7 @@ interface PanelActionsInput{
 interface ProfileOriginPort{captureOrigin(reason:string):()=>void}
 interface FirstStartInput extends ProfileOriginPort{
   readonly document:Document;readonly profiles:ProfilesController;
-  readonly backupProtection:Readonly<{enable(password:string):PromiseLike<unknown>}>;
+  readonly backupProtection:Readonly<{enable(password:string,assertOrigin:()=>void):PromiseLike<unknown>}>;
   readonly provider:Readonly<{locationStatus(id:'google-drive'):Readonly<{connected?:boolean;engineBusy?:boolean}>|null}>;
   connectDriveForProfile():boolean|PromiseLike<boolean>;
   getStudentName():string;isDefaultStudentName(value:string):boolean;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;renderProfile():unknown;reportError(error:unknown):unknown;appCanMutate():boolean;
@@ -265,10 +265,10 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
     if(value!==confirm)return {error:'The two passwords do not match.'};
     return {value};
   }
-  async function applyPassword(){
+  async function applyPassword(assertOrigin:()=>void){
     const chosen=password();
     if(chosen.error){showError(chosen.error);field(chosen.error.includes('match')?'first-start-confirm':'first-start-password')?.focus();return false;}
-    if(chosen.value)await ports.backupProtection.enable(chosen.value);
+    if(chosen.value)await ports.backupProtection.enable(chosen.value,assertOrigin);
     return true;
   }
   function applyName(){
@@ -309,14 +309,15 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
     const active=()=>origin===actionRevision&&!!(node('first-start-dialog') as HTMLDialogElement|null)?.open;
     const current=()=>active()&&requireMutationAuthority()&&stillCurrent(intent.assert);
     const ownerCurrent=()=>active()&&ports.appCanMutate()&&stillCurrent(intent.assertOwner);
-    return {active,current,ownerCurrent};
+    const assertCurrent=()=>{if(!current())throw new Error('This First Start action is no longer current.');};
+    return {current,ownerCurrent,assertCurrent};
   }
   async function connect(){
     if(!requireMutationAuthority())return false;
     try{
       const action=beginAction('connect new profile');showError('');
       try{
-        if(!action.current()||!await applyPassword()||!action.current())return false;
+        if(!action.current()||!await applyPassword(action.assertCurrent)||!action.current())return false;
         const raw=String(field('first-start-name')?.value||'').trim();if(raw)profiles.rename(raw);
         const ok=await ports.connectDriveForProfile();
         if(!action.ownerCurrent())return false;
@@ -329,7 +330,7 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
     try{
       const action=beginAction('finish new profile');showError('');
       try{
-        if(!action.current()||!await applyPassword()||!action.current())return false;
+        if(!action.current()||!await applyPassword(action.assertCurrent)||!action.current())return false;
         applyName();profiles.finishFirstStart();close();ports.renderProfile();return true;
       }catch(error){return action.ownerCurrent()?fail(error):false;}
     }catch(error){return fail(error);}

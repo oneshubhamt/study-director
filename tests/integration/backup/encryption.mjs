@@ -100,6 +100,10 @@ choice='remove';await protection.manage();assert.equal(saved,null);assert.equal(
   let revision=1,owner=true;
   const guarded=factory({canMutate:()=>owner,remember:()=>false,issueToken:()=>revision,assertToken:token=>{if(!owner||token!==revision)throw new Error('owner changed');}});
   const previousWrites=writes;
+  let formOpen=true;
+  beforePolicyMutation=()=>{formOpen=false;};
+  await assert.rejects(guarded.enable(password,()=>{if(!formOpen)throw new Error('First Start closed');}),/First Start closed/);
+  assert.equal(saved,null);assert.equal(writes,previousWrites,'cancelling First Start prevents its pending password from becoming the backup policy');
   beforePolicyMutation=()=>guarded.lock();
   await assert.rejects(guarded.enable(password),{name:'AbortError'});
   assert.equal(saved,null);assert.equal(writes,previousWrites);
