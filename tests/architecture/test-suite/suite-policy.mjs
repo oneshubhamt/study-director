@@ -78,10 +78,10 @@ assert.equal(pkg.scripts?.test,'node tests/helpers/run-category.mjs fast','npm t
 assert.equal(pkg.scripts?.['test:fast'],'node tests/helpers/run-category.mjs fast');
 assert.equal(pkg.scripts?.['test:coverage'],'node tests/helpers/coverage.mjs','coverage must remain stock-Node and npm-package independent');
 assert.equal(pkg.scripts?.['test:mutation'],'node tests/helpers/mutation.mjs','mutation testing must remain stock-Node and npm-package independent');
-const runner=fs.readFileSync('tests/helpers/run-category.mjs','utf8');
+const runner=fs.readFileSync('tests/helpers/run-category.mts','utf8');
 assert.match(runner,/hermetic-loader\.mjs/);
 assert.match(runner,/hermetic-runtime\.mjs/);
-const runtime=fs.readFileSync('tests/helpers/hermetic-runtime.mjs','utf8'),loader=fs.readFileSync('tests/helpers/hermetic-loader.mjs','utf8');
+const runtime=fs.readFileSync('tests/helpers/hermetic-runtime.mts','utf8'),loader=fs.readFileSync('tests/helpers/hermetic-loader.mts','utf8');
 assert.match(runtime,/spawnSync/);assert.match(runtime,/childProcess\[name\]/);assert.match(runtime,/hermetic-worker\.cjs/);assert.match(loader,/node:http2/);assert.match(loader,/node:dns\/promises/);
 assert.match(runner,/repositoryDiff\(baseline,repositorySnapshot\(\)\)/);
 assert.match(runner,/SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0'/);

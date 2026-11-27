@@ -25,6 +25,13 @@
     "tests/helpers/output-paths.mts",
     "tests/helpers/coverage-runtime.mts",
     "tests/helpers/coverage-provenance.mts",
-    "tests/unit/app/coverage-provenance.mts"
+    "tests/unit/app/coverage-provenance.mts",
+    "tests/helpers/run-category.mts",
+    "tests/helpers/hermetic-loader.mts",
+    "tests/helpers/hermetic-runtime.mts",
+    "tests/helpers/runtime-source.mts",
+    "tests/helpers/async-tools.mts",
+    "tests/helpers/artifacts.mts",
+    "tests/helpers/quarantine.mts"
   ]
 }
