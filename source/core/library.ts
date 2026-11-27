@@ -1284,7 +1284,7 @@ const createModule=():LibraryModuleContract=>{
       }
       if(current&&activeSessionOwnsDiaryRecord(current)){setDiaryStatus('That Study Day acquired retained session state while deletion was open. Edit its reflection in Review.',false);return false;}
       if(current){const deleting=current;try{const deleted=await deleteDiaryEntryRecord(date,{assertWrite:()=>{if(!currentOwner(owner)||activeSessionOwnsDiaryRecord(deleting))throw new Error('The Diary deletion is no longer current. Reopen the reflection before deleting.');}});if(!deleted||!currentOwner(owner))return false;}catch(error){if(!currentOwner(owner))return false;const committed=(error as {code?:unknown}|null)?.code==='DAILY_RECORD_COMMITTED_UNVERIFIED';setDiaryStatus((committed?'Reflection deletion reached canonical storage; final verification did not complete: ':'Reflection was not deleted: ')+errorMessage(error),true);return false;}}
-      selectedDiaryDate='';diaryDraftRecord=null;diaryEntryListed=false;invalidateLibrarySummaryCache();setDiaryStatus('');await renderDiary();return true;
+      if(selectedDiaryDate===date){selectedDiaryDate='';diaryDraftRecord=null;diaryEntryListed=false;setDiaryStatus('');}invalidateLibrarySummaryCache();await renderDiary();return true;
     }
     async function settleDiaryEdit(options:Parameters<DiaryEditor['flush']>[1]={}){
       if(!diaryEditing)return true;const field=diaryEditorField();

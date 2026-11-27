@@ -191,7 +191,7 @@ const noop=()=>{};
   const context={notifications:port,saveDayInProgress:false,rolloverSaveInProgress:false,appCanMutate:()=>true,reflectionOnlyReady:()=>true,getReviewDate:()=> '2026-10-01',
     resolveReviewEditorBinding:()=>({date:'2026-10-01',reflection:'Committed reflection'}),document:{querySelector:()=>({})},
     flushReflectionOnlySave:async()=>{if(storageError)throw storageError;return {canonical:'Committed reflection',followup:Promise.resolve(refreshError)};},
-    ReviewView:{sync:noop},syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error)
+    ReviewView:{sync:noop},syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error),errorCode:error=>String(error?.code||'')
   };
   vm.createContext(context);
   const start=review.indexOf('async function saveReflectionOnlyRecord('),end=review.indexOf('async function saveDayRecord(',start);
@@ -200,6 +200,7 @@ const noop=()=>{};
   let event=coordinator.readEvent('review','save-reflection');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/Reflection saved locally; refreshing Library failed/u);
   refreshError=null;assert.equal(await context.saveReflectionOnlyRecord(),true);event=coordinator.readEvent('review','save-reflection');assert.equal(event.lifecycle,'succeeded');
   storageError=new Error('disk full');assert.equal(await context.saveReflectionOnlyRecord(),false);event=coordinator.readEvent('review','save-reflection');assert.equal(event.outcome,'local-save-failed');assert.match(event.message,/Could not save reflection/u);
+  storageError=Object.assign(new Error('read-back unavailable'),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED'});assert.equal(await context.saveReflectionOnlyRecord(),false);event=coordinator.readEvent('review','save-reflection');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/reached canonical storage/u);
   coordinator.clear();
 }
 

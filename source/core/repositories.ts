@@ -1132,6 +1132,11 @@ function dailyRecordTimestamp(record:Pick<DailyRecord,'updatedAt'|'savedAt'>|nul
   const n=Date.parse(record&&((record.updatedAt)||(record.savedAt))||'');
   return Number.isFinite(n)?n:0;
 }
+function assertExpectedDailyRecordRecovery(date:string,expected:DailyRecord|null){
+  const fallback=fallbackDailyRecordsRawGet().find(record=>record.date===date)||null;
+  if(fallback&&!sameDataValue(fallback,expected)&&(!expected||dailyRecordTimestamp(fallback)>=dailyRecordTimestamp(expected)))
+    throw Object.assign(new Error('Daily Record recovery changed before this mutation.'),{code:'DAILY_RECORD_CHANGED'});
+}
 function activeSessionTimestamp(session:ActiveSession|null){
   const n=Date.parse(session&&session.updatedAt||'');
   return Number.isFinite(n)?n:0;
@@ -1219,17 +1224,18 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMut
   if(!clean||('degraded' in clean&&clean.degraded))throw new Error('New daily record failed its canonical validation.');
   const expected=conditional?(options.expectedCanonical===null?null:sanitizeCurrentDailyRecord(storedDailyRecordFields(options.expectedCanonical))):null;
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record save precondition failed canonical validation.');
+  const check=()=>{assertOrigin?.();if(conditional)assertExpectedDailyRecordRecovery(clean.date,expected);};
   try{
       assertWriteToken(ownershipToken,'the daily-record IndexedDB write');
-    await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{}),...(assertOrigin?{assertOrigin}:{})});idbCommitted=true;
-    assertOrigin?.();assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
+    check();await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{}),...(conditional||assertOrigin?{assertOrigin:check}:{})});idbCommitted=true;
+    check();assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
     cleanupCommittedDailyRecords([clean]);
     reportCanonicalCommit('dailyRecord','upsert',null,{backupCapture:options.backupCapture===true});
     stored=true;return freeze({ok:true,storage:'indexeddb'});
   }
   catch(e){
     if(idbCommitted)throw Object.assign(new Error('Daily Record reached canonical IndexedDB, but post-write completion could not be verified.'),{code:'DAILY_RECORD_COMMITTED_UNVERIFIED',cause:e});
-    assertOrigin?.();if(isOwnershipLostError(e)||conditional&&String((e as {code?:unknown}|null|undefined)?.code||'')==='DAILY_RECORD_CHANGED')throw e;
+    check();if(isOwnershipLostError(e)||conditional&&String((e as {code?:unknown}|null|undefined)?.code||'')==='DAILY_RECORD_CHANGED')throw e;
     assertWriteToken(ownershipToken,'the daily-record fallback write');
     const existing=fallbackDailyRecordsGet(),arr=existing.filter(r=>r.date!==clean.date);arr.push(clean);
     const capped=capFallbackDailyRecords(arr,rescueRoom(STORAGE_KEYS.fallbackDailyRecords,APP_LIMITS.fallbackDailyRecordsBytes)),retainedDates=new Set(capped.map(record=>record.date));
@@ -1391,6 +1397,7 @@ async function removeDailyRecord(date:string,options:DailyRecordMutationOptions&
   const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
   const expected=conditional?(options.expectedCanonical===null?null:sanitizeCurrentDailyRecord(storedDailyRecordFields(options.expectedCanonical))):null;
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record deletion precondition failed canonical validation.');
+  const check=()=>{assertOrigin?.();if(conditional)assertExpectedDailyRecordRecovery(date,expected);};
   const ownershipToken=issueWriteToken('deleting the daily record');
   const finishWrite=beginAuthoritativeWrite();
   let removed=false,idbCommitted=false;
@@ -1404,8 +1411,8 @@ async function removeDailyRecord(date:string,options:DailyRecordMutationOptions&
         if(!fallbackDailyRecordsSet(fallbackBefore.filter(record=>record.date!==date)))throw LocalStorageContract.lastError||new Error('DailyRecord fallback could not be cleared and no durable deletion marker could be established.');
         assertWriteToken(ownershipToken,'the daily-record IndexedDB deletion');
       }
-      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{}),...(assertOrigin?{assertOrigin}:{})});idbCommitted=true;
-      assertOrigin?.();assertWriteToken(ownershipToken,'the daily-record fallback cleanup');
+      check();const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{}),...(conditional||assertOrigin?{assertOrigin:check}:{})});idbCommitted=true;
+      check();assertWriteToken(ownershipToken,'the daily-record fallback cleanup');
       const fallbackCleared=staged||conditional?fallbackDailyRecordsSet(fallbackDailyRecordsRawGet().filter(r=>r.date!==date)):true;
       if(!fallbackCleared&&!staged)throw LocalStorageContract.lastError||new Error('DailyRecord fallback cleanup failed.');
       if(!rollback&&fallbackCleared)clearDeletionRecoveryKeys([recoveryKey]);

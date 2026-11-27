@@ -63,7 +63,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
     dataset={};isConnected=true;value='';
     setAttribute(){}
   }
-  let pausedSave=null,pausedRead=null,ownerRevision=1,canWrite=true,mutations=0;
+  let pausedSave=null,pausedRead=null,failReadback=false,ownerRevision=1,canWrite=true,mutations=0;
   const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,Date,setTimeout,clearTimeout,queueMicrotask,HTMLTextAreaElement:TextArea});
   vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
   vm.runInContext(readRuntimeSource('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});
@@ -84,7 +84,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
         return app.dailyRecords.save(...args);
       },
       remove:(...args)=>{mutations++;return app.dailyRecords.remove(...args);},
-      verifyCanonical:(...args)=>app.dailyRecords.verifyCanonical(...args),
+      verifyCanonical:(...args)=>{if(failReadback){failReadback=false;throw new Error('QA read-back unavailable');}return app.dailyRecords.verifyCanonical(...args);},
       verifyCanonicalAbsent:(...args)=>app.dailyRecords.verifyCanonicalAbsent(...args),
       timestamp:(...args)=>app.dailyRecords.timestamp(...args)
     }),
@@ -127,6 +127,16 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
     persistence.DiaryEditor.clear(field);
   }
   pausedSave=null;
+
+  // A physical write followed by a failed read-back must not be retried as
+  // another write or misreported as a rollback. The requested value can settle
+  // after verification succeeds, even though the original baseline is old.
+  const oldReflection=(await app.dailyRecords.get(date,{strict:true})).reflection;
+  failReadback=true;
+  await assert.rejects(persistence.DailyReflectionPersistence.commit(date,'committed reflection',{expectedCanonical:oldReflection}),error=>error?.code==='DAILY_RECORD_COMMITTED_UNVERIFIED');
+  const committedMutations=mutations;
+  assert.equal((await persistence.DailyReflectionPersistence.commit(date,'committed reflection',{expectedCanonical:oldReflection})).canonical,'committed reflection');
+  assert.equal(mutations,committedMutations,'read-back recovery must not rewrite the Saved Day');
 
   // A read begun by a former owner cannot use a newly acquired write lease.
   // Exercise both the direct Review commit and the Diary deletion pre-read.
@@ -216,6 +226,27 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   assert.equal(owned.stores.daily.get(date).reflection,after.reflection,'the physically committed Daily Record must remain canonical');
   assert.deepEqual(owned.sharedLocal.get('fallback')??null,fallbackBefore,'post-commit ambiguity must not change the fallback Daily Record state');
   assert.equal(events.length,eventCount,'the former owner must not publish a stale Daily Record completion event');
+}
+
+// Emergency fallback is part of the compared evidence. A conditional edit
+// or deletion must preserve an independently newer rescue copy, including
+// the case where the attempted canonical transaction cannot start.
+{
+  const date='2026-09-20',stamp='2026-09-20T12:00:00.000Z',controls={},h=createHarness(new Map(),null,controls);
+  const base={version:1,recordKind:'study',date,reflection:'baseline',savedAt:stamp,updatedAt:stamp,sourceRevision:1};
+  await h.app.dailyRecords.save(base);
+  const expected=await h.app.dailyRecords.get(date,{strict:true});
+  controls.failNextDailyWrite=true;
+  assert.equal((await h.app.dailyRecords.save({...expected,reflection:'new rescue',updatedAt:'2026-09-20T12:01:00.000Z'})).storage,'fallback');
+  const recovery=structuredClone(h.sharedLocal.get('fallback'));
+  const stale={...expected,reflection:'stale candidate',updatedAt:'2026-09-20T12:02:00.000Z'};
+  for(const unavailable of [false,true]){
+    controls.failNextDailyWrite=unavailable;
+    await assert.rejects(h.app.dailyRecords.save(stale,{expectedCanonical:expected}),error=>error?.code==='DAILY_RECORD_CHANGED');
+    await assert.rejects(h.app.dailyRecords.remove(date,{expectedCanonical:expected}),error=>error?.code==='DAILY_RECORD_CHANGED');
+    assert.deepEqual(h.sharedLocal.get('fallback'),recovery,'newer rescue evidence is preserved');
+    assert.equal(h.stores.daily.get(date).reflection,'baseline');
+  }
 }
 
 // The actual Diary deletion transaction must honor the external request's

@@ -39,12 +39,15 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     if(!text.editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
     const current=await records.get(date,{strict:true}),currentCanonical=String(current?.reflection||'');
     assertOrigin();
-    if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     const hasContent=!!String(candidate||'').trim(),backupCapture=options.backupCapture===true;
     if(currentCanonical===candidate){
       if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);assertOrigin();
       return snapshot(current);
     }
+    // A retry after a committed write with unavailable read-back is a verified
+    // no-op if the requested reflection is already present. Never rewrite the
+    // rest of a Saved Day just to acknowledge that outcome.
+    if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     let committed=false;
     try{
       if(current?.recordKind==='study'){
