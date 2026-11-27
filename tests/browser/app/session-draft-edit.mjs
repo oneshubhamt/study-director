@@ -45,8 +45,8 @@ try{
   await waitFor(()=>page.evaluate(`document.querySelectorAll('#library-diary-editor .library-note-action').length===2`),{label:'retained Study Day Diary actions'});
   const retainedActions=await page.evaluate(`[...document.querySelectorAll('#library-diary-editor .library-note-action')].map(button=>({text:button.textContent,disabled:button.disabled,label:button.getAttribute('aria-label')}))`);
   assert.deepEqual(retainedActions,[
-    {text:'Delete',disabled:true,label:'Edit today’s active reflection in Review'},
-    {text:'Edit',disabled:true,label:'Edit today’s active reflection in Review'}
+    {text:'Delete',disabled:true,label:'Edit this session reflection in Review'},
+    {text:'Edit',disabled:true,label:'Edit this session reflection in Review'}
   ],'a retained session keeps its saved Study Day reflection single-writer in Review');
   await page.evaluate(`__PWA6.goTab('execute')`);
 
