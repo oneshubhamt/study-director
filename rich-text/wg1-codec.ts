@@ -1,5 +1,5 @@
 /* DOM-free WG1 envelope/text helpers shared by the editor bundle and search worker. */
-import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
+import {PRODUCTION_LIMITS} from '../contracts/production-limits.mts';
 export const WG1_STORAGE_PREFIX='WG1:';
 export const WG1_VERSION=1;
 export const WG1_DEFAULT_MAX_DEPTH=64;

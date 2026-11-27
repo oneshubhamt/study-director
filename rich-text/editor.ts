@@ -17,7 +17,7 @@ import type {MarkdownNode} from './markdown';
 import type {OverlayHandle,OverlayOptions,OverlayHistory,WorkspaceDescriptor} from '../types/workspace.ts';
 import {normalizeTag,renameTagInInline,renameTagInText,tagMatches,tagsInText} from './tags';
 declare const __SD_WORDGARD_VERSION__:string;
-import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
+import {PRODUCTION_LIMITS} from '../contracts/production-limits.mts';
 import {WG1_STORAGE_PREFIX,WG1_DEFAULT_MAX_DEPTH,WG1_DEFAULT_MAX_NODES,decodeWG1Envelope,encodeWG1Document,normalizePlainText,wg1ToPlainText} from './wg1-codec';
 import {compareRichText,mergeIncomingAdditions,appendIncomingAdditions,mergeThreeWay,type MergeRange} from './reconciliation';
 

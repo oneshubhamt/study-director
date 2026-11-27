@@ -1,4 +1,4 @@
-import {PRODUCTION_LIMITS as limits} from '../contracts/production-limits.mjs';
+import {PRODUCTION_LIMITS as limits} from '../contracts/production-limits.mts';
 import type {ImageResult} from '../portable/worker-contracts';
 export type PreparedImage=ImageResult<Blob>;
 export type ImageCanvas={width:number;height:number;getContext(context:'2d'):{imageSmoothingQuality:ImageSmoothingQuality;drawImage(image:ImageBitmap,x:number,y:number,width:number,height:number):void}|null};

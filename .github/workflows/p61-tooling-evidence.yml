@@ -74,17 +74,6 @@ jobs:
           cat "$RUNNER_TEMP/missing.log"
           grep 'Incomplete coverage' "$RUNNER_TEMP/missing.log"
           mv "$RUNNER_TEMP/removed-coverage.json" "$missing"
-      - name: Strict type and build entry points
-        if: ${{ !cancelled() }}
-        run: |
-          npm run check:types
-          npm run test:release:types
-          npm run test:release:bundle
-          npm run build
-          npm run verify
-          git diff --exit-code -- generated/runtime types/wordgard
-          npm run stage:firebase
-          npm run test:release:deployment
       - name: Publish final calibration
         if: always()
         env:
@@ -137,3 +126,28 @@ jobs:
           compare tests/unit/backup/repository-retention.mjs 'retention rules' 20261006
           compare tests/unit/app/timer-engine-logic.mjs 'timer rules' 20261104
           compare tests/unit/app/timer-engine-logic.mjs 'restored focus' 20261105
+
+  release-verification:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Run release verification through package entry points
+        run: npm run test:release
+      - name: Check generated artifact stability
+        if: ${{ !cancelled() }}
+        run: |
+          npm run build:runtime
+          git diff --exit-code -- generated/runtime types/wordgard
+          npm run build
+          npm run verify
+      - name: Exercise browser scheduling and CDP through normal entry point
+        if: ${{ !cancelled() }}
+        run: npm run test:browser -- pwa
