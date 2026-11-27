@@ -35,6 +35,14 @@
     "tests/helpers/quarantine.mts",
     "tests/helpers/coverage.mts",
     "tests/helpers/branch-coverage.mts",
-    "tests/helpers/promotion-evidence.mts"
+    "tests/helpers/promotion-evidence.mts",
+    "tests/helpers/fake-clock.mts",
+    "build/module-manifest.mts",
+    "build/generated-runtime-paths.mts",
+    "build/host-source.mts",
+    "build/wordgard-metadata.mts",
+    "build/typescript-projects.mts",
+    "tests/helpers/core-script.mts",
+    "tests/helpers/bug-regression-policy.mts"
   ]
 }

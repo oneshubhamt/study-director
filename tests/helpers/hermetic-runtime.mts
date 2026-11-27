@@ -9,7 +9,7 @@ const blocked=(name:string)=>(..._args:unknown[]):never=>{throw new Error(`Fast 
 for(const name of ['fetch','WebSocket','EventSource']){
   if(name in globalThis)Object.defineProperty(globalThis,name,{configurable:true,writable:true,value:blocked(name)});
 }
-for(const name of ['spawn','spawnSync','exec','execSync','execFile','execFileSync','fork'] as const)childProcess[name]=blocked(`child_process.${name}`);
+for(const name of ['spawn','spawnSync','exec','execSync','execFile','execFileSync','fork'] as const)Object.defineProperty(childProcess,name,{value:blocked(`child_process.${name}`),configurable:true,writable:true});
 
 const NativeWorker=workerThreads.Worker;
 const workerPreload=path.join(path.dirname(fileURLToPath(import.meta.url)),'hermetic-worker.cjs');

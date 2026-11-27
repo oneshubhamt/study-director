@@ -82,7 +82,7 @@ const runner=fs.readFileSync('tests/helpers/run-category.mts','utf8');
 assert.match(runner,/hermetic-loader\.mjs/);
 assert.match(runner,/hermetic-runtime\.mjs/);
 const runtime=fs.readFileSync('tests/helpers/hermetic-runtime.mts','utf8'),loader=fs.readFileSync('tests/helpers/hermetic-loader.mts','utf8');
-assert.match(runtime,/spawnSync/);assert.match(runtime,/childProcess\[name\]/);assert.match(runtime,/hermetic-worker\.cjs/);assert.match(loader,/node:http2/);assert.match(loader,/node:dns\/promises/);
+assert.match(runtime,/spawnSync/);assert.match(runtime,/Object\.defineProperty\(childProcess,name/);assert.match(runtime,/hermetic-worker\.cjs/);assert.match(loader,/node:http2/);assert.match(loader,/node:dns\/promises/);
 assert.match(runner,/repositoryDiff\(baseline,repositorySnapshot\(\)\)/);
 assert.match(runner,/SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0'/);
 assert.match(runner,/Node\.js 22\.23\.4\+/);

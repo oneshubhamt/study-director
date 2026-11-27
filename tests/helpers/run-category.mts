@@ -31,7 +31,7 @@ for(let index=0;index<argv.length;index++){
 const target=String(positional[0]||'fast');
 if(!allowed.has(target))throw new Error(`Unknown fast-test target: ${target}`);
 const jobs=Number(jobsFlag??process.env['TEST_JOBS']??Math.min(4,os.availableParallelism?.()||os.cpus().length||1));
-if(!Number.isInteger(jobs)||jobs<1)throw new Error(`--jobs must be a positive whole number; got ${jobsFlag??process.env.TEST_JOBS}`);
+if(!Number.isInteger(jobs)||jobs<1)throw new Error(`--jobs must be a positive whole number; got ${jobsFlag??process.env['TEST_JOBS']}`);
 const timeoutMs=Math.max(30000,Number(process.env['TEST_FILE_TIMEOUT_MS'])||180000);
 
 const selected=target==='targeted'?[...new Set(positional.slice(1).map(file=>file.split(path.sep).join('/')))]:[];
