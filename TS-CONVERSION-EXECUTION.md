@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 session retirement and final reconciliation — OPEN · 2026-11-27
+
+- Start `bb1e8acb2eadd2fd3a24bcf402932dd416ad1ba8`; all nine workflows on application/test revision `de7733924a5d22bdfe20e4d84db587ce8e7f5176` now terminal SUCCESS, including all ten audit browser legs and repeated PWA. No Phase 6.
+- Objective: fence actual Review save/rollover at each asynchronous boundary, retire only the canonical checkpoint actually covered by Saved Day, preserve successor and emergency recovery, ensure suspended Review cannot publish a retired result. Audit integrity authority and outstanding historical mappings; record exact-head tests. Use existing conditional repository contracts, not another persistence system.
+- Source audit: review.ts saveDayRecord and handleStudyDayRollover call unconditional clear after awaited storage/Library; session-host already has conditional expectedCanonical; repository clear has compare-and-delete but no external origin assertion. Correct at owners and actual host wiring, verify controlled delayed read/write/clear, ordinary same-session progress, rollover and suspended pathways. Stage 2 independent.
+
+
 ## REVIEW-P5 · Stage 1 consolidated authority corrections and historical reconciliation — OPEN · 2026-11-27
 
 - Application/test revision `de7733924a5d22bdfe20e4d84db587ce8e7f5176`; predecessor baseline `57354d58965c204683ec68768b260f65026a21df` has nine of nine workflows terminal success. This pass comprises Review origin correction `9911ee14b6395ba29ff695b2f7f84a3bb9c1184d`, PWA ownership handoff correction `9926b4edb1c9fc0dfecac3c551720b0c869f44a7` and cadence/projection preservation at the application/test revision above. No Phase 6, promotion, deployment, migration or F33 parity work.
