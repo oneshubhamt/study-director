@@ -53,7 +53,7 @@ export type VerifiedRecoveryCopy=Readonly<{at:string;sourceRevision:string;forma
 export type VerifiedRecoveryState=Readonly<{version:3;file:VerifiedRecoveryCopy|null;providers:Readonly<Record<string,VerifiedRecoveryCopy>>}>;
 export type VerifiedBackupReceipt=Readonly<{source:string;sourceRevision:string;verified?:boolean;attachmentsComplete?:boolean}>;
 export interface VerifiedRecoveryInput{
-  readonly metadata:Readonly<{read():Promise<unknown>;write(value:VerifiedRecoveryState):Promise<unknown>}>;
+  readonly metadata:Readonly<{read():Promise<unknown>;write(value:VerifiedRecoveryState,assertOrigin?:()=>void):Promise<unknown>}>;
   readonly storageHealth:Pick<StorageHealthController,'snapshot'|'updateHistory'>;
   readonly mutationEpoch:Readonly<{latestChangeAt(recorded:string):Promise<string>}>;
   readonly backupVersion:number;
@@ -69,7 +69,7 @@ export interface VerifiedRecoveryController{
   entries(state?:VerifiedRecoveryState):readonly VerifiedRecoveryCopy[];
   lastBackupTime(state?:VerifiedRecoveryState):number;
   read():Promise<VerifiedRecoveryState>;
-  record(copy:VerifiedBackupReceipt):Promise<boolean>;
+  record(copy:VerifiedBackupReceipt,assertOrigin?:()=>void):Promise<boolean>;
   verifyFreshCurrentBackup():Promise<Readonly<{ok:boolean;verifiedCopies:number;latestVerifiedAt:string}>>;
   reconcileChangeClock():Promise<boolean>;
   reconcileStartupChangeClock():Promise<boolean>;

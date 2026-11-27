@@ -173,22 +173,23 @@ function createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<
   const lastBackupTime=(state:VerifiedRecoveryState=current)=>Math.max(-Infinity,...entries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));
   const verified=(source:string)=>source==='file'?current.file:current.providers[source]||null;
   async function read(){return normalizeVerifiedRecoveryState(await input.metadata.read());}
-  function update(change:(state:VerifiedRecoveryState)=>VerifiedRecoveryState|Readonly<{version:3;file:VerifiedRecoveryCopy|null;providers:Readonly<Record<string,VerifiedRecoveryCopy>>}>){
+  function update(change:(state:VerifiedRecoveryState)=>VerifiedRecoveryState|Readonly<{version:3;file:VerifiedRecoveryCopy|null;providers:Readonly<Record<string,VerifiedRecoveryCopy>>}>,assertOrigin?:()=>void){
     const run=async()=>{
-      const next=normalizeVerifiedRecoveryState(change(await read()));
-      try{await input.metadata.write(next);}
+      assertOrigin?.();const prior=await read();assertOrigin?.();
+      const next=normalizeVerifiedRecoveryState(change(prior));
+      try{await input.metadata.write(next,assertOrigin);assertOrigin?.();}
       catch(error){input.capture('backup.freshness-write',error,'warn');throw error;}
       current=next;input.refreshProviders();return true;
     };
     const next=writeChain.catch(()=>undefined).then(run);writeChain=next;return next;
   }
-  function record(copy:VerifiedBackupReceipt):Promise<boolean>{
+  function record(copy:VerifiedBackupReceipt,assertOrigin?:()=>void):Promise<boolean>{
     const source=String(copy?.source||''),sourceRevision=verifiedBackupTime(copy?.sourceRevision);
     if(!sourceRevision||!VERIFIED_SOURCE.test(source))return Promise.resolve(false);
     const entry:VerifiedRecoveryCopy=freeze({at:input.nowIso(),sourceRevision,format:copy.attachmentsComplete===false?null:input.backupVersion});
     return update(prior=>source==='file'
       ?freeze({...prior,file:freeze({...entry,verified:copy.verified===true})})
-      :freeze({...prior,providers:freeze({...prior.providers,[source]:entry})}));
+      :freeze({...prior,providers:freeze({...prior.providers,[source]:entry})}),assertOrigin);
   }
   async function reconcileChangeClock(){
     const recorded=String(input.storageHealth.snapshot().lastLocalSaveAt||''),latest=await input.mutationEpoch.latestChangeAt(recorded);

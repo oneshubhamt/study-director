@@ -1251,7 +1251,7 @@ type VerifiedRecoveryInput=Parameters<typeof BackupReadinessHostModule.createVer
 const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze<VerifiedRecoveryInput>({
   metadata:Object.freeze<VerifiedRecoveryInput['metadata']>({
     read:()=>readHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups),
-    write:value=>writeHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups,value)
+    write:(value,assertOrigin)=>writeHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups,value,assertOrigin?{strict:true,assertOrigin}:{})
   }),
   storageHealth:Object.freeze<VerifiedRecoveryInput['storageHealth']>({snapshot:()=>requireStorageHealthController().snapshot(),updateHistory:patch=>requireStorageHealthController().updateHistory(patch)}),
   mutationEpoch:Object.freeze<VerifiedRecoveryInput['mutationEpoch']>({latestChangeAt:recorded=>AppData.mutationEpoch.latestChangeAt(recorded)}),

@@ -1383,7 +1383,7 @@ const ancestryPublicationCases=[];
     runtime.controller.invalidateRepositoryPreparation();
   }
 }
-assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','unchanged-recovered','new-throw','new-recovered']);
+assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','unchanged-recovered','new-throw','new-recovered','origin-retired-after-remote-commit']);
 
 // Run the production provider catch-up terminal transition with controlled
 // ports: an ancestry-warning result may never be relabelled as fully synced.

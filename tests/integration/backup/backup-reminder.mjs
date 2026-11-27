@@ -116,4 +116,28 @@ function raceFixture({read=async()=>empty,count=async()=>7}={}){
   assert.equal(await pending,false);assert.deepEqual(f.published,['']);assert.equal(f.notified.length,0);
   cases.push('automatic backup becoming available during deferred count suppresses reminder');
 }
+// A verified remote checkpoint can outlive the operation that observed it.
+// Its queued local freshness receipt must retain the original owner's fence.
+{
+  let durable=empty,owner=1,writes=0,refreshes=0,delayRead=null,delayWrite=null,enteredRead=null,enteredWrite=null;
+  const verified=Readiness.createVerifiedRecovery(freeze({
+    metadata:freeze({read:async()=>{enteredRead?.resolve();if(delayRead)await delayRead.promise;return durable;},
+      write:async(value,assertOrigin)=>{enteredWrite?.resolve();if(delayWrite)await delayWrite.promise;assertOrigin?.();durable=value;writes++;}}),
+    storageHealth:freeze({snapshot:()=>({}),updateHistory:()=>{}}),mutationEpoch:freeze({latestChangeAt:async value=>value}),
+    backupVersion:24,sourceRevision:()=>'',refreshProviders:()=>{refreshes++;},capture:()=>{},nowIso:()=>iso(now)
+  }));
+  const origin=()=>{const revision=owner;return ()=>{if(owner!==revision)throw Error('receipt origin retired');};};
+  const receipt=sourceRevision=>({source:'google-drive',sourceRevision});
+  delayRead=deferred();enteredRead=deferred();
+  const readPending=verified.record(receipt(iso(now-1000)),origin());await enteredRead.promise;owner++;delayRead.resolve();
+  await assert.rejects(readPending,/receipt origin retired/u);delayRead=null;enteredRead=null;
+  assert.equal(writes,0);assert.equal(refreshes,0);assert.equal(verified.verified('google-drive'),null);
+  delayWrite=deferred();enteredWrite=deferred();
+  const writePending=verified.record(receipt(iso(now-500)),origin());await enteredWrite.promise;owner++;delayWrite.resolve();
+  await assert.rejects(writePending,/receipt origin retired/u);delayWrite=null;enteredWrite=null;
+  assert.equal(writes,0);assert.equal(refreshes,0);assert.equal(durable,empty);
+  assert.equal(await verified.record(receipt(iso(now)),origin()),true);
+  assert.equal(writes,1);assert.equal(refreshes,1);assert.equal(verified.verified('google-drive').sourceRevision,iso(now));
+  cases.push('retired verified recovery receipt cannot replace stored or projected freshness; fresh authority succeeds');
+}
 console.log(JSON.stringify({status:'PASS',suite:'backup-reminder',productionOwner:'backup-readiness-host',cases},null,2));

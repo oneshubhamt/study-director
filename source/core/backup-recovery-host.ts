@@ -315,8 +315,8 @@ const createModule=()=>{
       restoreSessionState:input.events.restoreSessionState,verifyActiveSessionRuntime:input.events.verifyActiveSessionRuntime,
       restoredFromFile:()=>{input.events.notifyBackupChange({urgent:true,reason:'file-restore'});return runtime.providers.automaticActive();},
       backupCompleted:(context:Completion)=>{
-        if(context?.userExport)input.events.settleStorageReset();input.storageHealth.markOk('backup');input.events.resetBackupNudge();input.events.refreshStorageWarning();
-        if(context?.copy)void input.verifiedRecovery.record(context.copy).catch(error=>input.diagnostics.capture('backup.freshness-receipt',error,'warn'));input.events.scheduleUpdate(250);
+        context.assertOrigin?.();if(context?.userExport)input.events.settleStorageReset();input.storageHealth.markOk('backup');input.events.resetBackupNudge();input.events.refreshStorageWarning();
+        if(context?.copy)void input.verifiedRecovery.record(context.copy,context.assertOrigin).catch(error=>input.diagnostics.capture('backup.freshness-receipt',error,'warn'));input.events.scheduleUpdate(250);
       }
     } satisfies BackupRuntimeInput['ports']['events']);
     runtime=input.module.createRuntime(freeze({ports:freeze({
