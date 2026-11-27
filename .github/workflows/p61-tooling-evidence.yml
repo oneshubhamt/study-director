@@ -1,0 +1,88 @@
+name: P6.1 tooling evidence
+
+on:
+  push:
+    branches: [ts-exp]
+    paths:
+      - '.github/workflows/p61-tooling-evidence.yml'
+      - 'tests/helpers/**'
+      - 'tests/unit/app/generated-cases.mts'
+      - 'tests/unit/app/coverage-provenance.mts'
+      - 'build/**'
+      - 'tsconfig.node.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  evidence:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish pending calibration
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=pending -f context='P6.1 tooling evidence' -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - name: Mixed JS and TS without installed dependencies
+        run: |
+          test ! -e node_modules
+          node tests/helpers/run-category.mjs targeted tests/unit/app/canonical.mts tests/unit/app/generated-cases.mts tests/unit/app/coverage-provenance.mts tests/integration/storage/save-lane.mjs tests/architecture/test-suite/suite-policy.mjs
+      - name: Calibrate real mutation runner
+        if: ${{ !cancelled() }}
+        run: npm run test:mutation -- --probe
+      - name: Verify all permanent mutation witnesses
+        if: ${{ !cancelled() }}
+        run: npm run test:mutation
+      - name: Exercise targeted raw coverage receipt
+        if: ${{ !cancelled() }}
+        run: |
+          npm run test:coverage -- --test tests/unit/app/canonical.mts --file source/core/canonical.ts --keep-raw "$RUNNER_TEMP/p61-partial"
+      - name: Run risk coverage on discovered suite
+        if: ${{ !cancelled() }}
+        run: npm run test:coverage -- --keep-raw "$RUNNER_TEMP/p61-full" --json "$RUNNER_TEMP/p61-coverage.json"
+      - name: Install release toolchain
+        if: ${{ !cancelled() }}
+        run: npm ci --ignore-scripts
+      - name: Reject incomplete raw coverage and reuse complete receipt
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          if npm run test:coverage:branches -- --from "$RUNNER_TEMP/p61-partial" > "$RUNNER_TEMP/partial.log" 2>&1; then cat "$RUNNER_TEMP/partial.log"; exit 1; fi
+          cat "$RUNNER_TEMP/partial.log"
+          grep -E 'Partial coverage cannot satisfy|Coverage producer did not pass' "$RUNNER_TEMP/partial.log"
+          npm run test:coverage:branches -- --from "$RUNNER_TEMP/p61-full" --json "$RUNNER_TEMP/p61-branches.json"
+          missing=$(find "$RUNNER_TEMP/p61-full" -name 'coverage-*.json' -print -quit)
+          test -n "$missing"
+          mv "$missing" "$RUNNER_TEMP/removed-coverage.json"
+          if npm run test:coverage:branches -- --from "$RUNNER_TEMP/p61-full" > "$RUNNER_TEMP/missing.log" 2>&1; then cat "$RUNNER_TEMP/missing.log"; exit 1; fi
+          cat "$RUNNER_TEMP/missing.log"
+          grep 'Incomplete coverage' "$RUNNER_TEMP/missing.log"
+          mv "$RUNNER_TEMP/removed-coverage.json" "$missing"
+      - name: Strict type and build entry points
+        if: ${{ !cancelled() }}
+        run: |
+          npm run check:types
+          npm run test:release:types
+          npm run build
+          npm run verify
+      - name: Publish final calibration
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          state=failure
+          if [ "$JOB_STATUS" = success ]; then state=success; fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$state" -f context='P6.1 tooling evidence' -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
