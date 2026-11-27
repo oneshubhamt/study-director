@@ -1,0 +1,129 @@
+name: REVIEW-P5 historical model comparison
+
+on:
+  push:
+    branches: [ts-exp]
+    paths:
+      - '.github/workflows/review-p5-historical.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-model:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Compare whole historical Insights reports and Lab evidence
+        env:
+          TZ: UTC
+        run: |
+          node --input-type=module <<'JS'
+          import {execFileSync} from 'node:child_process';
+          import vm from 'node:vm';
+          import assert from 'node:assert/strict';
+          import {readInsightsModelRuntimeSource} from './tests/helpers/insights-model-runtime.mjs';
+          import {realInsightsProviders} from './tests/helpers/insights-providers.mjs';
+          const historical=[
+            'de4872a88c2015bc8833e0244c0ab8ce6e6b5998',
+            'c4bf6d1553a834555fda551c8a9e8f12dc9397f5'
+          ];
+          const load=(source,label)=>{
+            const ctx=vm.createContext({console});
+            vm.runInContext(source,ctx,{filename:label});
+            return ctx.StudyDirectorInsightsModel;
+          };
+          const sources=historical.map(ref=>[ref,load(execFileSync('git',['show',ref+':source/external/insights-model.js'],{encoding:'utf8',maxBuffer:8*1024*1024}),ref)]);
+          const current=load(readInsightsModelRuntimeSource(),'current');
+          const {classifyTaskOutcome,summarizePracticeRuns}=realInsightsProviders();
+          const dependencies={classifyTaskOutcome,summarizePracticeRuns};
+          const day=86400000,end='2026-08-10',endDay=Date.parse(end+'T00:00:00Z')/day;
+          const date=offset=>new Date((endDay+offset)*day).toISOString().slice(0,10);
+          function fixture(count,variant){
+            const rows=[];
+            const completions=[0,20,49,79.49,79.5,79.9,80,90,100];
+            for(let i=0;i<count;i++){
+              const offset=i-count+1-(variant==='gaps'?Math.floor((count-i)/4):0);
+              const d=date(offset),quality=i%7===0?null:1+i%5,kind=['work','support','fixed'];
+              const tasks=Array.from({length:1+i%4},(_,j)=>{
+                const k=variant==='no-work'?kind[1+(i+j)%2]:j===0?'work':kind[(i+j)%3];
+                const source=['manual','time','units','skipped','none'][(i+2*j)%5];
+                const completion=variant==='threshold'?completions[(i+j)%completions.length]:variant==='all-strong'?100:variant==='all-missed'?0:(i*17+j*23)%101;
+                const dur=15+15*((i+j)%12),actual=source==='none'?undefined:Math.round(dur*60*(i%5)/4);
+                return {id:'t'+i+'-'+j,name:'Block '+j,area:['A','B','C / D',''][j%4],kind:k,start:['06:00','10:30','16:00','21:00'][j%4],dur,
+                  ...(source==='none'?{}:{completion:source==='skipped'?0:completion,completionSource:source}),
+                  ...(actual===undefined?{}:{actualSeconds:actual}),...(source==='skipped'?{skipped:true}:{}),
+                  ...(i%3===0?{pauseEvents:[{type:'manual',seconds:90},{type:'pomodoro',seconds:300,plannedSeconds:300}]}:{})};
+              });
+              const practiceRuns=i%3===0?[{taskId:tasks[0].id,targetMs:60000,totalUnits:4,unitMs:[30000,48000,60000+i%20*1000,79000]}]:[];
+              rows.push({date:d,updatedAt:d+'T12:00:00.000Z',studyQuality:quality,tasks:variant==='empty-days'&&i%2===0?[]:tasks,practiceRuns,
+                ...(variant==='degraded'&&i%3===0?{degraded:true}:{}),
+                ...(i%5===0?{originalSchedule:tasks.map(t=>({...t,dur:t.dur+15})),shiftedStudyBlocks:1,totalScheduleShiftMinutes:15,netScheduleShiftMinutes:15}:{})});
+            }
+            return rows;
+          }
+          const fixtures=[
+            ['empty',[]],['single',fixture(1,'mixed')],['no-work',fixture(12,'no-work')],['threshold',fixture(27,'threshold')],
+            ['all-strong',fixture(30,'all-strong')],['all-missed',fixture(30,'all-missed')],['gaps',fixture(45,'gaps')],
+            ['empty-days',fixture(45,'empty-days')],['degraded',fixture(45,'degraded')],['mixed',fixture(91,'mixed')],
+            ['horizon',fixture(735,'mixed')],['future-window',fixture(40,'mixed').concat([{date:date(3),tasks:[]}])],
+            ['duplicate-revision',fixture(12,'mixed').concat([{date:end,updatedAt:end+'T16:00:00.000Z',tasks:[{id:'new',kind:'work',dur:55,completion:80,completionSource:'manual',actualSeconds:600}]}])]
+          ];
+          const serialize=value=>JSON.parse(JSON.stringify(value));
+          const normalizePath=path=>path.replace(/\[\d+\]/g,'[]');
+          const summarize=value=>value===undefined?'[absent]':typeof value==='object'&&value!==null?(Array.isArray(value)?'[array '+value.length+']':'[object]'):value;
+          function compare(a,b,path,record){
+            if(Object.is(a,b))return;
+            if(Array.isArray(a)&&Array.isArray(b)){
+              if(a.length!==b.length)record(path+'.length',a.length,b.length);
+              for(let i=0;i<Math.min(a.length,b.length);i++)compare(a[i],b[i],path+'['+i+']',record);
+              return;
+            }
+            if(a&&b&&typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){
+              for(const key of [...new Set([...Object.keys(a),...Object.keys(b)])].sort())compare(a[key],b[key],path+'.'+key,record);
+              return;
+            }
+            record(path,summarize(a),summarize(b));
+          }
+          function reports(model,rows,key,today){
+            const engine=model.ModelEngine.createInsightsEngine(dependencies),prepared=engine.prepare(structuredClone(rows));
+            const window=engine.filterPreparedWindow(prepared,key,today);
+            const options={windowKey:key,windowTo:window.to||today,currentStudyDate:today,allRecordCount:prepared.records.length};
+            const report=engine.buildPrepared(window.records,prepared,options);
+            return {compact:serialize(report),lab:serialize(report.getLabEvidence())};
+          }
+          let cases=0;
+          const differences=new Map(),caseCounts=[];
+          for(const [name,rows] of fixtures){
+            for(const key of name==='horizon'?['all','30','90']:['all','30']){
+              const today=name==='future-window'?date(-10):end;
+              const actual=reports(current,rows,key,today);
+              // Detect non-determinism before comparing to either historical owner.
+              assert.deepEqual(reports(current,rows,key,today),actual,name+' '+key+' repeat');
+              for(const [ref,model] of sources){
+                const expected=reports(model,rows,key,today);let count=0;
+                compare(expected,actual,'report',(path,before,after)=>{
+                  count++;
+                  const k=ref.slice(0,8)+' '+normalizePath(path);
+                  const row=differences.get(k)||{ref,path:normalizePath(path),count:0,cases:new Set(),samples:[]};
+                  row.count++;row.cases.add(name+'/'+key);
+                  if(row.samples.length<3)row.samples.push({case:name+'/'+key,path,before,after});
+                  differences.set(k,row);
+                });
+                caseCounts.push({ref,fixture:name,window:key,records:rows.length,changedLeaves:count});cases++;
+              }
+            }
+          }
+          console.log(JSON.stringify({cases,fixtures:fixtures.length,caseCounts}));
+          for(const row of differences.values())console.log(JSON.stringify({...row,cases:[...row.cases]}));
+          console.log(JSON.stringify({comparisonCases:cases,distinctChangedPaths:differences.size,status:'OBSERVED',note:'Differences require human disposition; this is not a parity assertion.'}));
+          JS
