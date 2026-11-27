@@ -2992,7 +2992,7 @@ const LibraryView=LibraryModule.createView(Object.freeze<LibraryViewInput>({port
   }),
   ownership:Object.freeze<LibraryViewInput['ports']['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
   overlays:Object.freeze<LibraryViewInput['ports']['overlays']>({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
-  session:Object.freeze<LibraryViewInput['ports']['session']>({hasActiveSession:hasBlockingActiveSession,activeDate:()=>String(TimerState.studyDate||sessionPanelSession?.date||'')})
+  session:Object.freeze<LibraryViewInput['ports']['session']>({hasActiveSession:hasBlockingActiveSession,activeDate:()=>String(sessionPanelSession?.date||(hasBlockingActiveSession()?TimerState.studyDate:'')||'')})
 })}));
 if(!Object.isFrozen(LibraryView)||LibraryView.format!=='study-director.library-view'||LibraryView.contractVersion!==1){
   throw new Error('Study Director Library view is unavailable or incompatible.');
