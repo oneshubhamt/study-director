@@ -23,7 +23,7 @@ for(const root of actualRoots)assert.ok(allowedRoots.has(root),`orphan test/supp
 for(const root of allowedRoots)assert.ok(actualRoots.includes(root),`canonical test/support root is missing: tests/${root}`);
 
 // Exact/format-only duplicate files are never legitimate, regardless of layer.
-const byFingerprint=new Map();
+const byFingerprint=new Map<string,string>();
 for(const file of tests){
   const fingerprint=normalizedFingerprint(file),previous=byFingerprint.get(fingerprint);
   assert.equal(previous,undefined,`duplicate test implementation: ${previous} and ${file}`);byFingerprint.set(fingerprint,file);

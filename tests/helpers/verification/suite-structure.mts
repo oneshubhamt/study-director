@@ -114,7 +114,7 @@ for(const entry of entries){
   assert.match(entry.id,/^[a-z0-9]+(?:-[a-z0-9]+)*$/,'browser id must be semantic kebab-case');
   assert.match(entry.script,/^tests\/browser\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*\.(?:mjs|mts)$/,'browser path must include one semantic product domain');
   assert.ok(fs.existsSync(entry.script),`browser test is missing: ${entry.script}`);
-  assert.ok(Array.isArray(entry.coverage)&&entry.coverage.length>0,`${entry.id} needs coverage metadata`);
+  assert.ok(Boolean(Array.isArray(entry.coverage))&&entry.coverage.length>0,`${entry.id} needs coverage metadata`);
   assert.equal(new Set(entry.coverage).size,entry.coverage.length,`${entry.id} coverage metadata must not contain duplicates`);
   for(const tag of entry.coverage)assert.match(tag,/^[a-z0-9]+(?:-[a-z0-9]+)*$/,`${entry.id} coverage tag must be semantic kebab-case`);
   assert.ok(Number.isFinite(entry.timeoutMs)&&entry.timeoutMs>=0&&entry.timeoutMs<=300000,`${entry.id} timeout must be a bounded non-negative duration`);
