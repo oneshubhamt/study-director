@@ -1,5 +1,32 @@
 # TypeScript conversion — execution record
 
+## 2026-11-27 — REVIEW-P5 Stage 1 continuation: exact-revision verification checkpoint (gate OPEN)
+
+Application/test revision: `57354d58965c204683ec68768b260f65026a21df`; prior documentation checkpoint: `c6e92fd29baf9a71d48ec4d3cf79d7b5224c7598`. This checkpoint is documentation only. Starting revision, baseline, earlier comparison pins, confirmed repairs and scope limits remain in the preceding record. No Phase 6 work or promotion.
+
+**Fresh CI on the exact application/test revision:**
+
+- [P5.7 targeted browser closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479296): in_progress.
+- [Repository checks](https://github.com/oneshubhamt/study-director/actions/runs/45926479360): success.
+- [P5.10C targeted Insights feature closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479352): success.
+- [P5.8 targeted Drive/status closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479385): success.
+- [Generated runtime targeted closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479337): success.
+- [P5.11b targeted presentation closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479415): success.
+- [REVIEW-P5 Stage 1 audit](https://github.com/oneshubhamt/study-director/actions/runs/45926479346): success.
+- [P5.13 targeted host closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479376): success.
+- [P5.12 targeted PWA closure](https://github.com/oneshubhamt/study-director/actions/runs/45926479437): success.
+
+The consolidated audit workflow passed its fast suite and ten built-browser session journeys. The [PWA browser log](https://github.com/oneshubhamt/study-director/actions/runs/45926479437/job/140268850956) explicitly reports all five isolated install-capture, offline and update passes. Each offline pass includes canonical readback, immediate hidden-secondary reload and exactly one reload each; update passes assert one primary check across tabs, immediate hidden-secondary reload, single reload each and protection of independent-profile primary. The starting revision's successful repeated run is supporting evidence only. Original intermittent second-repetition failure still lacks a deterministic causal witness; the ownership/controller-change candidate trace in the preceding record is not a diagnosis. No speculative exemption of primary durability checks was made. P5.7 non-browser witnesses, build and targeted backup/recovery journeys succeeded; the five isolated changed browser passes were in_progress at this checkpoint.
+
+**Additional historical source/caller reconciliation** against `de4872a88c2015bc8833e0244c0ab8ce6e6b5998` (source inspected; not a claim that every branch was executed):
+
+- Historical main.js:1023–1135 -> session-handoff.ts:64–170, registered in current main.ts:3172 onward: frozen claim stops duplicate timer before waiting, carries evidence, requires strict canonical write/readback before successful notice, retains freeze and skips sync for newer claim, throttles retry. Origin/generation/transfer ownership checks and strict IDB read are justified strengthening. Session browser workflow green; full delayed date/runtime mutation reconciliation remains open.
+- Historical main.js:6548–6565 -> backup-recovery-host.ts:24–45, main.ts:2177: quiescence depth and freeze timestamp, pending timer cancellation, editor quiescence, wait for exclusive settlement, suppress resume while handoff frozen. Source correspondence established; actual timer resume/authority consumer remains part of final reconciliation.
+- Historical main.js:7897–7939 -> backup-recovery-host.ts:183–235: retained staged-byte verification, hash/size grouping, prepublication ownership/cancellation check, atomic labels replacement, cleanup on abort, full revision-fence fallback on missing token. Historical main.js:7251–7259 -> backup-recovery-host.ts:331–355, main.ts:2699: journal/integrity scratch retention, deduplication and error propagation. Historical main.js:7981–8009 -> backup-recovery-host.ts:240–282: stronger restore journal identity/authority fences, ambiguous commit retains rollback bytes, malformed journal rejection, exact scratch-release identity and no rollback after release failure. Malformed deletion-entry boundary requires further semantic reconciliation; not marked closed.
+- Corrected caller locations for preceding source notes: maintenance main.ts:3286–3291; profile main.ts:1661,1710.
+
+**Disposition:** consolidated exact-revision audit and PWA repetition verification succeeded. Stage 1 remains PARTIAL/OPEN: historical reverse semantic/caller reconciliation across remaining restore/storage-reset/integrity, deferred Guide/Insights and host paths is not exhausted; original PWA intermittent cause and prior Notes export flake are not established; no successful repetition is represented as a causal fix. Local checkout/working-tree verification blocked by network DNS; GitHub-hosted pinned toolchain/remote trees are the evidence, not a claimed local checkout. Stage 2 gate remains open; Phase 7 physical-device, capacity and live-provider certification excluded. No F33 parity reassignment without historical evidence.
+
 ## REVIEW-P5 · Stage 1 consolidated verification and historical follow-through — PARTIAL / OPEN · 2026-11-27
 
 - Continuation start `f59cddda54ff3df7cc2e7f161fb98f9591ac4695`; overall programme comparator `de4872a88c2015bc8833e0244c0ab8ce6e6b5998`; original Stage 1 start and earlier comparison pins in the initial objective map and intervening entries below (including last relevant Plan JS `8753895af3116adfe749d42e09ef0fb1edbd1f17`). Re-read AGENTS, phase register, DECISIONS, TYPESCRIPT, VERIFICATION and actual owner/caller/test sources. No new historical SHA needed for the source groups below. Local git ls-remote still DNS-blocked; Node 22.16.0/npm 10.9.2 do not match repository pins. Exact remote refs, compare API and hosted pinned Node 26.12.1/npm 12.2.1/TS 7.0.2 used; no local working-tree claim.
