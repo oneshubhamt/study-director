@@ -1,4 +1,8 @@
-export const privateModules=Object.freeze([
+export type BuildTarget='development'|'deployment';
+export type PrivateModule=Readonly<{id:string;source:string;stem:string;registryId?:string}>;
+export type ExternalModule=Readonly<{id:string;stem:string;execution:'startup'|'on-demand'|'worker';source?:string;sources?:readonly string[];generated?:string;generatedSources?:readonly string[]}>;
+export type StaticAsset=Readonly<{source:string;output:string;targets:readonly BuildTarget[];precache:boolean;template?:boolean}>;
+export const privateModules:readonly PrivateModule[]=Object.freeze([
   Object.freeze({id:'internal',source:'core/internal.ts',stem:'sd.internal'}),
   Object.freeze({id:'operation-lifecycle',source:'core/operation-lifecycle.ts',stem:'sd.operation-lifecycle'}),
   Object.freeze({id:'interactions',source:'core/interactions.ts',stem:'sd.interactions'}),
@@ -84,7 +88,7 @@ export const privateModules=Object.freeze([
 
 // Direct runtime dependencies after host composition. The manifest order is a
 // topological order; private modules may never resolve one another themselves.
-export const runtimeDependencies=Object.freeze({
+export const runtimeDependencies:Readonly<Record<string,readonly string[]>>=Object.freeze({
   internal:Object.freeze([]),
   'operation-lifecycle':Object.freeze([]),
   interactions:Object.freeze([]),
@@ -169,7 +173,7 @@ export const runtimeDependencies=Object.freeze({
 });
 
 export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
-export const authoredExternalModules=Object.freeze([
+export const authoredExternalModules:readonly ExternalModule[]=Object.freeze([
   Object.freeze({id:'glass',source:'external/glass.ts',stem:'sd.glass',execution:'startup'}),
   Object.freeze({id:'aurora',source:'external/aurora.ts',stem:'sd.aurora',execution:'startup'}),
   Object.freeze({id:'guide',source:'external/guide.ts',stem:'sd.guide',execution:'on-demand'}),
@@ -177,7 +181,7 @@ export const authoredExternalModules=Object.freeze([
   Object.freeze({id:'drive',source:'external/drive.ts',stem:'sd.drive',execution:'startup'})
 ]);
 
-export const generatedRuntimeModules=Object.freeze([
+export const generatedRuntimeModules:readonly ExternalModule[]=Object.freeze([
   // Wordgard is its own generated module, loaded with (before) Study Director's editor.
   Object.freeze({id:'rich-text',generatedSources:Object.freeze(['wordgard.js','rich-text.js']),stem:'sd.richtext',execution:'startup'}),
   Object.freeze({id:'search-worker',generated:'search-worker.js',stem:'sd.note-search',execution:'worker'}),
@@ -211,8 +215,8 @@ export const platformFiles=Object.freeze({
   hostingHeaders:Object.freeze({source:'platform/firebase-hosting-headers.merge.json',output:'firebase-hosting-headers.merge.json'})
 });
 
-const bothTargets=Object.freeze(['development','deployment']);
-export const staticAssets=Object.freeze([
+const bothTargets:readonly BuildTarget[]=Object.freeze(['development','deployment']);
+export const staticAssets:readonly StaticAsset[]=Object.freeze([
   Object.freeze({source:'assets/fonts/barlow-condensed-latin-400-normal.woff2',output:'assets/fonts/barlow-condensed-latin-400-normal.woff2',targets:bothTargets,precache:true}),
   Object.freeze({source:'assets/fonts/barlow-condensed-latin-700-normal.woff2',output:'assets/fonts/barlow-condensed-latin-700-normal.woff2',targets:bothTargets,precache:true}),
   Object.freeze({source:'assets/fonts/barlow-latin-400-normal.woff2',output:'assets/fonts/barlow-latin-400-normal.woff2',targets:bothTargets,precache:true}),

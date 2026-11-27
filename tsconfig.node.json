@@ -57,6 +57,7 @@
     "build/wordgard-source-patches.mts",
     "build/runtime-bundle.mts",
     "tests/helpers/typescript-source.mts",
-    "contracts/data-architecture.mts"
+    "contracts/data-architecture.mts",
+    "build/build.mts"
   ]
 }
