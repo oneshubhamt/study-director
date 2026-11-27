@@ -1,5 +1,11 @@
 # TypeScript conversion — execution record
 
+## REVIEW-P5 · Stage 1 Diary/repair completion — OPEN · 2026-11-27
+
+- Baseline `7a8a898f64409a4fdaf06c45ddb93c6e6bb4e082` (41 commits after documentation `7a7db53174272d8684ed71f2c33de968b6869e68`). Predecessor `3abb89950ddb7eef54d8a663abc0e65df9839bd3`: all nine workflows terminal success, including all ten audit browser legs ([audit](https://github.com/oneshubhamt/study-director/actions/runs/45931627858)). Newer head introduces origin-fenced remote repair, conditional Study Day publication and Diary single-writer guard; do not duplicate these changes.
+- Current objectives: close the missing Diary deletion origin fence at the actual Daily Record CAS and postcommit boundary; preserve fallback/successor data and distinguish committed-but-unverified deletion from precommit failure. Verify direct Reflection owner fences after asynchronous read-back and preserve date-specific semantics. Correct the native retained-Study-Day Diary journey's visible Save Study Day notification obstruction without bypassing hit testing. Add targeted regression witnesses; reconcile CI, historical dispositions and remaining limits before closure.
+- Baseline fast audit job [140302571138](https://github.com/oneshubhamt/study-director/actions/runs/45937030906/job/140302571138) passed; [session-draft-edit](https://github.com/oneshubhamt/study-director/actions/runs/45937030906/job/140302571260) failed because the actual toast Open Review action covers the Days control. Other nine audit browser legs passed. No Phase 6, promotion or deployment; no Stage 1 closure yet.
+
 ## REVIEW-P5 · Stage 1 session retirement and integrity authority — OPEN · 2026-11-27
 
 - Start `bb1e8acb2eadd2fd3a24bcf402932dd416ad1ba8`; previous application/test revision (`de7733924a5d22bdfe20e4d84db587ce8e7f5176`) all nine workflows terminal SUCCESS, all ten audit browser legs and repeated PWA included. Objective recorded before implementation in `d4aa92adb1492729d135a16c7e3fbe3fdfc33b7a`. No Phase 6.
