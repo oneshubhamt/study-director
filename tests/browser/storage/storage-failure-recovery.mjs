@@ -198,10 +198,10 @@ try{
     if(before?.reflection!=='Verified before storage failure'||!baselineSavedAt)throw new Error('Healthy fixture did not persist the baseline Saved Day');
     await edit('New reflection preserved by emergency recovery');
     const rawFallback=()=>localStorage.getItem(key),baselineFallback=rawFallback(),priorTime=d.readStorageHealth().lastStudyDataSaveAt,summary=()=>({issues:d.readStorageHealth().issues.map(row=>row.source),savedAt:d.readStorageHealth().lastStudyDataSaveAt,status:document.getElementById('save-status').textContent});
-    let phase='preflight',preflightDailyWrites=0,emergencyDailyWrites=0;
+    let phase='preflight',preflightDailyWrites=0,emergencyDailyWrites=0,priorEmergencyTime=null;
     IDBDatabase.prototype.transaction=function(names,mode,...args){
       const savedDayWrite=mode==='readwrite'&&(typeof names==='string'?[names]:Array.from(names||[])).includes(store);
-      if(savedDayWrite){if(phase==='preflight')preflightDailyWrites++;else emergencyDailyWrites++;}
+      if(savedDayWrite){if(phase==='preflight')preflightDailyWrites++;else{if(emergencyDailyWrites===0)priorEmergencyTime=d.readStorageHealth().lastStudyDataSaveAt;emergencyDailyWrites++;}}
       if(phase==='preflight'||savedDayWrite)throw new DOMException('forced '+phase+' transaction failure','InvalidStateError');
       return original.call(this,names,mode,...args);
     };
@@ -211,7 +211,8 @@ try{
       phase='emergency';d.IndexedDb.clearConnection();
       const recoveredCheckpoint=await d.writeLiveDraftNow({markChanged:false});
       if(!recoveredCheckpoint?.ok||recoveredCheckpoint.storage?.idb!==true)throw new Error('Could not re-establish canonical Active Session before the selective fault');
-      const priorEmergencyTime=d.readStorageHealth().lastStudyDataSaveAt;
+      // The successful final Active Session checkpoint also advances the study-data clock.
+      // Compare with the clock at entry to the failing Saved-Day transaction, not before preflight.
       const emergencyResult=await d.saveDayRecord(),raw=rawFallback(),rescue=JSON.parse(raw||'[]').find(record=>record.date===date);
       const emergency={result:emergencyResult,...summary(),priorTime:priorEmergencyTime,attempts:emergencyDailyWrites,rescue,canonical:await d.IndexedDb.get(store,date)};
       return {date,before,priorTime,preflight,emergency};
@@ -227,6 +228,7 @@ try{
   assert.equal(emergency.result,false,'an admitted emergency-only Saved Day is not acknowledged as a canonical save');
   assert.ok(emergency.attempts>0,'the selective fault reaches the real Saved-Day transaction');
   assert.match(emergency.status,/recovery copy remains available/u,'emergency storage is distinguished from a canonical save');
+  assert.ok(emergency.priorTime,'the attempted Saved-Day write records its pre-write study-data timestamp');
   assert.equal(emergency.savedAt,emergency.priorTime,'emergency-only storage does not advance canonical study-save time');
   assert.equal(emergency.rescue?.reflection,'New reflection preserved by emergency recovery','the newly edited reflection is actually present in rescue bytes');
   assert.deepEqual(emergency.canonical,before,'the earlier canonical Saved Day survives the failed write');
