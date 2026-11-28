@@ -103,16 +103,24 @@ try{
   const cancelledRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA,before=await d.AppData.activeSession.load();let done=false,outcome,error;d.BackupController.restore(window.__RestoreSafetyQACandidate).then(v=>{outcome=v;done=true},e=>{error=e;done=true});const deadline=Date.now()+10000;while(!done&&Date.now()<deadline){document.querySelector('#sd-interaction-dialog[open] [data-interaction-cancel]')?.click();await new Promise(r=>setTimeout(r,20));}if(!done)throw new Error('Restore cancellation did not settle');if(error)throw error;return {outcome,unchanged:(await d.AppData.activeSession.load()).value?.scheduleText===before.value?.scheduleText&&(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection==='ACTIVE SESSION REVIEW'};})()`);
   assert.equal(cancelledRestore.unchanged,true,'cancelled reconciliation changed the active session');
 
+  const reflectionEditor='.pane.on .sd-rte[data-sd-rich-surface="reflection"] [contenteditable="true"]';
+  await page1.evaluate(`__RestoreSafetyQA.goTab('review')`);
+  await waitFor(()=>page1.evaluate(`!!document.querySelector(${JSON.stringify(reflectionEditor)})`),{label:'running restore reflection editor'});
+  await page1.click(reflectionEditor);
+  await page1.evaluate(`(()=>{const editor=document.querySelector(${JSON.stringify(reflectionEditor)});if(!editor)throw new Error('Reflection editor is unavailable');const range=document.createRange(),selection=getSelection();range.selectNodeContents(editor);selection.removeAllRanges();selection.addRange(range);editor.focus();})()`);
+  await page1.send('Input.insertText',{text:'LOCAL DECISION BASE'});
+  await waitFor(()=>page1.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection').value)==='LOCAL DECISION BASE'`),{label:'running restore reflection input'});
+  await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA;d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();})()`);
+
   // A running timer checkpoints elapsed evidence while a restore decision is
   // open. That automatic advancement must not invalidate the decision; a real
   // Review edit made after the same decision was shown must invalidate it and
   // force the comparison to be rebuilt before anything is applied.
   const timerOnlyRestore=await page1.evaluate(`(async()=>{
     const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms)),elapsed=session=>Math.max(0,...Object.values(session?.snapshot?.taskState||{}).map(row=>Number(row?.actual?.seconds)||0));
-    d.TimerState.paused=false;if(!d.TimerEngine.startCur(120))throw new Error('Running restore fixture could not restart a bounded long timer');d.goTab('review');await wait(40);
-    const box=document.getElementById('daily-reflection');box.value='LOCAL DECISION BASE';d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
+    d.TimerState.paused=false;if(!d.TimerEngine.startCur(120))throw new Error('Running restore fixture could not restart a bounded long timer');await wait(40);await d.flushLiveDraft();
     const candidate=await d.BackupController.inspect(window.__RestoreSafetyQAFile.blob,{filename:window.__RestoreSafetyQAFile.filename});
-    let done=false,value,error,reopened=false,advanced=false,beforeSeconds=0,afterSeconds=0,stableAtDecision='',stableAtSecond='',secondTitle='';
+    let done=false,value,error,reopened=false,advanced=false,beforeSeconds=0,afterSeconds=0,secondTitle='';
     d.BackupController.restore(candidate).then(v=>{value=v;done=true},e=>{error=e;done=true});
     const deadline=Date.now()+45000;
     while(!done&&Date.now()<deadline){
@@ -120,24 +128,24 @@ try{
       if(dialog?.open&&!advanced){
         const before=await d.AppData.activeSession.load();beforeSeconds=elapsed(before.value);
         await wait(1200);await d.flushLiveDraft();
-        const after=await d.AppData.activeSession.load();afterSeconds=elapsed(after.value);stableAtDecision=JSON.stringify(d.ActiveSessionCodec.restoreStabilityValue(after.value));advanced=true;
+        const after=await d.AppData.activeSession.load();afterSeconds=elapsed(after.value);advanced=true;
         const group=[...dialog.querySelectorAll('.interaction-group')].find(node=>node.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session'));
         const local=group&&[...group.querySelectorAll('.interaction-option')].find(button=>String(button.dataset.value||'').endsWith('_local'));
         if(!local)throw new Error('Running restore did not expose the local Active Session decision.');
         local.click();dialog.querySelector('.interaction-actions .primary')?.click();
         for(let i=0;i<100&&!done&&dialog.open;i++)await wait(10);
         for(let i=0;i<120&&!done&&!dialog.open;i++)await wait(10);
-        if(!done&&dialog.open){reopened=true;secondTitle=dialog.querySelector('#sd-interaction-title')?.textContent||'';const current=await d.AppData.activeSession.load();stableAtSecond=JSON.stringify(d.ActiveSessionCodec.restoreStabilityValue(current.value));dialog.querySelector('[data-interaction-cancel]')?.click();}
+        if(!done&&dialog.open){reopened=true;secondTitle=dialog.querySelector('#sd-interaction-title')?.textContent||'';dialog.querySelector('[data-interaction-cancel]')?.click();}
       }
       await wait(20);
     }
     if(!done)throw new Error('Running timer restore did not settle.');if(error)throw error;
     const final=await d.AppData.activeSession.load();
-    return {advanced,beforeSeconds,afterSeconds,reopened,stableEqualAtSecond:stableAtDecision===stableAtSecond,stableAtDecision,stableAtSecond,secondTitle,review:final.value?.snapshot?.review?.reflection||'',cancelled:value?.cancelled===true};
+    return {advanced,beforeSeconds,afterSeconds,reopened,secondTitle,review:StudyDirectorRichText.toPlainText(final.value?.snapshot?.review?.reflection||''),cancelled:value?.cancelled===true};
   })()`);
   assert.equal(timerOnlyRestore.advanced,true,'running-session restore never reached a real reconciliation decision');
   assert.ok(timerOnlyRestore.afterSeconds>timerOnlyRestore.beforeSeconds,'running-session fixture did not persist elapsed timer advancement while the decision was open');
-  assert.equal(timerOnlyRestore.reopened,false,`timer-only checkpoint advancement opened another reconciliation surface: ${timerOnlyRestore.secondTitle}; stableEqualAtSecond=${timerOnlyRestore.stableEqualAtSecond}\ndecision=${timerOnlyRestore.stableAtDecision}\nsecond=${timerOnlyRestore.stableAtSecond}`);
+  assert.equal(timerOnlyRestore.reopened,false,`timer-only checkpoint advancement opened another reconciliation surface: ${timerOnlyRestore.secondTitle}`);
   assert.equal(timerOnlyRestore.review,'LOCAL DECISION BASE','timer-only restore lost the selected local Active Session');
   assert.equal(timerOnlyRestore.cancelled,false,'timer-only restore was cancelled instead of reconciling');
 
@@ -151,7 +159,7 @@ try{
       const dialog=document.getElementById('sd-interaction-dialog');
       if(dialog?.open&&!firstHandled){
         firstHandled=true;
-        const box=document.getElementById('daily-reflection');box.value='MATERIAL CONCURRENT EDIT';d.setStudyQuality(5,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
+        const loaded=await d.AppData.activeSession.load(),current=loaded.value,now=new Date().toISOString();if(!current)throw new Error('Material-race Active Session is unavailable');const changed=d.ActiveSessionCodec.canonicalize({...current,revision:d.AppData.activeSession.nextRevision(current.revision),updatedAt:now,snapshot:{...current.snapshot,review:{reflection:'MATERIAL CONCURRENT EDIT',studyQuality:5},updatedAt:now}});if(!changed)throw new Error('Material-race Active Session is invalid');const saved=await d.AppData.activeSession.save(changed,{strictDurability:true});if(!saved?.ok||saved.error||saved.storage?.idb!==true)throw saved?.error||new Error('Material-race Active Session did not reach canonical storage');
         const group=[...dialog.querySelectorAll('.interaction-group')].find(node=>node.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session'));
         const local=group&&[...group.querySelectorAll('.interaction-option')].find(button=>String(button.dataset.value||'').endsWith('_local'));
         if(!local)throw new Error('Material-race restore did not expose the local Active Session decision.');
