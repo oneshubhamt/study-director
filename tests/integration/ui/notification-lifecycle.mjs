@@ -53,6 +53,22 @@ function coordinator(){const time=clock(),renders=[];return {time,renders,notice
   const third=n.begin({source:'drive',id:'backup',operationId:'three',title:'Backup'});third.update({lifecycle:'cancelled',message:'Cancelled safely'});
   assert.equal(third.update({message:'Wrong success',lifecycle:'succeeded'}),false);assert.equal(n.eventStatus().events.at(-1).lifecycle,'cancelled');
 }
+// Moving the device calendar backwards must not grant extra display time.
+{
+  const elapsed=clock();
+  let calendar=Date.UTC(2026,9,1);
+  const n=module.createCoordinator(freeze({...elapsed,now:()=>calendar,elapsedNow:elapsed.now}));
+  n.notify({key:'saved',title:'Saved',duration:4000});
+  elapsed.tick(1500);
+  calendar-=70*86400000;
+  n.setHidden(true);
+  elapsed.tick(8000);
+  n.setHidden(false);
+  elapsed.tick(2499);
+  assert.equal(n.eventStatus().toasts.length,1,'a hidden popup retains its unused display time');
+  elapsed.tick(1);
+  assert.equal(n.eventStatus().toasts.length,0,'calendar rollback cannot extend visible popup time');
+}
 class Element {
   constructor(tag='div'){this.tagName=tag;this.children=[];this.parentNode=null;this.dataset={};this.attributes={};this.listeners=new Map();this.className='';this.textContent='';this.classList={contains:k=>this.className.split(' ').includes(k),add:k=>this.className+=' '+k,remove:k=>this.className=this.className.split(' ').filter(v=>v!==k).join(' '),toggle:(k,on)=>on?this.classList.add(k):this.classList.remove(k)};}
   append(...items){for(const item of items){item.parentNode=this;this.children.push(item);}}

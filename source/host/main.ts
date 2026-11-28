@@ -314,7 +314,7 @@ const {WorkspaceRouteCoordinator,WorkspaceHistoryBridge,WorkspaceHistoryPublic}=
 
 const {renderNotificationSurfaces,renderCoordinatedNotice,noticeCanCompact,setStatus}=FoundationHostModule.createNoticeViews({document,notifications:()=>NoticeCoordinator,clampText,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars});
 const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze<Parameters<typeof NoticeCoordinatorModule.createCoordinator>[0]>({
-  render:renderCoordinatedNotice,now:()=>Date.now(),
+  render:renderCoordinatedNotice,
   setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),
   installationCooldownMs:1200,capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
 }));

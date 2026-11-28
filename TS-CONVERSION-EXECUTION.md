@@ -17,6 +17,8 @@
 
 - Strictly converted the capacity and multi-tab browser drivers (37/124 primary paths). Both maximum-count modes (500 Saved Days, 2,000 notes) passed restore, re-export, reload and fault rollback in Chromium. Rollback now compares the retained dates and reads an exact note. Multi-tab passed protected actions, takeover, stale-write rejection and return hydration. CDP page programs execute in the built app.
 
+- Replaying repository-checkpoint exposed a six-billion-ms popup timer that Node truncated to 1 ms. A targeted lifecycle test reproduced a saved notification staying visible past its remaining duration after a clock rollback. Popup expiry now uses elapsed time, with calendar time retained for Recent. The lifecycle test and checkpoint passed without the overflow, and strict checks passed on 357 files.
+
 ## P6.1 · Closed
 
 - All 80 P6.1-assigned paths were reconciled against the frozen P6.0 inventory. Each of the 61 JavaScript implementation entries has a strictly checked TypeScript owner; stable `.mjs` entry names and the CJS worker preload remain forwarding boundaries. Native launchers, Python and declarative configuration remain native.

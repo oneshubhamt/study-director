@@ -17,6 +17,7 @@ const createModule=()=>{
     if(!input||!Object.isFrozen(input))throw new TypeError('Notice coordinator input must be frozen.');
     const render=typeof input.render==='function'?input.render:()=>{};
     const now=typeof input.now==='function'?input.now:()=>Date.now();
+    const elapsedNow=input.elapsedNow??input.now??(()=>globalThis.performance?.now()??Date.now());
     const setTimer=typeof input.setTimeout==='function'?input.setTimeout:setTimeout;
     const clearTimer=typeof input.clearTimeout==='function'?input.clearTimeout:clearTimeout;
     const cooldownMs=Math.max(0,Number(input.installationCooldownMs)||1200);
@@ -182,8 +183,8 @@ const createModule=()=>{
     }
     function eventSnapshot(){return freeze({events:freeze([...events.values()].map(publicEvent)),toasts:freeze(visibleEvents().map(publicEvent))});}
     function accountTime(){
-      const time=now();
-      for(const row of events.values())if(row.started!==null){row.remaining=Math.max(0,row.remaining-(time-row.started));row.started=null;if(row.remaining===0&&!row.dismissed){row.dismissed=true;settleRecent(row,'expired');}}
+      const time=elapsedNow();
+      for(const row of events.values())if(row.started!==null){row.remaining=Math.max(0,row.remaining-Math.max(0,time-row.started));row.started=null;if(row.remaining===0&&!row.dismissed){row.dismissed=true;settleRecent(row,'expired');}}
     }
     function publishEvents(){
       if(eventTimer!==null){clearTimer(eventTimer);eventTimer=null;}
@@ -203,7 +204,7 @@ const createModule=()=>{
       for(const row of events.values())if(!visibleKeys.has(row.key))row.pauses.clear();
       // Every visible pop-up counts down, in front or behind; hovering one,
       // or the expanded stack, stops the clock.
-      for(const row of timed)if(!hidden&&!row.pauses.size&&!(stackPauses.size&&visibleKeys.has(row.key))&&row.event.duration){row.started=now();next=Math.min(next,row.remaining);}
+      for(const row of timed)if(!hidden&&!row.pauses.size&&!(stackPauses.size&&visibleKeys.has(row.key))&&row.event.duration){row.started=elapsedNow();next=Math.min(next,row.remaining);}
       if(Number.isFinite(next))eventTimer=setTimer(()=>{eventTimer=null;accountTime();publishEvents();},next);
       for(const row of visible)noteShown(row);
       const state=eventSnapshot(),published=++publication;

@@ -16,7 +16,7 @@ export type NotificationRequest=Omit<NotificationInput,'kind'> & {readonly kind?
 export interface BannerInput {readonly kind:BannerKind;readonly title:string;readonly message:string;readonly actionLabel?:string;readonly compact?:boolean;readonly visible?:boolean}
 export interface BannerRow {readonly id:string;readonly kind:BannerKind;readonly title:string;readonly message:string;readonly priority:number;readonly signature:string;readonly actionLabel:string;readonly compact:boolean;readonly deferred:boolean;readonly eligibleAt:number}
 export interface BannerState {readonly format:'study-director.notice-state';readonly version:1;readonly revision:number;readonly active:BannerRow|null;readonly queued:readonly (BannerRow|null)[];readonly announcement:string}
-export interface CoordinatorInput {render?:(state:BannerState)=>void;now?:()=>number;setTimeout?:(callback:()=>void,delay:number)=>number;clearTimeout?:(id:number)=>void;installationCooldownMs?:number;capture?:(scope:string,error:unknown)=>void}
+export interface CoordinatorInput {render?:(state:BannerState)=>void;now?:()=>number;elapsedNow?:()=>number;setTimeout?:(callback:()=>void,delay:number)=>number;clearTimeout?:(id:number)=>void;installationCooldownMs?:number;capture?:(scope:string,error:unknown)=>void}
 export interface RecentFields {key:string;source:string;deliveryId:string;tier:Tier;severity:Severity;title:string;message:string}
 export interface RecentEntry extends RecentFields {id:string;at:number;outcome:RecentOutcome;seen:boolean}
 export interface AudioDelivery {play(name:string,options?:{isCurrent?:()=>boolean;explicit?:boolean}):Promise<boolean>;stop():void;status():SoundStatus}
