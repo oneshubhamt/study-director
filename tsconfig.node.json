@@ -147,6 +147,8 @@
     "tests/helpers/drive-browser.mts",
     "tests/helpers/verification/drive-profile-binding.mts",
     "tests/helpers/device-folder-world.mts",
-    "tests/helpers/verification/device-folder-layout.mts"
+    "tests/helpers/verification/device-folder-layout.mts",
+    "tests/helpers/device-folder-ports.mts",
+    "tests/helpers/verification/device-folder-storage.mts"
   ]
 }

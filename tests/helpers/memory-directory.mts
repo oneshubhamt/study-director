@@ -7,7 +7,7 @@ type BlobPart=NonNullable<ConstructorParameters<typeof Blob>[0]>[number];
 type Clock=()=>number;
 type FileEntry={
   kind:'file';name:string;
-  createWritable():Promise<{write(blob:BlobPart):Promise<void>;close():Promise<void>;abort():Promise<void>}>;
+  createWritable(options?:{keepExistingData?:boolean}):Promise<{write(blob:BlobPart):Promise<void>;close():Promise<void>;abort():Promise<void>}>;
   getFile():Promise<File>;touch(at:number):void;
 };
 type DirectoryEntry={
@@ -49,7 +49,7 @@ export function createMemoryDirectory({now:initialNow=()=>Date.now(),faults={cor
     let content=new Blob([]),modified=now();
     return {
       kind:'file',name,
-      async createWritable(){const parts:BlobPart[]=[];return {write:async (blob:BlobPart)=>{parts.push(blob);},close:async()=>{content=new Blob(parts);modified=now();},abort:async()=>{parts.length=0;}};},
+      async createWritable(_options?:{keepExistingData?:boolean}){const parts:BlobPart[]=[];return {write:async (blob:BlobPart)=>{parts.push(blob);},close:async()=>{content=new Blob(parts);modified=now();},abort:async()=>{parts.length=0;}};},
       async getFile(){
         let blob=content;
         if(faults.corruptReadOf.has(name)&&blob.size){faults.corruptReadOf.delete(name);const bytes=new Uint8Array(await blob.arrayBuffer());bytes[0]=bytes[0]!^0xff;blob=new Blob([bytes]);}
