@@ -20,7 +20,7 @@ export function assetStoragePort(owner:unknown){
   supported:()=>call('supported'),requireAvailable:()=>call('requireAvailable'),
   get:async(id:string)=>{const value=await call('get',id);assert.ok(value instanceof Blob);return value;},
   put:async(id:string,blob:Blob,options?:{name?:string;library?:boolean;stage?:boolean;token?:number})=>assetRow(await call('put',id,blob,options)),
-  list:async()=>Array.from(jsonArray(await call('list')()),assetRow),
+  list:async()=>Array.from(jsonArray(await call('list')),assetRow),
   rename:async(id:string,name:string)=>assetRow(await call('rename',id,name)),
   setLibrary:async(id:string,value:boolean)=>assetRow(await call('setLibrary',id,value)),
   verifyMetadata:async(rows:unknown)=>call('verifyMetadata',rows),restoreMetadata:async(rows:unknown)=>call('restoreMetadata',rows),
