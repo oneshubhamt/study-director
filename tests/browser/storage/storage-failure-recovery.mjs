@@ -255,6 +255,8 @@ try{
     assert.equal(state.startup.fullyInitialized,false,`${mode} IndexedDB failure allowed writable startup`);
     assert.equal(state.planReadOnly,true,`${mode} IndexedDB failure left Plan writable`);
     assert.equal(state.applyDisabled,true,`${mode} IndexedDB failure left Apply enabled before canonical Plan hydration`);
+    // This assertion is intentionally a rendered-surface witness: startup may
+    // retain ownership while canonical Plan hydration has failed.
     results.indexedDB[mode]=true;
   }
 

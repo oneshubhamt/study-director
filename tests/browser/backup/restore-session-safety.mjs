@@ -102,6 +102,74 @@ try{
   // must preserve the local session, and must not download an optional copy.
   const cancelledRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA,before=await d.AppData.activeSession.load();let done=false,outcome,error;d.BackupController.restore(window.__RestoreSafetyQACandidate).then(v=>{outcome=v;done=true},e=>{error=e;done=true});const deadline=Date.now()+10000;while(!done&&Date.now()<deadline){document.querySelector('#sd-interaction-dialog[open] [data-interaction-cancel]')?.click();await new Promise(r=>setTimeout(r,20));}if(!done)throw new Error('Restore cancellation did not settle');if(error)throw error;return {outcome,unchanged:(await d.AppData.activeSession.load()).value?.scheduleText===before.value?.scheduleText&&(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection==='ACTIVE SESSION REVIEW'};})()`);
   assert.equal(cancelledRestore.unchanged,true,'cancelled reconciliation changed the active session');
+
+  // A running timer checkpoints elapsed evidence while a restore decision is
+  // open. That automatic advancement must not invalidate the decision; a real
+  // Review edit made after the same decision was shown must invalidate it and
+  // force the comparison to be rebuilt before anything is applied.
+  const timerOnlyRestore=await page1.evaluate(`(async()=>{
+    const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms)),elapsed=session=>Math.max(0,...Object.values(session?.snapshot?.taskState||{}).map(row=>Number(row?.actual?.seconds)||0));
+    d.TimerState.paused=false;d.setTimerMode(d.TIMER_MODES.RUNNING,'qa-running-restore');d.goTab('review');await wait(40);
+    const box=document.getElementById('daily-reflection');box.value='LOCAL DECISION BASE';d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
+    const candidate=await d.BackupController.inspect(window.__RestoreSafetyQAFile.blob,{filename:window.__RestoreSafetyQAFile.filename});
+    let done=false,value,error,reopened=false,advanced=false,beforeSeconds=0,afterSeconds=0;
+    d.BackupController.restore(candidate).then(v=>{value=v;done=true},e=>{error=e;done=true});
+    const deadline=Date.now()+45000;
+    while(!done&&Date.now()<deadline){
+      const dialog=document.getElementById('sd-interaction-dialog');
+      if(dialog?.open&&!advanced){
+        const before=await d.AppData.activeSession.load();beforeSeconds=elapsed(before.value);
+        await wait(1200);await d.flushLiveDraft();
+        const after=await d.AppData.activeSession.load();afterSeconds=elapsed(after.value);advanced=true;
+        const group=[...dialog.querySelectorAll('.interaction-group')].find(node=>node.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session'));
+        const local=group&&[...group.querySelectorAll('.interaction-option')].find(button=>String(button.dataset.value||'').endsWith('_local'));
+        if(!local)throw new Error('Running restore did not expose the local Active Session decision.');
+        local.click();dialog.querySelector('.interaction-actions .primary')?.click();
+        for(let i=0;i<100&&!done&&dialog.open;i++)await wait(10);
+        for(let i=0;i<120&&!done&&!dialog.open;i++)await wait(10);
+        if(!done&&dialog.open){reopened=true;dialog.querySelector('[data-interaction-cancel]')?.click();}
+      }
+      await wait(20);
+    }
+    if(!done)throw new Error('Running timer restore did not settle.');if(error)throw error;
+    const final=await d.AppData.activeSession.load();
+    return {advanced,beforeSeconds,afterSeconds,reopened,review:final.value?.snapshot?.review?.reflection||'',cancelled:value?.cancelled===true};
+  })()`);
+  assert.equal(timerOnlyRestore.advanced,true,'running-session restore never reached a real reconciliation decision');
+  assert.ok(timerOnlyRestore.afterSeconds>timerOnlyRestore.beforeSeconds,'running-session fixture did not persist elapsed timer advancement while the decision was open');
+  assert.equal(timerOnlyRestore.reopened,false,'timer-only checkpoint advancement incorrectly invalidated restore reconciliation');
+  assert.equal(timerOnlyRestore.review,'LOCAL DECISION BASE','timer-only restore lost the selected local Active Session');
+  assert.equal(timerOnlyRestore.cancelled,false,'timer-only restore was cancelled instead of reconciling');
+
+  const materialRace=await page1.evaluate(`(async()=>{
+    const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms));
+    const candidate=await d.BackupController.inspect(window.__RestoreSafetyQAFile.blob,{filename:window.__RestoreSafetyQAFile.filename});
+    let done=false,value,error,firstHandled=false,rebuilt=false;
+    d.BackupController.restore(candidate).then(v=>{value=v;done=true},e=>{error=e;done=true});
+    const deadline=Date.now()+45000;
+    while(!done&&Date.now()<deadline){
+      const dialog=document.getElementById('sd-interaction-dialog');
+      if(dialog?.open&&!firstHandled){
+        firstHandled=true;
+        const box=document.getElementById('daily-reflection');box.value='MATERIAL CONCURRENT EDIT';d.setStudyQuality(5,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
+        const group=[...dialog.querySelectorAll('.interaction-group')].find(node=>node.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session'));
+        const local=group&&[...group.querySelectorAll('.interaction-option')].find(button=>String(button.dataset.value||'').endsWith('_local'));
+        if(!local)throw new Error('Material-race restore did not expose the local Active Session decision.');
+        local.click();dialog.querySelector('.interaction-actions .primary')?.click();
+        for(let i=0;i<100&&!done&&dialog.open;i++)await wait(10);
+      }else if(firstHandled&&dialog?.open){
+        rebuilt=true;dialog.querySelector('[data-interaction-cancel]')?.click();
+      }
+      await wait(20);
+    }
+    if(!done)throw new Error('Material-race restore did not settle after cancelling the rebuilt comparison.');if(error)throw error;
+    const final=await d.AppData.activeSession.load();
+    return {firstHandled,rebuilt,cancelled:value?.cancelled===true,review:final.value?.snapshot?.review?.reflection||''};
+  })()`);
+  assert.equal(materialRace.firstHandled,true,'material-race restore never reached the original decision');
+  assert.equal(materialRace.rebuilt,true,'material Active Session edit did not invalidate and rebuild the stale restore decision');
+  assert.equal(materialRace.cancelled,true,'rebuilt material-race comparison was not cancellable');
+  assert.equal(materialRace.review,'MATERIAL CONCURRENT EDIT','stale restore decision overwrote the newer material Active Session edit');
   const blockedRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA;try{await d.BackupController.inspect(new Blob([JSON.stringify({version:6,records:[]})],{type:'application/json'}),{filename:'legacy.json'});return {ok:true};}catch(error){return {ok:false,message:error.message};}})()`);
   assert.equal(blockedRestore.ok,false,'unsupported historical import must fail before restore');
   assert.match(blockedRestore.message,/retired|unsupported/u);

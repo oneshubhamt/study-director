@@ -56,6 +56,24 @@ assert.ok(captured.some(item=>item.scope==='ownership.hydrate'&&/Preferences hyd
 assert.deepEqual(hydrationEvents.slice(0,8),['plan-data','plan-runtime','saved-plans','primary:true','activation:ownership-takeover','resume-storage-reset','unsupported-census','drafts:true:true'],'startup host must preserve takeover hydration order, merge reload evidence, and force canonical finalization');
 
 {
+  const calls=[];
+  const views=StartupHost.createOwnershipViews(freeze({
+    document:{body:{appendChild:()=>{}},getElementById:()=>null,createElement:()=>({className:'',append:()=>{},appendChild:()=>{},addEventListener:()=>{},dataset:{},remove:()=>{},set type(_value){},set textContent(_value){}})},
+    OWNERSHIP_STATES:Ownership.OWNERSHIP_STATES,
+    AppOwnership:freeze({state:Ownership.OWNERSHIP_STATES.PRIMARY,canMutate:()=>true,requirePrimary:()=>true,status:()=>freeze({state:Ownership.OWNERSHIP_STATES.PRIMARY})}),
+    NoticeCoordinator:freeze({stopSound:()=>calls.push('stop-sound')}),
+    appCanMutate:()=>false,claimAppControl:()=>true,setPlanStatus:()=>{},
+    mutationStatus:()=>null,ready:()=>false,
+    syncPlanAccess:()=>calls.push('plan-access'),
+    projectOwnership:()=>calls.push('ownership'),
+    wakeBackground:reason=>calls.push('wake:'+reason),
+    syncWake:()=>{calls.push('sync-wake');return true;}
+  }));
+  views.renderOwnershipUi();
+  assert.deepEqual(calls,['stop-sound','plan-access','ownership','wake:ownership','sync-wake'],'fail-closed startup must project Plan access before full startup readiness');
+}
+
+{
   // Plan has a narrower write boundary than ownership: until its canonical
   // storage has hydrated, a primary lease must not enable Apply/Edit controls.
   let dataReady=false,ownerWritable=true,observedOwnership=null;

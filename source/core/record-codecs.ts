@@ -874,7 +874,45 @@ function materializeDailyRecordSummary(summary:unknown){
     const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
     return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot)});
   }
-  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue});
+  // Restore reconciliation can remain open while a running timer checkpoints
+  // ordinary elapsed time. Those checkpoints must not invalidate a decision
+  // that was already based on the same schedule, task and user-edited state.
+  // Keep pause/switch/completion/review/practice/schedule changes visible.
+  function restoreStabilityValue(session:unknown){
+    const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
+    const stableTasks=KeyedRecord.create<Readonly<Record<string,unknown>>>();
+    for(const [taskId,state] of Object.entries(clean.snapshot.taskState)){
+      const {actual,...task}=state;
+      if(!actual){stableTasks[taskId]=freeze({...task});continue;}
+      const {seconds:_seconds,clock,record,...actualRest}=actual;
+      const stableActual:Record<string,unknown>={...actualRest};
+      if(clock){
+        const {endedAt:_endedAt,...stableClock}=clock;
+        if(Object.keys(stableClock).length)stableActual['clock']=freeze({...stableClock});
+      }
+      if(record){
+        const {activeSeconds:_activeSeconds,lastEndedAt:_lastEndedAt,sessions,...stableRecord}=record;
+        const stableSessions=Array.isArray(sessions)?sessions.map(entry=>{
+          const {endedAt:_endedAt,activeSeconds:_activeSeconds,...stable}=entry;
+          return freeze({...stable});
+        }):null;
+        const projected={...stableRecord,...(stableSessions?{sessions:freeze(stableSessions)}:{})};
+        if(Object.keys(projected).length)stableActual['record']=freeze(projected);
+      }
+      stableTasks[taskId]=freeze({...task,...(Object.keys(stableActual).length?{actual:freeze(stableActual)}:{})});
+    }
+    const timer=clean.snapshot.timerRuntime;
+    let stableTimer:Readonly<Record<string,unknown>>|null=null;
+    if(timer){
+      const {updatedAt:_timerUpdatedAt,timerState,...timerRest}=timer;
+      const {recordedSec:_recordedSec,lastTickMs:_lastTickMs,...stableTimerState}=timerState;
+      stableTimer=freeze({...timerRest,timerState:freeze({...stableTimerState})});
+    }
+    const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,taskState:_taskState,timerRuntime:_timerRuntime,...snapshot}=clean.snapshot;
+    const {revision:_revision,updatedAt:_updatedAt,snapshot:_snapshot,...sessionRest}=clean;
+    return freeze({...sessionRest,snapshot:freeze({...snapshot,taskState:freeze(stableTasks),timerRuntime:stableTimer})});
+  }
+  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue,restoreStabilityValue});
   }
   // Portable user data is an explicit allowlist, independent of sync destinations.
   function createPersonalDataCodec(limits:Pick<Limits,'maxScheduleChars'|'maxStudentNameChars'>){

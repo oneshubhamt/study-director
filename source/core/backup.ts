@@ -579,7 +579,7 @@ async function captureRestoreReconciliationRevision(relevantDates:readonly strin
     const value:Partial<NoteRecord>=notes[key]||{};return [key,String(value.updatedAt||''),String(value.label||''),String(value.text||'')];
   });
   const recordState=currentDailyRecords(records||[],'Restore reconciliation Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
-  const session=loadedSession&&loadedSession.value?ActiveSessionCodec.sanitizeCurrent(loadedSession.value):null;
+  const session=loadedSession&&loadedSession.value?ActiveSessionCodec.restoreStabilityValue(loadedSession.value):null;
   return JSON.stringify([recordState,noteState,session,personalData||null]);
 }
 async function buildStableRestoreImpact(parsed:Parsed,preview:Preview,signal:Signal,options:RestoreOptions={}){
