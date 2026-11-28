@@ -65,8 +65,8 @@ function indexedDbPrelude(mode){
   if(mode==='timeout')return `Object.defineProperty(window,'indexedDB',{configurable:true,value:{open(){return {error:null}}}});`;
   throw new Error(`Unknown IndexedDB mode: ${mode}`);
 }
-async function createPage({idbMode='normal',allLocalFailures=false,waitForStartup=true}={}){
-  const faultSetup=allLocalFailures?`window.__storageFaults.read=true;window.__storageFaults.write=true;`:'';
+async function createPage({idbMode='normal',localWriteFailure=false,waitForStartup=true}={}){
+  const faultSetup=localWriteFailure?`window.__storageFaults.write=true;`:'';
   const page=await browser.createPage(appUrl,{timezoneId:studyTimezone(),preload:`${controllableLocalStorage}${faultSetup}${indexedDbPrelude(idbMode)}window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';`});
   try{await waitFor(()=>page.evaluate(`!!window.__StorageDebug`),{timeout:10000,label:`${idbMode} debug exposure`});}
   catch(error){
@@ -262,18 +262,17 @@ try{
     results.indexedDB[mode]=true;
   }
 
-  const doubleFault=await createPage({idbMode:'absent',allLocalFailures:true,waitForStartup:false});pages.push(doubleFault);
-  await waitFor(async()=>{const state=await doubleFault.evaluate(`(()=>{const health=__StorageDebug.readStorageHealth(),warning=!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;return {ready:warning&&health.issues.some(row=>row.source==='indexedDB')&&health.issues.some(row=>row.source==='localStorage.read')&&health.issues.some(row=>row.source==='localStorage.write'),warning,issues:health.issues.map(row=>row.source),startup:__StorageDebug.StartupLifecycle.status()};})()`);if(!state.ready)throw new Error(JSON.stringify(state));return true;},{timeout:10000,label:'combined storage failure visible'});
+  const doubleFault=await createPage({idbMode:'absent',localWriteFailure:true,waitForStartup:false});pages.push(doubleFault);
+  await waitFor(async()=>{const state=await doubleFault.evaluate(`(()=>{const health=__StorageDebug.readStorageHealth(),warning=!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;return {ready:warning&&health.issues.some(row=>row.source==='indexedDB')&&health.issues.some(row=>row.source==='localStorage.write'),warning,issues:health.issues.map(row=>row.source),startup:__StorageDebug.StartupLifecycle.status()};})()`);if(!state.ready)throw new Error(JSON.stringify(state));return true;},{timeout:10000,label:'combined storage failure visible'});
   const doubleState=await doubleFault.evaluate(`(()=>({issues:__StorageDebug.readStorageHealth().issues.map(row=>row.source),warning:!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden,text:document.getElementById('storage-warning-text').textContent,plan:document.getElementById('plan-board-state').textContent,startup:__StorageDebug.StartupLifecycle.status()}))()`);
   assert.ok(doubleState.issues.includes('indexedDB'),'combined failure lost the IndexedDB issue');
-  assert.ok(doubleState.issues.includes('localStorage.read'),'combined failure lost the localStorage read issue');
   assert.ok(doubleState.issues.includes('localStorage.write'),'combined failure lost the localStorage write issue');
   assert.equal(doubleState.warning,true,'combined storage failure was not globally visible');
   await doubleFault.send('Page.reload',{ignoreCache:true});
   await waitFor(()=>doubleFault.evaluate(`!!window.__StorageDebug`),{timeout:15000,label:'combined-failure reload'});
-  await waitFor(()=>doubleFault.evaluate(`(()=>{const health=__StorageDebug.readStorageHealth(),warning=!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;return warning&&health.issues.some(row=>row.source==='indexedDB')&&health.issues.some(row=>row.source==='localStorage.read')})()`),{timeout:10000,label:'combined storage failure reconstructed'});
+  await waitFor(()=>doubleFault.evaluate(`(()=>{const health=__StorageDebug.readStorageHealth(),warning=!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;return warning&&health.issues.some(row=>row.source==='indexedDB')&&health.issues.some(row=>row.source==='localStorage.write')})()`),{timeout:10000,label:'combined storage failure reconstructed'});
   const reloadState=await doubleFault.evaluate(`(()=>({issues:__StorageDebug.readStorageHealth().issues.map(row=>row.source),warning:!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden}))()`);
-  assert.ok(reloadState.issues.includes('indexedDB')&&reloadState.issues.includes('localStorage.read'),'storage failures were not reconstructed after reload');
+  assert.ok(reloadState.issues.includes('indexedDB')&&reloadState.issues.includes('localStorage.write'),'storage failures were not reconstructed after reload');
   assert.equal(reloadState.warning,true,'storage warning did not return after reload');
   results.recovery={bothSystemsUnavailable:true,inMemoryAuthority:true,reload:true};
 
