@@ -124,6 +124,7 @@
     "types/backup-maintenance-host.ts",
     "types/backup-integrity-host.ts",
     "types/backup-recovery-host.ts",
+    "types/provider-pending.ts",
     "types/backup-runtime-host.ts",
     "types/reconciliation-ui.ts",
     "types/browser-registry.ts",

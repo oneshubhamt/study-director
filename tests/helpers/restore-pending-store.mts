@@ -1,8 +1,7 @@
-import type {BackupRecoveryHostModule} from '../../source/core/backup-recovery-host.ts';
-import type {PendingRecord, PendingStoreInput} from '../../types/backup-recovery-host.ts';
+import type {PendingHooks, PendingRecord, PendingStoreInput} from '../../types/provider-pending.ts';
 
 // Reopen the production pending store against the same persisted metadata.
-export function restorePendingStore(host: BackupRecoveryHostModule, sourceRevision: string) {
+export function restorePendingStore(host: {createPendingStore(input: PendingStoreInput): PendingHooks}, sourceRevision: string) {
   let persisted: PendingRecord | null = null;
   const input: PendingStoreInput = {
     sourceRevision: () => sourceRevision,

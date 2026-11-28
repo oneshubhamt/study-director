@@ -1,10 +1,11 @@
+import type {PendingEntry} from './provider-pending.ts';
 import type {ManagedRepositoryModule} from '../source/core/managed-repository.ts';
 import type {RepositoryBackgroundModule} from '../source/core/repository-background.ts';
 import type {BackupDiagnosticsModule} from '../source/core/backup-operation-diagnostics.ts';
 import type {ExportsModule} from '../source/core/exports.ts';
 import type {RepositoryPolicyModule,Job,WorkBudget} from './lifecycle.ts';
 import type {Manifest,Commit,CommitFile,ObjectEntry,PreparedObject,Prepared,ManifestFile,Continuation,BlobLease,ReadObject,Check,Retention,Calendar,PrepareOptions,ScrubOptions,ScrubProgress,Transport,RetentionProof} from './managed-repository.ts';
-import type {RecoveryPresentation,PresentationScope,PresentationEvent,PresentationPatch,PresentationLifecycle,Progress,CoveredNotes,PendingEntry} from './backup-recovery-host.ts';
+import type {RecoveryPresentation,PresentationScope,PresentationEvent,PresentationPatch,PresentationLifecycle,Progress,CoveredNotes} from './backup-recovery-host.ts';
 import type {RecoverySpec} from './managed-recovery.ts';
 import type {BaselineHeader} from './reconciliation-baseline.ts';
 import type {MaintenanceState,MaintenanceCleanup,RepositoryObservation,IntegrityTarget,IntegrityResult} from './repository-background.ts';
@@ -73,7 +74,7 @@ export type SavedPublication={name:string;unchanged:boolean;sharedBaseEstablishe
 export type ProviderOptions=PrepareOptions&{assertOrigin?:()=>void;presentation?:PresentationScope|null;skip?:CoveredNotes;checkpointId?:string;mode?:'bring-in'|'restore-version';onProgress?:((value:Progress)=>void)|null;note?:string;missingOnly?:boolean;before?:string;quiet?:boolean;sync?:boolean;review?:boolean;password?:boolean;confirmed?:boolean;scheduleMaintenance?:boolean;preemptBackground?:boolean;foregroundPriority?:boolean;recoveryProgress?:((value:Progress)=>void)|null;repositorySnapshot?:Snapshot|null;pendingIntent?:PendingEntry|null;copy?:SourceCopy|null;forCleanup?:boolean;checkProtection?:Check|null;signal?:AbortSignal|null;respectBackgroundSuspension?:boolean;sessionClaim?:import('./backup.ts').SessionClaimProjection|null};
 export type CleanupOptions={reuseObjectInventory?:boolean;maintenanceLease?:Lease|null;checkMaintenance?:Check|null;inventoryBeforeDelete?:boolean;beginDeletion?:Check|null;workBudget?:WorkBudget|null;preparedObjectListing?:{items:readonly CachedObject[];overflow:boolean;invalidCount:number}|null};
 export type ConvergenceResult={status:string;reason:string;checkpointId?:string;maintenancePending?:boolean};
-export type PendingHooks={read(id:string):Promise<PendingEntry|null>;mark(id:string):Promise<boolean>;clear(id:string,expected?:PendingEntry|null):Promise<boolean>};
+export type {PendingHooks} from './provider-pending.ts';
 export type MaintenanceHooks={read(id:string):Promise<MaintenanceState|null>;mark(id:string,state:{reason:string;nextEligibleAt:string;repositoryScope:string;newRequest?:boolean},expected?:MaintenanceState|null):Promise<boolean|'superseded'>;clear(id:string,expected?:MaintenanceState|null):Promise<boolean|'superseded'>};
 export type AutomaticHooks={covered(id:string):unknown;current():unknown;ready?:(()=>boolean|null|PromiseLike<boolean|null>)|null};
 export type PreparedScrub=ScrubOptions&{repositoryScope?:string;requestId?:string;assertOrigin?:()=>void};

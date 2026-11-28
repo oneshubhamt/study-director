@@ -316,7 +316,7 @@ assert.equal(journal,null,'Successful exact restore must clear its persistent ro
 const historicalSession=freeze({id:'current',type:'activeSession',version:9,revision:7,date:'2026-09-19',status:'suspended',scheduleText:'07:30 | 50 | Historical active | work | Ethics | block | 1',snapshot:freeze({label:'historical-active'}),suspendedAt:'2026-09-19T05:00:00.000Z',updatedAt:'2026-09-19T05:00:00.000Z'});activeSession=historicalSession;const sessionObjectFiles=new Map(objectFiles);let sessionManifestBlob=null,sessionCommitBlob=null;const sessionPublication=await runtime.repository.publish([manifest],{interactive:false},freeze({writeObject:async entry=>(sessionObjectFiles.set(entry.objectId,entry.blob),freeze({id:entry.objectId})),writeManifest:async file=>(sessionManifestBlob=file.blob,freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'})),commit:async marker=>(sessionCommitBlob=marker.blob,freeze({name:marker.checkpointId+'.sdcommit'})),onCommitted:async()=>null,cleanup:async()=>null,onFailure:async()=>null})),sessionManifest=sessionPublication.manifest,sessionReadObject=async entry=>sessionObjectFiles.get(entry.objectId)||null;assert.ok(sessionManifest.objects.some(entry=>entry.kind==='activeSession'),'A managed checkpoint containing an Active Session must persist an Active Session repository object.');assert.ok(sessionManifestBlob instanceof Blob&&sessionCommitBlob instanceof Blob);activeSession=null;const sessionCandidate=await runtime.repository.inspect(sessionManifest,sessionReadObject,{interactive:false,committed:true}),sessionRestore=await runtime.repository.restoreVersion(sessionCandidate);assert.equal(sessionRestore.restored.activeSession,true);assert.deepEqual(activeSession,historicalSession,'Historical Version Restore must reinstate the checkpoint Active Session exactly, including its applied schedule.');assert.equal(currentPersonal.plans.draft,null,'Restoring an Active Session must not copy its applied schedule into the independent Plan draft.');const resetCandidate=await runtime.repository.inspect(manifest,readObject,{interactive:false,committed:true});await runtime.repository.restoreVersion(resetCandidate);assert.equal(activeSession,null,'Restoring the original no-session historical version must still clear the restored session.');assert.equal(currentPersonal.plans.draft,null,'Clearing the restored session must leave Plan restoration to portable Personal Data.');
 
 // An exact restore keeps the selected version and protects the local data it will replace.
-const remoteFiles=new Map(),readDownloads=[];let providerUploaded=false;
+const remoteFiles=new Map(),readDownloads=[];let providerUploaded=false,refuseCommit=false;
 const remoteKey=(kind,id)=>`${kind}:${id}`;
 for(const [objectId,blob] of objectFiles)remoteFiles.set(remoteKey('object',objectId),{kind:'object',id:objectId,name:objectId+'.sdobject',blob,createdAt:manifest.exportedAt});
 remoteFiles.set(remoteKey('checkpoint',checkpointId),{kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:publishedManifestBlob,createdAt:manifest.exportedAt,history:{logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:manifest.counts,encrypted:manifest.encrypted,retention:manifest.retention}});
@@ -325,7 +325,9 @@ const originalHistoricalManifestBytes=new Uint8Array(await publishedManifestBlob
 let safetyMaintenancePolls=0,publicationCounter=0,foregroundPublicationActive=false,orphanRestoreMaintenance=false,orphanRestoreReaps=0;const safetyCoordinationEvents=[];
 const providerTransport=freeze({
   list:async({kind})=>freeze({items:freeze([...remoteFiles.values()].filter(file=>file.kind===kind).map(file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,...(file.history?{history:file.history}:{})}))),overflow:false}),
-  upload:async file=>{providerUploaded=true;const stored={kind:file.kind,id:file.id,name:file.name,blob:file.blob,createdAt:file.exportedAt||new Date().toISOString(),history:file.historySummary||null};remoteFiles.set(remoteKey(file.kind,file.id),stored);return freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:stored.createdAt,modifiedAt:stored.createdAt});},
+  upload:async file=>{
+    if(refuseCommit&&file.kind==='commit')throw new Error('injected failure writing the protected commit');
+    providerUploaded=true;const stored={kind:file.kind,id:file.id,name:file.name,blob:file.blob,createdAt:file.exportedAt||new Date().toISOString(),history:file.historySummary||null};remoteFiles.set(remoteKey(file.kind,file.id),stored);return freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:stored.createdAt,modifiedAt:stored.createdAt});},
   download:async item=>{if(item.kind==='object'&&!providerUploaded)readDownloads.push(item.id);const stored=remoteFiles.get(remoteKey(item.kind,item.id));if(!stored)throw new Error('missing provider fixture file');return stored.blob;},
   delete:async item=>remoteFiles.delete(remoteKey(item.kind,item.id)),
   beginPublication:async()=>{foregroundPublicationActive=true;safetyCoordinationEvents.push('publication-start');return freeze({id:`pub_${String(++publicationCounter).padStart(32,'0')}`,createdAt:new Date().toISOString()});},
@@ -385,6 +387,15 @@ assert.deepEqual(managedProviderRecoveryEvents,['mutation-enter','suspend:restor
 // Recover the displaced Saved Days via the same picker entry, from the published commit and objects.
 await restoreFromProvider(protectedVersion.checkpoint.checkpointId);
 assert.deepEqual(records,displacedDays,'restoring the protected version recovers the exact displaced Saved Days');
+// A manifest or uploaded objects alone cannot authorize replacing the local data.
+const committedIds=()=>[...remoteFiles.values()].filter(file=>file.kind==='commit').map(file=>file.id).sort();
+const committedBeforeFailure=committedIds();
+refuseCommit=true;
+try{
+  await assert.rejects(restoreFromProvider(checkpointId),/injected failure writing the protected commit/u);
+}finally{refuseCommit=false;}
+assert.deepEqual(records,displacedDays,'a failed safety commit leaves the displaced Saved Days intact');
+assert.deepEqual(committedIds(),committedBeforeFailure,'a failed safety commit exposes no new committed version');
 // Restore on an empty device does not upload a redundant protected version.
 {
   const checkpointsBefore=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length;
@@ -415,6 +426,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
 {
   const savedChoice=noteChoice,attachmentIds=new Set(manifest.objects.filter(entry=>entry.kind==='attachment').map(entry=>entry.objectId));
   notes={...notes,Ethics:normalizeArea({key:'Ethics',text:'text after an accident',updatedAt:'2099-01-03T00:00:00.000Z'},'Ethics')};noteChoice=conflict=>conflict.incomingValue;readDownloads.length=0;providerUploaded=false;
+  assert.equal(await pendingStore().read('repository-version-qa'),null,'the bring-in starts with no source publication due');
   const noteRestore=await runtime.providers.bringInRepositoryProvider('repository-version-qa',{checkpointId,note:'Ethics'});
   assert.equal((await pendingStore().read('repository-version-qa'))?.providerId,'repository-version-qa','a non-shared bring-in records the source publication it owes');
   runtime.providers.configurePendingBackupRetry(null);
