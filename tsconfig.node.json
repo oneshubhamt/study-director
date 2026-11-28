@@ -136,6 +136,8 @@
     "tests/helpers/verification/strict-durability-boundaries.mts",
     "tests/helpers/verification/data-maintenance.mts",
     "tests/helpers/verification/study-data-mark.mts",
-    "tests/helpers/verification/indexeddb-topology-retirement.mts"
+    "tests/helpers/verification/indexeddb-topology-retirement.mts",
+    "tests/helpers/asset-storage-port.mts",
+    "tests/helpers/verification/asset-storage-contract.mts"
   ]
 }

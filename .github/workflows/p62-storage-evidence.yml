@@ -18,6 +18,9 @@ on:
       - 'tests/helpers/verification/deletion-recovery.mts'
       - 'tests/helpers/verification/strict-durability-boundaries.mts'
       - 'tests/helpers/verification/data-maintenance.mts'
+      - 'tests/helpers/asset-storage-port.mts'
+      - 'tests/helpers/verification/asset-storage-contract.mts'
+      - 'tests/integration/storage/asset-storage-contract.mjs'
       - 'tests/helpers/verification/study-data-mark.mts'
       - 'tests/integration/storage/study-data-mark.mjs'
       - 'tests/helpers/verification/indexeddb-topology-retirement.mts'
@@ -328,5 +331,6 @@ jobs:
           tests/integration/attachments/attachment-archive.mjs
           tests/integration/attachments/attachment-storage-dedup.mjs
           tests/integration/storage/attachment-integrity-audit.mjs
+          tests/integration/storage/asset-storage-contract.mjs
           tests/integration/storage/attachment-reference-recovery.mjs
           tests/integration/backup/restore-assets.mjs
