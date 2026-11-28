@@ -657,6 +657,21 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
 // duplicate logical file if the prior page's response/receipt was lost.
 const restartCases=[];
 {
+ const first=createHarness(),second=createHarness({remoteState:first.state});
+ const create=async(page,name,mimeType)=>{const response=await page.fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:'Bearer token-fixture'},body:JSON.stringify({name,mimeType})});assert.equal(response.status,200);return response.json();};
+ for(const mimeType of ['application/vnd.google-apps.folder','application/octet-stream']){
+  const rows=[];
+  for(const [page,name] of [[first,'left'],[second,'right'],[first,'left again']])rows.push(await create(page,name,mimeType));
+  assert.equal(new Set(rows.map(row=>row.id)).size,3,'interleaved pages must allocate three distinct remote identities');
+  if(mimeType==='application/octet-stream'){
+   assert.equal(new Set(rows.map(row=>row.version)).size,3,'remote revisions advance across both writers');
+   assert.deepEqual(rows.map(row=>second.state.files.get(row.id).name),['left','right','left again']);
+  }else assert.deepEqual(rows.map(row=>second.state.folderNames.get(row.id)),['left','right','left again']);
+ }
+ restartCases.push('two live pages interleave writes against one server allocator');
+}
+
+{
  const first=createHarness();await first.provider.prepare();await first.provider.authorize();
  const kindIds=[['object','obj_'+'1'.repeat(32)],['checkpoint','cp_'+'2'.repeat(32)],['commit','cp_'+'3'.repeat(32)]];
  for(const [kind,id] of kindIds){

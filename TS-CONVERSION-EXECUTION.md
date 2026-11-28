@@ -13,6 +13,8 @@
 
 - Converted the disk-backed worker fixture and processing contract tests to strict TypeScript (35/124 primary paths). Node supplies the filesystem adapter and the worker supplies the actual operation types. All 172 fast entries passed dependency-free in 73.8 s. Strict types and typed lint passed on 355 files, and the 64 MiB binary capacity and processing contracts passed through their stable entries.
 
+- Interleaved Drive fixture clients reproduced a collision (two IDs for three writes). Sharing the simulated server allocator preserves every file, folder and revision across pages. Drive security and repository checkpoint pass. The unsupported-data Chromium suite now checks the exact seeded readable note and the opaque record retained in a newer database. All seven cases passed after rebuilding the app.
+
 ## P6.1 · Closed
 
 - All 80 P6.1-assigned paths were reconciled against the frozen P6.0 inventory. Each of the 61 JavaScript implementation entries has a strictly checked TypeScript owner; stable `.mjs` entry names and the CJS worker preload remain forwarding boundaries. Native launchers, Python and declarative configuration remain native.

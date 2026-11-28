@@ -33,11 +33,11 @@ function databaseDump(value:unknown):DatabaseDump{
 type Case={name:string;seed:string;held?:Record<string,number>;blocked?:boolean;profiles?:boolean;clear?:string;write?:{store:string;value:(key:unknown)=>object};check?:(context:{page:CdpPage;before:DatabaseDump;after:DatabaseDump})=>Promise<void>};
 const cases:Case[]=[
   {name:'newer database with a store this build does not know',
-    seed:`(async()=>{${idb}const db=await open(),v=db.version;db.close();(await open(v+1,created=>created.createObjectStore('futureThings',{keyPath:'id'}))).close();return v+1;})()`,
+    seed:`(async()=>{${idb}const db=await open(),v=db.version;db.close();(await open(v+1,created=>created.createObjectStore('futureThings',{keyPath:'id'}).add({id:'future-1',extension:[3,1,4]}))).close();return v+1;})()`,
     check:async({page,before,after})=>{
       assert.equal(after.version,before.version,'the newer database is never upgraded or downgraded');
-      assert.ok(after.stores['futureThings'],'a store this build does not know stays');
-      assert.equal(await page.evaluate(`Object.values(__PWA6.AppData.notes.snapshot?.()||{}).length>=0`),true);
+      assert.deepEqual(after.stores['futureThings'],{keys:['future-1'],values:[{id:'future-1',extension:[3,1,4]}]},'the unknown store retains its original record');
+      assert.equal(await page.evaluate(`__PWA6.AppData.notes.get('ethics')?.text`),'Kept text','the existing note is readable after reopening the newer database');
       assert.equal(jsonObject(await page.evaluate(`__PWA6.UnsupportedData.summary()`))['total'],0,'nothing in a newer database this build can read is held');
     }},
   {name:'note saved by a newer version',held:{notes:1},
