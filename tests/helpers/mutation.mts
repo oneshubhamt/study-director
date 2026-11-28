@@ -18,7 +18,7 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({"id":"canonical-note-port-is-strict","file":"source/core/repositories.ts","find":"idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets","replace":"idbGetAll,idbStoreTransaction,idbStrictTransaction:idbTransaction,storageResets:()=>IndexedDb.lifecycle().resets","tests":["tests/integration/storage/strict-durability-boundaries.mjs"]}),
   Object.freeze({"id":"canonical-daily-batch-is-strict","file":"source/core/repositories.ts","find":"return idbStrictTransaction<{ok:true}>(stores,","replace":"return idbTransaction<{ok:true}>(stores,","tests":["tests/integration/storage/strict-durability-boundaries.mjs"]}),
   Object.freeze({id:'canonical-sorts-object-keys',file:'source/core/canonical.ts',find:'Object.keys(input).sort()',replace:'Object.keys(input)',tests:Object.freeze(['tests/unit/app/canonical.mts'])}),
-  Object.freeze({id:'save-lane-retries-only-current-value',file:'source/core/save-lane.ts',find:'if(sequence===taken)',replace:'if(true)',tests:Object.freeze(['tests/integration/storage/save-lane.mjs'])}),
+  Object.freeze({id:'save-lane-retries-only-current-value',file:'source/core/save-lane.ts',find:'if(sequence===taken)',replace:'if(true)',tests:Object.freeze(['tests/helpers/verification/save-lane.mts'])}),
   Object.freeze({
     id:'settlement-clears-its-deadline',file:'source/core/operation-lifecycle.ts',
     find:'if(timer!==null)clear(timer);',replace:'if(false)clear(timer);',
@@ -27,7 +27,7 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({
     id:'diagnostic-history-keeps-live-operations',file:'source/core/backup-operation-diagnostics.ts',
     find:"records=records.filter(row=>row.status==='running'||keep.has(row));",replace:'records=records.filter(row=>keep.has(row));',
-    tests:Object.freeze(['tests/unit/backup/backup-operation-diagnostics.mjs'])
+    tests:Object.freeze(['tests/helpers/verification/backup-operation-diagnostics.mts'])
   }),
   Object.freeze({
     id:'partial-integrity-remains-unfinished',file:'source/core/operation-lifecycle.ts',
