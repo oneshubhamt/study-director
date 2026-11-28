@@ -572,6 +572,26 @@ assert.equal(staleCalls,2,'A stale scratch decision must cause exactly one fresh
 assert.equal(staleState.notes.Shared.text,'External canonical edit while modal open.','The stale scratch result must never become canonical.');
 assert.ok(staleHarness.statuses.some(message=>/Rebuilding the comparison/u.test(message)),'The stale-plan retry should be visible on the standalone restore surface.');
 
+// A link can change within the same timestamp while the text choice is open.
+{
+  const state=createState();
+  state.notes.Shared=normalizeArea({key:'Shared',text:'Local text',links:[linkA],updatedAt:'2026-08-22T15:00:00.000Z'},'Shared');
+  let decisions=0;
+  const harness=createHarness(state,{noteResolver:async({conflicts})=>{
+    assert.equal(state.journal,null);
+    const [conflict]=conflicts;
+    if(++decisions===1)state.notes.Shared=freeze({...state.notes.Shared,links:[linkB]});
+    return freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze({Shared:freeze({
+      text:decisions===1?'obsolete decision':conflict.localValue,
+      localCandidateId:conflict.localCandidateId,incomingCandidateId:conflict.incomingCandidateId
+    })})});
+  }});
+  await harness.runtime.controller.restore(await harness.runtime.controller.inspect(staleBlob,{filename:'same-timestamp-note-link.sdbackup'}));
+  assert.equal(decisions,2,'a link-only edit invalidates the pending restore decision');
+  assert.equal(state.notes.Shared.text,'Local text');
+  assert.deepEqual(state.notes.Shared.links,[linkB],'the fresh decision keeps the concurrent link edit');
+}
+
 // A file restore that changed data tells every automatic backup location at once.
 const fileState={records:new Map(),deletions:[],notes:{},activeSession:null,schedule:'',personal:personal('File Device'),journal:null};
 let fileConvergenceCalls=0;

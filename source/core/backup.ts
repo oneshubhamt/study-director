@@ -576,7 +576,7 @@ async function captureRestoreReconciliationRevision(relevantDates:readonly strin
     personalExport({flush:false})
   ]);
   const notes=AppData.notes.normalizePayload(notesRaw),noteState=Object.keys(notes).sort().map(key=>{
-    const value:Partial<NoteRecord>=notes[key]||{};return [key,String(value.updatedAt||''),String(value.label||''),String(value.text||'')];
+    const value:Partial<NoteRecord>=notes[key]||{};return [key,String(value.updatedAt||''),String(value.label||''),String(value.text||''),value.links||[]];
   });
   const recordState=currentDailyRecords(records||[],'Restore reconciliation Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
   const session=loadedSession&&loadedSession.value?ActiveSessionCodec.restoreStabilityValue(loadedSession.value):null;
