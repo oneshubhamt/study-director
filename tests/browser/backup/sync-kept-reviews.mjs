@@ -32,6 +32,10 @@ try{
   await waitFor(async()=>!markers()&&!await waiting(b)&&!await waiting(a),{label:'both settle',timeout:120000});
 
   // Both edit the note; A's edit reaches Drive first.
+  // B's pop-ups from here on. Since typing goes up 10 s after it pauses, B
+  // finds A's edit at its own upload, before it next looks at Drive, and the
+  // pop-up (12 s) may have gone by the time the review below is opened.
+  await b.evaluate(`(()=>{window.__keptPopups=[];const region=document.getElementById('sd-toast-region'),seen=new WeakSet();new MutationObserver(()=>{for(const node of region.querySelectorAll('.interaction-toast')){if(seen.has(node)||!node.textContent.includes('Kept for review'))continue;seen.add(node);window.__keptPopups.push({review:[...node.querySelectorAll('button')].some(button=>button.textContent==='Review')});}}).observe(region,{childList:true,subtree:true});})()`);
   await edit(b,'Edited on B');
   const beforeA=uploadsBy('A');
   await edit(a,'Edited on A');await a.evaluate(`__PWA6.BackupProviderRuntime.flushAutomatic('app-hidden')`);
@@ -53,9 +57,8 @@ try{
   await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
   assert.match(await b.evaluate(`document.getElementById('profile-badge').getAttribute('aria-label')`),/kept versions? to review/u,'the phone circle names what waits for review');
   // It pops up once when it first appears (phase 4), with Review.
-  const keptToast=`[...document.querySelectorAll('#sd-toast-region .interaction-toast')].filter(node=>node.textContent.includes('Kept for review')).map(node=>({text:node.textContent,review:[...node.querySelectorAll('button')].some(button=>button.textContent==='Review')}))`;
-  await waitFor(async()=>(await b.evaluate(keptToast)).length===1,{label:'B pops up the kept version',timeout:20000});
-  assert.equal((await b.evaluate(keptToast))[0].review,true,'the pop-up offers Review');
+  await waitFor(async()=>(await b.evaluate(`window.__keptPopups.length`))>=1,{label:'B pops up the kept version',timeout:20000});
+  assert.deepEqual(await b.evaluate(`window.__keptPopups`),[{review:true}],'it pops up once, and the pop-up offers Review');
   const firstDelivery=await b.evaluate(`__PWA6.NoticeCoordinator.readEvent('sync','kept-new')?.deliveryId`);
 
   await waitFor(async()=>!await waiting(b),{label:'B settles after its catch-up',timeout:120000});

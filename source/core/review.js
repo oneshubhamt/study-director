@@ -177,6 +177,13 @@ registry.define('review',1,()=>{
         field.dataset.reviewLifecycleRevision=String(lifecycle);
       });
       setReflectionRichSync(lifecycleCanWrite()?'saved':'read-only',lifecycleCanWrite()?'Saved':'Read-only');
+      // Bound inside a session change (Recover in Review, a restore), the
+      // field is read-only only until that change ends; it then says so, as
+      // it did before the previous-day question waited for startup.
+      if(!lifecycleCanWrite())setTimeout(()=>{
+        const box=document.getElementById('daily-reflection');
+        if(box?.dataset.richSyncState==='read-only'&&box.dataset.reviewDate===target&&lifecycleCanWrite())setReflectionRichSync('saved','Saved');
+      },0);
       return true;
     }
     function invalidateReviewEditors(){

@@ -83,6 +83,9 @@ const cases={
     await waitFor(()=>asked(page),{timeout:15000,label:'the previous day is asked about'});
     await answer(page,'Recover in Review');
     await waitFor(async()=>/Recovered unsaved/u.test(await banner(page)),{timeout:15000,label:'Review holds the day, not saved yet'});
+    // Its reflection can be written, and says so: it read "Read-only" until
+    // typed in, since Recover binds Review inside the session change (F34).
+    await waitFor(()=>page.evaluate(`document.getElementById('daily-reflection').dataset.richSyncState==='saved'`),{timeout:5000,label:'the recovered day’s reflection is writable, not marked read-only'});
     assert.equal(await page.evaluate(`__PWA6.saveDayRecord()`),true,'saved');await sleep(800);
     assert.ok(await savedDay(page,day));
     assert.equal(await storedSession(page),null);
