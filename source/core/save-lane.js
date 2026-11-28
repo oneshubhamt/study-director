@@ -32,7 +32,8 @@ registry.define('save-lane',1,()=>{
     const label=String(input.label||'Changes'),write=input.write,onState=input.onState,{setTimeout,clearTimeout}=environment;
     // timer: the next automatic write (now, or after a failed write's pause).
     // cooling: the pause after a write starts, during which new values wait.
-    let timer=0,cooling=0,pending=false,value,sequence=0,tail=Promise.resolve(),attempt=0,lastError=null,writing=0;
+    // dropped: values taken before this sequence were cancelled.
+    let timer=0,cooling=0,pending=false,value,sequence=0,dropped=0,tail=Promise.resolve(),attempt=0,lastError=null,writing=0;
     function arm(delay){if(timer)clearTimeout(timer);timer=setTimeout(()=>{timer=0;void flush().catch(()=>{});},delay);}
     function report(state,error=null){try{onState(state,error);}catch{}}
     // Starts the next automatic write when nothing holds it back.
@@ -56,7 +57,11 @@ registry.define('save-lane',1,()=>{
         if(!pending&&!writing)report('saved');else wake();
         return result;
       },error=>{
-        writing--;lastError=error;
+        writing--;
+        // A cancelled value is no longer this lane's to save: its failure is
+        // not reported, retried or passed to a later flush.
+        if(taken<dropped){wake();return undefined;}
+        lastError=error;
         // Only a value nothing has replaced is retried after a pause. A newer
         // value keeps its own timing.
         if(sequence===taken){pending=true;value=current;arm(RETRY_DELAYS_MS[Math.min(attempt,RETRY_DELAYS_MS.length-1)]);attempt++;}
@@ -65,8 +70,12 @@ registry.define('save-lane',1,()=>{
       });
       return tail;
     }
-    // Drops the pending value; a write already running is not retried.
-    function cancel(){if(timer)clearTimeout(timer);if(cooling)clearTimeout(cooling);timer=0;cooling=0;pending=false;value=undefined;attempt=0;sequence++;}
+    // Drops the pending value; a write already running is not retried. The
+    // dropped value's failure goes with it, so a later flush or settle does
+    // not fail on a value nobody is saving any more (2026-11-28: Save Today
+    // dropped a refused reflection write, and its failure kept Review from
+    // being left).
+    function cancel(){if(timer)clearTimeout(timer);if(cooling)clearTimeout(cooling);timer=0;cooling=0;pending=false;value=undefined;attempt=0;sequence++;dropped=sequence;lastError=null;tail=tail.catch(()=>{});}
     return freeze({
       schedule,flush,cancel,
       pending:()=>pending,writing:()=>writing>0,

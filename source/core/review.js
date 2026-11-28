@@ -277,9 +277,12 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
 // Today's reflection saves through the shared save lane: into its Saved Day
 // on a day without a study session, otherwise into the session. Each pending
 // value names its date and store, so a date change mid-save still writes the
-// right day.
+// right day. A session write whose session has since ended (saved, discarded
+// or closed elsewhere) has nothing to write: the reflection went with that
+// end, and writing a session now would fail, or bring the closed one back.
 async function writeReflection(pending,options={}){
   if(pending.mode==='session'){
+    if(!reviewHasStudyDay())return null;
     const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true,typed:true});
     if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
     return result;
