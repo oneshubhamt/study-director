@@ -9,7 +9,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.js
 const deployment=path.join(root,'dist/deployment');
 const mainPath=path.join(deployment,manifest.main);
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec:RuntimeBackupCodec,ActiveSessionCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
+const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec:RuntimeBackupCodec,ActiveSessionCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,suspendTodaySession,todayISO});\n`;
 let main=fs.readFileSync(mainPath,'utf8');
 if(!main.includes(marker))throw new Error('Restore-safety browser harness hook is unavailable.');
 main=withoutPwaChecks(main.replace(marker,exposure+marker));
@@ -165,8 +165,12 @@ try{
   assert.match(blockedClear,/End or suspend the active session before clearing Library data/u,'Clear Library internal precondition did not surface');
 
   const suspended=await page1.evaluate(`(async()=>{
-    const d=__RestoreSafetyQA,loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);session.status='suspended';session.suspendedAt=new Date().toISOString();session.updatedAt=session.suspendedAt;const saved=await d.AppData.activeSession.save(session);if(!saved?.ok)throw saved?.error||new Error('could not persist suspended fixture');
-    d.resetRuntimeSessionState({lifecycleManaged:true,source:'qa-qa',date:d.todayISO()});d.setSessionPanelMode('suspended');d.setTimerMode(d.TIMER_MODES.SUSPENDED,'qa-qa');d.OwnershipUiProjection.apply();
+    const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms));let done=false,value=false,error;
+    d.suspendTodaySession().then(v=>{value=v;done=true},e=>{error=e;done=true});
+    const deadline=Date.now()+10000;
+    while(!done&&Date.now()<deadline){const dialog=document.getElementById('sd-interaction-dialog');if(dialog?.open)dialog.querySelector('.interaction-actions .primary')?.click();await wait(20);}
+    if(!done)throw new Error('Suspending the running session did not settle.');if(error)throw error;if(!value)throw new Error('The real suspension flow was cancelled or failed.');
+    d.OwnershipUiProjection.apply();
     const q=s=>document.querySelector(s);return {blocked:d.hasBlockingActiveSession(),open:q('[data-action="pick-import-file"]').disabled,recoverDevice:q('[data-action="open-version-history"]').disabled,clear:q('[data-action="clear-library"]').disabled,file:q('#import-file').disabled,mode:d.TimerState.mode};
   })()`);
   assert.deepEqual(suspended,{blocked:false,open:false,recoverDevice:false,clear:false,file:false,mode:'suspended'},'genuinely suspended session should allow recovery entry, file import and Clear Library');
