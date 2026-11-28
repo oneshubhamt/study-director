@@ -15,7 +15,8 @@ const newRequest=():Request=>({result:null,error:null,onupgradeneeded:null,onsuc
 const keyPaths:Record<string,string|null>={dailyRecords:'date',dailySummaries:'date',notes:'key',activeSessions:'id',appMeta:'key',assets:null};
 
 class StoreNames{
-  constructor(private readonly set:Set<string>){}
+  private readonly set:Set<string>;
+  constructor(set:Set<string>){this.set=set;}
   get length(){return this.set.size;}
   contains(name:string){return this.set.has(String(name));}
   [Symbol.iterator](){return [...this.set].sort()[Symbol.iterator]();}
@@ -127,7 +128,7 @@ function silentIndexedDb({answerFrom,lateAfter=null}:{answerFrom:number;lateAfte
 }
 function countingDb(backend:unknown,errors:string[]){
   const {persistence}=loadModules(backend);
-  return persistence.createIndexedDb(Object.freeze({config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:9,stores:currentStores}),hooks:Object.freeze({onError:(message:unknown)=>errors.push(String(message)),onOk:()=>{},capture:()=>{}})})));
+  return dbPort(method(persistence,'createIndexedDb')(Object.freeze({config:Object.freeze({dbName:'StudyDirectorDB',dbVersion:9,stores:currentStores}),hooks:Object.freeze({onError:(message:unknown)=>errors.push(String(message)),onOk:()=>{},capture:()=>{}})})));
 }
 {
   const errors:string[]=[],slow=silentIndexedDb({answerFrom:2,lateAfter:2700});
