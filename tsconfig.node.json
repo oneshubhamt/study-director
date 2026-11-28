@@ -143,6 +143,7 @@
     "tests/helpers/verification/attachment-integrity-audit.mts",
     "tests/helpers/drive-server.mts",
     "tests/helpers/drive-harness.mts",
-    "tests/helpers/verification/drive-repository-scale.mts"
+    "tests/helpers/verification/drive-repository-scale.mts",
+    "tests/helpers/drive-browser.mts"
   ]
 }
