@@ -26,6 +26,8 @@ on:
       - 'tests/helpers/device-folder-ports.mts'
       - 'tests/helpers/verification/device-folder-storage.mts'
       - 'tests/helpers/verification/device-backup.mts'
+      - 'tests/helpers/verification/folder-encryption.mts'
+      - 'tests/integration/backup/folder-encryption.mjs'
       - 'tests/integration/backup/device-backup.mjs'
       - 'tests/integration/backup/device-folder-storage.mjs'
       - 'tests/helpers/device-folder-world.mjs'
