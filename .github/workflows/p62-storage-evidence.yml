@@ -21,6 +21,8 @@ on:
       - 'tests/helpers/asset-storage-port.mts'
       - 'tests/helpers/drive-server.mts'
       - 'tests/helpers/drive-harness.mts'
+      - 'tests/helpers/verification/drive-repository-scale.mts'
+      - 'tests/integration/backup/drive-repository-scale.mjs'
       - 'tests/helpers/drive-harness.mjs'
       - 'tests/helpers/verification/asset-storage-contract.mts'
       - 'tests/helpers/verification/attachment-reference-recovery.mts'
