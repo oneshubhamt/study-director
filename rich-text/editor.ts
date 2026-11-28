@@ -275,6 +275,22 @@ function normalizeImageWidth(value: unknown) {
 function normalizeImageAlignment(value: unknown): ImageAlignment {
   return value === 'center' || value === 'right' ? value : 'left';
 }
+// An image or audio a note copied, read back from its HTML by its stored id
+// (a paste into a note). Its picture or sound stays in the asset store.
+function copiedImageValue(element: Element): StudyImageValue | null {
+  const assetId = element.getAttribute('data-sd-asset-id') || '';
+  if (!validAssetId(assetId)) return null;
+  return {
+    assetId,
+    alt: normalizeImageAlt(element.getAttribute('data-sd-asset-alt') || ''),
+    widthPct: normalizeImageWidth(element.getAttribute('data-sd-image-width')),
+    align: normalizeImageAlignment(element.getAttribute('data-sd-image-align'))
+  };
+}
+function copiedAudioValue(element: Element): StudyAudioValue | null {
+  const attachmentId = element.getAttribute('data-sd-attachment-id') || '';
+  return validAssetId(attachmentId) ? {attachmentId, name: normalizeAttachmentName(element.getAttribute('data-sd-audio-name') || '')} : null;
+}
 function normalizeCellWidth(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(MIN_TABLE_COLUMN_PCT, Math.min(100, Math.round(number * 100) / 100)) : 50;
@@ -529,11 +545,13 @@ const StudyImage = Leaf.Type.define<StudyImageValue>('SDImage', {
       throw new RangeError('Invalid StudyDirector image node.');
   },
   shape: {structure: studyImageShape, atom: true},
+  // Copied from a note and pasted into one, it is the same stored image.
+  parseRules: [{selector: 'figure.sd-rte-image[data-sd-asset-id]', readElement: (element: Element) => copiedImageValue(element) ?? parse.Reject}],
   toText: node => {
     const value = node.param as StudyImageValue;
     return value.alt ? `[Image: ${value.alt}]` : '[Image]';
   }
-});
+} as any);
 function studyAudioShape(value: StudyAudioValue, url?: string | null) {
   const name = normalizeAttachmentName(value.name);
   return Elt.mk('figure', {class: 'sd-rte-audio', 'data-sd-attachment-id': value.attachmentId, 'data-sd-audio-name': name}, [
@@ -584,8 +602,9 @@ const StudyAudio = Leaf.Type.define<StudyAudioValue>('SDAudio', {
       throw new RangeError('Invalid StudyDirector audio node.');
   },
   shape: {structure: studyAudioShape, atom: true},
+  parseRules: [{selector: 'figure.sd-rte-audio[data-sd-attachment-id]', readElement: (element: Element) => copiedAudioValue(element) ?? parse.Reject}],
   toText: node => `[Audio: ${normalizeAttachmentName((node.param as StudyAudioValue).name)}]`
-});
+} as any);
 const refreshImageRender = Transaction.Effect.define<null>(),
   imageRevision = GardState.Field.define<number>({
     create: () => 0,
@@ -1388,6 +1407,99 @@ function markdownForCopy(slice: any) {
     return null;
   }
 }
+// Copy with the pictures (owner, 2026-11-28). The copy the editor writes
+// holds each image by its stored id only: its bytes are in the asset store,
+// read asynchronously, and a copy event must be written at once. So other
+// apps got "[Image]". When a copy holds images, the clipboard is written again
+// with them: in the HTML (as data: URLs, for apps that read it), and a lone
+// image also as a PNG, which every app pastes. The HTML keeps the note's own
+// markers, so a paste into a note still finds the stored image, with its size
+// and description. A browser without the async clipboard, a refusal, or a
+// copy over the size limit keeps the editor's copy as it was.
+const COPY_IMAGE_MAX_BYTES = 24 * 1048576,
+  COPY_PNG_MAX_SIDE = 4096;
+function blobDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error('The image could not be read.'));
+    reader.readAsDataURL(blob);
+  });
+}
+async function pngBlob(blob: Blob) {
+  if (blob.type === 'image/png') return blob;
+  const bitmap = await createImageBitmap(blob),
+    scale = Math.min(1, COPY_PNG_MAX_SIDE / Math.max(bitmap.width, bitmap.height, 1)),
+    canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob(png => (png ? resolve(png) : reject(new Error('The image could not be copied.'))), 'image/png'));
+}
+function copyWithPictures(event: ClipboardEvent, assets: AssetStore) {
+  const html = event.clipboardData?.getData('text/html') || '',
+    text = event.clipboardData?.getData('text/plain') || '';
+  if (!/\sdata-sd-asset-id=/.test(html) || typeof ClipboardItem !== 'function' || typeof navigator.clipboard?.write !== 'function') return false;
+  const doc = new DOMParser().parseFromString(html, 'text/html'),
+    figures = [...doc.body.querySelectorAll<HTMLElement>('figure.sd-rte-image[data-sd-asset-id]')];
+  if (!figures.length) return false;
+  const rest = doc.body.cloneNode(true) as HTMLElement;
+  rest.querySelectorAll('figure').forEach(figure => figure.remove());
+  const lone = figures.length === 1 && !rest.textContent?.trim();
+  const pictures = (async () => {
+    const reader = assetReader(assets),
+      found = new Map<string, Blob>();
+    let total = 0;
+    try {
+      for (const figure of figures) {
+        const id = String(figure.dataset.sdAssetId || '');
+        if (found.has(id) || !validAssetId(id)) continue;
+        const blob = await reader.get(id).catch(() => null);
+        if (!(blob instanceof Blob) || !IMAGE_MIME_TYPES.has(blob.type)) continue;
+        if ((total += blob.size) > COPY_IMAGE_MAX_BYTES) throw new Error('The copied images are too large to put on the clipboard.');
+        found.set(id, blob);
+      }
+    } finally {
+      reader.dispose();
+    }
+    if (!found.size) throw new Error('No copied image could be read.');
+    return found;
+  })();
+  const htmlBlob = pictures.then(async found => {
+    const urls = new Map<string, string>();
+    for (const figure of figures) {
+      const id = String(figure.dataset.sdAssetId || ''),
+        blob = found.get(id),
+        media = figure.querySelector('.sd-rte-image-media') || figure;
+      // The editor's controls mean nothing outside it.
+      figure.querySelectorAll('button').forEach(button => button.remove());
+      if (!blob) continue;
+      if (!urls.has(id)) urls.set(id, await blobDataUrl(blob));
+      const img = doc.createElement('img');
+      img.src = urls.get(id)!;
+      img.alt = normalizeImageAlt(figure.dataset.sdAssetAlt || '');
+      media.querySelectorAll('.sd-rte-image-missing,img').forEach(old => old.remove());
+      media.prepend(img);
+    }
+    return new Blob([doc.body.innerHTML], {type: 'text/html'});
+  });
+  const items: Record<string, Blob | Promise<Blob>> = {'text/html': htmlBlob, 'text/plain': new Blob([text], {type: 'text/plain'})};
+  if (lone) items['image/png'] = pictures.then(found => pngBlob([...found.values()][0]!));
+  pictures.catch(() => {});
+  // Written in the copy itself: Safari allows it only there.
+  try {
+    void navigator.clipboard.write([new ClipboardItem(items)]).catch(() => {});
+  } catch {
+    return false;
+  }
+  return true;
+}
+// A note's own copy pastes as the note wrote it, even when the clipboard
+// also holds the picture as a file (see copyWithPictures).
+function noteOwnCopy(data: DataTransfer | null | undefined) {
+  return /\swg-content=["']?true/i.test(data?.getData('text/html') || '');
+}
 
 function imageMimeFromName(file: File) {
   const extension =
@@ -1673,6 +1785,31 @@ function sanitizePastedHtml(html: string) {
       ]);
     wordLists(body);
     body.querySelectorAll('*').forEach(element => {
+      // Inside an element already replaced or removed: nothing to keep.
+      if (!body.contains(element)) return;
+      // An image or audio copied from a note keeps what names it (its stored
+      // id, description, size and place), and nothing else: it pasted as the
+      // text "Loading image…" before.
+      if (element.tagName === 'FIGURE') {
+        const image = element.classList.contains('sd-rte-image') ? copiedImageValue(element) : null,
+          audio = !image && element.classList.contains('sd-rte-audio') ? copiedAudioValue(element) : null;
+        if (image || audio) {
+          const figure = parsed.createElement('figure');
+          if (image) {
+            figure.className = 'sd-rte-image';
+            figure.setAttribute('data-sd-asset-id', image.assetId);
+            figure.setAttribute('data-sd-asset-alt', image.alt);
+            figure.setAttribute('data-sd-image-width', String(image.widthPct));
+            figure.setAttribute('data-sd-image-align', image.align || 'left');
+          } else if (audio) {
+            figure.className = 'sd-rte-audio';
+            figure.setAttribute('data-sd-attachment-id', audio.attachmentId);
+            figure.setAttribute('data-sd-audio-name', audio.name);
+          }
+          element.replaceWith(figure);
+          return;
+        }
+      }
       const style = String(element.getAttribute('style') || '');
       if (
         element.hasAttribute('hidden') ||
@@ -3594,6 +3731,12 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
   editor.contentDOM.addEventListener('keydown', trackShift, true);
   editor.contentDOM.addEventListener('keyup', trackShift, true);
   editor.contentDOM.addEventListener('blur', () => (shiftHeld = false));
+  // After the editor has written its copy (it listens on the content inside).
+  const copyPictures = (event: ClipboardEvent) => {
+    if (event.defaultPrevented) copyWithPictures(event, options.assets);
+  };
+  editor.dom.addEventListener('copy', copyPictures);
+  editor.dom.addEventListener('cut', copyPictures);
   editor.contentDOM.classList.add('sd-rte-content', 'sd-rte-editor');
   editor.contentDOM.addEventListener('focusout', publish);
   editor.contentDOM.spellcheck = !readOnly;
@@ -4569,8 +4712,9 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
   attachmentTrigger.appendChild(attachmentIcon);
   const pasteImage = (event: InputEvent | ClipboardEvent, wg: Wordgard) => {
     if (options.allowAssetInsert === false) return false;
-    const file = ('clipboardData' in event ? event.clipboardData : event.dataTransfer)?.files[0];
-    if (!file?.type.startsWith('image/')) return false;
+    const data = 'clipboardData' in event ? event.clipboardData : event.dataTransfer,
+      file = data?.files[0];
+    if (!file?.type.startsWith('image/') || noteOwnCopy(data)) return false;
     if (!imageBusy) {
       wg.dispatch({effects: setPendingImageSelection.of(wg.state.selection)});
       void attachImage(file);

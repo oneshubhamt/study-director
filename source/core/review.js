@@ -120,7 +120,7 @@ registry.define('review',1,()=>{
     const {cancelAnimationFrame,clearTimeout,requestAnimationFrame,setTimeout,todayISO}=ports.environment;
     let rolloverSaveInProgress=false;
     let saveDayInProgress=false;
-    let activeSessionPersistenceBlocked=false;
+    let activeSessionPersistenceBlocked=false,sessionWriteHold=null;
     let currentReview=freeze({date:'',reflection:'',studyQuality:null,unfinished:''});
     let persistedReview=freeze({date:'',reflection:'',studyQuality:null});
     let reflectionOnlyState=freeze({date:'',canonical:'',recordKind:null});
@@ -177,6 +177,13 @@ registry.define('review',1,()=>{
         field.dataset.reviewLifecycleRevision=String(lifecycle);
       });
       setReflectionRichSync(lifecycleCanWrite()?'saved':'read-only',lifecycleCanWrite()?'Saved':'Read-only');
+      // Bound inside a session change (Recover in Review, a restore), the
+      // field is read-only only until that change ends; it then says so, as
+      // it did before the previous-day question waited for startup.
+      if(!lifecycleCanWrite())setTimeout(()=>{
+        const box=document.getElementById('daily-reflection');
+        if(box?.dataset.richSyncState==='read-only'&&box.dataset.reviewDate===target&&lifecycleCanWrite())setReflectionRichSync('saved','Saved');
+      },0);
       return true;
     }
     function invalidateReviewEditors(){
@@ -274,6 +281,21 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
     AppDiagnostics.capture('review.reflection-only-load',error,'warn');return false;
   }
 }
+// Save Today and the day's rollover hold the session's writes while they take
+// the session into a Saved Day. A reflection write that comes meanwhile waits
+// for the hold to end, rather than fail: it then writes if the session is
+// still there (the save failed, so the reflection stays safe in the session)
+// and has nothing to write if the save closed it. Before, it failed at once,
+// so Review showed "Save failed" for a moment and logged a warning.
+function holdSessionWrites(){
+  activeSessionPersistenceBlocked=true;
+  if(!sessionWriteHold){let release;const ended=new Promise(resolve=>{release=resolve;});sessionWriteHold=freeze({ended,release});}
+}
+function releaseSessionWrites(){
+  activeSessionPersistenceBlocked=false;
+  const hold=sessionWriteHold;sessionWriteHold=null;hold?.release();
+}
+function sessionWritesHeld(){return sessionWriteHold?.ended||null;}
 // Today's reflection saves through the shared save lane: into its Saved Day
 // on a day without a study session, otherwise into the session. Each pending
 // value names its date and store, so a date change mid-save still writes the
@@ -282,6 +304,7 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
 // end, and writing a session now would fail, or bring the closed one back.
 async function writeReflection(pending,options={}){
   if(pending.mode==='session'){
+    await sessionWritesHeld();
     if(!reviewHasStudyDay())return null;
     const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true,typed:true});
     if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
@@ -518,7 +541,7 @@ async function saveDayRecord(options={}){
   const closesPriorDay=SessionEvidenceGateway.snapshot({includeRecords:false}).date<todayISO();
   const closesSession=closesPriorDay||options.closeSession===true;
   if(closesSession){
-    activeSessionPersistenceBlocked=true;
+    holdSessionWrites();
     stopTimerExecution();
     cancelPendingLiveDraftSave();
   }
@@ -562,7 +585,7 @@ async function saveDayRecord(options={}){
   }catch(e){
     notice.finish('failed',(committed?'Study Day saved locally in Library; follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+(e&&e.message?e.message:e),{title:committed?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committed?'local-save-completed':'local-save-failed'});
     return false;
-  }finally{activeSessionPersistenceBlocked=false;saveDayInProgress=false;syncReviewSurfaceMode();}
+  }finally{releaseSessionWrites();saveDayInProgress=false;syncReviewSurfaceMode();}
   return true;
 }
 /* ROLLOVER SAVE ORCHESTRATION */
@@ -630,7 +653,7 @@ async function handleStudyDayRollover(options={}){
     // A live device stores its session as it stands, so a day left for review
     // holds all its work; a woken device's copy is left as it was.
     if(!woke&&hasSaveableStudyDay())await flushLiveDraft({markChanged:false});
-    activeSessionPersistenceBlocked=true;
+    holdSessionWrites();
     if(hasSaveableStudyDay()){
       ({decision,quiet:quietSave=false}=await rolloverDecision(woke,endedDate));
       if(decision==='save'){
@@ -674,7 +697,7 @@ async function handleStudyDayRollover(options={}){
     return false;
   }finally{
     rolloverSaveInProgress=false;
-    activeSessionPersistenceBlocked=false;
+    releaseSessionWrites();
     if(decision==='defer')void Promise.resolve().then(reconsiderStoredSession).catch(error=>AppDiagnostics.capture('session.rollover-reconsider',error,'warn'));
   }
 }

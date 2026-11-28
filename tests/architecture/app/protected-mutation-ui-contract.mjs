@@ -14,6 +14,7 @@ assert.match(repositories,/replacePortable:value=>\{[\s\S]*?Meta\.transaction\('
 assert.doesNotMatch(plan,/else if\(!TASKS\.length\)draftMode=true;/u,'empty live tasks never implicitly open Plan editing.');
 assert.doesNotMatch(html,/title:element\.getAttribute\('title'\)/u,'ownership projection must not snapshot attributes it never mutates.');
 assert.doesNotMatch(review,/wasDisabled=!!saveButton\?\.disabled/u,'Review save completion must derive control availability from current Review state rather than replaying a pre-operation disabled snapshot.');
-assert.match(review,/finally\{activeSessionPersistenceBlocked=false;saveDayInProgress=false;syncReviewSurfaceMode\(\);\}/u,'Study-day save completion must re-derive Review controls.');
+assert.match(review,/finally\{releaseSessionWrites\(\);saveDayInProgress=false;syncReviewSurfaceMode\(\);\}/u,'Study-day save completion must release the session writes and re-derive Review controls.');
+assert.match(review,/function releaseSessionWrites\(\)\{\n  activeSessionPersistenceBlocked=false;/u,'Releasing the session writes must clear the block.');
 
 console.log(JSON.stringify({status:'PASS',contract:'protected-mutation-ui-reconciliation',surfaces:['plan','execute','review','library']},null,2));

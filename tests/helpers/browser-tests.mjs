@@ -55,6 +55,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('mobile-rich-editor','tests/browser/rich-text/mobile-rich-editor.mjs',['rich-editor','wordgard','mobile','touch','viewport','focus-mode','popup','checklist','accessibility']),
     test('native-overlays','tests/browser/rich-text/native-overlays.mjs',['popover','anchor-positioning','fallback','keyboard','selection','focus-mode','lifecycle']),
     test('paste-sanitization','tests/browser/rich-text/paste-sanitization.mjs',['rich-editor','wordgard','paste','sanitization','heading','table-header','schema']),
+    test('image-copy','tests/browser/rich-text/image-copy.mjs',['rich-editor','wordgard','copy','paste','image','clipboard','notes']),
     test('rich-editor-completion','tests/browser/rich-text/rich-editor-completion.mjs',['rich-editor','wordgard','heading','checklist','table-header','table-direct-resize','image-alt','limits','accessibility']),
     test('table-resize-context-coherence','tests/browser/rich-text/table-resize-controls.mjs',['rich-editor','wordgard','table','resize','toolbar','selection','mobile','desktop']),
     test('typography-refinement','tests/browser/rich-text/typography-refinement.mjs',['rich-editor','typography','popover','alignment','image','persistence','desktop']),
