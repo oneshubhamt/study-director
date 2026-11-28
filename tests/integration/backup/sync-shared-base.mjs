@@ -1,3 +1,4 @@
+import {restorePendingStore} from '../../helpers/restore-pending-store.mts';
 import {readScript} from '../../../build/source-script.mts';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
@@ -13,7 +14,7 @@ import {checkCases} from '../../helpers/generated-cases.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/managed-recovery.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/managed-recovery.ts','source/core/backup-recovery-host.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const RecordCodecs=registry.require('record-codecs',1);
 const BackupCodecs=registry.require('backup-codec',1);
@@ -673,11 +674,11 @@ let syncWorld=null;
     listPublications:async()=>{markers.onList?.();return freeze({items:freeze([...markers.values()]),overflow:false,ignored:0});},assertPublication:async row=>row,endPublication:async row=>{markers.delete(row.id);return true;},
     beginMaintenance:async()=>freeze({id:'mnt_'+crypto.randomUUID().replace(/-/gu,''),createdAt:new Date().toISOString()}),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true
   });
-  const device=(state,{folder=null,claims:claiming=false,markers=null}={})=>{
+  const device=(state,{folder=null,claims:claiming=false,markers=null,pendingStore=null}={})=>{
     // A review of kept versions takes state.keptChoice ('use' or the default)
     // and, for note texts, state.reviewText(conflict) or the current text.
     const reviewTexts=(options,current)=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:typeof current.reviewText==='function'?current.reviewText(item,options):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))});
-    const harness=createHarness(state,{noteResolver:reviewTexts,inertTimers:!!folder}),providers=harness.runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
+    const harness=createHarness(state,{noteResolver:reviewTexts,inertTimers:!!folder||!!pendingStore}),providers=harness.runtime.providers,recovery=ManagedRecoveryModule.createCoordinator(freeze({
       automaticBackup:freeze({suspend:async()=>freeze({}),resume:async()=>true}),diagnostics:freeze({capture:()=>{},mark:()=>false}),
       lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
@@ -686,6 +687,7 @@ let syncWorld=null;
     if(claiming)providers.configureSessionOwnership(freeze({installationId:()=>state.installationId,read:async()=>state.activeSession,today:()=>'2026-08-31'}));
     // The change clock: every capture in this harness has the same source revision.
     if(folder){assert.equal(providers.register(freeze({id:'folder',label:'Device Folder',connected:()=>true,repository:store(folder)})),true);providers.configureAutomaticBackup(freeze({covered:()=>'',current:()=>'2026-08-23T00:00:00.000Z'}));providers.configurePendingBackupRetry(freeze({read:async()=>null,mark:async()=>true,clear:async()=>true}));}
+    if(pendingStore)providers.configurePendingBackupRetry(pendingStore());
     return freeze({
       backUpFolder:()=>providers.backupRepositoryProvider('folder',{interactive:false}),
       upload:async()=>{await new Promise(resolve=>setTimeout(resolve,3));return providers.backupRepositoryProvider('drive',{interactive:false});},
@@ -1287,7 +1289,8 @@ let syncWorld=null;
   const {device,note}=syncWorld;
   const a={installationId:'inst_restore_device_a',records:new Map([['2026-08-01',record('2026-08-01','first day')]]),deletions:[],noteDeletions:[],notes:note('version one'),activeSession:null,schedule:'',personal:personal('Restore User'),journal:null};
   const b={installationId:'inst_restore_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Restore User'),journal:null};
-  const A=device(a),B=device(b);
+  const pendingStore=restorePendingStore(registry.require('backup-recovery-host',1),'2026-08-23T00:00:00.000Z');
+  const A=device(a,{pendingStore}),B=device(b);
   const first=await A.upload();assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'version one');
   // The same Saved Day changed on both leaves a version kept for review on both devices.
   a.notes=note('version two');a.records.set('2026-08-01',record('2026-08-01','first day by A','2026-08-31T09:00:00.000Z'));await A.upload();
@@ -1297,10 +1300,16 @@ let syncWorld=null;
   await B.upload();assert.equal((await A.sync()).cancelled,false);assert.deepEqual(a.reviews.open().map(review=>review.id),[kept.id]);
   // An older version does not descend from what both last shared, so Replace
   // shows the notes it changes; the person takes the backup's copy.
+  const beforeRestore=syncWorld.versions(syncWorld.drive);
+  const priorIntent=await pendingStore().read('drive');
   a.reviewText=item=>item.incomingValue;const restored=await A.restore(first.checkpointId);a.reviewText=null;assert.notEqual(restored.cancelled,true);
   assert.equal(a.notes.Shared.text,'version one','the restore applies here at once');
   assert.deepEqual(a.reviews.open().map(review=>review.id),[kept.id],'versions kept for review stay through a restore');
   assert.equal(restored.convergence?.source?.shared,true,'the restore came from Drive');
+  const restoreIntent=await pendingStore().read('drive');
+  assert.equal(restoreIntent?.providerId,'drive','shared restore persists the owed publication before returning');
+  assert.ok(!priorIntent||restoreIntent.requestedAt>priorIntent.requestedAt,'the restore records a fresh request even when an older upload was pending');
+  assert.deepEqual(syncWorld.versions(syncWorld.drive),beforeRestore,'restore defers ordinary publication to the next upload');
   const after=await A.upload();assert.notEqual(after.checkpointId,first.checkpointId,'the restored state becomes Drive’s newest version');
   assert.equal((await B.sync()).cancelled,false,'the other device takes the restore in without a question');
   assert.equal(b.notes.Shared.text,'version one','and gets the restored note');

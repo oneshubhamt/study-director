@@ -2,7 +2,11 @@
 
 ## Current gate
 
-**P6.1 complete with an independent replay correction. P6.2 is ready.** Application/test baseline `66cffde8116fb0efb57fc95bad97958051ef4978`, P6.1 start `6805687e5f20b9b88a0c9d67b254a9b54ccdacb3`, executor-verified code `a3d6ae2251e45eec387a658ecdb7f0acb8bef3c9`, corrected runner `b05419ea`. [Measured baseline and F33 reconciliation](docs/typescript/P6-BASELINE.md) · [340-path inventory](docs/typescript/P6-BASELINE.tsv) · [P6.2 executor handoff](docs/typescript/PHASE-6.md#p62-executor-handoff).
+**P6.1 complete with an independent replay correction. P6.2 is in progress.** Application/test baseline `66cffde8116fb0efb57fc95bad97958051ef4978`, P6.1 start `6805687e5f20b9b88a0c9d67b254a9b54ccdacb3`, executor-verified code `a3d6ae2251e45eec387a658ecdb7f0acb8bef3c9`, corrected runner `b05419ea`. [Measured baseline and F33 reconciliation](docs/typescript/P6-BASELINE.md) · [340-path inventory](docs/typescript/P6-BASELINE.tsv) · [P6.2 executor handoff](docs/typescript/PHASE-6.md#p62-executor-handoff).
+
+## P6.2 · In progress
+
+Opening checkpoint at `be5c24be`: prove F33 4a through the registered provider. Restore the protected copy, verify selected bytes, distinguish unnecessary source publication from a genuinely owed one, then fault-test the real owners before retiring matching source checks. The two real provider suites now pass (15.4 s locally, two jobs). The exact path exercises the existing “Remove them” choice, then restores the protected version through the provider. A reopened pending store distinguishes the shared and bring-in cases. Fault attribution and source-check retirement are next. The remaining backup/storage conversion and 4b–4g stay open.
 
 ## P6.1 · Closed
 

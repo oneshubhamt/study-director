@@ -1,3 +1,4 @@
+import {restorePendingStore} from '../../helpers/restore-pending-store.mts';
 import {readScript} from '../../../build/source-script.mts';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
@@ -13,7 +14,7 @@ import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../port
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url)),ROOT=path.resolve(HERE,'../../..'),read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.ts','source/core/device-folder-storage.ts','source/core/operation-lifecycle.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/managed-recovery.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/device-folder-storage.ts','source/core/operation-lifecycle.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/managed-recovery.ts','source/core/backup-recovery-host.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
 const CanonicalModule=registry.require('canonical',1),RecordCodecs=registry.require('record-codecs',1),BackupCodecs=registry.require('backup-codec',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupModule=registry.require('backup',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,Object.freeze({canonical:CanonicalModule})),ManagedRecoveryModule=registry.require('managed-recovery',1);
 const processing=createProcessingEngine();
@@ -314,7 +315,7 @@ assert.equal(journal,null,'Successful exact restore must clear its persistent ro
 // P7: exact Version Restore must also restore a historical Active Session when that version contains one.
 const historicalSession=freeze({id:'current',type:'activeSession',version:9,revision:7,date:'2026-09-19',status:'suspended',scheduleText:'07:30 | 50 | Historical active | work | Ethics | block | 1',snapshot:freeze({label:'historical-active'}),suspendedAt:'2026-09-19T05:00:00.000Z',updatedAt:'2026-09-19T05:00:00.000Z'});activeSession=historicalSession;const sessionObjectFiles=new Map(objectFiles);let sessionManifestBlob=null,sessionCommitBlob=null;const sessionPublication=await runtime.repository.publish([manifest],{interactive:false},freeze({writeObject:async entry=>(sessionObjectFiles.set(entry.objectId,entry.blob),freeze({id:entry.objectId})),writeManifest:async file=>(sessionManifestBlob=file.blob,freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'})),commit:async marker=>(sessionCommitBlob=marker.blob,freeze({name:marker.checkpointId+'.sdcommit'})),onCommitted:async()=>null,cleanup:async()=>null,onFailure:async()=>null})),sessionManifest=sessionPublication.manifest,sessionReadObject=async entry=>sessionObjectFiles.get(entry.objectId)||null;assert.ok(sessionManifest.objects.some(entry=>entry.kind==='activeSession'),'A managed checkpoint containing an Active Session must persist an Active Session repository object.');assert.ok(sessionManifestBlob instanceof Blob&&sessionCommitBlob instanceof Blob);activeSession=null;const sessionCandidate=await runtime.repository.inspect(sessionManifest,sessionReadObject,{interactive:false,committed:true}),sessionRestore=await runtime.repository.restoreVersion(sessionCandidate);assert.equal(sessionRestore.restored.activeSession,true);assert.deepEqual(activeSession,historicalSession,'Historical Version Restore must reinstate the checkpoint Active Session exactly, including its applied schedule.');assert.equal(currentPersonal.plans.draft,null,'Restoring an Active Session must not copy its applied schedule into the independent Plan draft.');const resetCandidate=await runtime.repository.inspect(manifest,readObject,{interactive:false,committed:true});await runtime.repository.restoreVersion(resetCandidate);assert.equal(activeSession,null,'Restoring the original no-session historical version must still clear the restored session.');assert.equal(currentPersonal.plans.draft,null,'Clearing the restored session must leave Plan restoration to portable Personal Data.');
 
-// A managed provider Version Restore must keep the selected historical object immutable and append a fresh current checkpoint after local verification.
+// An exact restore keeps the selected version and protects the local data it will replace.
 const remoteFiles=new Map(),readDownloads=[];let providerUploaded=false;
 const remoteKey=(kind,id)=>`${kind}:${id}`;
 for(const [objectId,blob] of objectFiles)remoteFiles.set(remoteKey('object',objectId),{kind:'object',id:objectId,name:objectId+'.sdobject',blob,createdAt:manifest.exportedAt});
@@ -347,8 +348,43 @@ const providerManagedRecovery=ManagedRecoveryModule.createCoordinator(freeze({
 }));
 runtime.providers.configureManagedRecovery(freeze({run:spec=>providerManagedRecovery.execute(spec)}));
 records.push(freeze({version:16,recordKind:'study',date:'2026-09-20',reflection:'provider local-only',savedAt:'2026-09-20T04:00:00.000Z',updatedAt:'2026-09-20T04:00:00.000Z'}));
-const providerRestore=await runtime.providers.restoreRepositoryProviderVersion('repository-version-qa',{checkpointId});assert.equal(providerRestore.mode,'restore-version');assert.ok(safetyMaintenancePolls>=2,'Cross-device Version Restore must observe maintenance yield before publishing the protected safety checkpoint.');assert.equal(safetyCoordinationEvents.find(event=>event.startsWith('maintenance-poll:')),'maintenance-poll:publication-active','Foreground recovery must publish its coordination marker before waiting for remote maintenance to yield.');assert.equal(nestedFileJobReentries,0,'Managed restore safety publication must not re-enter and await its own exclusive file job.');assert.equal(providerRestore.convergence.source.status,'completed');assert.equal(providerRestore.convergence.source.unchanged,true,'Exact same-provider Version Restore must recognize that the selected checkpoint already exists remotely.');assert.deepEqual([...providerRestore.convergence.others],[],'no other location backs up on its own here');assert.deepEqual(records.map(row=>row.date),['2026-09-18']);
-const providerCheckpoints=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint');assert.equal(providerCheckpoints.length,2,'Managed provider Version Restore must retain the selected history and append one protected Before restore checkpoint, without publishing a redundant identical current checkpoint.');assert.ok(providerCheckpoints.some(file=>file.id===checkpointId),'The selected historical checkpoint must remain available after restore.');const historicalAfter=remoteFiles.get(remoteKey('checkpoint',checkpointId)).blob;assert.deepEqual(new Uint8Array(await historicalAfter.arrayBuffer()),originalHistoricalManifestBytes,'Historical managed checkpoint bytes must never be rewritten by Version Restore.');const providerManifests=[];for(const file of providerCheckpoints)providerManifests.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));const protectedProvider=providerManifests.find(item=>item.retention?.role==='before-restore');assert.ok(protectedProvider,'Managed provider restore must publish a protected Before restore checkpoint before local replacement.');assert.ok(Date.parse(protectedProvider.retention.protectedUntil)>Date.parse(protectedProvider.exportedAt));assert.equal(providerManifests.filter(item=>item.retention?.role!=='before-restore'&&item.checkpoint.checkpointId!==checkpointId).length,0,'Exact same-provider restore must not append a duplicate normal checkpoint after local replacement.');assert.deepEqual(managedProviderRecoveryEvents,['mutation-enter','suspend:restore-version','quiesce-enter','settle:restore-version','quiesce-exit','quiesce-enter','settle:restore-version','rebuild:restore-version','quiesce-exit','mutation-exit','resume:provider-qa'],'Provider recovery must keep long external safety I/O outside the two short quiescence windows while preserving one shared mutation transaction.');
+const pendingStore=restorePendingStore(registry.require('backup-recovery-host',1),'2026-09-19T00:00:00.000Z');
+runtime.providers.configurePendingBackupRetry(pendingStore());
+const displacedDays=structuredClone(records);
+const restoreFromProvider=id=>runtime.providers.restoreRepositoryProviderVersion('repository-version-qa',{checkpointId:id});
+let providerRestore;
+try{
+  providerRestore=await restoreFromProvider(checkpointId);
+}finally{
+  // An upload can change remote data even when the provider subsequently throws.
+  const selected=remoteFiles.get(remoteKey('checkpoint',checkpointId));
+  assert.ok(selected,'the selected historical manifest remains in storage');
+  assert.deepEqual(new Uint8Array(await selected.blob.arrayBuffer()),originalHistoricalManifestBytes,'restore preserves the selected manifest bytes, including on failure');
+}
+assert.equal(providerRestore.mode,'restore-version');
+assert.deepEqual(records.map(row=>[row.date,row.reflection]),[['2026-09-18','repository reflection']],'the selected Saved Day replaces the local data');
+assert.equal(await pendingStore().read('repository-version-qa'),null,'a current non-shared source owes no duplicate publication');
+assert.deepEqual([providerRestore.convergence.source.status,providerRestore.convergence.source.unchanged,providerRestore.convergence.source.checkpoint],['completed',true,checkpointId]);
+assert.deepEqual([...providerRestore.convergence.others],[],'no other location backs up on its own here');
+const manifests=[];
+for(const file of remoteFiles.values()){
+  if(file.kind==='checkpoint')manifests.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));
+}
+assert.deepEqual(manifests.filter(item=>item.retention.role==='normal').map(item=>item.checkpoint.checkpointId),[checkpointId],'the selected checkpoint is the only ordinary checkpoint');
+const protectedVersions=manifests.filter(item=>item.retention.role==='before-restore');
+assert.equal(protectedVersions.length,1,'the displaced data has one protected checkpoint');
+const protectedVersion=protectedVersions[0];
+assert.equal(protectedVersion.retention.purpose,'before-restore');
+assert.ok(Date.parse(protectedVersion.retention.protectedUntil)>Date.parse(protectedVersion.exportedAt));
+assert.equal(providerRestore.managedRecovery.safety.checkpointId,protectedVersion.checkpoint.checkpointId);
+assert.ok(safetyMaintenancePolls>=2,'cross-device maintenance yields before safety publication');
+assert.equal(safetyCoordinationEvents.find(event=>event.startsWith('maintenance-poll:')),'maintenance-poll:publication-active','the foreground marker precedes the wait for maintenance');
+assert.equal(nestedFileJobReentries,0,'safety publication stays inside the owning file job');
+assert.deepEqual(managedProviderRecoveryEvents,['mutation-enter','suspend:restore-version','quiesce-enter','settle:restore-version','quiesce-exit','quiesce-enter','settle:restore-version','rebuild:restore-version','quiesce-exit','mutation-exit','resume:provider-qa'],'slow external safety I/O stays outside both short quiescence windows');
+
+// Recover the displaced Saved Days via the same picker entry, from the published commit and objects.
+await restoreFromProvider(protectedVersion.checkpoint.checkpointId);
+assert.deepEqual(records,displacedDays,'restoring the protected version recovers the exact displaced Saved Days');
 // Restore on an empty device does not upload a redundant protected version.
 {
   const checkpointsBefore=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length;
@@ -380,6 +416,8 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   const savedChoice=noteChoice,attachmentIds=new Set(manifest.objects.filter(entry=>entry.kind==='attachment').map(entry=>entry.objectId));
   notes={...notes,Ethics:normalizeArea({key:'Ethics',text:'text after an accident',updatedAt:'2099-01-03T00:00:00.000Z'},'Ethics')};noteChoice=conflict=>conflict.incomingValue;readDownloads.length=0;providerUploaded=false;
   const noteRestore=await runtime.providers.bringInRepositoryProvider('repository-version-qa',{checkpointId,note:'Ethics'});
+  assert.equal((await pendingStore().read('repository-version-qa'))?.providerId,'repository-version-qa','a non-shared bring-in records the source publication it owes');
+  runtime.providers.configurePendingBackupRetry(null);
   assert.equal(noteRestore.cancelled,false);assert.equal(noteRestore.notesReconciled,true);assert.equal(notes.Ethics.text,'repository note');
   assert.ok(readDownloads.length>=1&&readDownloads.length<new Set(manifest.objects.map(entry=>entry.objectId)).size,`the note read downloaded ${readDownloads.length} of ${manifest.objects.length} objects`);
   assert.ok(readDownloads.every(id=>!attachmentIds.has(id)),'no attachment the note does not use is downloaded');
