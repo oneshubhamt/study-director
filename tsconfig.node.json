@@ -128,6 +128,8 @@
     "tests/helpers/verification/repository-journals.mts",
     "tests/helpers/verification/canonical-mutation-epoch.mts",
     "tests/helpers/verification/appmeta-contract.mts",
-    "tests/helpers/verification/canonical-schema-separation.mts"
+    "tests/helpers/verification/canonical-schema-separation.mts",
+    "tests/helpers/repository-note-ports.mts",
+    "tests/helpers/verification/note-persistence.mts"
   ]
 }
