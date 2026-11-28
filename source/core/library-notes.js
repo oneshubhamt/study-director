@@ -315,7 +315,11 @@ registry.define('library-notes',1,modules=>{
       trigger.addEventListener('click',event=>{
         event.preventDefault();
         if(!menu.hidden){controller.hide();return;}
-        fillNoteMenu(menu,entry,controller);controller.show(trigger);trigger.setAttribute('aria-expanded','true');focusFirstMenuItem(menu);
+        // The note as it stands now: this button was drawn with the note, and
+        // a new note's first words do not redraw it (right-click reads the
+        // list the same way).
+        const current=noteEntries().find(candidate=>candidate.key===entry.key)||entry;
+        fillNoteMenu(menu,current,controller);controller.show(trigger);trigger.setAttribute('aria-expanded','true');focusFirstMenuItem(menu);
       });
       return [trigger,menu];
     }
@@ -631,9 +635,10 @@ registry.define('library-notes',1,modules=>{
         const accepted=commitEditor(editor,editor.value,event);
         if(!accepted)return;
         const refreshed=getNote(entry.key,entry.label);
-        noteEditorSignature=noteEditorRenderSignature({...entry,hasNote:!!String(editor.value||'').trim()},refreshed,false,canMutate());
-        meta.textContent=noteMeta({...entry,ephemeral:false},refreshed);
         const hasNote=!!String(editor.value||'').trim();
+        noteEditorSignature=noteEditorRenderSignature({...entry,hasNote},refreshed,false,canMutate());
+        // The entry was drawn with the note: a new note's says it is empty.
+        meta.textContent=noteMeta({...entry,ephemeral:false,hasNote},refreshed);
         const row=[...document.querySelectorAll('[data-note-key]')].find(candidate=>candidate.dataset.noteKey===entry.key);
         if(row){
           row.classList.toggle('has-note',hasNote);
