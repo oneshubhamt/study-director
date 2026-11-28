@@ -82,6 +82,16 @@
     "tests/helpers/verification/suite-structure.mts",
     "tests/helpers/verification/dependency-assurance.mts",
     "tests/helpers/verification/deployment-contract.mts",
-    "tests/helpers/verification/verify-minified-release.mts"
+    "tests/helpers/verification/verify-minified-release.mts",
+    "tests/helpers/verification/attachment-aware-reconciliation.mts",
+    "tests/helpers/verification/diagnostics-labels.mts",
+    "tests/helpers/verification/format-ledger.mts",
+    "tests/helpers/verification/managed-version-history-contract.mts",
+    "tests/helpers/verification/runtime-authority-contract.mts",
+    "tests/helpers/verification/persistence-boundary.mts",
+    "tests/helpers/verification/backup-recovery-ux-contract.mts",
+    "tests/helpers/verification/managed-recovery-contract.mts",
+    "tests/helpers/verification/cleer-integration.mts",
+    "tests/helpers/verification/host-export-port.mts"
   ]
 }

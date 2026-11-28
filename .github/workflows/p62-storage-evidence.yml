@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/p62-storage-evidence.yml'
       - 'tests/helpers/mutation.mts'
+      - 'tests/helpers/coverage-risk.mts'
       - 'tests/integration/attachments/attachment-deletion.mjs'
       - 'tests/integration/backup/repository-restore.mjs'
       - 'tests/integration/backup/sync-shared-base.mjs'
@@ -68,3 +69,33 @@ jobs:
             echo "Exports replay $attempt"
             time node tests/browser/exports/exports.mjs
           done
+
+  risk-coverage:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Preserve numeric safety floors after replacing the readback anchor
+        run: node tests/helpers/coverage.mjs --json "$RUNNER_TEMP/p62-coverage.json"
+      - name: Verify all previously established permanent safety mutants
+        run: >-
+          node tests/helpers/mutation.mjs
+          canonical-sorts-object-keys
+          save-lane-retries-only-current-value
+          settlement-clears-its-deadline
+          diagnostic-history-keeps-live-operations
+          partial-integrity-remains-unfinished
+          encrypted-backup-password-verifier-is-enforced
+          backup-chunk-integrity-is-enforced
+          attachment-metadata-failure-rolls-references-back
+          restore-verifies-committed-saved-days
+          reconciliation-verifies-committed-saved-days
+          library-clear-restores-durable-journal
+          sync-keeps-the-other-edit
+          hourly-keeps-only-changed-notes
+          clock-jump-rebases-timer-start
