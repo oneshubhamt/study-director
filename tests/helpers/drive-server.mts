@@ -13,7 +13,7 @@ export type RemoteState={
  folders:string[];folderProperties:Map<string,Properties>;folderNames:Map<string,string>;deletionMarkers:{id:string;name:string;profile:string}[];
  files:Map<string,RemoteFile>;uploads:Map<string,RemoteUpload>;trashedFolders:Set<string>;sequence:{file:number;folder:number;version:number};
 };
-type BodyProbe={signal?:AbortSignal|null;aborted:boolean;cancelled:boolean;finish:(()=>void)|null};
+type BodyProbe={signal:AbortSignal|null|undefined;aborted:boolean;cancelled:boolean;finish:(()=>void)|null};
 type RangeProbe={loaded:number;cancelled:boolean};
 type JsonFault={mode:string;remaining?:number;status?:number;payload?:unknown};
 type RequestLog={url:string;method:string;authorization:string;contentRange:string};
@@ -100,8 +100,8 @@ export function createDriveServer({email,expiresIn,clock,remoteState,timers}:{em
       const parent=q.match(/'([^']+)' in parents/u)?.[1];
       let rows=[...state.files.values()].filter(file=>!file.trashed&&(!parent||file.parents?.includes(parent)));
       const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
-      if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryKind||'')===kindMatch[1]);
-      if(idMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryId||'')===idMatch[1]);
+      if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.['studyDirectorRepositoryKind']||'')===kindMatch[1]);
+      if(idMatch)rows=rows.filter(file=>String(file.appProperties?.['studyDirectorRepositoryId']||'')===idMatch[1]);
       const files=rows.map(fileMetadata).sort((a,b)=>String(b.createdTime).localeCompare(String(a.createdTime)));
       const offset=Number(url.searchParams.get('pageToken')||0),size=state.pageSizes?.[kindMatch?.[1]??'']||(state.pageSize&&kindMatch?.[1]==='object'?state.pageSize:Number(url.searchParams.get('pageSize'))||1000);
       if(state.pageDelayMs&&kindMatch?.[1]==='object'){
@@ -114,14 +114,14 @@ export function createDriveServer({email,expiresIn,clock,remoteState,timers}:{em
     if(url.pathname==='/drive/v3/files'&&method==='POST'){
       if(state.folderCreateDenied)return json({error:{message:'folder creation denied'}},403);
       const metadata=readMetadata(String(options.body||'{}'));
-      if(metadata.mimeType==='application/vnd.google-apps.folder'&&metadata.appProperties?.studyDirectorDeletedProfile){
-        const id=`marker-${state.deletionMarkers.length+1}`;state.deletionMarkers.push({id,name:String(metadata.name||''),profile:String(metadata.appProperties.studyDirectorDeletedProfile)});return json({id});
+      if(metadata.mimeType==='application/vnd.google-apps.folder'&&metadata.appProperties?.['studyDirectorDeletedProfile']){
+        const id=`marker-${state.deletionMarkers.length+1}`;state.deletionMarkers.push({id,name:String(metadata.name||''),profile:String(metadata.appProperties['studyDirectorDeletedProfile'])});return json({id});
       }
       if(metadata.mimeType==='application/vnd.google-apps.folder'){
         const id=`folder-${state.sequence.folder++}`;state.folders.push(id);if(metadata.name)state.folderNames.set(id,String(metadata.name));const {studyDirectorFolder:_marker,...properties}=metadata.appProperties||{};state.folderProperties.set(id,properties);return json(folderMetadata(id));
       }
       const id=`repo-${state.sequence.file++}`,stamp=new (clock?.Date||Date)((clock?.Date||Date).now()+(Number(state.driveClockAheadMs)||0)).toISOString(),file={id,name:required(metadata.name),mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.sequence.version++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
-      if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.studyDirectorRepositoryKind||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
+      if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.['studyDirectorRepositoryKind']||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
       return json(fileMetadata(file));
     }
     if(url.pathname==='/upload/drive/v3/files'&&method==='POST'){
@@ -160,13 +160,13 @@ export function createDriveServer({email,expiresIn,clock,remoteState,timers}:{em
       const id=findId(url.pathname);
       if(state.folders.includes(id)&&url.searchParams.get('alt')!=='media')return json(folderMetadata(id));
       const file=state.files.get(id);
-      if(file&&url.searchParams.get('alt')==='media'&&(state.failMediaKinds?.has(file.appProperties?.studyDirectorRepositoryKind??'')||state.failMediaIds?.has(id)))return json({error:{message:'QA_FIXTURE temporarily unavailable backup metadata'}},404);if(!file)return json({error:{message:'not found'}},404);
+      if(file&&url.searchParams.get('alt')==='media'&&(state.failMediaKinds?.has(file.appProperties?.['studyDirectorRepositoryKind']??'')||state.failMediaIds?.has(id)))return json({error:{message:'QA_FIXTURE temporarily unavailable backup metadata'}},404);if(!file)return json({error:{message:'not found'}},404);
       if(url.searchParams.get('alt')==='media'){
-        if(state.historyReadDelayMs&&['checkpoint','commit'].includes(file.appProperties?.studyDirectorRepositoryKind??'')){
+        if(state.historyReadDelayMs&&['checkpoint','commit'].includes(file.appProperties?.['studyDirectorRepositoryKind']??'')){
           state.activeHistoryReads=(state.activeHistoryReads||0)+1;state.maxHistoryReads=Math.max(state.maxHistoryReads||0,state.activeHistoryReads);
           try{await delay(state.historyReadDelayMs,options.signal);}finally{state.activeHistoryReads--;}
         }
-        if(['checkpoint','commit'].includes(file.appProperties?.studyDirectorRepositoryKind??''))(state.historyReadCompletions??=[]).push(id);
+        if(['checkpoint','commit'].includes(file.appProperties?.['studyDirectorRepositoryKind']??''))(state.historyReadCompletions??=[]).push(id);
         const range=headers.get('Range');if(range&&state.rangeMode!=='ignored'){
           const match=/^bytes=(\d+)-(\d+)$/u.exec(range);assert.ok(match,'range request must declare two offsets');const start=Number(match[1]),end=Number(match[2]);let content=file.content.slice(start,end+1);if(state.rangeMode==='truncated')content=content.slice(0,-1);
           let responseBody:Blob|ReadableStream<Uint8Array>=content;
@@ -186,7 +186,7 @@ export function createDriveServer({email,expiresIn,clock,remoteState,timers}:{em
       const metadata=readMetadata(String(options.body||'{}'));if(metadata.trashed===true){state.trashedFolders.add(id);return json({id});}if(state.folderRenameFails&&metadata.name)return json({error:{message:'rename failed'}},500);if(metadata.name)state.folderNames.set(id,String(metadata.name));state.folderProperties.set(id,{...(state.folderProperties.get(id)||{}),...(metadata.appProperties||{})});return json(folderMetadata(id));
     }
     if(url.pathname.startsWith('/drive/v3/files/')&&method==='DELETE'){
-      const id=findId(url.pathname),file=state.files.get(id),kind=String(file?.appProperties?.studyDirectorRepositoryKind||'');
+      const id=findId(url.pathname),file=state.files.get(id),kind=String(file?.appProperties?.['studyDirectorRepositoryKind']||'');
       if(state.networkFailCoordinationDeleteOnce&&['publication','maintenance'].includes(kind)){state.networkFailCoordinationDeleteOnce=false;throw new TypeError('simulated ambiguous coordination delete');}
       state.deletions.push(id);state.files.delete(id);return new Response(null,{status:204});
     }
