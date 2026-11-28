@@ -322,6 +322,19 @@ for(const [objectId,blob] of objectFiles)remoteFiles.set(remoteKey('object',obje
 remoteFiles.set(remoteKey('checkpoint',checkpointId),{kind:'checkpoint',id:checkpointId,name:checkpointId+'.sdcheckpoint',blob:publishedManifestBlob,createdAt:manifest.exportedAt,history:{logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:manifest.counts,encrypted:manifest.encrypted,retention:manifest.retention}});
 remoteFiles.set(remoteKey('commit',checkpointId),{kind:'commit',id:checkpointId,name:checkpointId+'.sdcommit',blob:publishedCommitBlob,createdAt:manifest.exportedAt});
 const originalHistoricalManifestBytes=new Uint8Array(await publishedManifestBlob.arrayBuffer());
+const selectedArtifacts=new Map();
+for(const key of [remoteKey('commit',checkpointId),...new Set(manifest.objects.map(entry=>remoteKey('object',entry.objectId)))]){
+  const file=remoteFiles.get(key);
+  assert.ok(file,'selected artifact exists before restore: '+key);
+  selectedArtifacts.set(key,new Uint8Array(await file.blob.arrayBuffer()));
+}
+async function assertSelectedArtifacts(){
+  for(const [key,bytes] of selectedArtifacts){
+    const file=remoteFiles.get(key);
+    assert.ok(file,'selected artifact remains available: '+key);
+    assert.deepEqual(new Uint8Array(await file.blob.arrayBuffer()),bytes,'restore preserves the selected artifact bytes: '+key);
+  }
+}
 let safetyMaintenancePolls=0,publicationCounter=0,foregroundPublicationActive=false,orphanRestoreMaintenance=false,orphanRestoreReaps=0;const safetyCoordinationEvents=[];
 const providerTransport=freeze({
   list:async({kind})=>freeze({items:freeze([...remoteFiles.values()].filter(file=>file.kind===kind).map(file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,...(file.history?{history:file.history}:{})}))),overflow:false}),
@@ -362,6 +375,7 @@ try{
   const selected=remoteFiles.get(remoteKey('checkpoint',checkpointId));
   assert.ok(selected,'the selected historical manifest remains in storage');
   assert.deepEqual(new Uint8Array(await selected.blob.arrayBuffer()),originalHistoricalManifestBytes,'restore preserves the selected manifest bytes, including on failure');
+  await assertSelectedArtifacts();
 }
 assert.equal(providerRestore.mode,'restore-version');
 assert.deepEqual(records.map(row=>[row.date,row.reflection]),[['2026-09-18','repository reflection']],'the selected Saved Day replaces the local data');
@@ -396,6 +410,8 @@ try{
 }finally{refuseCommit=false;}
 assert.deepEqual(records,displacedDays,'a failed safety commit leaves the displaced Saved Days intact');
 assert.deepEqual(committedIds(),committedBeforeFailure,'a failed safety commit exposes no new committed version');
+assert.deepEqual(new Uint8Array(await remoteFiles.get(remoteKey('checkpoint',checkpointId)).blob.arrayBuffer()),originalHistoricalManifestBytes,'failed safety publication preserves the selected manifest');
+await assertSelectedArtifacts();
 // Restore on an empty device does not upload a redundant protected version.
 {
   const checkpointsBefore=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint').length;

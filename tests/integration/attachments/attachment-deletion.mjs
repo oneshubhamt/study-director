@@ -10,10 +10,10 @@ for(const file of ['source/core/internal.ts','source/core/attachments.ts','sourc
 const registry=context[Symbol.for('studyDirector.internalModules.v1')],attachments=registry.require('attachments',1),Clear=registry.require('library-clear',1);
 const ID='att-1234567890abcdefghij';
 function documentFixture(){const status={textContent:''},preview={querySelector:()=>null,replaceChildren(){}},root={open:true},detail={replaceChildren(){},append(){},scrollTop:0},list={replaceChildren(){},append(){},children:[],scrollTop:0};return {activeElement:null,getElementById(id){return id==='attachment-status'?status:id==='attachment-preview'?preview:id==='library-attachments'?root:id==='attachment-detail'?detail:id==='attachment-list'?list:{value:'',textContent:'',hidden:false,replaceChildren(){},append(){},addEventListener(){}};},querySelectorAll(){return []},querySelector(){return null},createElement(){return {dataset:{},classList:{add(){}},setAttribute(){},addEventListener(){},append(){},appendChild(){},closest(){return null},focus(){},style:{}}},addEventListener(){}};}
-function fixture({metadataFailure=false,sweepFailure=false,trackGuards=false}={}){
+function fixture({metadataFailure=false,sweepFailure=false,trackGuards=false,referenceOwner=null}={}){
   let referenced=true,metadata=true,rollbacks=0,lastDeletionState=null;const order=[];
   const store={requireAvailable(){},list:async()=>metadata?[{id:ID,name:'MRI',type:'application/pdf',size:10,hash:'f'.repeat(64),library:true}]:[],removeMetadata:async(_ids,_guard,options={})=>{order.push('metadata');lastDeletionState=structuredClone(options.deletionState||null);if(metadataFailure)throw new Error('metadata failed');metadata=false;return 1},restoreMetadata:async(_rows,options={})=>{lastDeletionState=structuredClone(options.deletionState||null);metadata=true;return 1;},collect:async work=>{order.push('collect');return work({sweep:async()=>{order.push('sweep');if(sweepFailure)throw new Error('sweep failed');return 1}})}};
-  const library=attachments.create({notifications:createNotifications('attachments').port,store,processing:{check(){},job:fn=>fn()},document:documentFixture(),interactions:{choose:async()=> 'remove',confirm:async()=>true,notify(){},input:async()=>null},canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>referenced?[{kind:'note',key:'n',label:'N',ids:new Set([ID]),value:'x'}]:[],destinations:async()=>[],settle:async()=>{if(trackGuards)order.push('settle')},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,quiesce:async work=>{if(trackGuards)order.push('quiesce-enter');try{return await work();}finally{if(trackGuards)order.push('quiesce-exit')}},runExclusive:async(_kind,work)=>{if(trackGuards)order.push('exclusive-enter');try{return await work();}finally{if(trackGuards)order.push('exclusive-exit')}},removeReferences:async()=>{order.push('surgery');referenced=false;return {rollback:async()=>{order.push('rollback');rollbacks++;referenced=true}}},insert:async()=>{}});
+  const library=attachments.create({notifications:createNotifications('attachments').port,store,processing:{check(){},job:fn=>fn()},document:documentFixture(),interactions:{choose:async()=> 'remove',confirm:async()=>true,notify(){},input:async()=>null},canMutate:()=>true,requireOwner(){},token:()=>1,assertToken(){},isActive:()=>true,cleanup(){},renderReference(){},sources:async options=>referenceOwner?referenceOwner.refs.sources(options):referenced?[{kind:'note',key:'n',label:'N',ids:new Set([ID]),value:'x'}]:[],destinations:async()=>[],settle:async()=>{if(trackGuards)order.push('settle')},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,quiesce:async work=>{if(trackGuards)order.push('quiesce-enter');try{return await work();}finally{if(trackGuards)order.push('quiesce-exit')}},runExclusive:async(_kind,work)=>{if(trackGuards)order.push('exclusive-enter');try{return await work();}finally{if(trackGuards)order.push('exclusive-exit')}},removeReferences:async(id,_refs,assert)=>{order.push('surgery');if(referenceOwner)return referenceOwner.refs.removeEverywhere(id,assert);referenced=false;return {rollback:async()=>{order.push('rollback');rollbacks++;referenced=true}}},insert:async()=>{}});
   return {library,state:()=>({referenced,metadata,rollbacks,order,lastDeletionState})};
 }
 
@@ -40,13 +40,13 @@ console.log(JSON.stringify({status:'PASS',contracts:['guard ordering','metadata 
 
 function referenceFixture({scanTrusted=true,rewriteMode='success',liveFields=[]}={}){
   const marker=`ref:${ID}`,date='2026-09-13',stamp='2026-09-13T00:00:00.000Z';
-  const notes={n:{key:'n',label:'N',text:marker,updatedAt:'r1'}};
+  const notes={n:{key:'n',label:'N',text:marker,updatedAt:'r1',links:[]}};
   const days=new Map([[date,{date,reflection:marker,updatedAt:stamp,tasks:['original']}]]);let revision=1,owner=true;
   let session={id:'current',date,revision:1,updatedAt:stamp,snapshot:{review:{reflection:marker,studyQuality:null}}};
   let dayFailure='',sessionFailure='',failDayRead=false,failSessionRead=false,noteWrites=0,dayWrites=0,sessionWrites=0;
   const clone=value=>structuredClone(value),equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const data={
-    notes:{get:key=>notes[key]?{...clone(notes[key]),links:[]}:null,readFreshPayload:async()=>clone(notes),replace:async()=>{},updateValidatedRich(key,label,text,expected){if(notes[key]?.updatedAt!==expected)return {status:'conflict',revision:notes[key]?.updatedAt};noteWrites++;notes[key]={...notes[key],label,text,updatedAt:'r'+(++revision)};return {status:'changed',revision:notes[key].updatedAt};},flush:async()=>true,failure:()=>({failed:false})},
+    notes:{get:key=>notes[key]?clone(notes[key]):null,readFreshPayload:async()=>clone(notes),replace:async()=>{},updateValidatedRich(key,label,text,expected){if(notes[key]?.updatedAt!==expected)return {status:'conflict',revision:notes[key]?.updatedAt};noteWrites++;notes[key]={...notes[key],label,text,updatedAt:'r'+(++revision)};return {status:'changed',revision:notes[key].updatedAt};},flush:async()=>true,failure:()=>({failed:false})},
     dailyRecords:{list:async()=>[...days.values()].map(clone),get:async key=>clone(days.get(key)||null),saveBatch:async()=>assert.fail('individual attachment mutation must be conditional'),restoreBatch:async()=>{},verifyCanonical:async row=>{if(failDayRead){failDayRead=false;throw new Error('injected day read-back failure');}if(!equal(days.get(row.date),row))throw new Error('canonical day mismatch');return true;},save:async(row,options)=>{
       if(dayFailure==='successor'){dayFailure='';days.set(date,{...days.get(date),tasks:['newer'],updatedAt:'2026-09-14T00:00:00.000Z'});}
       if(!options||!equal(days.get(row.date),options.expectedCanonical))throw new Error('Daily Record changed before this save.');
@@ -149,6 +149,35 @@ for(const failure of ['saved-days','active-session']){
   assert.throws(()=>Clear.createState({...referenceFixture().statePorts,review:{}}),/review ports are incomplete/);
   assert.throws(()=>attachments.createReferenceCoordinator({...valid,background:{}}),/background ports are incomplete/);
   assert.throws(()=>attachments.createReferenceCoordinator({...valid,live:{}}),/live-source ports are incomplete/);
+}
+
+// Strict flush success is not proof of the intended durable note. These
+// faults leave no reference to the attachment in the note text; a global
+// reference census alone cannot distinguish them from the intended edit.
+for(const [fault,patch] of [
+  ['text',{text:'unexpected persisted text'}],
+  ['revision',{updatedAt:'r100'}],
+  ['links',{links:['successor-note']}]
+]){
+  const t=referenceFixture(),deletion=fixture({referenceOwner:t});
+  let persisted;
+  const flush=t.ports.data.notes.flush;
+  t.ports.data.notes.flush=async options=>{
+    assert.equal(options.strict,true);
+    await flush(options);
+    assert.equal(t.notes.n.text,'','the attempted note rewrite removes the attachment');
+    persisted={...t.notes.n,...patch};
+    t.notes.n=structuredClone(persisted);
+    return true;
+  };
+  await assert.rejects(()=>deletion.library.remove(ID),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');
+  assert.ok(persisted,'the fault ran after strict flush');
+  assert.deepEqual(t.notes.n,persisted,fault+' readback must preserve the observed note rather than adopting it for compensation');
+  assert.deepEqual(t.writes(),{noteWrites:1,dayWrites:0,sessionWrites:0},'refusal must not rewrite the successor or untouched surfaces');
+  assert.equal(deletion.state().metadata,true,'refusal keeps attachment metadata');
+  assert.ok(!deletion.state().order.some(event=>event==='metadata'||event==='sweep'),'refusal prevents logical deletion and physical cleanup');
+  assert.equal(t.days.get('2026-09-13').reflection,t.marker);
+  assert.equal(t.getSession().snapshot.review.reflection,t.marker);
 }
 
 // Compensation must neither adopt successors nor write untouched records.

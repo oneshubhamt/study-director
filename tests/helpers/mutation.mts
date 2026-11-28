@@ -60,6 +60,31 @@ const mutations:readonly Mutation[]=Object.freeze([
     find:'await ports.restore(journal.payload);',replace:'await Promise.resolve();',
     tests:Object.freeze(['tests/integration/library/library-clear.mjs'])
   }),
+  Object.freeze({
+    id:"exact-restore-does-not-owe-publication",file:"source/core/backup-provider.ts",
+    find:"sourceNeeded:mode==='bring-in'||selected.shared===true",replace:"sourceNeeded:true",
+    tests:Object.freeze(["tests/integration/backup/repository-restore.mjs"])
+  }),
+  Object.freeze({
+    id:"shared-restore-owes-publication",file:"source/core/backup-provider.ts",
+    find:"sourceNeeded:mode==='bring-in'||selected.shared===true",replace:"sourceNeeded:mode==='bring-in'",
+    tests:Object.freeze(["tests/integration/backup/sync-shared-base.mjs"])
+  }),
+  Object.freeze({
+    id:"bring-in-owes-publication",file:"source/core/backup-provider.ts",
+    find:"sourceNeeded:mode==='bring-in'||selected.shared===true",replace:"sourceNeeded:selected.shared===true",
+    tests:Object.freeze(["tests/integration/backup/repository-restore.mjs"])
+  }),
+  Object.freeze({
+    id:"note-reference-removal-verifies-persisted-text",file:"source/core/library-clear.ts",
+    find:"String(verified[key]?.text||'')!==value||postimages.has(key)&&!same(verified[key],postimages.get(key))",replace:"false",
+    tests:Object.freeze(["tests/integration/attachments/attachment-deletion.mjs"])
+  }),
+  Object.freeze({
+    id:"note-reference-removal-verifies-whole-record",file:"source/core/library-clear.ts",
+    find:"String(verified[key]?.text||'')!==value||postimages.has(key)&&!same(verified[key],postimages.get(key))",replace:"String(verified[key]?.text||'')!==value",
+    tests:Object.freeze(["tests/integration/attachments/attachment-deletion.mjs"])
+  }),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -119,6 +144,11 @@ const witnesses:Readonly<Record<string,readonly string[]>>={
     "assert.equal(t.state().restored,1,'metadata failure restores journaled state');",
     "assert.equal(t.state().restored,1,'startup replays journaled state');"
   ],
+  "exact-restore-does-not-owe-publication": ["assert.equal(await pendingStore().read('repository-version-qa'),null,'a current non-shared source owes no duplicate publication');"],
+  "shared-restore-owes-publication": ["assert.equal(restoreIntent?.providerId,'drive','shared restore persists the owed publication before returning');"],
+  "bring-in-owes-publication": ["assert.equal((await pendingStore().read('repository-version-qa'))?.providerId,'repository-version-qa','a non-shared bring-in records the source publication it owes');"],
+  "note-reference-removal-verifies-persisted-text": ["await assert.rejects(()=>deletion.library.remove(ID),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
+  "note-reference-removal-verifies-whole-record": ["await assert.rejects(()=>deletion.library.remove(ID),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
   "sync-keeps-the-other-edit": [
     "assert.equal(keptNote.kept.text,'one, A again",
     "assert.equal(held[0].kept.text,older.text,label);"
