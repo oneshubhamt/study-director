@@ -144,6 +144,7 @@
     "tests/helpers/drive-server.mts",
     "tests/helpers/drive-harness.mts",
     "tests/helpers/verification/drive-repository-scale.mts",
-    "tests/helpers/drive-browser.mts"
+    "tests/helpers/drive-browser.mts",
+    "tests/helpers/verification/drive-profile-binding.mts"
   ]
 }
