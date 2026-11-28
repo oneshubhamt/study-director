@@ -162,3 +162,75 @@ console.log(JSON.stringify({status:'PASS',suite:'read-only-data-diagnostics',hea
   for(const row of rows)await journalMeta.remove('libraryClearJournalPayloadPrefix',row.suffix);
 }
 console.log('PASS: original durable journal fence and orphan preservation');
+
+
+// A fresh registered runtime must see the exact rollback data after a rejected
+// prepare, phase update or retirement. Use a separate store per journal family.
+for(const kind of ['restore','library-clear']){
+  const h=createHarness(new Map(),null,{clock});
+  const controls={clock};
+  const runtime=()=>createHarness(h.sharedLocal,h.stores,controls);
+  let current=runtime();
+  const journal=()=>kind==='restore'?current.app.restoreJournal:current.app.libraryClearJournal;
+  const id=kind==='restore'?'restore_qa_restart_failure':'libraryclear_qa_restart_failure';
+  const rollbackText='A'.repeat(512*1024+32);
+  const expected=kind==='restore'?{id,blob:new Blob([rollbackText]),filename:'restart.sdbackup'}:
+    {id,signature:'restart-signature',payload:{planSignature:'restart-signature',savedDays:{},rollbackText}};
+  const verify=async phase=>{
+    const durable=await journal().read();
+    assert.equal(durable?.state.id,id);
+    assert.equal(durable.state.phase,phase);
+    if(kind==='restore')assert.equal(await durable.payload.blob.text(),rollbackText);
+    else {
+      assert.equal(durable.state.chunkCount,2);
+      assert.equal(durable.payload.rollbackText,rollbackText);
+      assert.equal(durable.payload.planSignature,'restart-signature');
+    }
+  };
+  controls.failNextMetaWrite=true;
+  await assert.rejects(journal().prepare(expected),/injected appMeta write failure/u);
+  current=runtime();
+  assert.equal(await journal().read(),null,'rejected journal preparation must leave no rollback evidence');
+  assert.equal(h.stores.meta.size,0);
+  let before=current.idbDurability.strict,normal=current.idbDurability.normal;
+  await journal().prepare(expected);
+  assert.equal(current.idbDurability.strict,before+1,'journal preparation uses a strict transaction');
+  assert.equal(current.idbDurability.normal,normal);
+  current=runtime();
+  await verify('prepared');
+  controls.failNextMetaWrite=true;
+  await assert.rejects(journal().mark(id,'verified'),/injected appMeta write failure/u);
+  current=runtime();
+  await verify('prepared');
+  before=current.idbDurability.strict;normal=current.idbDurability.normal;
+  await journal().mark(id,'verified');
+  assert.equal(current.idbDurability.strict,before+1,'journal phase publication uses a strict transaction');
+  assert.equal(current.idbDurability.normal,normal);
+  current=runtime();
+  await verify('verified');
+  controls.failNextMetaWrite=true;
+  await assert.rejects(journal().clear(id),/injected appMeta write failure/u);
+  current=runtime();
+  await verify('verified');
+  if(kind==='library-clear'){
+    // Change one ASCII byte without changing the size or JSON validity.
+    const chunks=await current.journalMeta.list('libraryClearJournalPayloadPrefix');
+    assert.equal(chunks.length,2);
+    const row=chunks.find(entry=>entry.value.index===0);
+    assert.ok(row);
+    const bytes=new Uint8Array(row.value.bytes),offset=bytes.indexOf(65);
+    assert.ok(offset>=0);
+    bytes[offset]=66;
+    await current.journalMeta.write('libraryClearJournalPayloadPrefix',{...row.value,bytes},{suffix:row.suffix,strict:true});
+    current=runtime();
+    await assert.rejects(journal().read(),/failed integrity verification/u,'same-length rollback corruption must fail closed');
+    assert.equal((await current.journalMeta.list('libraryClearJournalPayloadPrefix')).length,2,'failed verification must retain both recovery chunks');
+    await current.journalMeta.write('libraryClearJournalPayloadPrefix',row.value,{suffix:row.suffix,strict:true});
+    await verify('verified');
+  }
+  await journal().clear(id);
+  current=runtime();
+  assert.equal(await journal().read(),null,'completed journal retirement survives restart');
+  assert.equal(h.stores.meta.size,0);
+}
+console.log('PASS: journal failure/restart, strict publication and same-length multi-chunk corruption');

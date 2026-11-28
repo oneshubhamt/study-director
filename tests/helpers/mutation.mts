@@ -133,6 +133,11 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({"id":"older-backoff-preserves-new-urgent-deadline","file":"source/core/backup-provider.ts","find":"backoff&&!newer&&!preserve?'replace':'earliest'","replace":"backoff?'replace':'earliest'","tests":Object.freeze(["tests/integration/backup/automatic-provider-backup.mjs"])}),
   Object.freeze({"id":"same-revision-failure-enforces-backoff","file":"source/core/backup-provider.ts","find":"backoff&&!newer&&!preserve?'replace':'earliest'","replace":"'earliest'","tests":Object.freeze(["tests/integration/backup/automatic-provider-backup.mjs"])}),
   Object.freeze({"id":"restore-clears-before-renewing-source-intent","file":"source/core/backup-provider.ts","find":"await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){","replace":"if(!automaticNeeded(selected))await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){","tests":Object.freeze(["tests/integration/backup/repository-restore.mjs"])}),
+  Object.freeze({"id":"restore-journal-prepare-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'restore journal preparation aborted'}","replace":"{strict:false,abortMessage:'restore journal preparation aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"library-journal-prepare-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'Library-clear journal preparation aborted'}","replace":"{strict:false,abortMessage:'Library-clear journal preparation aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"restore-journal-phase-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'restore journal phase update aborted'}","replace":"{strict:false,abortMessage:'restore journal phase update aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"library-journal-phase-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'Library-clear journal phase update aborted'}","replace":"{strict:false,abortMessage:'Library-clear journal phase update aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"library-journal-verifies-chunk-digest","file":"source/core/repository-journals.ts","find":"if(await libraryClearDigest(bytes)!==state.sha256)","replace":"if(false)","tests":["tests/integration/storage/repository-journals.mjs"]}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -153,6 +158,11 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "restore-journal-prepare-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal preparation uses a strict transaction');"],
+  "library-journal-prepare-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal preparation uses a strict transaction');"],
+  "restore-journal-phase-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal phase publication uses a strict transaction');"],
+  "library-journal-phase-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal phase publication uses a strict transaction');"],
+  "library-journal-verifies-chunk-digest": ["await assert.rejects(journal().read(),/failed integrity verification/u,'same-length rollback corruption must fail closed');"],
   "foreground-release-rediscovers-new-work": ["assert.equal(attempts,1,'foreground release rediscovers newly owed work even without an existing timer');"],
   "older-backoff-preserves-new-urgent-deadline": ["assert.ok(distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000)","assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000","assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change'","assert.equal(attempts,2,'a new revision must not be delayed by the previous revision backoff');"],
   "same-revision-failure-enforces-backoff": ["assert.equal(attempts,1,'same-revision urgency cannot bypass backoff');","assert.equal(attempts().length,2,'a failed catch-up is tried again within a minute');"],

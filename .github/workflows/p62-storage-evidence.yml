@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/p62-storage-evidence.yml'
       - 'tests/helpers/mutation.mts'
+      - 'tests/integration/storage/repository-journals.mjs'
       - 'tests/helpers/coverage-risk.mts'
       - 'tests/integration/attachments/attachment-deletion.mjs'
       - 'tests/integration/backup/repository-restore.mjs'
@@ -47,6 +48,8 @@ jobs:
             mutants: recovery-hold-awaits-provider-drain recovery-release-resumes-every-provider recovery-failure-still-resumes recovery-host-waits-for-settlement retry-clear-failure-preserves-obligation forget-retires-pending-obligation
           - area: stale-intent-and-receipt
             mutants: exact-restore-retires-superseded-intent unavailable-pending-read-fails-closed pending-receipt-requires-source-revision
+          - area: journal-durability-and-integrity
+            mutants: restore-journal-prepare-is-strict library-journal-prepare-is-strict restore-journal-phase-is-strict library-journal-phase-is-strict library-journal-verifies-chunk-digest
           - area: scheduler-deadline-and-intent-order
             mutants: foreground-release-rediscovers-new-work older-backoff-preserves-new-urgent-deadline same-revision-failure-enforces-backoff restore-clears-before-renewing-source-intent
     steps:
