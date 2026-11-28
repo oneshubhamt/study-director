@@ -21,7 +21,7 @@ const recordCodecs=readScript('source/core/record-codecs.ts');
 // The VM executes the actual repository modules. The record codecs below are
 // deliberately reduced fixture validators, not the production canonical schema.
 // Keep VM exports unknown at the boundary until a caller inspects the capability.
-type FixtureClock=Pick<ReturnType<typeof createFakeClock>,'Date'|'setTimeout'|'clearTimeout'>;
+type FixtureClock=Pick<ReturnType<typeof createFakeClock>,'Date'|'setTimeout'|'clearTimeout'>|{Date:DateConstructor|ReturnType<typeof createFakeClock>['Date'];setTimeout:typeof setTimeout;clearTimeout:typeof clearTimeout};
 type DailyFixtureCodec={
   buildDailyRecordSummary(value:unknown):unknown;
   sanitizeCurrentDailyRecord(value:unknown):unknown;
