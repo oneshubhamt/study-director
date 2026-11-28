@@ -2,13 +2,11 @@ import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {LOCAL_STORAGE_KEYS} from '../../../contracts/data-architecture.mjs';
 import {INDEXED_DB} from '../../../contracts/canonical-identities.mjs';
 import fs from 'node:fs';
-import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
+import {writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
-import {CdpPage,withoutPwaChecks,studyTimezone,devToolsPort} from '../../helpers/browser-harness.mjs';
+import {launchChromium,withoutPwaChecks,studyTimezone} from '../../helpers/browser-harness.mjs';
 
 const root=process.cwd();
 const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
@@ -48,14 +46,7 @@ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0
 const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 
 
-const profile=fs.mkdtempSync(path.join(os.tmpdir(),'qa-storage-health-'));
-const browser=spawn(chromium,[
-  '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
-  '--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'
-],{stdio:['ignore','ignore','pipe']});
-let browserError='';browser.stderr.on('data',chunk=>{browserError+=chunk;});
-const browserPort=await devToolsPort(profile);
-await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'Chromium CDP endpoint'});
+let browser;
 
 const controllableLocalStorage=`(()=>{
   const values=new Map();
@@ -75,13 +66,8 @@ function indexedDbPrelude(mode){
   throw new Error(`Unknown IndexedDB mode: ${mode}`);
 }
 async function createPage({idbMode='normal',allLocalFailures=false,waitForStartup=true}={}){
-  const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?about:blank`,{method:'PUT'})).json();
-  const page=await CdpPage.connect(target.webSocketDebuggerUrl);
-  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Log.enable');
-  await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   const faultSetup=allLocalFailures?`window.__storageFaults.read=true;window.__storageFaults.write=true;`:'';
-  await page.send('Page.addScriptToEvaluateOnNewDocument',{source:`${controllableLocalStorage}${faultSetup}${indexedDbPrelude(idbMode)}window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';`});
-  await page.send('Page.navigate',{url:appUrl});
+  const page=await browser.createPage(appUrl,{timezoneId:studyTimezone(),preload:`${controllableLocalStorage}${faultSetup}${indexedDbPrelude(idbMode)}window.alert=()=>{};window.confirm=()=>true;window.prompt=()=>'';`});
   try{await waitFor(()=>page.evaluate(`!!window.__StorageDebug`),{timeout:10000,label:`${idbMode} debug exposure`});}
   catch(error){
     const diagnostic=await page.evaluate(`({href:location.href,title:document.title,ready:document.readyState,body:(document.body&&document.body.innerText||'').slice(0,500)})`).catch(()=>null);
@@ -95,6 +81,7 @@ async function createPage({idbMode='normal',allLocalFailures=false,waitForStartu
 const results={release:manifest.release,localStorage:{},indexedDB:{},planDraft:{},activeSession:{},recovery:{}};
 const pages=[];
 try{
+  browser=await launchChromium({executable:chromium,profilePrefix:'qa-storage-health-'});
   const page=await createPage();pages.push(page);
   const storageEstimateLabel=await page.evaluate(`document.getElementById('local-storage-use')?.textContent||''`);
   assert.doesNotMatch(storageEstimateLabel,/\bUsing\b/u,'browser-wide usage must not be presented as Study Director data size');
@@ -288,10 +275,5 @@ try{
   writeArtifact('storage-failure-recovery-results.json',JSON.stringify({status:'PASS',...results},null,2)+'\n');
   console.log(JSON.stringify({status:'PASS',...results},null,2));
 }finally{
-  pages.forEach(page=>{try{page.close();}catch{}});
-  browser.kill('SIGTERM');
-  server.close();
-  await sleep(100);
-  if(browser.exitCode===null)browser.kill('SIGKILL');
-  if(browserError&&process.exitCode)console.error(browserError.slice(-4000));
+  try{await browser?.close();}finally{server.close();}
 }
