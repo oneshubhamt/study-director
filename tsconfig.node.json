@@ -133,6 +133,7 @@
     "tests/helpers/verification/note-persistence.mts",
     "tests/helpers/repository-safety-ports.mts",
     "tests/helpers/verification/deletion-recovery.mts",
-    "tests/helpers/verification/strict-durability-boundaries.mts"
+    "tests/helpers/verification/strict-durability-boundaries.mts",
+    "tests/helpers/verification/data-maintenance.mts"
   ]
 }

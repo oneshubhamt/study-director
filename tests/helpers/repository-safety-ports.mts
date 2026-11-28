@@ -30,7 +30,7 @@ export function checkedRepository(...args:Parameters<typeof createHarness>){
   const call=(owner:string,name:string,...values:unknown[])=>method(app[owner],name)(...values);
   const get=async(date:string,options?:{strict?:boolean})=>optionalRecord(await call('dailyRecords','get',date,options));
   const meta=h.repositoryMeta;
-  return {...h,app:{
+  return {...h,rawApp:h.app,app:{
     compatibility:app['compatibility'],
     notes:notesPort(h.app),
     activeSession:{

@@ -17,6 +17,8 @@ on:
       - 'tests/helpers/repository-safety-ports.mts'
       - 'tests/helpers/verification/deletion-recovery.mts'
       - 'tests/helpers/verification/strict-durability-boundaries.mts'
+      - 'tests/helpers/verification/data-maintenance.mts'
+      - 'tests/integration/storage/data-maintenance.mjs'
       - 'tests/integration/storage/strict-durability-boundaries.mjs'
       - 'tests/integration/storage/deletion-recovery.mjs'
       - 'tests/helpers/verification/note-persistence.mts'
@@ -309,6 +311,7 @@ jobs:
           tests/integration/storage/note-persistence.mjs
           tests/integration/storage/deletion-recovery.mjs
           tests/integration/storage/strict-durability-boundaries.mjs
+          tests/integration/storage/data-maintenance.mjs
           tests/integration/backup/current-canonical-roundtrip.mjs
           tests/integration/backup/sync-shared-base.mjs
           tests/architecture/exports/export-hash-boundary.mjs
