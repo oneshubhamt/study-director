@@ -35,7 +35,7 @@ export function notesPort(app:unknown){
   const owner=jsonObject(app)['notes'];
   const call=(name:string,...args:unknown[])=>method(owner,name)(...args);
   const get=(key:string)=>{const value=call('get',key);return value===null?null:view(value);};
-  const status=(value:unknown)=>{const row=jsonObject(value);return {...row,status:jsonString(row['status'])};};
+  const status=(value:unknown):Record<string,unknown>&{status:string}=>{const row=jsonObject(value);return {...row,status:jsonString(row['status'])};};
   return {
     get,getRequired:(key:string)=>required(get(key)),
     load:async()=>call('load'),reloadFresh:async()=>call('reloadFresh'),

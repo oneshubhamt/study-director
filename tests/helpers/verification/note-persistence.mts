@@ -271,7 +271,7 @@ for(const failEpochRead of [false,true]){
     assert.equal(storedNote(stores.area,'botany')?.text,'theirs');assert.equal(storedNote(stores.area,'botany (unsaved copy)')?.text,'mine','the copy is stored by the same transaction');
     assert.equal(required(reports.at(-1))['copyLabel'],'Botany (unsaved copy)');
     const reopened=checkedHarness(new Map(),stores,{clock});await reopened.app.notes.load();
-    assert.equal(reopened.app.notes.getRequired('botany').text,'theirs');assert.equal(reopened.app.notes.get('botany (unsaved copy)').text,'mine','both versions survive a crash after the clash');
+    assert.equal(reopened.app.notes.getRequired('botany').text,'theirs');assert.equal(reopened.app.notes.getRequired('botany (unsaved copy)').text,'mine','both versions survive a crash after the clash');
   }
   { // Edits made while the clash is settled join the copy.
     const {app,stores,clock}=await setup();
@@ -290,7 +290,7 @@ for(const failEpochRead of [false,true]){
     const copies=[...stores.area.values()].map(storedRow).filter(entry=>entry.label.toLowerCase().startsWith('zoology (unsaved copy'));
     assert.equal(copies.length,100);assert.equal(copies.filter(entry=>entry.text==='mine').length,1,'the copy got a stamped name');
     assert.match(required(copies.find(entry=>entry.text==='mine')).label,/^Zoology \(unsaved copy [0-9a-z]{16}\)$/u);
-    assert.equal(storedNote(stores.area,'zoology (unsaved copy 99)').text,'old copy 99','no stored note is replaced');
+    assert.equal(requiredStoredNote(stores.area,'zoology (unsaved copy 99)').text,'old copy 99','no stored note is replaced');
   }
   const oldTrash=noteKeys.trash(noteId('deleted first')),newerTrash=noteKeys.trash(noteId('deleted second'));
   const fill=(stores:Stores,count:number,trash:string[]=[])=>{for(const [index,key] of trash.entries())put(stores,{version:3,key,label:`Deleted ${index}`,text:`deleted ${index}`,updatedAt:`2026-09-15T11:0${index}:00.000Z`});for(let index=0;stores.area.size<count;index+=1)put(stores,noteRow(`filler ${index}`,'x','2026-09-15T11:00:00.000Z'));};
@@ -382,7 +382,7 @@ for(const failEpochRead of [false,true]){
   await app.notes.remove(ecgTrash);
   assert.equal(app.notes.link('heart',pharm,{on:false}).status,'changed');
   assert.equal(app.notes.getRequired('heart').links.length,0,'ids of notes gone for good are dropped');
-  await app.notes.flush({strict:true});assert.equal('links' in storedNote(stores.area,'heart'),false,'an empty bar is not stored');
+  await app.notes.flush({strict:true});assert.equal('links' in requiredStoredNote(stores.area,'heart'),false,'an empty bar is not stored');
   // The record keeps the rules: ids only, never itself, no repeats.
   const record=app.notes.exportPayload()[pharm];
   for(const links of [[pharm],[heart,heart],['heart'],[]])assert.throws(()=>app.notes.normalizePayload({[pharm]:{...record,links}}),/canonical schema/u);

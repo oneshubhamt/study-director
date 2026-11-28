@@ -6,14 +6,15 @@ type Names=StoreName|StoreName[];
 type Mode='readonly'|'readwrite';
 type Range={lower:string;upper:string};
 type Finish=(ok?:boolean,value?:unknown)=>void;
+type KeyFault=Pick<ReadonlySet<string>,'has'>|null;
 type ReadEvent={store:StoreName;key:string;mode:Mode};
 export type StorageControls={
-  failLocal?:boolean;failLocalRemove?:boolean;failLocalGetKeys?:Set<string>;failLocalSetKeys?:Set<string>;failLocalRemoveKeys?:Set<string>;
+  failLocal?:boolean;failLocalRemove?:boolean;failLocalGetKeys?:KeyFault;failLocalSetKeys?:KeyFault;failLocalRemoveKeys?:KeyFault;
   failSessionWrite?:boolean;failNextAreaWrite?:boolean;failNextDailyWrite?:boolean;failNextMetaOnlyWrite?:boolean;
   failNextMetaWrite?:boolean;failNextMaintenanceCompletion?:boolean;failNextMetaRequest?:{operation:string;key:string};
   storageResets?:number;dailyKeyEnumeration?:boolean;
   onTransactionComplete?:(event:{stores:Names;mode:Mode})=>void;onTransactionRead?:(event:ReadEvent)=>void;
-  onStorageRead?:(event:{store:StoreName;kind:'get'|'list';key?:string})=>unknown;onAreaRead?:()=>unknown;onSessionRead?:()=>unknown;
+  onStorageRead?:((event:{store:StoreName;kind:'get'|'list';key?:string})=>unknown)|null;onAreaRead?:(()=>unknown)|null;onSessionRead?:(()=>unknown)|null;
 };
 type Request={result:unknown;error:Error|null;onsuccess:((event:{target:Request})=>void)|null;onerror:(()=>void)|null};
 type Store={
