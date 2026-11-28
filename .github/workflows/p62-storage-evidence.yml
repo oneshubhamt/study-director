@@ -1,0 +1,38 @@
+name: P6.2 storage evidence
+
+on:
+  push:
+    branches: [ts-exp]
+    paths:
+      - '.github/workflows/p62-storage-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - area: restore-publication
+            mutants: exact-restore-does-not-owe-publication shared-restore-owes-publication bring-in-owes-publication
+          - area: note-readback
+            mutants: note-reference-removal-verifies-persisted-text note-reference-removal-verifies-whole-record
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Attribute failures against unchanged controls in disposable copies
+        env:
+          MUTANTS: ${{ matrix.mutants }}
+        run: node tests/helpers/mutation.mjs $MUTANTS
+      - name: Verify checkout unchanged
+        if: always()
+        run: git diff --exit-code && test -z "$(git status --porcelain)"
