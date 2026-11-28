@@ -14,7 +14,7 @@ import {discoverFastTests} from './test-discovery.mts';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const categories=Object.freeze(['unit','integration','architecture'] as const);
 type Category=typeof categories[number];
-type RunResult={relative:string;status:number|null;signal:NodeJS.Signals|null;timedOut:boolean;launchError:Error|null;seconds:number;stdout:string;stderr:string};
+type RunResult={relative:string;status:number|null;signal:NodeJS.Signals|null;timedOut:boolean;launchError:Error|null;seconds:number;stdout:string;stderr:string;matchedReplay:boolean};
 type Failure={file:string;reason:string;stderr:string};
 type RepositoryChange={changed:string[];suspects:string[]};
 const allowed=new Set<string>([...categories,'fast','targeted']);
@@ -30,6 +30,11 @@ for(let index=0;index<argv.length;index++){
 }
 const target=String(positional[0]||'fast');
 if(!allowed.has(target))throw new Error(`Unknown fast-test target: ${target}`);
+const replayFamily=process.env['SD_CASE_FAMILY'];
+const replaySeed=process.env['SD_CASE_SEED'];
+const replayRequested=replayFamily!==undefined||replaySeed!==undefined;
+if(replayRequested&&target!=='targeted')throw new Error('Use the targeted runner for generated-case replay. Clear SD_CASE_FAMILY and SD_CASE_SEED for a full suite.');
+if(replayFamily!==undefined&&!replayFamily.trim())throw new Error('SD_CASE_FAMILY must name a generated case family.');
 const jobs=Number(jobsFlag??process.env['TEST_JOBS']??Math.min(4,os.availableParallelism?.()||os.cpus().length||1));
 if(!Number.isInteger(jobs)||jobs<1)throw new Error(`--jobs must be a positive whole number; got ${jobsFlag??process.env['TEST_JOBS']}`);
 const timeoutMs=Math.max(30000,Number(process.env['TEST_FILE_TIMEOUT_MS'])||180000);
@@ -70,6 +75,8 @@ function isolatedEnvironment(tempRoot:string,relative:string):NodeJS.ProcessEnv{
     XDG_CACHE_HOME:path.join(tempRoot,'cache'),SD_TEST_ARTIFACT_DIR:path.join(tempRoot,'artifacts'),
     SD_ENCRYPTED_TEST:'0',SD_MINIFIED_TEST:'0'
   });
+  delete env['SD_CASE_MATCH_FILE'];
+  if(replayRequested)env['SD_CASE_MATCH_FILE']=path.join(tempRoot,'matched-replay');
   if(process.env['SD_COVERAGE_DIR']){env['SD_COVERAGE_DIR']=path.resolve(process.env['SD_COVERAGE_DIR']);env['SD_COVERAGE_TEST_ID']=relative;}
   for(const directory of [env['HOME']!,env['TMPDIR']!,env['XDG_CACHE_HOME']!,env['SD_TEST_ARTIFACT_DIR']!])fs.mkdirSync(directory,{recursive:true});
   return env;
@@ -111,7 +118,7 @@ function runFile(relative:string):Promise<RunResult>{
       if(settled)return;settled=true;clearTimeout(timer);
       fs.closeSync(stdout);fs.closeSync(stderr);
       const read=(file:string)=>{try{return fs.readFileSync(file,'utf8');}catch{return '';}};
-      const result={relative,status,signal,timedOut,launchError,seconds:(performance.now()-started)/1000,stdout:read(stdoutPath),stderr:read(stderrPath)};
+      const result={relative,status,signal,timedOut,launchError,seconds:(performance.now()-started)/1000,stdout:read(stdoutPath),stderr:read(stderrPath),matchedReplay:replayRequested&&fs.existsSync(path.join(tempRoot,'matched-replay'))};
       fs.rmSync(captureRoot,{recursive:true,force:true});fs.rmSync(tempRoot,{recursive:true,force:true});
       resolve(result);
     };
@@ -171,13 +178,15 @@ if(repositoryChange){
   console.error(`\nFast test modified the repository: ${repositoryChange.changed.slice(0,12).join(', ')}${repositoryChange.changed.length>12?` (+${repositoryChange.changed.length-12} more)`:''}`);
   console.error(`Written by one of: ${repositoryChange.suspects.join(', ')}. Rerun those with --jobs 1 to find which.`);
 }
-if(failures.length||repositoryChange||notRun){
+const unmatchedReplay=replayRequested&&!results.some(result=>result.matchedReplay);
+if(unmatchedReplay)console.error(`No generated case matched family ${replayFamily??'(any)'} and seed ${replaySeed??'(any)'} in the selected files.`);
+if(failures.length||repositoryChange||notRun||unmatchedReplay){
   console.error(`\n${failures.length} of ${results.length} test files failed${notRun?`; ${notRun} not run (${stopReason})`:''}:`);
   for(const failure of failures){
     const tail=failure.stderr.trim().split('\n').slice(-12).join('\n  ');
     console.error(`- ${failure.file}: ${failure.reason}${tail?`\n  ${tail}`:''}`);
   }
-  console.log(JSON.stringify({status:'FAIL',suite:target,tests:files.length,ran:results.length,failed:failures.length,repositoryModified:!!repositoryChange,jobs,seconds},null,2));
+  console.log(JSON.stringify({status:'FAIL',suite:target,tests:files.length,ran:results.length,failed:failures.length,unmatchedReplay,repositoryModified:!!repositoryChange,jobs,seconds},null,2));
   process.exit(1);
 }
 console.log(JSON.stringify({status:'PASS',suite:target,tests:results.length,jobs,seconds,hermetic:true,npmRequired:false},null,2));

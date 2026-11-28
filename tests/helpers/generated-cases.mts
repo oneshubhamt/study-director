@@ -1,4 +1,6 @@
 // Stable generated-case identity and bounded, reproducible input evidence.
+import {writeFileSync} from 'node:fs';
+
 export function seededRandom(seed: number): ()=>number {
   let state=seed>>>0;
   return ()=>{state=(state+0x6D2B79F5)>>>0;let t=state;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return ((t^(t>>>14))>>>0)/4294967296;};
@@ -20,23 +22,33 @@ type CaseTools=ReturnType<typeof tools>;
 type CaseOptions={seed:number;count:number};
 const requestedAtStartup=process.env['SD_CASE_SEED'];
 const familyAtStartup=process.env['SD_CASE_FAMILY'];
-let selectedAtStartup=0;
-if(requestedAtStartup!==undefined)process.once('beforeExit',()=>{
-  if(!selectedAtStartup){console.error(`No generated case matched ${familyAtStartup??'(any family)'} seed ${requestedAtStartup}.`);process.exitCode=1;}
+const replayRequested=requestedAtStartup!==undefined||familyAtStartup!==undefined;
+const matchFile=process.env['SD_CASE_MATCH_FILE'];
+let matchedReplay=false;
+// A direct invocation checks its own selection. The targeted runner combines matches across files.
+if(replayRequested&&!matchFile)process.once('exit',code=>{
+  if(code===0&&!matchedReplay){
+    console.error(`No generated case matched family ${familyAtStartup??'(any)'} and seed ${requestedAtStartup??'(any)'}.`);
+    process.exitCode=1;
+  }
 });
 export async function checkCases(name: string,{seed,count}: CaseOptions,check: (tools: CaseTools,index: number)=>void|Promise<void>): Promise<number>{
   const only=process.env['SD_CASE_SEED'],family=process.env['SD_CASE_FAMILY'];
+  if(family!==undefined&&!family.trim())throw new Error('SD_CASE_FAMILY must name a generated case family.');
   if(family&&family!==name)return 0;
   if(only!==undefined&&(!/^\d+$/u.test(only)||Number(only)>0xffffffff))throw new Error('SD_CASE_SEED must be an unsigned 32-bit integer.');
   if(!Number.isSafeInteger(seed)||seed<0||seed>0xffffffff||!Number.isSafeInteger(count)||count<1)throw new Error('Invalid generated-case range.');
   const cases=Array.from({length:count},(_,index)=>({index,caseSeed:(seed+index)>>>0})).filter(row=>only===undefined||row.caseSeed===Number(only));
   if(family&&only!==undefined&&!cases.length)throw new Error(`Seed ${only} is outside ${name}.`);
   for(const {index,caseSeed} of cases){
-    if(only===requestedAtStartup&&family===familyAtStartup)selectedAtStartup++;
     const draws:number[]=[],inputs:unknown[]=[];
     const random=seededRandom(caseSeed);
     try{
       await check(tools(()=>{const draw=random();draws.push(draw);return draw;},input=>inputs.push(structuredClone(input))),index);
+      if(replayRequested&&!matchedReplay&&only===requestedAtStartup&&family===familyAtStartup){
+        if(matchFile)writeFileSync(matchFile,'matched');
+        matchedReplay=true;
+      }
       if(process.env['SD_CASE_TRACE_SEED']===String(caseSeed)&&(!process.env['SD_CASE_TRACE_FAMILY']||process.env['SD_CASE_TRACE_FAMILY']===name))console.log('CASE-TRACE '+JSON.stringify({family:name,seed:caseSeed,index,draws,inputs}));
     }catch(error){
       const where=`${name}: case ${index+1} of ${count} failed (seed ${caseSeed}; rerun with SD_CASE_FAMILY=${JSON.stringify(name)} SD_CASE_SEED=${caseSeed})`;

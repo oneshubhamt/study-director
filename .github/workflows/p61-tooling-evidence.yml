@@ -109,6 +109,27 @@ jobs:
         with:
           node-version: '26.12.1'
           package-manager-cache: false
+      - name: Require a filtered run to execute a matching case
+        run: |
+          set -euo pipefail
+          export SD_CASE_FAMILY="no matching family"
+          timer=tests/unit/app/timer-engine-logic.mjs
+          canonical=tests/unit/app/canonical.mts
+          runner=tests/helpers/run-category.mjs
+          refuse() {
+            local reason="$1"
+            shift
+            if node "$runner" "$@" > "$RUNNER_TEMP/replay-refusal.log" 2>&1; then
+              cat "$RUNNER_TEMP/replay-refusal.log"
+              exit 1
+            fi
+            grep -F "$reason" "$RUNNER_TEMP/replay-refusal.log"
+          }
+          refuse 'Use the targeted runner' fast
+          refuse 'No generated case matched' targeted "$timer"
+          export SD_CASE_FAMILY="timer rules" SD_CASE_SEED=20261104
+          refuse 'No generated case matched' targeted "$canonical"
+          node "$runner" targeted "$canonical" "$timer"
       - name: Compare actual non-first generated inputs and operation traces
         run: |
           set -euo pipefail
