@@ -102,4 +102,27 @@ function fixture({durableHeartbeatFailure=false,localHeartbeatFailure=false}={})
   assert.equal(f.coordinator.leavePage('pwa-update'),false,'with no update running there is nothing to drop');
 }
 
+// A renewal already waiting on the database when the page leaves does not
+// bring the lease back once it completes (Codex review, PR #32).
+{
+  let localValue=null,interval=null,acquires=0;const renewal=deferred(),gate=deferred(),entered=deferred();
+  const coordinator=mod.createCoordinator(freeze({
+    configuration:freeze({heartbeatMs:1000,leaseMs:5000,lockName:'qa-mutation',storageKey:'qa-lock'}),
+    durable:freeze({acquire:async request=>{acquires++;if(acquires>1)await renewal.promise;return freeze({acquired:true,lease:freeze({...request})});},release:async()=>true}),
+    environment:freeze({AbortController,addStorageListener:()=>{},clearInterval:()=>{interval=null;},locks:null,now:()=>Date.now(),randomIdPart:()=> 'abcdefghij',setInterval:callback=>(interval=callback,1),setTimeout:(callback,delay)=>setTimeout(callback,Math.min(delay,2))}),
+    hooks:freeze({foreignReleased:()=>{},refreshUi:()=>{},scheduleUpdate:()=>{}}),
+    identity:freeze({canMutate:()=>true,status:()=>freeze({tabId:'tabqa123',pageId:'pageqa123',claimId:'claimqa123'})}),
+    local:freeze({getJson:()=>localValue,remove:()=>{localValue=null;return true;},setJson:(_key,value)=>{localValue=value;return true;}})
+  }));
+  const task=coordinator.runExclusive('pwa-update',async()=>{entered.resolve();await gate.promise;});
+  await entered.promise;
+  interval();for(let i=0;i<20&&acquires<2;i++)await new Promise(r=>setTimeout(r,1));
+  assert.equal(acquires,2,'a renewal is waiting on the database');
+  assert.equal(coordinator.leavePage('pwa-update'),true);assert.equal(localValue,null);
+  renewal.resolve();for(let i=0;i<5;i++)await new Promise(r=>setTimeout(r,1));
+  assert.equal(localValue,null,'the renewal that completes after the page left does not write the lease again');
+  assert.equal(coordinator.status().recoveryFault,'','and leaving is not taken for a lost lock');
+  gate.resolve();await task;
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'mutation-coordinator',localMirrorFailClosed:true,durableLeaseFailClosed:true,rollbackRequiresDurableAuthority:true,localMirrorDoesNotBrickApp:true,closedTabLeaseWakes:true,updateLeaseLeavesWithPage:true},null,2));

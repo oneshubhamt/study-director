@@ -84,6 +84,8 @@ registry.define('mutation-coordinator',1,()=>{
       try{result=await durableAcquire(kind,id,{waitRecovery:false});}
       catch(error){loseAuthority(error,{durableProtected:false});return false;}
       if(!result.acquired){loseAuthority(new Error('Another Study Director tab acquired the durable data mutation lease.'),{durableProtected:false});return false;}
+      // A renewal under way when the page left must not bring its lease back.
+      if(active&&active.id===id&&active.leaving)return false;
       try{writeLease(kind,id);return true;}
       catch(error){
         // The durable IndexedDB lease is still ours. Do not release the strongest lock merely
@@ -125,10 +127,11 @@ registry.define('mutation-coordinator',1,()=>{
     // (an update keeps its lease until the reload). Its release waits on the
     // database, which a page being unloaded does not finish, so the lease
     // outlived the page and the reloaded app started read-only, without
-    // today's session (owner, 2026-11-28). The lease goes with the page now;
-    // the database copy runs out by itself.
+    // today's session (owner, 2026-11-28). The lease goes with the page now,
+    // and no renewal writes it again; the database copy runs out by itself.
     function leavePage(kind){
       if(!active||active.kind!==String(kind||''))return false;
+      active.leaving=true;
       if(heartbeat){input.environment.clearInterval(heartbeat);heartbeat=null;}
       clearLease(active.id);return true;
     }
