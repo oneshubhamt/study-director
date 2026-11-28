@@ -12,6 +12,11 @@ on:
       - 'tests/integration/backup/sync-shared-base.mjs'
       - 'tests/browser/exports/exports.mjs'
       - 'tests/browser/storage/storage-failure-recovery.mjs'
+      - 'tests/browser/storage/capacity.mjs'
+      - 'tests/browser/backup/restore-session-safety.mjs'
+      - 'source/core/record-codecs.ts'
+      - 'source/core/backup.ts'
+      - 'tests/integration/backup/current-canonical-roundtrip.mjs'
   workflow_dispatch:
 
 permissions:
@@ -127,3 +132,34 @@ jobs:
             echo "Storage failure replay $attempt"
             time node tests/browser/storage/storage-failure-recovery.mjs
           done
+
+  running-restore:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run check:types
+      - run: node tests/integration/backup/current-canonical-roundtrip.mjs
+      - run: npm run build
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Running restore and material change controls
+        run: |
+          for attempt in 1 2 3; do
+            echo "Running restore safety replay $attempt"
+            time node tests/browser/backup/restore-session-safety.mjs
+          done
+      - name: Maximum-count restore controls
+        run: |
+          time node tests/browser/storage/capacity.mjs
+          time env SD_CAPACITY_INACTIVE=1 node tests/browser/storage/capacity.mjs

@@ -51,6 +51,22 @@ const active=activeSessionCodec.canonicalize({id:'current',type:'activeSession',
   assert.notDeepEqual(activeSessionCodec.restoreStabilityValue(edited),activeSessionCodec.restoreStabilityValue(running),'Review edits remain material to restore reconciliation');
   const paused=activeSessionCodec.canonicalize({...advanced,snapshot:{...advanced.snapshot,timerRuntime:{...advanced.snapshot.timerRuntime,mode:'paused',paused:true,timerState:{...advanced.snapshot.timerRuntime.timerState,pausedStartedMs:Date.parse(later)}}}});
   assert.notDeepEqual(activeSessionCodec.restoreStabilityValue(paused),activeSessionCodec.restoreStabilityValue(running),'pause/resume transitions remain material to restore reconciliation');
+  const otherTask='other',otherState={actual:{seconds:30,record:{activeSeconds:30,status:'completed'}}};
+  const withOther=activeSessionCodec.canonicalize({...running,snapshot:{...running.snapshot,taskState:{...running.snapshot.taskState,[otherTask]:otherState}}});
+  const otherEdited=activeSessionCodec.canonicalize({...withOther,snapshot:{...withOther.snapshot,taskState:{...withOther.snapshot.taskState,[otherTask]:{actual:{seconds:31,record:{activeSeconds:31,status:'completed'}}}}}});
+  assert.ok(withOther&&otherEdited);
+  assert.notDeepEqual(activeSessionCodec.restoreStabilityValue(otherEdited),activeSessionCodec.restoreStabilityValue(withOther),'elapsed evidence on another task is material, not a live tick');
+  const stopped=activeSessionCodec.canonicalize({...paused,snapshot:{...paused.snapshot,taskState:{[taskId]:{...paused.snapshot.taskState[taskId],actual:{...paused.snapshot.taskState[taskId].actual,seconds:96}}}}});
+  assert.ok(stopped);
+  assert.notDeepEqual(activeSessionCodec.restoreStabilityValue(stopped),activeSessionCodec.restoreStabilityValue(paused),'elapsed evidence while paused is material');
+  const completed=activeSessionCodec.canonicalize({...advanced,snapshot:{...advanced.snapshot,taskState:{[taskId]:{...advanced.snapshot.taskState[taskId],actual:{...advanced.snapshot.taskState[taskId].actual,record:{...advanced.snapshot.taskState[taskId].actual.record,status:'completed'}}}}}});
+  assert.ok(completed);
+  assert.notDeepEqual(activeSessionCodec.restoreStabilityValue(completed),activeSessionCodec.restoreStabilityValue(advanced),'completed record status remains material even on the running task');
+  const prior={startedAt:'2026-09-10T19:00:00.000Z',durationSec:600,endedAt:'2026-09-10T19:10:00.000Z',activeSeconds:600,pausedSeconds:0,pauseCount:0};
+  const withPrior=activeSessionCodec.canonicalize({...running,snapshot:{...running.snapshot,taskState:{[taskId]:{...running.snapshot.taskState[taskId],actual:{...running.snapshot.taskState[taskId].actual,record:{...running.snapshot.taskState[taskId].actual.record,sessionCount:2,sessions:[prior,...running.snapshot.taskState[taskId].actual.record.sessions]}}}}}});
+  const priorEdited=activeSessionCodec.canonicalize({...withPrior,snapshot:{...withPrior.snapshot,taskState:{[taskId]:{...withPrior.snapshot.taskState[taskId],actual:{...withPrior.snapshot.taskState[taskId].actual,record:{...withPrior.snapshot.taskState[taskId].actual.record,sessions:[{...prior,activeSeconds:599},...running.snapshot.taskState[taskId].actual.record.sessions]}}}}}});
+  assert.ok(withPrior&&priorEdited);
+  assert.notDeepEqual(activeSessionCodec.restoreStabilityValue(priorEdited),activeSessionCodec.restoreStabilityValue(withPrior),'previous focus-session evidence on the same task remains material');
 }
 const personal={version:2,plans:{draft:'07:00 | 60 | A | Study | Ethics | pages | 10',savedPlans:[{id:'plan-current-qa',label:'Current plan',scheduleText:'08:00 | 60 | B | Study | Polity | pages | 10',createdAt:stamp,updatedAt:stamp}],defaultId:'plan-current-qa'},preferences:{studentName:'Current User',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,soundMode:'minimal'}};
 const blobs=[new Blob(['image bytes'],{type:'image/png'}),new Blob(['%PDF-current bytes'],{type:'application/pdf'}),new Blob(['audio bytes'],{type:'audio/mpeg'})];

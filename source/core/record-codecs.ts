@@ -880,10 +880,12 @@ function materializeDailyRecordSummary(summary:unknown){
   // Keep pause/switch/completion/review/practice/schedule changes visible.
   function restoreStabilityValue(session:unknown){
     const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
+    const timer=clean.snapshot.timerRuntime;
+    const runningTask=clean.status==='active'&&timer?.mode==='running'&&!timer.paused&&timer.taskId===clean.snapshot.currentTaskId?timer.taskId:null;
     const stableTasks=KeyedRecord.create<Readonly<Record<string,unknown>>>();
     for(const [taskId,state] of Object.entries(clean.snapshot.taskState)){
       const {actual,...task}=state;
-      if(!actual){stableTasks[taskId]=freeze({...task});continue;}
+      if(!actual||taskId!==runningTask){stableTasks[taskId]=freeze({...state});continue;}
       const {seconds:_seconds,clock,record,...actualRest}=actual;
       const stableActual:Record<string,unknown>={...actualRest};
       if(clock){
@@ -891,22 +893,23 @@ function materializeDailyRecordSummary(summary:unknown){
         if(Object.keys(stableClock).length)stableActual['clock']=freeze({...stableClock});
       }
       if(record){
-        const {activeSeconds:_activeSeconds,lastEndedAt:_lastEndedAt,status:_status,sessions,...stableRecord}=record;
-        const stableSessions=Array.isArray(sessions)?sessions.map(entry=>{
+        const {activeSeconds:_activeSeconds,lastEndedAt:_lastEndedAt,status,sessions,...stableRecord}=record;
+        const stableSessions=Array.isArray(sessions)?sessions.map((entry,index)=>{
+          if(index!==sessions.length-1)return freeze({...entry});
           const {endedAt:_endedAt,activeSeconds:_activeSeconds,...stable}=entry;
           return freeze({...stable});
         }):null;
-        const projected={...stableRecord,...(stableSessions?{sessions:freeze(stableSessions)}:{})};
+        const stableStatus=status==='in_progress'||status==='partial'?'running':status;
+        const projected={...stableRecord,...(stableStatus===undefined?{}:{status:stableStatus}),...(stableSessions?{sessions:freeze(stableSessions)}:{})};
         if(Object.keys(projected).length)stableActual['record']=freeze(projected);
       }
       stableTasks[taskId]=freeze({...task,...(Object.keys(stableActual).length?{actual:freeze(stableActual)}:{})});
     }
-    const timer=clean.snapshot.timerRuntime;
     let stableTimer:Readonly<Record<string,unknown>>|null=null;
     if(timer){
       const {updatedAt:_timerUpdatedAt,timerState,...timerRest}=timer;
       const {recordedSec:_recordedSec,lastTickMs:_lastTickMs,...stableTimerState}=timerState;
-      stableTimer=freeze({...timerRest,timerState:freeze({...stableTimerState})});
+      stableTimer=freeze({...timerRest,timerState:freeze({...stableTimerState,...(runningTask?{}:{recordedSec:_recordedSec})})});
     }
     const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,taskState:_taskState,timerRuntime:_timerRuntime,...snapshot}=clean.snapshot;
     const {revision:_revision,updatedAt:_updatedAt,snapshot:_snapshot,...sessionRest}=clean;

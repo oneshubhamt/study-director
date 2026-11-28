@@ -121,12 +121,13 @@ try{
     }
     if(!done)throw new Error('Running timer restore did not settle.');if(error)throw error;
     const final=await d.AppData.activeSession.load();
-    return {advanced,beforeSeconds,afterSeconds,reopened,secondTitle,review:StudyDirectorRichText.toPlainText(final.value?.snapshot?.review?.reflection||''),cancelled:value?.cancelled===true};
+    return {advanced,beforeSeconds,afterSeconds,finalSeconds:elapsed(final.value),reopened,secondTitle,review:StudyDirectorRichText.toPlainText(final.value?.snapshot?.review?.reflection||''),cancelled:value?.cancelled===true};
   })()`);
   assert.equal(timerOnlyRestore.advanced,true,'running-session restore never reached a real reconciliation decision');
   assert.ok(timerOnlyRestore.afterSeconds>timerOnlyRestore.beforeSeconds,'running-session fixture did not persist elapsed timer advancement while the decision was open');
   assert.equal(timerOnlyRestore.reopened,false,`timer-only checkpoint advancement opened another reconciliation surface: ${timerOnlyRestore.secondTitle}`);
   assert.equal(timerOnlyRestore.review,'LOCAL DECISION BASE','timer-only restore lost the selected local Active Session');
+  assert.ok(timerOnlyRestore.finalSeconds>=timerOnlyRestore.afterSeconds,'keeping the local session must not lose the elapsed time checkpointed during the decision');
   assert.equal(timerOnlyRestore.cancelled,false,'timer-only restore was cancelled instead of reconciling');
 
   const materialRace=await page1.evaluate(`(async()=>{
@@ -208,7 +209,7 @@ try{
 
   const runtimeErrors=[...(page1?.events||[]),...(page2?.events||[])];
   assert.deepEqual(runtimeErrors,[],'runtime errors occurred: '+runtimeErrors.map(event=>event?.text||JSON.stringify(event)).join('\n'));
-  console.log(JSON.stringify({status:'PASS',release:manifest.release||'RestoreSafetyQA',checks:{activeAndPausedUiBlocked:true,exportPreserved:true,internalRestoreGuard:true,internalClearGuard:true,suspendedAllowed:true,restoredSessionRevisionStable:true,activeSessionReviewStable:true,runningSessionHandoffOperational:true,recoveryBannerTruthful:true,secondaryTakeControlPreserved:true,noRuntimeErrors:true}},null,2));
+  console.log(JSON.stringify({status:'PASS',release:manifest.release||'RestoreSafetyQA',checks:{activeAndPausedUiBlocked:true,exportPreserved:true,internalRestoreGuard:true,internalClearGuard:true,suspendedAllowed:true,restoredSessionRevisionStable:true,activeSessionReviewStable:true,runningSessionHandoffOperational:true,timerOnlyProgressPreserved:true,materialReviewRebuild:true,recoveryBannerTruthful:true,secondaryTakeControlPreserved:true,noRuntimeErrors:true}},null,2));
 }finally{
   try{await browser.close();}catch{}
   server.close();
