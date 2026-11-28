@@ -17,6 +17,8 @@ on:
       - 'tests/helpers/memory-directory.mts'
       - 'tests/helpers/registered-exports.mts'
       - 'tests/helpers/verification/data-architecture.mts'
+      - 'tests/helpers/verification/background-work-contract.mts'
+      - 'tests/helpers/verification/indexeddb-durability.mts'
       - 'tests/helpers/verification/attachment-archive.mts'
       - 'tests/helpers/baseline-roundtrip.mts'
       - 'tests/integration/backup/repository-restore.mjs'
@@ -250,6 +252,8 @@ jobs:
         run: >-
           node tests/helpers/run-category.mjs --jobs 1 targeted
           tests/architecture/storage/data-architecture.mjs
+          tests/architecture/storage/background-work-contract.mjs
+          tests/unit/storage/indexeddb-durability.mjs
           tests/architecture/exports/export-hash-boundary.mjs
           tests/architecture/exports/file-worker-bundle.mjs
           tests/integration/backup/device-folder-layout.mjs

@@ -101,6 +101,8 @@
     "tests/helpers/verification/data-architecture.mts",
     "tests/helpers/baseline-roundtrip.mts",
     "tests/helpers/registered-exports.mts",
-    "tests/helpers/verification/attachment-archive.mts"
+    "tests/helpers/verification/attachment-archive.mts",
+    "tests/helpers/verification/background-work-contract.mts",
+    "tests/helpers/verification/indexeddb-durability.mts"
   ]
 }
