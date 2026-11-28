@@ -3349,6 +3349,12 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   html.printing-note .note-print *{color:#111!important;background:transparent!important;border-color:#bbb!important;box-shadow:none!important;text-shadow:none!important}
   html.printing-note .note-print mark{background:#fff1a8!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
   html.printing-note .note-print img{max-width:100%;height:auto;break-inside:avoid}
+  /* Page breaks: a heading stays with what follows it; an image, a table row,
+     a code block or a quote is not cut in two; a paragraph leaves at least two
+     lines on each page. */
+  html.printing-note .note-print :is(h1,h2,h3,h4,h5,h6){break-after:avoid;page-break-after:avoid}
+  html.printing-note .note-print :is(img,figure,tr,pre,blockquote){break-inside:avoid;page-break-inside:avoid}
+  html.printing-note .note-print :is(p,li){orphans:2;widows:2}
   html.printing-note .note-print :is(.sd-rte-content,.sd-rte-readonly){max-height:none!important;overflow:visible!important}
 }
 /* Library → Data polish. Helper notes keep a straight rule, storage details are

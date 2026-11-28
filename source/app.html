@@ -5363,7 +5363,9 @@ function renderRichTextContent(container,value,emptyText='',label='Rich text'){
   try{return RichTextApi.renderRichText({container,value:canonical,label:String(label||'Rich text'),assets:RichTextAssets,workspaceOverlay:RichTextWorkspaceOverlay,notes:richTextNotes()});}
   catch(error){AppDiagnostics.capture('rich-text.display',error,'warn');container.textContent=plainTextContent(canonical).trim()||String(emptyText||'');return false;}
 }
-// Prints one note, its title and content with images, and nothing else on the page.
+// Prints one note, its title and content with images, and nothing else on the
+// page. The print dialog's Save as PDF makes the note's PDF: it takes the
+// page's title as its file name, so the title is the note's while it prints.
 async function printNote(heading,value){
   for(const old of document.querySelectorAll('.note-print'))old.remove();
   const sheet=document.createElement('article'),title=document.createElement('h1'),body=document.createElement('div');
@@ -5375,8 +5377,9 @@ async function printNote(heading,value){
   const deadline=Date.now()+10000,pending=()=>[...body.querySelectorAll('.sd-rte-image[data-sd-asset-id]')].some(figure=>!['ready','missing'].includes(figure.dataset.sdAssetHydrated));
   while(pending()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,50));
   await Promise.all([...body.querySelectorAll('img')].map(image=>typeof image.decode==='function'?image.decode().catch(()=>{}):null));
-  document.documentElement.classList.add('printing-note');
-  window.addEventListener('afterprint',()=>{document.documentElement.classList.remove('printing-note');sheet.remove();},{once:true});
+  const appTitle=document.title;
+  document.documentElement.classList.add('printing-note');document.title=title.textContent;
+  window.addEventListener('afterprint',()=>{document.documentElement.classList.remove('printing-note');document.title=appTitle;sheet.remove();},{once:true});
   window.print();
   return true;
 }
@@ -7328,7 +7331,8 @@ function updateHeaderInfo(){
   // The Review heading names the day under review (setReviewDateTitle), not
   // the clock's: writing today's date here showed "Sunday · Nov 22" over
   // Saturday's reflection.
-  document.title=`STUDY DIRECTOR · ${monShort} ${dd}`;
+  // A note being printed holds the title: Save as PDF names the file from it.
+  if(!document.documentElement.classList.contains('printing-note'))document.title=`STUDY DIRECTOR · ${monShort} ${dd}`;
   const workBlocks=TASKS.filter(isWorkBlock);
   const totalMin=workBlocks.reduce((a,t)=>a+positiveMinutes(t.dur),0);
   const hrs=Math.round(totalMin/6)/10;

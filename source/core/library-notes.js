@@ -275,7 +275,7 @@ registry.define('library-notes',1,modules=>{
         {id:'library-note-new-inside',label:'New note inside…',hint:'',reason:readOnly||(canCreateNote()?'':'At the note limit'),run:open(()=>createNote())},
         {id:'library-note-versions',label:'Earlier versions…',hint:'',reason:readOnly||(stored?'':unwritten),run:open(()=>showNoteVersions(entry))},
         {id:'library-note-export-one',label:'Export this note',hint:'',reason:readOnly||(stored&&entry.hasNote?'':stored?'The note is empty':unwritten),run:open(()=>exportNoteEntry(entry))},
-        {id:'library-note-print',label:'Print…',hint:'',reason:stored&&entry.hasNote?'':stored?'The note is empty':unwritten,run:open(()=>printNoteEntry(entry))},
+        {id:'library-note-print',label:'Print or save as PDF…',hint:'',reason:stored&&entry.hasNote?'':stored?'The note is empty':unwritten,run:open(()=>printNoteEntry(entry))},
         'separator',
         {id:'library-note-delete',label:entry.ephemeral?'Discard':'Delete',hint:'Del',danger:true,reason:readOnly||(entry.ephemeral||stored?'':state.kind==='parent'?'Delete the notes inside it first':'It is an Area in today’s plan'),run:open(()=>deleteNote())}
       ].filter(action=>!entry.support||SUPPORT_NOTE_ACTIONS.has(action.id));
