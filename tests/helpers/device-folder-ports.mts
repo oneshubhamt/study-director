@@ -21,7 +21,7 @@ function lease(value:unknown){
  return {...row,id:jsonString(row['id']),name:jsonString(row['name']),createdAt:jsonString(row['createdAt']),renews:row['renews']};
 }
 function blob(value:unknown):Blob{assert.ok(value instanceof Blob,'Expected downloaded file bytes');return value;}
-export function folderStoragePort(owner:unknown){
+function storageMethods(owner:unknown){
  const call=(name:string,...args:unknown[])=>method(owner,name)(...args);
  const leases=async(name:string)=>{const row=jsonObject(await call(name));return {...row,items:Array.from(jsonArray(row['items']),lease)};};
  async function download(ref:Identity,options:RangeOptions):Promise<RangeResult>;
@@ -33,10 +33,10 @@ export function folderStoragePort(owner:unknown){
  }
  return {list:async(options:{kind:Kind;freshDigests?:boolean})=>{const row=jsonObject(await call('list',options));return {...row,items:Array.from(jsonArray(row['items']),item)};},
   upload:async(value:unknown)=>item(await call('upload',value)),download,delete:async(ref:Identity)=>call('delete',ref),scope:async()=>jsonString(await call('scope')),
-  beginOperation:(options:unknown)=>folderStoragePort(call('beginOperation',options)),
   beginPublication:async()=>lease(await call('beginPublication')),listPublications:()=>leases('listPublications'),assertPublication:async(value:unknown)=>call('assertPublication',value),renewPublication:async(value:unknown)=>lease(await call('renewPublication',value)),endPublication:async(value:unknown)=>call('endPublication',value),
   beginMaintenance:async()=>lease(await call('beginMaintenance')),listMaintenances:()=>leases('listMaintenances'),assertMaintenance:async(value:unknown)=>call('assertMaintenance',value),renewMaintenance:async(value:unknown)=>lease(await call('renewMaintenance',value)),endMaintenance:async(value:unknown)=>call('endMaintenance',value)};
 }
+export function folderStoragePort(owner:unknown){return {...storageMethods(owner),beginOperation:(options:unknown)=>storageMethods(method(owner,'beginOperation')(options))};}
 export function deviceControllerPort(owner:unknown){
  const call=(name:string,...args:unknown[])=>method(owner,name)(...args);
  return {install:async()=>call('install'),connect:async()=>call('connect'),disconnect:async()=>call('disconnect'),refreshPermission:async()=>jsonObject(await call('refreshPermission')),status:()=>jsonObject(call('status')),

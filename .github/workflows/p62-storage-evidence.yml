@@ -25,6 +25,8 @@ on:
       - 'tests/helpers/device-folder-world.mts'
       - 'tests/helpers/device-folder-ports.mts'
       - 'tests/helpers/verification/device-folder-storage.mts'
+      - 'tests/helpers/verification/device-backup.mts'
+      - 'tests/integration/backup/device-backup.mjs'
       - 'tests/integration/backup/device-folder-storage.mjs'
       - 'tests/helpers/device-folder-world.mjs'
       - 'tests/helpers/verification/device-folder-layout.mts'
@@ -346,6 +348,7 @@ jobs:
           tests/architecture/exports/export-hash-boundary.mjs
           tests/architecture/exports/file-worker-bundle.mjs
           tests/integration/backup/device-folder-layout.mjs
+          tests/integration/backup/device-backup.mjs
           tests/integration/backup/device-folder-storage.mjs
           tests/integration/backup/folder-encryption.mjs
           tests/integration/attachments/attachment-archive.mjs
