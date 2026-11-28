@@ -28,6 +28,8 @@ jobs:
         include:
           - area: restore-publication
             mutants: exact-restore-does-not-owe-publication shared-restore-owes-publication bring-in-owes-publication
+          - area: restore-immutability
+            mutants: restore-preserves-selected-manifest restore-safety-copy-preserves-displaced-records
           - area: note-readback
             mutants: note-reference-removal-verifies-persisted-text note-reference-removal-verifies-whole-record note-reference-removal-verifies-links
           - area: restore-convergence

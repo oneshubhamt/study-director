@@ -105,6 +105,12 @@ const mutations:readonly Mutation[]=Object.freeze([
     find:"other.id===selected.id||!automaticRecoveryDestination(other)",replace:"other.id===selected.id||!providerConnected(other)||!automaticRecoveryDestination(other)",
     tests:Object.freeze(["tests/integration/backup/repository-restore.mjs"])
   }),
+  Object.freeze({id:"restore-preserves-selected-manifest",file:"source/core/backup-provider.ts",
+    find:"const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=file.manifest.checkpoint.checkpointId;assertOrigin?.();",replace:"const digest=await Exports.run('checksum',{value:file.blob},{signal}),checkpointId=retention?.role==='before-restore'&&history[0]?history[0].checkpoint.checkpointId:file.manifest.checkpoint.checkpointId;assertOrigin?.();",
+    tests:Object.freeze(['tests/integration/backup/repository-restore.mjs'])}),
+  Object.freeze({id:"restore-safety-copy-preserves-displaced-records",file:"source/core/managed-repository.ts",
+    find:"for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));",replace:"for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze(retention?.role==='before-restore'?items.map(item=>({...item,reflection:''})):[...items]));",
+    tests:Object.freeze(['tests/integration/backup/repository-restore.mjs'])}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -173,6 +179,8 @@ const witnesses:Readonly<Record<string,readonly string[]>>={
   "exact-restore-identifies-selected-checkpoint": ["assert.deepEqual([providerRestore.convergence.source.status,providerRestore.convergence.source.unchanged,providerRestore.convergence.source.checkpoint],['completed',true,checkpointId]);"],
   "restore-queues-newer-source-state": ["assert.deepEqual([restored.convergence.source.status,restored.convergence.source.retryQueued,restored.convergence.source.scheduled],['pending',true,true],'the restored location owes a backup of the result and has one scheduled');"],
   "restore-queues-disconnected-configured-peer": ["assert.deepEqual(restored.convergence.others.map(row=>[row.id,row.status,row.queued,row.scheduled]),[['peer-qa','pending',true,true]],'the other location is recorded and scheduled too');"],
+  "restore-preserves-selected-manifest": ["assert.deepEqual(new Uint8Array(await selected.blob.arrayBuffer()),originalHistoricalManifestBytes,'restore preserves the selected manifest bytes, including on failure');"],
+  "restore-safety-copy-preserves-displaced-records": ["assert.deepEqual(records,displacedDays,'restoring the protected version recovers the exact displaced Saved Days');"],
   "sync-keeps-the-other-edit": [
     "assert.equal(keptNote.kept.text,'one, A again",
     "assert.equal(held[0].kept.text,older.text,label);"
