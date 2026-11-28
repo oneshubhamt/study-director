@@ -11,6 +11,7 @@ on:
       - 'tests/integration/backup/repository-restore.mjs'
       - 'tests/integration/backup/sync-shared-base.mjs'
       - 'tests/browser/exports/exports.mjs'
+      - 'tests/browser/storage/storage-failure-recovery.mjs'
   workflow_dispatch:
 
 permissions:
@@ -99,3 +100,28 @@ jobs:
           sync-keeps-the-other-edit
           hourly-keeps-only-changed-notes
           clock-jump-rebases-timer-start
+
+  storage-failure:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Five isolated storage failure and recovery journeys
+        run: |
+          for attempt in 1 2 3 4 5; do
+            echo "Storage failure replay $attempt"
+            time node tests/browser/storage/storage-failure-recovery.mjs
+          done

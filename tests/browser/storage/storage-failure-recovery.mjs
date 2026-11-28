@@ -1,4 +1,6 @@
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
+import {LOCAL_STORAGE_KEYS} from '../../../contracts/data-architecture.mjs';
+import {INDEXED_DB} from '../../../contracts/canonical-identities.mjs';
 import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
@@ -14,7 +16,7 @@ if(!fs.existsSync(chromium))throw new Error(`Chromium not found: ${chromium}`);
 const manifest=JSON.parse(readRuntimeSource(path.join(root,'dist/build-manifest.json')));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__StorageDebug=Object.freeze({StorageHealthController,IndexedDb,AppData,PlanDraftEditor,writeLiveDraftNow,saveDayRecord,applySchedule,StartupLifecycle,AppOwnership,readStorageHealth,inspectStorageCapability,refreshStorageFallbackWarning,dismissStorageWarning});\n`;
+const exposure=`window.__StorageDebug=Object.freeze({StorageHealthController,IndexedDb,AppData,PlanDraftEditor,ReviewEditor,goTab,writeLiveDraftNow,saveDayRecord,applySchedule,StartupLifecycle,AppOwnership,readStorageHealth,inspectStorageCapability,refreshStorageFallbackWarning,dismissStorageWarning});\n`;
 let main=readRuntimeSource(path.join(deployment,manifest.main));
 if(!main.includes(marker))throw new Error('Storage-health browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
@@ -187,22 +189,71 @@ try{
   assert.ok(!activeScenario.recoveryIssues.includes('indexedDB'),'IndexedDB issue did not clear after a successful transaction');
   results.activeSession={repositoryConfirmedTimestamp:true,fallbackDoesNotConfirm:true,transactionFailure:true,recovery:true};
 
+  // Save Today requires a verified final Active Session checkpoint. Failing
+  // every IndexedDB transaction refuses admission, not a successful rescue.
+  // Fail only the Saved-Day write in the second case so the real save reaches
+  // its emergency repository path after the canonical preflight succeeds.
+  await page.evaluate(`__StorageDebug.goTab('review')`);
+  await waitFor(()=>page.evaluate(`!document.getElementById('daily-reflection').disabled`),{label:'writable Review after healthy session recovery'});
   const savedDayFallbackScenario=await page.evaluate(`(async()=>{
-    const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms));
-    const original=IDBDatabase.prototype.transaction;
-    IDBDatabase.prototype.transaction=function(){throw new DOMException('forced saved-day transaction failure','InvalidStateError')};
-    d.IndexedDb.clearConnection();__storageFaults.write=false;
-    await d.saveDayRecord();await wait(120);
-    const degraded=d.readStorageHealth();
-    IDBDatabase.prototype.transaction=original;d.IndexedDb.clearConnection();
-    await d.AppData.dailyRecords.summaries();await wait(250);
-    const recovered=d.readStorageHealth();
-    return {savedAt:degraded.lastStudyDataSaveAt,degradedIssues:degraded.issues.map(row=>row.source),recoveredIssues:recovered.issues.map(row=>row.source)};
+    const d=__StorageDebug,store=${JSON.stringify(INDEXED_DB.stores.dailyRecords.name)},key=${JSON.stringify(LOCAL_STORAGE_KEYS.fallbackDailyRecords)};
+    const original=IDBDatabase.prototype.transaction,field=document.getElementById('daily-reflection');
+    const edit=async text=>{
+      field.value=text;d.ReviewEditor.saveReview({strict:true});
+      await d.ReviewEditor.flushPending({strict:true});await d.ReviewEditor.settled();
+      const loaded=await d.AppData.activeSession.load();
+      if(loaded.value?.snapshot?.review?.reflection!==text)throw new Error('Review edit did not reach the canonical Active Session');
+      return loaded.value.date;
+    };
+    const date=await edit('Verified before storage failure');
+    if(!await d.saveDayRecord())throw new Error('Healthy Saved Day fixture failed: '+document.getElementById('save-status').textContent);
+    const before=await d.IndexedDb.get(store,date),priorTime=d.readStorageHealth().lastStudyDataSaveAt;
+    if(before?.reflection!=='Verified before storage failure'||!priorTime)throw new Error('Healthy fixture did not persist the baseline Saved Day');
+    await edit('New reflection preserved by emergency recovery');
+    const rawFallback=()=>localStorage.getItem(key),baselineFallback=rawFallback(),summary=()=>({issues:d.readStorageHealth().issues.map(row=>row.source),savedAt:d.readStorageHealth().lastStudyDataSaveAt,status:document.getElementById('save-status').textContent});
+    let phase='preflight',preflightDailyWrites=0,emergencyDailyWrites=0;
+    IDBDatabase.prototype.transaction=function(names,mode,...args){
+      const savedDayWrite=mode==='readwrite'&&(typeof names==='string'?[names]:Array.from(names||[])).includes(store);
+      if(savedDayWrite){if(phase==='preflight')preflightDailyWrites++;else emergencyDailyWrites++;}
+      if(phase==='preflight'||savedDayWrite)throw new DOMException('forced '+phase+' transaction failure','InvalidStateError');
+      return original.call(this,names,mode,...args);
+    };
+    try{
+      d.IndexedDb.clearConnection();__storageFaults.write=false;
+      const refused=await d.saveDayRecord(),preflight={result:refused,...summary(),fallbackUnchanged:rawFallback()===baselineFallback,attempts:preflightDailyWrites};
+      phase='emergency';d.IndexedDb.clearConnection();
+      const recoveredCheckpoint=await d.writeLiveDraftNow({markChanged:false});
+      if(!recoveredCheckpoint?.ok||recoveredCheckpoint.storage?.idb!==true)throw new Error('Could not re-establish canonical Active Session before the selective fault');
+      const emergencyResult=await d.saveDayRecord(),raw=rawFallback(),rescue=JSON.parse(raw||'[]').find(record=>record.date===date);
+      const emergency={result:emergencyResult,...summary(),attempts:emergencyDailyWrites,rescue,canonical:await d.IndexedDb.get(store,date)};
+      return {date,before,priorTime,preflight,emergency};
+    }finally{IDBDatabase.prototype.transaction=original;d.IndexedDb.clearConnection();}
   })()`);
-  assert.ok(savedDayFallbackScenario.savedAt,'fallback Saved-Day save did not record its confirmed save time');
-  assert.ok(savedDayFallbackScenario.degradedIssues.includes('dailyRecords'),'fallback Saved-Day success incorrectly cleared its degraded-storage issue');
-  assert.ok(!savedDayFallbackScenario.recoveredIssues.includes('dailyRecords'),'Saved-Day issue did not clear after fallback migration recovered');
+  const {date,before,priorTime,preflight,emergency}=savedDayFallbackScenario;
+  assert.equal(preflight.result,false,'preflight refuses a Study Day without a verified final Active Session checkpoint');
+  assert.equal(preflight.attempts,0,'preflight refusal never enters the Saved-Day write');
+  assert.equal(preflight.fallbackUnchanged,true,'preflight refusal writes no Saved-Day rescue');
+  assert.equal(preflight.savedAt,priorTime,'preflight refusal does not advance the confirmed study-save timestamp');
+  assert.match(preflight.status,/Could not save this Study Day/u);
+  assert.ok(preflight.issues.includes('indexedDB'),'preflight fault surfaces the unavailable database');
+  assert.equal(emergency.result,false,'an admitted emergency-only Saved Day is not acknowledged as a canonical save');
+  assert.ok(emergency.attempts>0,'the selective fault reaches the real Saved-Day transaction');
+  assert.match(emergency.status,/recovery copy remains available/u,'emergency storage is distinguished from a canonical save');
+  assert.equal(emergency.savedAt,priorTime,'emergency-only storage does not advance canonical study-save time');
+  assert.equal(emergency.rescue?.reflection,'New reflection preserved by emergency recovery','the newly edited reflection is actually present in rescue bytes');
+  assert.deepEqual(emergency.canonical,before,'the earlier canonical Saved Day survives the failed write');
+  assert.ok(emergency.issues.includes('dailyRecords'),'admitted emergency write retains its degraded-storage issue');
+  await page.evaluate(`__StorageDebug.AppData.dailyRecords.summaries()`);
+  await waitFor(()=>page.evaluate(`(async()=>{
+    const d=__StorageDebug,stored=await d.IndexedDb.get(${JSON.stringify(INDEXED_DB.stores.dailyRecords.name)},${JSON.stringify(date)}),fallback=JSON.parse(localStorage.getItem(${JSON.stringify(LOCAL_STORAGE_KEYS.fallbackDailyRecords)})||'[]');
+    return stored?.reflection===${JSON.stringify(emergency.rescue.reflection)}&&!fallback.some(row=>row.date===${JSON.stringify(date)})&&!d.readStorageHealth().issues.some(row=>row.source==='dailyRecords');
+  })()`),{label:'verified Saved-Day rescue replay and retirement'});
+  const recoveredDay=await page.evaluate(`__StorageDebug.IndexedDb.get(${JSON.stringify(INDEXED_DB.stores.dailyRecords.name)},${JSON.stringify(date)})`);
+  assert.deepEqual(recoveredDay,emergency.rescue,'recovery migrates the exact rescue record, not just its date');
+  assert.equal(await page.evaluate(`__StorageDebug.AppData.dailyRecords.verifyCanonical(${JSON.stringify(recoveredDay)})`),true);
   results.activeSession.savedDayFallbackIssueOwnership=true;
+  results.activeSession.savedDayPreflightRefusal=true;
+  results.activeSession.savedDayRescueExactReplay=true;
 
   for(const mode of ['absent','malformed','throwing','blocked','timeout']){
     const faultPage=await createPage({idbMode:mode,waitForStartup:false});pages.push(faultPage);
