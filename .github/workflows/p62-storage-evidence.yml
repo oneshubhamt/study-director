@@ -22,6 +22,8 @@ on:
       - 'tests/helpers/verification/note-text-checked-once.mts'
       - 'tests/helpers/verification/saved-day-evidence.mts'
       - 'tests/helpers/verification/canonical-storage.mts'
+      - 'tests/helpers/verification/unsupported-data.mts'
+      - 'tests/helpers/verification/profile-scope.mts'
       - 'tests/helpers/verification/generated-runtime.mts'
       - 'tests/helpers/verification/data-architecture.mts'
       - 'tests/helpers/verification/background-work-contract.mts'
@@ -118,6 +120,7 @@ jobs:
         run: |
           time node tests/browser/storage/canonical-storage.mjs
           time node tests/browser/exports/generated-runtime.mjs
+          time node tests/browser/storage/unsupported-data.mjs
 
   risk-coverage:
     if: github.ref == 'refs/heads/ts-exp'
@@ -267,6 +270,7 @@ jobs:
           tests/architecture/storage/background-work-contract.mjs
           tests/unit/storage/indexeddb-durability.mjs
           tests/unit/storage/saved-day-evidence.mjs
+          tests/unit/storage/profile-scope.mjs
           tests/integration/storage/note-text-checked-once.mjs
           tests/unit/storage/pending-review-codec.mjs
           tests/integration/storage/pending-reviews.mjs
