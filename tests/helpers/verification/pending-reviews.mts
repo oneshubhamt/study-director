@@ -16,13 +16,13 @@ function ports(app:unknown){
   const owner=jsonObject(app),reviews=owner['pendingReviews'],preparation=owner['preparationUnits'];
   return {
     pendingReviews:{
-      list:async()=>jsonArray(await method(reviews,'list')()).map(jsonObject),
-      merge:async(values:readonly unknown[])=>jsonArray(await method(reviews,'merge')(values)),
-      replace:async(values:readonly unknown[])=>jsonArray(await method(reviews,'replace')(values)),
-      resolve:async(ids:readonly string[])=>jsonArray(await method(reviews,'resolve')(ids)),
-      readItems:async(ids:readonly string[])=>jsonArray(await method(reviews,'readItems')(ids)).map(value=>value===null?null:jsonObject(value))
+      list:async()=>Array.from(jsonArray(await method(reviews,'list')()),jsonObject),
+      merge:async(values:readonly unknown[])=>Array.from(jsonArray(await method(reviews,'merge')(values))),
+      replace:async(values:readonly unknown[])=>Array.from(jsonArray(await method(reviews,'replace')(values))),
+      resolve:async(ids:readonly string[])=>Array.from(jsonArray(await method(reviews,'resolve')(ids))),
+      readItems:async(ids:readonly string[])=>Array.from(jsonArray(await method(reviews,'readItems')(ids)),value=>value===null?null:jsonObject(value))
     },
-    preparationUnits:{list:async()=>jsonArray(await method(preparation,'list')()).map(jsonObject)}
+    preparationUnits:{list:async()=>Array.from(jsonArray(await method(preparation,'list')()),jsonObject)}
   };
 }
 const api=ports(h.app);
