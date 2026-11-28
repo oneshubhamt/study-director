@@ -3340,7 +3340,9 @@ html,body,.app{max-width:100%;overflow-x:hidden}
 .note-print{display:none}
 @media print{
   @page{margin:16mm}
-  html.printing-note,html.printing-note body{background:#fff!important}
+  /* The app holds the page to the screen's height and clips the rest; a
+     printed note runs on over as many pages as it needs. */
+  html.printing-note,html.printing-note body{background:#fff!important;height:auto!important;min-height:0!important;overflow:visible!important}
   html.printing-note body>*:not(.note-print){display:none!important}
   html.printing-note .note-print{display:block;color:#111;font-family:var(--sd-font-body);font-size:11pt;line-height:1.45}
   html.printing-note .note-print h1{margin:0 0 12pt;font-size:18pt;line-height:1.25}

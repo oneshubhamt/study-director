@@ -7,6 +7,8 @@ import {open,sleep} from '../../helpers/drive-browser.mjs';
 // the first words do not redraw it (the editor stays as it is). The ⋯ menu
 // kept "Nothing written yet", so Print and Export stayed off, and the line
 // kept "Empty". Right-click was right: it reads the list as it stands.
+// A long note prints over as many pages as it needs (owner, 2026-11-28: the
+// app's screen-height page clipped it to one).
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'sd-new-note-'});
 const menuItem=(page,id)=>page.evaluate(`(()=>{const item=document.getElementById(${JSON.stringify(id)});return item?{disabled:item.disabled,hint:item.querySelector('.library-note-menu-hint')?.textContent||''}:null;})()`);
 try{
@@ -33,5 +35,20 @@ try{
     document.getElementById('library-note-print').click();for(let i=0;i<60&&!seen;i++)await new Promise(r=>setTimeout(r,50));
     window.dispatchEvent(new Event('afterprint'));window.print=realPrint;return seen;})()`);
   assert.deepEqual(printed,{title:'Fresh note',text:true},'Print… prints the new note');
-  console.log(JSON.stringify({status:'PASS',suite:'new-note-actions',checks:['top line follows the first words','⋯ offers Print, Export and Earlier versions','Print prints it']}));
+
+  // A long note: its print runs past the first page.
+  const long=Array.from({length:300},(_,index)=>`Paragraph ${index+1}: a line long enough to wrap once on a printed page, about deposits, withdrawals and the dates they were made.`).join('\n\n');
+  const updated=await page.evaluate(`(async()=>{const notes=__PWA6.AppData.notes;const result=notes.update('long note','Long note',${JSON.stringify(long)},'');await notes.flush({strict:true});return JSON.stringify(result);})()`);
+  assert.equal(JSON.parse(updated).status,'changed');
+  await page.evaluate(`(async()=>{await __PWA6.goTab('plan');await __PWA6.goTab('library');__PWA6.LibraryView.showSection('notes');})()`);
+  await waitFor(()=>page.evaluate(`(()=>{const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='long note');if(row)row.click();return document.querySelector('#library-notes-editor .library-notes-editor-title')?.textContent.trim()==='Long note';})()`),{label:'the long note opens'});
+  await page.evaluate(`(()=>{window.__printing=false;window.__realPrint=window.print;window.print=()=>{window.__printing=true;};document.getElementById('library-note-actions').click();})()`);
+  await waitFor(()=>page.evaluate(`!!document.getElementById('library-note-print')&&!document.getElementById('library-note-print').disabled`),{label:'Print… offered'});
+  await page.evaluate(`document.getElementById('library-note-print').click()`);
+  await waitFor(()=>page.evaluate(`window.__printing`),{label:'the long note goes to print'});
+  const pdf=Buffer.from((await page.send('Page.printToPDF',{printBackground:false})).data,'base64').toString('latin1');
+  await page.evaluate(`(()=>{window.dispatchEvent(new Event('afterprint'));window.print=window.__realPrint;})()`);
+  const pages=(pdf.match(/\/Type\s*\/Page[^s]/gu)||[]).length;
+  assert.ok(pages>=3,`the long note prints over several pages (${pages})`);
+  console.log(JSON.stringify({status:'PASS',suite:'note-actions-and-print',checks:['top line follows the first words','⋯ offers Print, Export and Earlier versions','Print prints it',`a long note prints over ${pages} pages`]}));
 }finally{await browser.close();await server.close();}

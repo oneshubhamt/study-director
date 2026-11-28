@@ -13,7 +13,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('session-merge-timer','tests/browser/app/session-merge-timer.mjs',['execute','sync','active-session']),
     test('storage-census','tests/browser/app/storage-census.mjs',['diagnostics','indexeddb','opfs','cache-storage']),
     test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),
-    test('new-note-actions','tests/browser/library/new-note-actions.mjs',['notes','library','print']),
+    test('note-actions-and-print','tests/browser/library/note-actions-and-print.mjs',['notes','library','print']),
     test('note-places','tests/browser/library/note-places.mjs',['notes','library','dialog','context-menu','touch']),
     test('attachment-editor','tests/browser/attachments/attachment-editor.mjs',['attachments','pdf','audio','rich-editor','overlay']),
     test('restore-session-safety','tests/browser/backup/restore-session-safety.mjs',['backup','restore','execute','library','recovery','multi-tab','ownership','reflection']),
