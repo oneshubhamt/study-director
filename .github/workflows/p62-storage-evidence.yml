@@ -43,6 +43,8 @@ jobs:
             mutants: automatic-cadence-keeps-first-change recovery-holds-every-provider pending-receipt-preserves-successor foreground-release-resumes-work
           - area: recovery-and-ownership
             mutants: recovery-resumes-after-unwind recovery-publication-failure-stays-pending mutation-denies-foreign-writer mutation-rejects-stale-claim-revision device-claim-rejects-stale-head
+          - area: recovery-settlement-and-retirement
+            mutants: recovery-hold-awaits-provider-drain recovery-release-resumes-every-provider recovery-failure-still-resumes recovery-host-waits-for-settlement retry-clear-failure-preserves-obligation forget-retires-pending-obligation
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0

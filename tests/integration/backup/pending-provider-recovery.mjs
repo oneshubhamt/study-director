@@ -9,14 +9,14 @@ const marker=()=>({format:'study-director.managed-provider-backup-pending',versi
 // Load complete production modules. Publication is a verified executor port;
 // the repository-checkpoint suite separately exercises the real binary pipeline.
 function fixture({durable=marker(),authorized=true,authorizedFolder=true,both=false,failReads=[]}={}){
-  const clock=createFakeClock(),captures=[],traces=[],readTimes=[];let reads=0,writes=0,clears=0,connectionListener=null,readUnavailable=false,control=true,locked=false,maintenance=null,cleanupPasses=0,publicationHook=noop;
+  const clock=createFakeClock(),captures=[],traces=[],readTimes=[];let reads=0,writes=0,clears=0,connectionListener=null,readUnavailable=false,retirementUnavailable=false,control=true,locked=false,maintenance=null,cleanupPasses=0,publicationHook=noop;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
   for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation'])vm.runInContext(readCoreScript(name),context,{filename:coreScriptPath(name)});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1),background=registry.require('repository-background',1,freeze({lifecycle}));
   const notifications=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>new clock.Date().toISOString(),diagnostics:freeze({capture:(...args)=>captures.push(args)}),storage:freeze({
     read:async()=>{reads++;readTimes.push(clock.now());if(readUnavailable||failReads.includes(reads))throw new Error('Temporary metadata read failure');return durable;},
-    write:async value=>{durable=value;},remove:async()=>{clears++;durable=null;}
+    write:async value=>{durable=value;},remove:async()=>{if(retirementUnavailable)throw new Error('Temporary metadata retirement failure');clears++;durable=null;}
   })}));
   const unexpected=()=>{throw new Error('Unexpected executor in pending lifecycle test');};
   const pipeline=freeze({noteObject:unexpected,readNote:unexpected,readSession:unexpected,createPublication:unexpected,publish:async(_history,options)=>{assert.equal(options.interactive,false,'automatic publication must never prompt for keys');writes++;await publicationHook(options);return {checkpointId:'cp_verified',sourceRevision:new clock.Date().toISOString(),publication:{name:'cp_verified'},manifest:{objects:[]}};},publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase:async()=>null,establishBase:unexpected,verifyObject:unexpected,scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>{cleanupPasses++;return {gcPending:false};},inspectCommit:unexpected,retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:noop});
@@ -26,7 +26,7 @@ function fixture({durable=marker(),authorized=true,authorizedFolder=true,both=fa
   const selected=freeze({id:'google-drive',label:'Google Drive',connected:()=>authorized,backgroundAvailable:()=>authorized,subscribeConnection:fn=>{connectionListener=fn;},repository:freeze({scope:async()=>'repo-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})});
   const folder=freeze({id:'device-folder',label:'Device Folder',connected:()=>authorizedFolder,backgroundAvailable:()=>authorizedFolder,repository:freeze({scope:async()=>'folder-scope',list:async()=>({items:[],overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected})});
   return {clock,runtime,pending,captures,traces,readTimes,register:()=>{runtime.register(selected);if(both)runtime.register(folder);},configure:()=>runtime.configurePendingBackupRetry(freeze(pending)),
-    authorization:value=>{authorized=value;},folderAuthorization:value=>{authorizedFolder=value;runtime.wakeBackground('folder-permission');},control:value=>{control=value;runtime.wakeBackground('ownership');},lock:value=>{locked=value;runtime.wakeBackground('encryption-unlocked');},notify:()=>connectionListener?.(),fail:value=>{readUnavailable=value;},onPublication:fn=>{publicationHook=fn;},
+    authorization:value=>{authorized=value;},folderAuthorization:value=>{authorizedFolder=value;runtime.wakeBackground('folder-permission');},control:value=>{control=value;runtime.wakeBackground('ownership');},lock:value=>{locked=value;runtime.wakeBackground('encryption-unlocked');},notify:()=>connectionListener?.(),fail:value=>{readUnavailable=value;},failRetirement:value=>{retirementUnavailable=value;},onPublication:fn=>{publicationHook=fn;},
     maintenance:()=>{maintenance={repositoryScope:'repo-scope',requestedAt:new clock.Date().toISOString(),nextEligibleAt:new clock.Date(clock.now()+1000).toISOString(),reason:'repository-state'};runtime.configureRepositoryMaintenance(freeze({read:async()=>maintenance,mark:async(_id,value)=>{maintenance={...maintenance,...value};return true;},clear:async()=>{maintenance=null;return true;}}));},
     stats:()=>({reads,writes,clears,durable,maintenance,cleanupPasses}),status:()=>runtime.backgroundStatus().find(row=>row.job==='google-drive convergence')};
 }
@@ -53,6 +53,31 @@ const cases=[];
  assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,0);
  t.onPublication(noop);await tick(t,30000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);
  cases.push('stale publication receipt preserves exact successor and retries');
+}
+{
+ const t=fixture();t.register();t.configure();let rejectPublication,aborted=false;
+ t.onPublication(({signal})=>new Promise((_,reject)=>{rejectPublication=()=>reject(signal.reason);signal.addEventListener('abort',()=>{aborted=true;},{once:true});}));
+ await tick(t,1000);assert.equal(t.status().busy,true);
+ const hold=t.runtime.suspendBackground('managed-recovery');let settled=false;hold.settled.then(()=>{settled=true;});
+ await t.clock.drainMicrotasks(240);
+ assert.equal(aborted,true);
+ assert.equal(settled,false,'a recovery hold must await actual publication release, not merely abort it');
+ assert.ok(t.stats().durable);rejectPublication();await hold.settled;
+ assert.equal(settled,true);assert.ok(t.stats().durable);
+ t.onPublication(noop);hold.release();await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);
+ cases.push('recovery waits for real transfer drain and retries after release');
+}
+{
+ const t=fixture();t.register();t.configure();const original=structuredClone(t.stats().durable);
+ t.failRetirement(true);await tick(t,1000);
+ assert.equal(t.stats().writes,1);assert.deepEqual(t.stats().durable,original);
+ assert.equal(t.status().pending,true,'a failed durable retirement must not complete the retry');
+ assert.equal(t.status().scheduled,true);
+ t.failRetirement(false);await tick(t,30000);
+ assert.equal(t.stats().durable,null);assert.equal(t.stats().clears,1);
+ const restarted=fixture({durable:structuredClone(t.stats().durable)});restarted.register();restarted.configure();await tick(restarted,3600000);
+ assert.equal(restarted.stats().writes,0,'retired intent must not republish after restart');assert.equal(restarted.clock.pending(),0);
+ cases.push('failed durable retirement keeps exact obligation and retires after retry');
 }
 for(const failedRead of [1,2]){
  const t=fixture({failReads:[failedRead]});t.register();t.configure();await tick(t,1000);

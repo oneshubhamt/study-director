@@ -120,6 +120,12 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({id:"mutation-denies-foreign-writer",file:"source/core/mutation-coordinator.ts",find:"if(foreignActive()&&!isRecoveryKind(operationKind))",replace:"if(false)",tests:Object.freeze(["tests/unit/backup/mutation-coordinator.mjs"])}),
   Object.freeze({id:"mutation-rejects-stale-claim-revision",file:"source/core/mutation-coordinator.ts",find:"sameOwner(current,state.origin)&&current.revision===state.origin.revision",replace:"sameOwner(current,state.origin)",tests:Object.freeze(["tests/unit/backup/mutation-coordinator.mjs"])}),
   Object.freeze({id:"device-claim-rejects-stale-head",file:"source/core/backup-provider.ts",find:"if(!head||head.item.id!==expectedCheckpointId)",replace:"if(!head)",tests:Object.freeze(["tests/helpers/session-ownership-claim-regression.mjs"])}),
+  Object.freeze({id:"recovery-hold-awaits-provider-drain",file:"source/core/backup-provider.ts",find:"settled:Promise.all(held.map(row=>row.suspension.settled))",replace:"settled:Promise.resolve([])",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({id:"recovery-release-resumes-every-provider",file:"source/core/backup-provider.ts",find:"for(const row of held)row.coordinator.resume(row.suspension);",replace:"for(const row of held)if(row===held[0])row.coordinator.resume(row.suspension);",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({id:"recovery-failure-still-resumes",file:"source/core/managed-recovery.ts",find:"        });\n      }finally{\n        if(suspension!==null){",replace:"        });\n      }catch(error){suspension=null;throw error;}finally{\n        if(suspension!==null){",tests:Object.freeze(["tests/unit/backup/managed-recovery.mjs"])}),
+  Object.freeze({id:"recovery-host-waits-for-settlement",file:"source/core/backup-recovery-host.ts",find:"await held.settled;",replace:"void held.settled;",tests:Object.freeze(["tests/unit/backup/backup-recovery-host.mjs"])}),
+  Object.freeze({id:"retry-clear-failure-preserves-obligation",file:"source/core/backup-provider.ts",find:"AppDiagnostics.capture('backup-provider.pending-retry-clear',error,'warn');return false;",replace:"AppDiagnostics.capture('backup-provider.pending-retry-clear',error,'warn');return true;",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({id:"forget-retires-pending-obligation",file:"source/core/backup-provider.ts",find:"handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();",replace:"handoffSessions.delete(selected.id);providerBackground(selected).clearAllScheduled();",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -140,6 +146,12 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "recovery-hold-awaits-provider-drain": ["assert.equal(settled,false,'a recovery hold must await actual publication release, not merely abort it');"],
+  "recovery-release-resumes-every-provider": ["assert.equal(t.stats().writes,2,'release permits each owed destination to publish once');"],
+  "recovery-failure-still-resumes": ["assert.deepEqual(h.state(),{suspended:0,activeLock:false},'a failed safety publication releases the hold');"],
+  "recovery-host-waits-for-settlement": ["assert.deepEqual(events.slice(start).filter(event=>['plan-flush','notes-flush','apply'].includes(event)),[],'nothing happens while background work is still running');"],
+  "retry-clear-failure-preserves-obligation": ["assert.equal(t.status().pending,true,'a failed durable retirement must not complete the retry');"],
+  "forget-retires-pending-obligation": ["assert.equal(t.stats().durable,null,'the owed backup is dropped');"],
   "automatic-cadence-keeps-first-change": ["assert.equal(t.publishedAt.length,2);assert.ok(t.publishedAt[1]-start>=20*MINUTE"],
   "recovery-holds-every-provider": ["assert.equal(t.stats().writes,0,'a recovery hold prevents both destinations from publishing');"],
   "pending-receipt-preserves-successor": ["assert.deepEqual(t.stats().durable?.entries[0],newer,'the older receipt must preserve the exact newer durable marker');"],

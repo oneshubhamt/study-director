@@ -51,6 +51,7 @@ function harness(options={}){
   const h=harness({failSafety:true});
   await assert.rejects(()=>h.coordinator.execute(h.spec),/safety failed/);
   assert.equal(h.events.includes('apply'),false,'Local mutation must not begin before the protected safety checkpoint is verified.');
+  assert.deepEqual(h.state(),{suspended:0,activeLock:false},'a failed safety publication releases the hold');
   assert.deepEqual(h.events,['mutation:enter','suspend:restore-version','quiesce:enter','settle:restore-version','quiesce:exit','safety','mutation:exit','resume:s1']);
   assert.deepEqual(h.state(),{suspended:0,activeLock:false});
 }
