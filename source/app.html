@@ -11248,6 +11248,10 @@ function reserveApplicationUpdate(context){
   const block=event=>{if(!released&&!dialog.contains(event.target)){event.preventDefault();event.stopImmediatePropagation();}};
   const blockedEvents=['beforeinput','click','dblclick','keydown','paste','cut','drop','submit','change'];
   for(const type of blockedEvents)window.addEventListener(type,block,true);
+  // The lease is held until the reload and leaves with this page, so the
+  // reloaded app is not read-only and restores today's session.
+  const leave=()=>{AppMutationCoordinator.leavePage('pwa-update');};
+  window.addEventListener('pagehide',leave);
   const validate=()=>{
     if(released||context.signal.aborted||pwaUpdateReservation!==token)return false;
     const now=AppOwnership.status();
@@ -11276,6 +11280,7 @@ function reserveApplicationUpdate(context){
       providerHold?.release();
       context.signal.removeEventListener('abort',releaseSignal);
       for(const type of blockedEvents)window.removeEventListener(type,block,true);
+      window.removeEventListener('pagehide',leave);
       if(pwaUpdateReservation===token){pwaUpdateReservation=null;foregroundChanged();}
       dialog.close();dialog.remove();OwnershipUiProjection.apply();
     }
@@ -12338,6 +12343,10 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     showEmptyIfNeeded:()=>{if(!TASKS.length)showEmpty();},
     openInitialTab:()=>goTab('plan',{source:'startup-initial',history:'none',restoreScroll:false,force:true}),
     restoreActiveSession:async()=>{
+      // A page closed in the middle of a change leaves its lease for up to
+      // 20 s. Restoring waits for it: skipped, today's session stayed away
+      // until the next reload ("No session", owner 2026-11-28).
+      await waitForClosedTabLease();
       const restored=appCanMutate()?await attemptAutoRestoreActiveSession():false;
       await refreshPersistedSessionBadge();
       return restored;

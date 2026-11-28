@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 
-const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'CoreFlowQA QA',updatedAt:new Date().toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
+// Before the first reload the old page leaves its change lock behind, as a
+// page closed in the middle of a change does (or an update before
+// 2026-11-28): today's session still comes back once the lock runs out. It
+// stayed away ("No session") until the next reload.
+const leftLease=`if(sessionStorage.getItem('qa.leftLease')){sessionStorage.removeItem('qa.leftLease');localStorage.setItem('studyDirector.mutationLock.v1',JSON.stringify({version:1,tabId:'qa_closed',pageId:'qa_closed',claimId:'qa_closed',kind:'qa-unfinished',id:'qa',expiresAt:Date.now()+4000}));}`;
+const preload=`${leftLease}(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'CoreFlowQA QA',updatedAt:new Date().toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'study-director-qa-core-'});let page=null;
 const result={status:'PASS',release:server.manifest.release,checks:{}};
 try{
@@ -16,7 +21,10 @@ try{
   const storage=await page.evaluate(`(async()=>({session:(await __PWA6.AppData.activeSession.load()).value,legacyCollection:localStorage.getItem('studyDirector.reflectionDrafts.v1'),records:(await __PWA6.AppData.dailyRecords.list()).length}))()`);
   assert.equal(storage.session.snapshot.review.reflection,'CoreFlowQA durable reflection');assert.equal(storage.legacyCollection,null);assert.equal(storage.records,0);result.checks.planTimerReviewIndexedDb=true;
 
+  await page.evaluate(`sessionStorage.setItem('qa.leftLease','1')`);
   await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after reload'});
+  await waitFor(()=>page.evaluate(`document.documentElement.dataset.studyDirectorReady==='true'&&document.getElementById('status-session')?.dataset.sessionState!=='empty'&&document.documentElement.dataset.studyDirectorUiMutable==='1'`),{label:'today’s session is back once the lock left by the old page runs out',timeout:15000});
+  result.checks.sessionBackAfterLeftLock=true;
   await page.evaluate(`__PWA6.goTab('review')`);await waitFor(()=>page.evaluate(`document.getElementById('daily-reflection').value==='CoreFlowQA durable reflection'`),{label:'reflection reload'});
   const newer=await page.evaluate(`(async()=>{const d=__PWA6,box=document.getElementById('daily-reflection');box.value='Newer active-session review';d.setStudyQuality(5,{save:false});const accepted=d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const session=await d.AppData.activeSession.load();return {accepted,review:session.value?.snapshot?.review||null,record:await d.AppData.dailyRecords.get(d.todayISO())};})()`);
   assert.equal(newer.accepted,true);assert.equal(newer.review.reflection,'Newer active-session review');assert.equal(newer.review.studyQuality,5);assert.equal(newer.record,null);result.checks.reviewPersistsOnlyInActiveSessionUntilSave=true;
