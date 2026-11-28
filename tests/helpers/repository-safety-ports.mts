@@ -71,7 +71,7 @@ export function checkedRepository(...args:Parameters<typeof createHarness>){
     },
     personalPreferences:{
       read:async()=>optionalRecord(await call('personalPreferences','read')),
-      write:async(value:unknown,options?:{assertOrigin?:()=>void})=>call('personalPreferences','write',value,options)
+      write:async(value:unknown,options?:{allowHydrating?:boolean;assertOrigin?:()=>void})=>call('personalPreferences','write',value,options)
     },
     mutationLease:{
       acquire:async(value:unknown)=>call('mutationLease','acquire',value),

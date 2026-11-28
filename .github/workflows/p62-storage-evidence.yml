@@ -18,6 +18,10 @@ on:
       - 'tests/helpers/verification/deletion-recovery.mts'
       - 'tests/helpers/verification/strict-durability-boundaries.mts'
       - 'tests/helpers/verification/data-maintenance.mts'
+      - 'tests/helpers/verification/study-data-mark.mts'
+      - 'tests/integration/storage/study-data-mark.mjs'
+      - 'tests/helpers/verification/indexeddb-topology-retirement.mts'
+      - 'tests/integration/storage/indexeddb-topology-retirement.mjs'
       - 'tests/integration/storage/data-maintenance.mjs'
       - 'tests/integration/storage/strict-durability-boundaries.mjs'
       - 'tests/integration/storage/deletion-recovery.mjs'
@@ -312,6 +316,8 @@ jobs:
           tests/integration/storage/deletion-recovery.mjs
           tests/integration/storage/strict-durability-boundaries.mjs
           tests/integration/storage/data-maintenance.mjs
+          tests/integration/storage/study-data-mark.mjs
+          tests/integration/storage/indexeddb-topology-retirement.mjs
           tests/integration/backup/current-canonical-roundtrip.mjs
           tests/integration/backup/sync-shared-base.mjs
           tests/architecture/exports/export-hash-boundary.mjs

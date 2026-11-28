@@ -134,6 +134,8 @@
     "tests/helpers/repository-safety-ports.mts",
     "tests/helpers/verification/deletion-recovery.mts",
     "tests/helpers/verification/strict-durability-boundaries.mts",
-    "tests/helpers/verification/data-maintenance.mts"
+    "tests/helpers/verification/data-maintenance.mts",
+    "tests/helpers/verification/study-data-mark.mts",
+    "tests/helpers/verification/indexeddb-topology-retirement.mts"
   ]
 }
