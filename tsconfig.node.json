@@ -97,6 +97,10 @@
     "tests/helpers/verification/export-hash-boundary.mts",
     "tests/helpers/verification/file-worker-bundle.mts",
     "tests/helpers/backup-fixture-choices.mts",
-    "tests/helpers/memory-directory.mts"
+    "tests/helpers/memory-directory.mts",
+    "tests/helpers/verification/data-architecture.mts",
+    "tests/helpers/baseline-roundtrip.mts",
+    "tests/helpers/registered-exports.mts",
+    "tests/helpers/verification/attachment-archive.mts"
   ]
 }

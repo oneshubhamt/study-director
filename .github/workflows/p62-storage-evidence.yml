@@ -15,6 +15,10 @@ on:
       - 'tests/integration/attachments/attachment-archive.mjs'
       - 'tests/helpers/backup-fixture-choices.mts'
       - 'tests/helpers/memory-directory.mts'
+      - 'tests/helpers/registered-exports.mts'
+      - 'tests/helpers/verification/data-architecture.mts'
+      - 'tests/helpers/verification/attachment-archive.mts'
+      - 'tests/helpers/baseline-roundtrip.mts'
       - 'tests/integration/backup/repository-restore.mjs'
       - 'tests/integration/backup/sync-shared-base.mjs'
       - 'tests/browser/exports/exports.mjs'
@@ -245,6 +249,7 @@ jobs:
       - name: Exercise stable entry points and directory consumers
         run: >-
           node tests/helpers/run-category.mjs --jobs 1 targeted
+          tests/architecture/storage/data-architecture.mjs
           tests/architecture/exports/export-hash-boundary.mjs
           tests/architecture/exports/file-worker-bundle.mjs
           tests/integration/backup/device-folder-layout.mjs
