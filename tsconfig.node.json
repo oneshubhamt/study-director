@@ -103,6 +103,11 @@
     "tests/helpers/registered-exports.mts",
     "tests/helpers/verification/attachment-archive.mts",
     "tests/helpers/verification/background-work-contract.mts",
-    "tests/helpers/verification/indexeddb-durability.mts"
+    "tests/helpers/verification/indexeddb-durability.mts",
+    "tests/helpers/current-codec-fixture.mts",
+    "tests/helpers/pending-review-codec.mts",
+    "tests/helpers/backup-presentation.mts",
+    "tests/helpers/verification/note-text-checked-once.mts",
+    "tests/helpers/verification/saved-day-evidence.mts"
   ]
 }
