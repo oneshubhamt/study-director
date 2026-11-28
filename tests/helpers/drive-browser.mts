@@ -29,7 +29,7 @@ export const hooks:{before:((request:DriveBrowserRequest)=>unknown|Promise<unkno
 // The ledger lists who uploaded and deleted what, for the steps and on failure.
 export const ledger:string[]=[];
 export async function attachDrive(page:CdpPage,who='?'){
-  page.on('Fetch.requestPaused',params=>{void handleRequest(params).catch(error=>{faults.push('Invalid paused Drive request: '+(error instanceof Error?error.message:String(error)));});});
+  page.on('Fetch.requestPaused',params=>{void handleRequest(params).catch(async(error:unknown)=>{faults.push('Invalid paused Drive request: '+(error instanceof Error?error.message:String(error)));if(typeof params['requestId']==='string')await page.send('Fetch.failRequest',{requestId:params['requestId'],errorReason:'Failed'}).catch(()=>{});});});
   async function handleRequest(params:Record<string,unknown>){
     const requestId=jsonString(params['requestId']),raw=jsonObject(params['request']);
     const request={url:jsonString(raw['url']),method:jsonString(raw['method']),headers:raw['headers']===undefined?{}:Object.fromEntries(Object.entries(jsonObject(raw['headers'])).map(([name,value])=>[name,jsonString(value)])),postDataEntries:raw['postDataEntries']===undefined?undefined:jsonArray(raw['postDataEntries']).map(value=>jsonObject(value)),postData:raw['postData']===undefined?undefined:jsonString(raw['postData'])};
@@ -41,7 +41,7 @@ export async function attachDrive(page:CdpPage,who='?'){
       const body=bytes===null?undefined:request.method==='PUT'||/multipart/u.test(type)?new Blob([bytes]):bytes.toString('utf8');
       if(hooks.before&&await hooks.before({who,method:request.method,url:request.url,text:bytes?bytes.subarray(0,4096).toString('latin1'):''})==='fail'){await page.send('Fetch.failRequest',{requestId,errorReason:'InternetDisconnected'});return;}
       const target=drive.state.files.get(decodeURIComponent(required(new URL(request.url).pathname.split('/').at(-1))));
-      if(request.method==='DELETE')ledger.push(`${new Date().toISOString().slice(11,23)} ${who} DELETE ${target?.name||'?'} ${target?.appProperties?.studyDirectorRepositoryKind||''}`);
+      if(request.method==='DELETE')ledger.push(`${new Date().toISOString().slice(11,23)} ${who} DELETE ${target?.name||'?'} ${target?.appProperties['studyDirectorRepositoryKind']||''}`);
       const response=await drive.fetch(request.url,{method:request.method,headers,...(body===undefined?{}:{body})});
       if(request.method==='POST'||request.method==='PUT'){try{const raw:unknown=await response.clone().json();const meta=jsonObject(raw);const properties=meta['appProperties']===undefined?{}:jsonObject(meta['appProperties']);if(meta['name'])ledger.push(`${new Date().toISOString().slice(11,23)} ${who} ${request.method} ${String(meta['id'])} ${String(meta['name'])} ${String(properties['studyDirectorRepositoryKind']||'')} ${String(properties['studyDirectorDevice']||properties['studyDirectorRepositoryDevice']||'')}`);}catch{}}
       const out=Buffer.from(await response.arrayBuffer());
@@ -74,7 +74,7 @@ export async function connect(page:CdpPage,label:string){
   assert.equal(connected,true,`${label}: Drive connects (${connected})`);
 }
 // Upload or cleanup markers on Drive: a device is saving or tidying up.
-export const markers=()=>[...drive.state.files.values()].some(file=>['publication','maintenance'].includes(file.appProperties?.studyDirectorRepositoryKind));
+export const markers=()=>[...drive.state.files.values()].some(file=>['publication','maintenance'].includes(file.appProperties['studyDirectorRepositoryKind']??''));
 export const uploadsBy=(who:string)=>ledger.filter(line=>line.split(' ')[1]===who&&/ POST \S+ cp_\S+\.sdcommit /u.test(line)).length;
 export const waiting=(page:CdpPage)=>page.evaluate(`__PWA6.BackupProviderRuntime.automaticWaiting()`);
 export const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
