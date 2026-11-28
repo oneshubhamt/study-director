@@ -41,6 +41,7 @@ function harness(options={}){
   assert.equal(result.cancelled,false);
   assert.equal(result.managedRecovery.safety.checkpointId,CHECKPOINT);
   assert.equal(result.managedRecovery.present.status,'completed');
+  assert.deepEqual(h.state(),{suspended:0,activeLock:false},'managed recovery releases its suspension and mutation lock');
   assert.deepEqual(h.events,['mutation:enter','suspend:restore-version','quiesce:enter','settle:restore-version','quiesce:exit','safety','quiesce:enter','settle:restore-version','apply','rebuild:restore-version','quiesce:exit','present','mutation:exit','resume:s1']);
   assert.deepEqual(h.state(),{suspended:0,activeLock:false});
   assert.equal(h.coordinator.status().active,false);

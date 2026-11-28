@@ -94,6 +94,26 @@ function lifetime({acquire,locks=null,mirrorFailure=false,release}={}){
   }));
   return {coordinator,requests,releases,mirrors,timers,get local(){return localValue;},set local(value){localValue=value;},tick:()=>{assert.ok(interval);interval();},advance:ms=>{now+=ms;},change:({sameClaim=false,canMutate=true}={})=>{revision+=2;if(!sameClaim)claimId='claim_b';writable=canMutate;}};
 }
+// A foreign reservation is a real admission barrier, not just a UI flag.
+{
+ const f=lifetime(),foreign={version:1,tabId:'other',pageId:'other',claimId:'other',id:'mutation_other',expiresAt:110000};f.local=foreign;
+ let entered=false,error;
+ try{await f.coordinator.runExclusive('clear-library',()=>{entered=true;});}catch(failure){error=failure;}
+ assert.equal(entered,false,'a competing foreign lease must deny entry');
+ assert.match(String(error?.message||''),/Another Study Director tab/u);
+ assert.deepEqual(f.requests,[],'no durable write may be attempted under a competing mirror');
+ assert.deepEqual(f.local,foreign);
+ f.local=null;await f.coordinator.runExclusive('clear-library',()=>{entered=true;});
+ assert.equal(entered,true,'an eligible successor can write after release');
+}
+// A stale revision within an unchanged claim is still stale authority.
+{
+ const gate=deferred(),f=lifetime({acquire:()=>gate.promise});let entered=false;
+ const task=f.coordinator.runExclusive('clear-library',()=>{entered=true;}).catch(error=>error);
+ await drain();f.change({sameClaim:true});gate.resolve({acquired:true});const error=await task;
+ assert.equal(entered,false,'an old revision cannot borrow the same claim after asynchronous admission');
+ assert.equal(lost(error),true);assert.deepEqual(f.mirrors,[]);assert.equal(f.releases.length,1);
+}
 // Baseline reproducer: the real checked owner must not enter the operation
 // after its durable acquire resolves for a former ownership claim.
 for(const sameClaim of [false,true]){

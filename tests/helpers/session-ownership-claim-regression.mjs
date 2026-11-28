@@ -88,7 +88,12 @@ assert.equal(again.claim.observedRevision,55);assert.equal(again.claim.handoffTo
 await assert.rejects(()=>b.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,handoffToken:HANDOFF_TOKEN,revision:51}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','the stale former owner must not reclaim from old evidence');
 await assert.rejects(()=>b.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:60,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,handoffToken:HANDOFF_TOKEN,revision:61}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','another device\'s claim blocks a claim that observed a different owner, whatever the revision');
 headId=HEAD_B;
-await assert.rejects(()=>a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,handoffToken:HANDOFF_TOKEN,revision:52}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','a takeover must fail if Drive advances after the verified head was observed but before the claim linearizes');
+
+const claimBytesBefore=await Promise.all([...files].map(async([id,file])=>[id,await file.blob.text()]));
+let staleHead;
+try{await a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,handoffToken:HANDOFF_TOKEN,revision:52});}catch(error){staleHead=error;}
+assert.equal(staleHead?.code,'REPOSITORY_SESSION_CLAIM_STALE','a verified but superseded head cannot authorize another claim');
+assert.deepEqual(await Promise.all([...files].map(async([id,file])=>[id,await file.blob.text()])),claimBytesBefore,'stale head refusal preserves the claim bytes');
 assert.equal(await a.releaseSessionClaim('google-drive',claimed.claim),false,'only the newest claim can be compensated');
 assert.equal(await a.releaseSessionClaim('google-drive',again.claim),true,'a failed local takeover can restore the previous owner with a higher epoch');
 const rolledBack=await b.readSessionClaim('google-drive');assert.equal(rolledBack.handoffToken,OTHER_TOKEN,'compensation retains the exact attempt identity');assert.equal(rolledBack.state,'owned');assert.equal(rolledBack.applies,true);assert.equal(rolledBack.ownedHere,true);assert.equal(rolledBack.revision,55);

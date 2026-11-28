@@ -32,6 +32,28 @@ function fixture({durable=marker(),authorized=true,authorizedFolder=true,both=fa
 }
 async function tick(t,ms){await t.clock.advance(ms);await t.clock.drainMicrotasks(240);}
 const cases=[];
+{
+ const initial={...marker(),entries:[...marker().entries,{providerId:'device-folder',requestedAt:'2026-09-01T00:00:00.000Z',sourceRevision:'2026-09-01T00:00:00.000Z'}]};
+ const t=fixture({durable:initial,both:true});t.register();t.configure();const hold=t.runtime.suspendBackground('managed-recovery');await hold.settled;
+ await tick(t,3600000);
+ assert.equal(t.stats().writes,0,'a recovery hold prevents both destinations from publishing');
+ assert.equal(t.stats().durable.entries.length,2,'both destinations remain owed while held');
+ assert.equal(t.clock.pending(),0,'neither destination retains an armed timer under the hold');
+ assert.equal(hold.release(),true);assert.equal(hold.release(),false);
+ await tick(t,1000);await tick(t,15000);await tick(t,30000);
+ assert.equal(t.stats().writes,2,'release permits each owed destination to publish once');
+ assert.equal(t.stats().durable,null);await tick(t,3600000);assert.equal(t.stats().writes,2);assert.equal(t.clock.pending(),0);
+ cases.push('one recovery hold suspends both locations and releases both once');
+}
+{
+ const t=fixture();t.register();t.configure();let newer;
+ t.onPublication(async()=>{await t.pending.mark('google-drive');newer=await t.pending.read('google-drive');});
+ await tick(t,1000);
+ assert.deepEqual(t.stats().durable?.entries[0],newer,'the older receipt must preserve the exact newer durable marker');
+ assert.equal(t.stats().writes,1);assert.equal(t.stats().clears,0);
+ t.onPublication(noop);await tick(t,30000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);
+ cases.push('stale publication receipt preserves exact successor and retries');
+}
 for(const failedRead of [1,2]){
  const t=fixture({failReads:[failedRead]});t.register();t.configure();await tick(t,1000);
  assert.equal(t.stats().writes,0);assert.equal(t.stats().clears,0);assert.ok(t.stats().durable);assert.equal(t.status().pending,true);assert.equal(t.status().scheduled,true);assert.ok(t.traces.includes('fail'));

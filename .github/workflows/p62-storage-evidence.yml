@@ -39,6 +39,10 @@ jobs:
             mutants: note-reference-removal-verifies-persisted-text note-reference-removal-verifies-whole-record note-reference-removal-verifies-links
           - area: restore-convergence
             mutants: exact-restore-identifies-selected-checkpoint restore-queues-newer-source-state restore-queues-disconnected-configured-peer
+          - area: scheduler-and-pending
+            mutants: automatic-cadence-keeps-first-change recovery-holds-every-provider pending-receipt-preserves-successor foreground-release-resumes-work
+          - area: recovery-and-ownership
+            mutants: recovery-resumes-after-unwind recovery-publication-failure-stays-pending mutation-denies-foreign-writer mutation-rejects-stale-claim-revision device-claim-rejects-stale-head
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0

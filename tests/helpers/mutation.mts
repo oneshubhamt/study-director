@@ -111,6 +111,15 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({id:"restore-safety-copy-preserves-displaced-records",file:"source/core/managed-repository.ts",
     find:"for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));",replace:"for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze(retention?.role==='before-restore'?items.map(item=>({...item,reflection:''})):[...items]));",
     tests:Object.freeze(['tests/integration/backup/repository-restore.mjs'])}),
+  Object.freeze({id:"automatic-cadence-keeps-first-change",file:"source/core/backup-provider.ts",find:"if(!Number.isFinite(state.waitingSince))state.waitingSince=now;",replace:"state.waitingSince=now;",tests:Object.freeze(["tests/integration/backup/automatic-provider-backup.mjs"])}),
+  Object.freeze({id:"recovery-holds-every-provider",file:"source/core/backup-provider.ts",find:"const held=[...providers.values()].filter((selected:Provider)=>selected.repository).map((selected:Provider)=>{",replace:"const held=[...providers.values()].filter((selected:Provider)=>selected.repository&&selected.id!=='device-folder').map((selected:Provider)=>{",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({id:"pending-receipt-preserves-successor",file:"source/core/backup-recovery-host.ts",find:"if(expected!==undefined&&JSON.stringify(pending)!==JSON.stringify(expected))",replace:"if(false)",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({id:"foreground-release-resumes-work",file:"source/core/repository-background.ts",find:"foreground=null;resolveRelease?.();resumeTimers();wake('foreground');",replace:"foreground=null;resolveRelease?.();",tests:Object.freeze(["tests/unit/backup/repository-background.mjs"])}),
+  Object.freeze({id:"recovery-resumes-after-unwind",file:"source/core/managed-recovery.ts",find:"await input.automaticBackup.resume(suspension);",replace:"await Promise.resolve(suspension);",tests:Object.freeze(["tests/unit/backup/managed-recovery.mjs"])}),
+  Object.freeze({id:"recovery-publication-failure-stays-pending",file:"source/core/managed-recovery.ts",find:"present=freeze({status:'pending',reason:String((error",replace:"present=freeze({status:'completed',reason:String((error",tests:Object.freeze(["tests/unit/backup/managed-recovery.mjs"])}),
+  Object.freeze({id:"mutation-denies-foreign-writer",file:"source/core/mutation-coordinator.ts",find:"if(foreignActive()&&!isRecoveryKind(operationKind))",replace:"if(false)",tests:Object.freeze(["tests/unit/backup/mutation-coordinator.mjs"])}),
+  Object.freeze({id:"mutation-rejects-stale-claim-revision",file:"source/core/mutation-coordinator.ts",find:"sameOwner(current,state.origin)&&current.revision===state.origin.revision",replace:"sameOwner(current,state.origin)",tests:Object.freeze(["tests/unit/backup/mutation-coordinator.mjs"])}),
+  Object.freeze({id:"device-claim-rejects-stale-head",file:"source/core/backup-provider.ts",find:"if(!head||head.item.id!==expectedCheckpointId)",replace:"if(!head)",tests:Object.freeze(["tests/helpers/session-ownership-claim-regression.mjs"])}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -131,6 +140,15 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "automatic-cadence-keeps-first-change": ["assert.equal(t.publishedAt.length,2);assert.ok(t.publishedAt[1]-start>=20*MINUTE"],
+  "recovery-holds-every-provider": ["assert.equal(t.stats().writes,0,'a recovery hold prevents both destinations from publishing');"],
+  "pending-receipt-preserves-successor": ["assert.deepEqual(t.stats().durable?.entries[0],newer,'the older receipt must preserve the exact newer durable marker');"],
+  "foreground-release-resumes-work": ["assert.equal(fired,1,'deferred background work must resume after foreground release');"],
+  "recovery-resumes-after-unwind": ["assert.deepEqual(h.state(),{suspended:0,activeLock:false},'managed recovery releases its suspension and mutation lock');"],
+  "recovery-publication-failure-stays-pending": ["assert.equal(result.managedRecovery.present.status,'pending','Post-operation repository failure must not undo an already verified local restore.');"],
+  "mutation-denies-foreign-writer": ["assert.equal(entered,false,'a competing foreign lease must deny entry');"],
+  "mutation-rejects-stale-claim-revision": ["assert.equal(entered,false,'an old revision cannot borrow the same claim after asynchronous admission');"],
+  "device-claim-rejects-stale-head": ["assert.equal(staleHead?.code,'REPOSITORY_SESSION_CLAIM_STALE','a verified but superseded head cannot authorize another claim');"],
   "canonical-sorts-object-keys": [
     "assert.equal(canonical.signature(original),"
   ],
