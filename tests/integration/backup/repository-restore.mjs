@@ -509,8 +509,10 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   // After a restore, every location owes a backup of the result. The restored location and each other location that backs up on its own are
   // recorded as owing one and scheduled; until every such record is written, the restore reads as pending, never completed.
   {
-    const owed=new Map(),failing=new Set();
-    runtime.providers.configurePendingBackupRetry(freeze({read:async id=>owed.get(id)||null,mark:async id=>{if(failing.has(id))return false;owed.set(id,freeze({providerId:id}));return true;},clear:async id=>{owed.delete(id);return true;}}));
+    const owed=new Map(),failing=new Set(),sourceIntentActions=[];
+    const sourceId='device-folder-engine';
+    owed.set(sourceId,freeze({providerId:sourceId,requestedAt:'2026-01-01T00:00:00.000Z'}));
+    runtime.providers.configurePendingBackupRetry(freeze({read:async id=>owed.get(id)||null,mark:async id=>{if(failing.has(id))return false;if(id===sourceId)sourceIntentActions.push('mark');owed.set(id,freeze({providerId:id}));return true;},clear:async id=>{if(id===sourceId)sourceIntentActions.push('clear');owed.delete(id);return true;}}));
     // The Device Folder last backed up before the newest change, so it still owes one after the restore.
     runtime.providers.configureAutomaticBackup(freeze({covered:id=>id==='device-folder-engine'?'2026-01-01T00:00:00.000Z':'',current:()=>'2099-01-05T00:00:00.000Z'}));
     assert.equal(runtime.providers.register(freeze({id:'peer-qa',label:'Peer QA',connected:()=>false,automaticConfigured:()=>true,repository:providerTransport})),true);
@@ -520,6 +522,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
       assert.deepEqual([restored.convergence.source.status,restored.convergence.source.retryQueued,restored.convergence.source.scheduled],['pending',true,true],'the restored location owes a backup of the result and has one scheduled');
       assert.deepEqual(restored.convergence.others.map(row=>[row.id,row.status,row.queued,row.scheduled]),[['peer-qa','pending',true,true]],'the other location is recorded and scheduled too');
       assert.deepEqual([...owed.keys()].sort(),['device-folder-engine','peer-qa'],'both obligations are written down');
+      assert.deepEqual(sourceIntentActions,['clear','mark'],'source restore replaces the old obligation before recording the new one');
       failing.add('peer-qa');owed.clear();
       const unrecorded=await runtime.providers.restoreRepositoryProviderVersion('device-folder-engine',{checkpointId:published.checkpointId,confirmed:true});
       assert.equal(unrecorded.convergence.status,'pending','a peer whose obligation could not be written keeps the restore pending');

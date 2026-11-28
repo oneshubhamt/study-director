@@ -129,6 +129,10 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({"id":"exact-restore-retires-superseded-intent","file":"source/core/backup-provider.ts","find":"await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){","replace":"await Promise.resolve();\n      if(automaticNeeded(selected)){","tests":Object.freeze(["tests/integration/backup/repository-restore.mjs"])}),
   Object.freeze({"id":"unavailable-pending-read-fails-closed","file":"source/core/backup-recovery-host.ts","find":"catch(error){input.diagnostics.capture('backup.pending-provider-read',error,'error');throw error;}","replace":"catch(error){input.diagnostics.capture('backup.pending-provider-read',error,'error');return normalizePending(null);}","tests":Object.freeze(["tests/unit/backup/backup-recovery-host.mjs"])}),
   Object.freeze({"id":"pending-receipt-requires-source-revision","file":"source/core/backup-provider.ts","find":"return !Number.isFinite(required)||Number.isFinite(completed)&&completed>=required;","replace":"return true;","tests":Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({"id":"foreground-release-rediscovers-new-work","file":"source/core/repository-background.ts","find":"foreground=null;resolveRelease?.();resumeTimers();wake('foreground');","replace":"foreground=null;resolveRelease?.();resumeTimers();","tests":Object.freeze(["tests/unit/backup/repository-background.mjs"])}),
+  Object.freeze({"id":"older-backoff-preserves-new-urgent-deadline","file":"source/core/backup-provider.ts","find":"backoff&&!newer&&!preserve?'replace':'earliest'","replace":"backoff?'replace':'earliest'","tests":Object.freeze(["tests/integration/backup/automatic-provider-backup.mjs"])}),
+  Object.freeze({"id":"same-revision-failure-enforces-backoff","file":"source/core/backup-provider.ts","find":"backoff&&!newer&&!preserve?'replace':'earliest'","replace":"'earliest'","tests":Object.freeze(["tests/integration/backup/automatic-provider-backup.mjs"])}),
+  Object.freeze({"id":"restore-clears-before-renewing-source-intent","file":"source/core/backup-provider.ts","find":"await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){","replace":"if(!automaticNeeded(selected))await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){","tests":Object.freeze(["tests/integration/backup/repository-restore.mjs"])}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -149,6 +153,10 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "foreground-release-rediscovers-new-work": ["assert.equal(attempts,1,'foreground release rediscovers newly owed work even without an existing timer');"],
+  "older-backoff-preserves-new-urgent-deadline": ["assert.ok(distinctReads.some(at=>at>changedAt&&at<=changedAt+t.policy.automaticUrgentMs+1000)","assert.ok(Number.isFinite(dueAt)&&dueAt<=t.clock.now()+t.policy.automaticUrgentMs+1000","assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').reason,'important-change'","assert.equal(attempts,2,'a new revision must not be delayed by the previous revision backoff');"],
+  "same-revision-failure-enforces-backoff": ["assert.equal(attempts,1,'same-revision urgency cannot bypass backoff');","assert.equal(attempts().length,2,'a failed catch-up is tried again within a minute');"],
+  "restore-clears-before-renewing-source-intent": ["assert.deepEqual(sourceIntentActions,['clear','mark'],'source restore replaces the old obligation before recording the new one');"],
   "exact-restore-retires-superseded-intent": ["assert.equal(await pendingStore().read('repository-version-qa'),null,'exact restore retires the superseded source intent');"],
   "unavailable-pending-read-fails-closed": ["assert.match(String(unavailablePending?.message||''),/temporary appMeta read failure/u,'unavailable pending metadata must reject, not become confirmed absence');"],
   "pending-receipt-requires-source-revision": ["assert.deepEqual(t.stats().durable,original,'an older source revision receipt must not retire the durable obligation');"],

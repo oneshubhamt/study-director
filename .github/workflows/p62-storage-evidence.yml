@@ -47,6 +47,8 @@ jobs:
             mutants: recovery-hold-awaits-provider-drain recovery-release-resumes-every-provider recovery-failure-still-resumes recovery-host-waits-for-settlement retry-clear-failure-preserves-obligation forget-retires-pending-obligation
           - area: stale-intent-and-receipt
             mutants: exact-restore-retires-superseded-intent unavailable-pending-read-fails-closed pending-receipt-requires-source-revision
+          - area: scheduler-deadline-and-intent-order
+            mutants: foreground-release-rediscovers-new-work older-backoff-preserves-new-urgent-deadline same-revision-failure-enforces-backoff restore-clears-before-renewing-source-intent
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0

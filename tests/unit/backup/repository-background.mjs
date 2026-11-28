@@ -312,6 +312,16 @@ for(const blocked of [false,true]){
  job.schedule(1000,'retained');bg.wake('reconnect');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(attempts,2);
 }
 {
+ const fake=createFakeClock(),bg=coordinator(fake);let dirty=false,attempts=0;
+ const job=bg.registerJob('convergence',{initialDelayMs:null,discover:()=>dirty,isAvailable:()=>true,capture:()=>{},retryMs:1000,execute:async()=>{attempts++;dirty=false;return {status:'completed'};}});
+ bg.wake('startup');assert.equal(job.status().pending,false);
+ const foreground=bg.beginForeground();await foreground.settled;dirty=true;
+ await fake.advance(2000);assert.equal(attempts,0);assert.equal(fake.pending(),0);
+ foreground.release();await fake.advance(1000);await fake.drainMicrotasks(80);
+ assert.equal(attempts,1,'foreground release rediscovers newly owed work even without an existing timer');
+ assert.equal(job.status().pending,false);assert.equal(fake.pending(),0);
+}
+{
  const fake=createFakeClock(),bg=coordinator(fake);let errors=0,attempts=0;
  bg.registerJob('convergence',{initialDelayMs:null,discover:()=>{throw new Error('state unavailable');},isAvailable:()=>true,capture:()=>{errors++;},execute:async()=>{attempts++;return {status:'completed'};}});
  bg.wake('startup');await fake.advance(1000);await fake.drainMicrotasks(80);assert.equal(errors,1);assert.equal(attempts,1,'uncertain discovery retains an execution opportunity');
