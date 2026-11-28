@@ -19,6 +19,9 @@ on:
       - 'tests/helpers/verification/strict-durability-boundaries.mts'
       - 'tests/helpers/verification/data-maintenance.mts'
       - 'tests/helpers/asset-storage-port.mts'
+      - 'tests/helpers/drive-server.mts'
+      - 'tests/helpers/drive-harness.mts'
+      - 'tests/helpers/drive-harness.mjs'
       - 'tests/helpers/verification/asset-storage-contract.mts'
       - 'tests/helpers/verification/attachment-reference-recovery.mts'
       - 'tests/helpers/verification/attachment-integrity-audit.mts'
@@ -336,5 +339,8 @@ jobs:
           tests/integration/attachments/attachment-storage-dedup.mjs
           tests/integration/storage/attachment-integrity-audit.mjs
           tests/integration/storage/asset-storage-contract.mjs
+          tests/integration/backup/drive-security.mjs
+          tests/integration/backup/drive-profile-binding.mjs
+          tests/integration/backup/drive-repository-scale.mjs
           tests/integration/storage/attachment-reference-recovery.mjs
           tests/integration/backup/restore-assets.mjs
