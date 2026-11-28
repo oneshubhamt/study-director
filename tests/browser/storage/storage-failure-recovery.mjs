@@ -254,7 +254,7 @@ try{
     assert.equal(state.warning,true,`${mode} IndexedDB failure was not globally visible`);
     assert.equal(state.startup.fullyInitialized,false,`${mode} IndexedDB failure allowed writable startup`);
     assert.equal(state.planReadOnly,true,`${mode} IndexedDB failure left Plan writable`);
-    assert.equal(state.applyDisabled,true,`${mode} IndexedDB failure left Apply enabled`);
+    assert.equal(state.applyDisabled,true,`${mode} IndexedDB failure left Apply enabled before canonical Plan hydration`);
     results.indexedDB[mode]=true;
   }
 
