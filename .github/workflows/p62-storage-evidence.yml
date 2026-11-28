@@ -12,6 +12,8 @@ on:
       - 'tests/helpers/repository-harness.mts'
       - 'tests/helpers/verification/canonical-mutation-epoch.mts'
       - 'tests/helpers/verification/appmeta-contract.mts'
+      - 'tests/helpers/verification/canonical-schema-separation.mts'
+      - 'tests/integration/storage/canonical-schema-separation.mjs'
       - 'tests/integration/storage/canonical-mutation-epoch.mjs'
       - 'tests/integration/storage/appmeta-contract.mjs'
       - 'tests/helpers/repository-storage.mts'
@@ -295,6 +297,7 @@ jobs:
           tests/integration/storage/pending-reviews.mjs
           tests/integration/storage/canonical-mutation-epoch.mjs
           tests/integration/storage/appmeta-contract.mjs
+          tests/integration/storage/canonical-schema-separation.mjs
           tests/integration/backup/current-canonical-roundtrip.mjs
           tests/integration/backup/sync-shared-base.mjs
           tests/architecture/exports/export-hash-boundary.mjs

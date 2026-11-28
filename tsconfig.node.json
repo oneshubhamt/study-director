@@ -127,6 +127,7 @@
     "tests/helpers/verification/pending-reviews.mts",
     "tests/helpers/verification/repository-journals.mts",
     "tests/helpers/verification/canonical-mutation-epoch.mts",
-    "tests/helpers/verification/appmeta-contract.mts"
+    "tests/helpers/verification/appmeta-contract.mts",
+    "tests/helpers/verification/canonical-schema-separation.mts"
   ]
 }

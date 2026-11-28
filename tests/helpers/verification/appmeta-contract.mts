@@ -26,8 +26,8 @@ function checkedHarness(...args:Parameters<typeof createHarness>){
 // AppMeta is tested as one contract: canonical values, gateway ownership/bounds, and revision-envelope migration.
 
 { // appmeta-current-values
-const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const {app}=checkedHarness(new Map(),stores);
+const stores={area:new Map<string,unknown>(),sync:new Map<string,unknown>(),tombstones:new Map<string,unknown>(),reflection:new Map<string,unknown>(),daily:new Map<string,unknown>(),summary:new Map<string,unknown>(),session:new Map<string,unknown>(),meta:new Map<string,unknown>()};
+const {app}=checkedHarness(new Map<string,unknown>(),stores);
 
 let proof=await app.metadata.verifyCurrent();
 assert.equal(proof.ok,true,'an empty optional appMeta surface must be canonical');
@@ -64,8 +64,8 @@ console.log(JSON.stringify({status:'PASS',suite:'appmeta-current-values',proof},
 }
 
 { // appmeta-gateway
-const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const {appMetaGateway:gateway,repositoryMeta,indexedDb,idbReads}=checkedHarness(new Map(),stores);
+const stores={area:new Map<string,unknown>(),sync:new Map<string,unknown>(),tombstones:new Map<string,unknown>(),reflection:new Map<string,unknown>(),daily:new Map<string,unknown>(),summary:new Map<string,unknown>(),session:new Map<string,unknown>(),meta:new Map<string,unknown>()};
+const {appMetaGateway:gateway,repositoryMeta,indexedDb,idbReads}=checkedHarness(new Map<string,unknown>(),stores);
 
 assert.equal(gateway.resolve('dataMaintenance')?.['family'],'dataMaintenance');
 assert.equal(gateway.resolve('savedDayDeletion:2026-09-19')?.['family'],'savedDayDeletionPrefix');
@@ -110,20 +110,20 @@ console.log(JSON.stringify({status:'PASS',suite:'appmeta-gateway',ownerRestricti
 { // appmeta-insights-envelope
 const key='insightsDatasetRevision';
 const updatedAt='2026-09-16T10:00:00.000Z';
-const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map([
+const stores={area:new Map<string,unknown>(),sync:new Map<string,unknown>(),tombstones:new Map<string,unknown>(),reflection:new Map<string,unknown>(),daily:new Map<string,unknown>(),summary:new Map<string,unknown>(),session:new Map<string,unknown>(),meta:new Map<string,unknown>([
   [key,{key,format:'study-director.insights-dataset-revision',version:1,counter:7,updatedAt}]
 ])};
 const original=structuredClone(stores.meta.get(key));
-const gateway=checkedHarness(new Map(),stores).repositoryMeta;
+const gateway=checkedHarness(new Map<string,unknown>(),stores).repositoryMeta;
 await assert.rejects(gateway.read('insightsDatasetRevision'),/envelope is not canonical/);
 assert.deepEqual(stores.meta.get(key),original,'unsupported metadata is not converted or rewritten');
 console.log(JSON.stringify({status:'PASS',suite:'appmeta-insights-envelope',unsupportedRejected:true}));
 }
 
 { // personal-preferences-resilience
-const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
+const stores={area:new Map<string,unknown>(),sync:new Map<string,unknown>(),tombstones:new Map<string,unknown>(),reflection:new Map<string,unknown>(),daily:new Map<string,unknown>(),summary:new Map<string,unknown>(),session:new Map<string,unknown>(),meta:new Map<string,unknown>()};
 const controls:RepositoryControls={};
-const harness=checkedHarness(new Map(),stores,controls);
+const harness=checkedHarness(new Map<string,unknown>(),stores,controls);
 const preferences=harness.app.personalPreferences;
 const canonical=Object.freeze({
   version:2,studentName:'Canonical',theme:'glass',presentation:'glass',quote:'Persist me',practiceCueMode:'quiet',
@@ -152,7 +152,7 @@ console.log(JSON.stringify({
 }
 
 { // bf2-portable-personal-atomicity
-const controls:RepositoryControls={},h=checkedHarness(new Map(),null,controls);
+const controls:RepositoryControls={},h=checkedHarness(new Map<string,unknown>(),null,controls);
 const before={version:2,plans:{draft:'Local unsaved working draft',savedPlans:[],defaultId:null},
   preferences:{studentName:'Before',theme:'glass',presentation:'glass',quote:'Original',
     practiceCueMode:'quiet',fontScale:1,practiceTargetMs:600000,nudge:null}};
