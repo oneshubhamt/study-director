@@ -23,7 +23,7 @@ export type DriveState=RemoteState&{
  folderShared:boolean;folderCreateDenied:boolean;folderListGate:PromiseLike<unknown>|null;folderListStarted:number;uploadPutGate:PromiseLike<unknown>|null;uploadPutStarted:number;
  authorizationHold:boolean;authorizationResponder:(()=>void)|null;authorizationRequests:number;releasedDownloads:number;
  offline?:boolean;driveClockAheadMs?:number;requestDelayMs?:((request:{url:URL;method:string})=>number)|null;
- jsonFault?:JsonFault|null;bodyRequests?:number;bodies?:BodyProbe[];listPage?:(query:string,params:URLSearchParams)=>unknown;
+ jsonFault?:JsonFault|null;bodyRequests?:number;bodies?:BodyProbe[];listPage?:((query:string,params:URLSearchParams)=>unknown)|undefined;
  pageSizes?:Record<string,number>;pageSize?:number;pageDelayMs?:number;objectPageStarts?:number;activeObjectPages?:number;
  repeatPageKinds?:Set<string>;incompleteSearchKinds?:Set<string>;failMediaKinds?:Set<string>;failMediaIds?:Set<string>;
  historyReadDelayMs?:number;activeHistoryReads?:number;maxHistoryReads?:number;historyReadCompletions?:string[];
@@ -33,7 +33,8 @@ export type DriveState=RemoteState&{
 };
 export type Timer=ReturnType<typeof setTimeout>|number;
 export type Timers={set:(callback:()=>void,ms:number)=>Timer;clear:(timer:Timer)=>void};
-type Clock=ReturnType<typeof createFakeClock>|null;
+export type DriveClock={Date?:ReturnType<typeof createFakeClock>['Date'];setTimeout(fn:()=>void,ms:number):number;clearTimeout(id:number):void};
+type Clock=DriveClock|null;
 type FetchOptions={method?:string;headers?:ConstructorParameters<typeof Headers>[0];signal?:AbortSignal|null;body?:Blob|string|null};
 let digestsInFlight=0;
 export const pendingRepositoryDigests=()=>digestsInFlight;

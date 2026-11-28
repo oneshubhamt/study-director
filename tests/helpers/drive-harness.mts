@@ -17,15 +17,14 @@ const source=compileScript(
 const policyContext=vm.createContext({});
 for(const file of ['internal','repository-policy'])vm.runInContext(readCoreScript(file),policyContext);
 const repositoryPolicy=field(registeredExports(policyContext,'repository-policy'),'protocol');
-import {createDriveServer,type RemoteState,type Timer} from './drive-server.mts';
-import type {createFakeClock} from './fake-clock.mts';
+import {createDriveServer,type RemoteState,type Timer,type DriveClock} from './drive-server.mts';
 import {method,registeredExports} from './registered-exports.mts';
 import {field} from './repository-safety-ports.mts';
 import {required} from './repository-note-ports.mts';
 export {pendingRepositoryDigests,repositoryDigest} from './drive-server.mts';
 export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
-type Clock=ReturnType<typeof createFakeClock>;
-type HarnessOptions={expiresIn?:number;clock?:Clock|null;registerProvider?:((config:Record<string,unknown>)=>unknown)|null;uploadProgressTransport?:boolean;localStorage?:unknown;remoteState?:Partial<RemoteState>|null;addEventListener?:(...args:unknown[])=>unknown;profileId?:()=>string;profileName?:()=>string;bind?:(info:unknown,assertOrigin:()=>void)=>unknown;email?:string;device?:()=>string;profilePortPatch?:unknown};
+type Clock=DriveClock;
+type HarnessOptions={expiresIn?:number;clock?:Clock|null;registerProvider?:((config:Record<string,unknown>)=>unknown)|null;uploadProgressTransport?:boolean;localStorage?:unknown;remoteState?:Partial<RemoteState>|null;addEventListener?:(type:string,listener:(event:unknown)=>unknown,options?:unknown)=>unknown;profileId?:()=>string;profileName?:()=>string;bind?:(info:unknown,assertOrigin:()=>void)=>unknown;email?:string;device?:()=>string;profilePortPatch?:unknown};
 function isRecord(value:unknown):value is Record<string,unknown>{return typeof value==='object'&&value!==null&&!Array.isArray(value);}
 const defaultBind=async(info:unknown)=>field(info,'mine')?'continue':'claim';
 export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01',profilePortPatch=null}:HarnessOptions={}){

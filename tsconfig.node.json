@@ -150,6 +150,8 @@
     "tests/helpers/verification/device-folder-layout.mts",
     "tests/helpers/device-folder-ports.mts",
     "tests/helpers/verification/device-folder-storage.mts",
-    "tests/helpers/verification/device-backup.mts"
+    "tests/helpers/verification/device-backup.mts",
+    "tests/helpers/drive-test-ports.mts",
+    "tests/helpers/verification/drive-security.mts"
   ]
 }
