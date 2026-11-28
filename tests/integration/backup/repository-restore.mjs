@@ -1,5 +1,6 @@
 import {restorePendingStore} from '../../helpers/restore-pending-store.mts';
 import {readScript} from '../../../build/source-script.mts';
+import {createPhaseTiming} from '../../helpers/phase-timing.mts';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
 import assert from 'node:assert/strict';
@@ -13,6 +14,7 @@ import {fixtureNoteKey} from '../../helpers/note-ids.mjs';
 import {passwordKey,streamEncryptionInfo,transformEncrypted} from '../../../portable/stream-encryption.ts';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
+const profilePhase=createPhaseTiming('repository-restore');
 const HERE=path.dirname(fileURLToPath(import.meta.url)),ROOT=path.resolve(HERE,'../../..'),read=relative=>readScript(path.join(ROOT,relative));
 for(const file of ['source/core/internal.ts','source/core/device-folder-storage.ts','source/core/operation-lifecycle.ts','source/core/record-codecs.ts','source/core/backup-codec.ts','source/core/canonical.ts','source/core/reconciliation.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/managed-recovery.ts','source/core/backup-recovery-host.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
@@ -112,6 +114,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   })
 })}));
 
+profilePhase("setup");
 // Build one repository checkpoint through the production publication coordinator and retain its immutable object files.
 const objectFiles=new Map();let publishedManifestBlob=null,publishedCommitBlob=null,activeObjectWrites=0,maxObjectWrites=0;
 const published=await runtime.repository.publish(null,{interactive:false},freeze({
@@ -169,6 +172,7 @@ assert.ok(portablePathMetrics.inspections>standaloneInspections,'Standalone .sdb
 await standaloneCandidate.release();await standalone.release();
 
 for(const [id,blob] of localAssetsBeforeLeaseCheck)assets.set(id,blob);
+profilePhase("checkpoint publication, inspection and portable export");
 // Replace local state, then prove the unified reconciliation path restores from the repository candidate without a parallel conflict engine.
 records=[];notes={};assets.clear();currentPersonal=localPersonal;deletions=[];
 const result=await runtime.repository.bringIn(candidate);
@@ -315,6 +319,7 @@ assert.equal(journal,null,'Successful exact restore must clear its persistent ro
 // P7: exact Version Restore must also restore a historical Active Session when that version contains one.
 const historicalSession=freeze({id:'current',type:'activeSession',version:9,revision:7,date:'2026-09-19',status:'suspended',scheduleText:'07:30 | 50 | Historical active | work | Ethics | block | 1',snapshot:freeze({label:'historical-active'}),suspendedAt:'2026-09-19T05:00:00.000Z',updatedAt:'2026-09-19T05:00:00.000Z'});activeSession=historicalSession;const sessionObjectFiles=new Map(objectFiles);let sessionManifestBlob=null,sessionCommitBlob=null;const sessionPublication=await runtime.repository.publish([manifest],{interactive:false},freeze({writeObject:async entry=>(sessionObjectFiles.set(entry.objectId,entry.blob),freeze({id:entry.objectId})),writeManifest:async file=>(sessionManifestBlob=file.blob,freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'})),commit:async marker=>(sessionCommitBlob=marker.blob,freeze({name:marker.checkpointId+'.sdcommit'})),onCommitted:async()=>null,cleanup:async()=>null,onFailure:async()=>null})),sessionManifest=sessionPublication.manifest,sessionReadObject=async entry=>sessionObjectFiles.get(entry.objectId)||null;assert.ok(sessionManifest.objects.some(entry=>entry.kind==='activeSession'),'A managed checkpoint containing an Active Session must persist an Active Session repository object.');assert.ok(sessionManifestBlob instanceof Blob&&sessionCommitBlob instanceof Blob);activeSession=null;const sessionCandidate=await runtime.repository.inspect(sessionManifest,sessionReadObject,{interactive:false,committed:true}),sessionRestore=await runtime.repository.restoreVersion(sessionCandidate);assert.equal(sessionRestore.restored.activeSession,true);assert.deepEqual(activeSession,historicalSession,'Historical Version Restore must reinstate the checkpoint Active Session exactly, including its applied schedule.');assert.equal(currentPersonal.plans.draft,null,'Restoring an Active Session must not copy its applied schedule into the independent Plan draft.');const resetCandidate=await runtime.repository.inspect(manifest,readObject,{interactive:false,committed:true});await runtime.repository.restoreVersion(resetCandidate);assert.equal(activeSession,null,'Restoring the original no-session historical version must still clear the restored session.');assert.equal(currentPersonal.plans.draft,null,'Clearing the restored session must leave Plan restoration to portable Personal Data.');
 
+profilePhase("reconciliation, selective restore and historical session");
 // An exact restore keeps the selected version and protects the local data it will replace.
 const remoteFiles=new Map(),readDownloads=[];let providerUploaded=false,refuseCommit=false;
 const remoteKey=(kind,id)=>`${kind}:${id}`;
@@ -439,6 +444,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   assert.equal(JSON.stringify(records),recordsBefore,'local data is unchanged');assert.equal([...remoteFiles.keys()].sort().join('|'),remoteBefore,'no safety version is written');
 }
 
+profilePhase("provider exact restore, protected version and publication obligations");
 // Restoring one note from a Drive version downloads only the objects that
 // hold the note, never the version's attachments or other data, and keeps
 // today's session through the recovery.
@@ -484,6 +490,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   ({notes}=saved);records=saved.records;deletions=saved.deletions;assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
 }
 
+profilePhase("Drive selective and missing-only restore");
 // The Device Folder runs on the same engine as Google Drive through its
 // storage adapter: backup, Version History, a one-note restore and an exact
 // restore all work on a folder, reading and writing the existing layout.
@@ -539,6 +546,7 @@ const uncommittedCandidate=await runtime.repository.inspect(manifest,readObject,
 // Standalone file candidates remain outside managed Version History and cannot invoke exact managed rollback.
 const manualFile=await runtime.checkpoint.create(),manualCandidate=await runtime.checkpoint.inspect(manualFile.blob,{interactive:false});await assert.rejects(()=>runtime.repository.restoreVersion(manualCandidate),/only for a verified Device Folder or Google Drive backup/i);await manualFile.release();
 
+profilePhase("Device Folder and managed authority");
 // Failure after destructive replacement begins must recover the exact pre-operation local state from the persistent journal.
 records=[freeze({version:16,recordKind:'study',date:'2026-09-20',reflection:'rollback record',savedAt:'2026-09-20T03:00:00.000Z',updatedAt:'2026-09-20T03:00:00.000Z'})];notes={Rollback:normalizeArea({key:'Rollback',text:'rollback note',updatedAt:'2026-09-20T03:00:00.000Z'},'Rollback')};currentPersonal=localPersonal;deletions=[freeze({date:'2026-09-16',deletedAt:'2026-09-20T03:00:00.000Z'})];noteDeletions=[freeze({key:'Old',deletedAt:'2026-09-20T03:00:00.000Z'})];attachmentDeletions=[freeze({assetId:deletedAssetId,deletedAt:'2026-09-20T03:00:00.000Z'})];assets=new Map([[extraAssetId,extraBlob]]);activeSession=null;
 const rollbackAssetProof=Object.fromEntries(await Promise.all([...assets].map(async([id,blob])=>[id,freeze({size:blob.size,type:blob.type,checksum:await codec.checksumBlob(blob)})]))),deviceLocalSentinel=freeze({installationId:'device-local-installation',systemAlertsEnabled:true,keepScreenAwake:true,storageHealth:'healthy',pwaUpdateState:'idle'});
@@ -562,3 +570,4 @@ objectFiles.set(damagedEntry.objectId,original);
 objectFiles.delete(damagedEntry.objectId);await assert.rejects(()=>runtime.repository.inspect(manifest,readObject,{interactive:false,committed:true}),{code:'REPOSITORY_OBJECT_MISSING'});
 
 console.log(JSON.stringify({status:'PASS',suite:'repository-restore-adapter',repositoryToPortableCurrent:true,checkpointProvenancePreserved:true,managedPortableRoundTripRemoved:true,unforgeableVerifiedSnapshot:true,attachmentLeaseLifetimeBound:true,encryptedRepositoryRestored:true,existingInspectionCandidate:true,existingReconciliationEngine:true,exactVersionRestore:true,providerRestoreAvoidsRedundantPresent:true,recoverySafetyForegroundPreemptsMaintenance:true,orphanMaintenanceRestoreRecovery:true,historicalCheckpointImmutable:true,uncommittedManifestRejected:true,standaloneFileExcluded:true,failedExactRestoreRolledBack:true,rollbackAttachmentBytesExact:true,historicalActiveSessionRestored:true,deviceLocalPreserved:true,attachmentIntegrity:true,storedCorruptionRejected:true,missingObjectRejected:true,boundedStructuredRestoreReads:true,concurrentFailureReceipts:true},null,2));
+profilePhase('destructive rollback, concurrent failure and integrity');

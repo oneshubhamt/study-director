@@ -1,5 +1,6 @@
 import {readScript} from '../../../build/source-script.mts';
 import {performance} from 'node:perf_hooks';
+import {createPhaseTiming} from '../../helpers/phase-timing.mts';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
 import assert from 'node:assert/strict';
@@ -11,6 +12,7 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
+const profilePhase=createPhaseTiming('repository-checkpoint');
 for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/canonical.ts','source/core/record-codecs.ts','source/core/reconciliation.ts','source/core/exports.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/backup-recovery-host.ts','source/core/backup-integrity-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const freeze=Object.freeze,CanonicalModule=registry.require('canonical',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),BackupModule=registry.require('backup',1,freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,freeze({canonical:CanonicalModule})),ExportsModule=registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupIntegrityHostModule=registry.require('backup-integrity-host',1);
@@ -346,6 +348,7 @@ denyVersionRemoval=true;await assert.rejects(()=>runtime.providers.removeReposit
 const removedProtectedProvider=await runtime.providers.removeRepositoryProviderVersion('repository-protected',protectedProviderResult.checkpointId,captureRemovalOrigin());assert.equal(removedProtectedProvider.removed,true,'the active Before restore provider checkpoint must be explicitly removable');assert.ok(mutationRuns.filter(kind=>kind==='remove-backup-version').length>=2,'provider version removal must execute inside the durable mutation coordinator');assert.equal(removedProtectedProvider.entries.length,0,'removing the only protected provider version must return an empty verified history projection');assert.equal([...protectedProviderFiles.values()].filter(file=>file.kind==='checkpoint').length,0,'explicit protected-point removal must delete its immutable manifest');assert.equal([...protectedProviderFiles.values()].filter(file=>file.kind==='commit').length,0,'explicit protected-point removal must delete its commit marker before normal GC');assert.ok([...protectedProviderFiles.values()].filter(file=>file.kind==='object').length>0,'coordination-capable repositories must preserve newly orphaned objects through the normal 48-hour GC grace after explicit safety removal');await assert.rejects(()=>runtime.providers.removeRepositoryProviderVersion('repository-protected',protectedProviderResult.checkpointId,captureRemovalOrigin()),/no longer this device's safety version/i,'a removed safety point must not be removable twice');
 const orphanMaintenance=freeze({id:'mnt-orphaned-provider-maintenance',createdAt:new Date(Date.now()-61*1000).toISOString()});protectedProviderMaintenances.set(orphanMaintenance.id,orphanMaintenance);snapshotRevision='provider-protected-orphan-recovery';sourceRevision='2026-09-19T00:31:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'orphan maintenance recovery',updatedAt:sourceRevision})};const orphanMaintenanceBackup=await runtime.providers.backupRepositoryProvider('repository-protected');assert.ok(orphanMaintenanceBackup.name,'a Drive/provider backup must recover in the same attempt from an abandoned maintenance lease');assert.equal(protectedProviderMaintenances.has(orphanMaintenance.id),false,'an expired maintenance marker must be reaped before foreground publication continues');
 
+profilePhase("setup, local publication, integrity and ownership");
 // Provider orchestration: marker first, then overlap read-only discovery with maintenance safety;
 // after durable commit marker release is awaited so coordination protection is definitely cleared before success returns.
 const overlapFiles=new Map(),overlapPublications=new Map(),overlapMaintenances=new Map(),overlapKey=(kind,id)=>kind+':'+id;let overlapLeaseId=0,discoveryObserved=false,releaseStarted=false,releaseFinished=false;
@@ -773,6 +776,7 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
  }finally{runtime.providers.configureIntegrityScrub(null);}
  console.log(JSON.stringify({status:'PASS',suite:'provider-exclusion-capacity',restoreRejectsLastQuarantinedObject:true,persistedExclusionPublishesFreshVerifiedObject:true}));
 }
+profilePhase("provider publication, ancestry, retention, integrity and capacity");
 // Assembled contract: the real BackupModule composes provider scheduling with
 // the real binary pipeline. Healthy transfers may exceed housekeeping budgets,
 // blocked cleanup wakes independently, and foreground history stays successful.
@@ -922,6 +926,7 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   assembledDriveCases.push(scenario);assembledDriveWallMs.push({scenario,wallMs:Math.round(performance.now()-scenarioStarted)});
  }finally{runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
+profilePhase("assembled provider coordination and maintenance scenarios");
 // A long upload renews its Drive marker while it runs, so no cleanup takes it
 // for abandoned. An upload whose marker cleanup removed (its page was frozen
 // too long) must stop before its commit, so no version is committed on
@@ -1000,6 +1005,7 @@ for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'
   incompleteInventoryCases.push({usableHistory,kind,fault,status:results[0].status});
  }finally{runtime.providers.configureIntegrityScrub(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
+profilePhase("heartbeat and incomplete inventory");
 // Finite backlogs cross both former limits (64 versions / 100 pages), then
 // recover through the actual lifecycle, with exact retention and reachability.
 const driveBacklogCases=[];
@@ -1064,6 +1070,7 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   driveBacklogCases.push({size,fault,retained:kept.size,exactObjects:true,progressReused:true});
  }finally{backgroundReady=false;runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
+profilePhase("finite backlog retirement");
 // A busy phone (bug 12): history reads are slow (3 s each, as on the phone)
 // and a new version lands every two minutes while cleanup works through a
 // large backlog. Each landing
@@ -1114,6 +1121,7 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
  }finally{backgroundReady=false;runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
 
+profilePhase("slow history retirement");
 // A continuation owns one sealed capture. Attempt signals and worker lifetimes
 // can change, but payload identity, encrypted bytes and live file leases cannot.
 const publicationContinuationCases=[],assembledUploadContinuations=[];
@@ -1178,6 +1186,7 @@ try{
  }
 }finally{publicationProtection=null;notes=beforeContinuation.notes;dailyRecords=beforeContinuation.dailyRecords;assetDescriptor=beforeContinuation.assetDescriptor;audioBlob=beforeContinuation.audioBlob;snapshotRevision=beforeContinuation.snapshotRevision;sourceRevision=beforeContinuation.sourceRevision;backgroundReady=beforeContinuation.backgroundReady;}
 
+profilePhase("continuation and worker lifetime");
 // Real canonical capture -> binary/encrypted checkpoint -> provider recovery
 // owner -> real Drive adapter. Only storage, HTTP and time are controlled.
 for(const encrypted of [false,true]){
@@ -1250,6 +1259,7 @@ for(const encrypted of [false,true]){
   assembledUploadContinuations.push({encrypted:true,beforeRestore:true,authorizationWindows:2,foregroundOnly:true,sealedAttachmentIdentity:true});
  }finally{runtime.providers.configurePendingBackupRetry(null);await h.provider.disconnect();publicationProtection=null;globalThis.Date=original.Date;backgroundClock=null;notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;audioBlob=original.audioBlob;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;backgroundReady=original.backgroundReady;}
 }
+profilePhase("capture, encrypted upload and provider resume");
 // Pass F: the shared manifest/commit byte-verification lease must reject a
 // same-size corrupt read and release its temporary file on *both* paths.
 const providerMetadataVerificationCases=[];
@@ -1308,6 +1318,7 @@ const providerMetadataVerificationCases=[];
   }finally{runtime.controller.invalidateRepositoryPreparation();notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
 }
 
+profilePhase("readback and concurrent upload settlement");
 // A verified repository checkpoint and local shared ancestry are distinct.
 // A failed ancestry write must not acknowledge a fully synchronized backup.
 const ancestryPublicationCases=[];
@@ -1385,6 +1396,7 @@ const ancestryPublicationCases=[];
 }
 assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','unchanged-recovered','new-throw','new-recovered','origin-retired-after-remote-commit']);
 
+profilePhase("ancestry and publication receipts");
 // Run the production provider catch-up terminal transition with controlled
 // ports: an ancestry-warning result may never be relabelled as fully synced.
 {
@@ -1492,4 +1504,6 @@ assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
+profilePhase('catch-up, durable retry and final assertions');
 await import('../../helpers/session-ownership-claim-regression.mjs');
+profilePhase('session ownership regression');

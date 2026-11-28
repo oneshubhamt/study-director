@@ -7,6 +7,9 @@ on:
       - '.github/workflows/p62-storage-evidence.yml'
       - 'tests/helpers/mutation.mts'
       - 'tests/integration/storage/repository-journals.mjs'
+      - 'tests/helpers/repository-harness.mjs'
+      - 'tests/helpers/phase-timing.mts'
+      - 'tests/integration/backup/repository-checkpoint.mjs'
       - 'tests/helpers/coverage-risk.mts'
       - 'tests/integration/attachments/attachment-deletion.mjs'
       - 'tests/integration/backup/repository-restore.mjs'
@@ -49,7 +52,7 @@ jobs:
           - area: stale-intent-and-receipt
             mutants: exact-restore-retires-superseded-intent unavailable-pending-read-fails-closed pending-receipt-requires-source-revision
           - area: journal-durability-and-integrity
-            mutants: restore-journal-prepare-is-strict library-journal-prepare-is-strict restore-journal-phase-is-strict library-journal-phase-is-strict library-journal-verifies-chunk-digest
+            mutants: restore-journal-prepare-is-strict library-journal-prepare-is-strict restore-journal-phase-is-strict library-journal-phase-is-strict library-journal-verifies-chunk-digest restore-journal-retirement-is-strict library-journal-retirement-is-strict library-journal-verifies-plan-signature
           - area: scheduler-deadline-and-intent-order
             mutants: foreground-release-rediscovers-new-work older-backoff-preserves-new-urgent-deadline same-revision-failure-enforces-backoff restore-clears-before-renewing-source-intent
     steps:
@@ -201,3 +204,23 @@ jobs:
         run: time node tests/browser/backup/session-plan-sync.mjs
       - name: Cold start Drive recovery
         run: time node tests/browser/backup/cold-start-drive-recovery.mjs
+
+  storage-cost-profile:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Comparable isolated sequential cost samples
+        env:
+          SD_P62_PROFILE: '1'
+        run: |
+          node --version
+          for attempt in 1 2 3; do
+            echo "Storage cost sample $attempt (one job, fresh child per suite)"
+            node tests/helpers/run-category.mjs --jobs 1 targeted tests/integration/backup/repository-checkpoint.mjs tests/integration/backup/repository-restore.mjs tests/unit/backup/repository-retention.mjs
+          done

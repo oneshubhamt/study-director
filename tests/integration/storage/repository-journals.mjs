@@ -173,6 +173,9 @@ for(const kind of ['restore','library-clear']){
   let current=runtime();
   const journal=()=>kind==='restore'?current.app.restoreJournal:current.app.libraryClearJournal;
   const id=kind==='restore'?'restore_qa_restart_failure':'libraryclear_qa_restart_failure';
+  const headerKey=kind==='restore'?'restoreJournalState':'libraryClearJournalState';
+  const laterPutKey=kind==='restore'?'restoreJournalPayload':`libraryClearJournalPayload:${id}:00000001`;
+  const laterDeleteKey=kind==='restore'?'restoreJournalPayload':headerKey;
   const rollbackText='A'.repeat(512*1024+32);
   const expected=kind==='restore'?{id,blob:new Blob([rollbackText]),filename:'restart.sdbackup'}:
     {id,signature:'restart-signature',payload:{planSignature:'restart-signature',savedDays:{},rollbackText}};
@@ -192,6 +195,12 @@ for(const kind of ['restore','library-clear']){
   current=runtime();
   assert.equal(await journal().read(),null,'rejected journal preparation must leave no rollback evidence');
   assert.equal(h.stores.meta.size,0);
+  controls.failNextMetaRequest={operation:'put',key:laterPutKey};
+  await assert.rejects(journal().prepare(expected),/transaction aborted|injected appMeta request failure/u);
+  assert.equal(controls.failNextMetaRequest,undefined,'the later preparation request must actually fail');
+  current=runtime();
+  assert.equal(await journal().read(),null,'a failed later put rolls back every earlier journal put');
+  assert.equal(h.stores.meta.size,0,'no partial header or chunk survives the aborted transaction');
   let before=current.idbDurability.strict,normal=current.idbDurability.normal;
   await journal().prepare(expected);
   assert.equal(current.idbDurability.strict,before+1,'journal preparation uses a strict transaction');
@@ -202,16 +211,34 @@ for(const kind of ['restore','library-clear']){
   await assert.rejects(journal().mark(id,'verified'),/injected appMeta write failure/u);
   current=runtime();
   await verify('prepared');
+  controls.failNextMetaRequest={operation:'put',key:headerKey};
+  await assert.rejects(journal().mark(id,'verified'),/transaction aborted|injected appMeta request failure/u);
+  assert.equal(controls.failNextMetaRequest,undefined);
+  current=runtime();
+  await verify('prepared');
   before=current.idbDurability.strict;normal=current.idbDurability.normal;
   await journal().mark(id,'verified');
   assert.equal(current.idbDurability.strict,before+1,'journal phase publication uses a strict transaction');
   assert.equal(current.idbDurability.normal,normal);
   current=runtime();
   await verify('verified');
+  const committedRows=structuredClone(h.stores.meta);
+  controls.failNextMetaRequest={operation:'get',key:headerKey};
+  await assert.rejects(journal().read(),/transaction aborted|injected appMeta request failure/u);
+  assert.equal(controls.failNextMetaRequest,undefined);
+  assert.deepEqual(h.stores.meta,committedRows,'failed readback must not change committed recovery rows');
+  current=runtime();
+  await verify('verified');
   controls.failNextMetaWrite=true;
   await assert.rejects(journal().clear(id),/injected appMeta write failure/u);
   current=runtime();
   await verify('verified');
+  controls.failNextMetaRequest={operation:'delete',key:laterDeleteKey};
+  await assert.rejects(journal().clear(id),/transaction aborted|injected appMeta request failure/u);
+  assert.equal(controls.failNextMetaRequest,undefined,'the later cleanup request must actually fail');
+  current=runtime();
+  await verify('verified');
+  assert.deepEqual(h.stores.meta,committedRows,'an aborted cleanup must restore every removed recovery row');
   if(kind==='library-clear'){
     // Change one ASCII byte without changing the size or JSON validity.
     const chunks=await current.journalMeta.list('libraryClearJournalPayloadPrefix');
@@ -227,10 +254,17 @@ for(const kind of ['restore','library-clear']){
     assert.equal((await current.journalMeta.list('libraryClearJournalPayloadPrefix')).length,2,'failed verification must retain both recovery chunks');
     await current.journalMeta.write('libraryClearJournalPayloadPrefix',row.value,{suffix:row.suffix,strict:true});
     await verify('verified');
+    const header=await current.journalMeta.read('libraryClearJournalState');
+    await current.journalMeta.write('libraryClearJournalState',{...header,signatureHash:'0'.repeat(64)},{strict:true});
+    current=runtime();
+    await assert.rejects(journal().read(),/plan signature does not verify/u,'a valid payload digest cannot authorize a mismatched plan signature');
+    assert.equal((await current.journalMeta.list('libraryClearJournalPayloadPrefix')).length,2);
+    await current.journalMeta.write('libraryClearJournalState',header,{strict:true});
+    await verify('verified');
   }
   await journal().clear(id);
   current=runtime();
   assert.equal(await journal().read(),null,'completed journal retirement survives restart');
   assert.equal(h.stores.meta.size,0);
 }
-console.log('PASS: journal failure/restart, strict publication and same-length multi-chunk corruption');
+console.log('PASS: journal failure/restart, aborted requests, readback, strict publication and multi-chunk integrity');

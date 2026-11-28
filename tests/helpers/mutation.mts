@@ -138,6 +138,9 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({"id":"restore-journal-phase-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'restore journal phase update aborted'}","replace":"{strict:false,abortMessage:'restore journal phase update aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
   Object.freeze({"id":"library-journal-phase-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'Library-clear journal phase update aborted'}","replace":"{strict:false,abortMessage:'Library-clear journal phase update aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
   Object.freeze({"id":"library-journal-verifies-chunk-digest","file":"source/core/repository-journals.ts","find":"if(await libraryClearDigest(bytes)!==state.sha256)","replace":"if(false)","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"restore-journal-retirement-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'restore journal cleanup aborted'}","replace":"{strict:false,abortMessage:'restore journal cleanup aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"library-journal-retirement-is-strict","file":"source/core/repository-journals.ts","find":"{strict:true,abortMessage:'Library-clear journal cleanup aborted'}","replace":"{strict:false,abortMessage:'Library-clear journal cleanup aborted'}","tests":["tests/integration/storage/repository-journals.mjs"]}),
+  Object.freeze({"id":"library-journal-verifies-plan-signature","file":"source/core/repository-journals.ts","find":"if(await libraryClearDigest(new TextEncoder().encode(String((payload as {planSignature?:unknown}|null)?.planSignature||'')))!==state.signatureHash)","replace":"if(false)","tests":["tests/integration/storage/repository-journals.mjs"]}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -158,6 +161,9 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "restore-journal-retirement-is-strict": ["assert.equal(idbDurability.strict,restoreStrictBefore+1,'restore journal retirement must use strict durability');"],
+  "library-journal-retirement-is-strict": ["assert.equal(idbDurability.strict,libraryStrictBefore+1,'library-clear journal retirement must use strict durability');"],
+  "library-journal-verifies-plan-signature": ["await assert.rejects(journal().read(),/plan signature does not verify/u,'a valid payload digest cannot authorize a mismatched plan signature');"],
   "restore-journal-prepare-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal preparation uses a strict transaction');"],
   "library-journal-prepare-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal preparation uses a strict transaction');"],
   "restore-journal-phase-is-strict": ["assert.equal(current.idbDurability.strict,before+1,'journal phase publication uses a strict transaction');"],

@@ -14,6 +14,7 @@
     "types/checks/node.ts",
     "tests/helpers/generated-cases.mts",
     "tests/helpers/restore-pending-store.mts",
+    "tests/helpers/phase-timing.mts",
     "tests/unit/app/generated-cases.mts",
     "tests/helpers/subprocess.mts",
     "tests/helpers/mutation-observer.mts",
