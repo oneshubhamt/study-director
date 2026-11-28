@@ -66,11 +66,25 @@ for(const failAfter of [100,SaveLane.DELAY_MS+50]){ // A superseded failure leav
   assert.equal(attempts.length,5);assert.equal(attempts.at(-1)[1],'y');assert.ok(attempts.at(-1)[0]-before<=SaveLane.DELAY_MS,'a newer value is tried without the retry pause');
   api.cancel();await clock.advance(120000);await settle();assert.equal(attempts.length,5,'a cancelled lane stops retrying');
 }
-{ // A write running when the lane is cancelled is not retried.
-  let rejectRunning;const writes=[],{api}=lane(value=>{writes.push(value);return new Promise((_,reject)=>{rejectRunning=reject;});});
-  api.schedule('deleted entry');const running=api.flush().catch(()=>{});await settle();
+{ // A write running when the lane is cancelled is not retried, and its failure is not reported.
+  let rejectRunning;const writes=[],{api,states}=lane(value=>{writes.push(value);return new Promise((_,reject)=>{rejectRunning=reject;});});
+  api.schedule('deleted entry');const running=api.flush();await settle();
   api.cancel();rejectRunning(new Error('late failure'));await running;
   await clock.advance(120000);await settle();assert.deepEqual(writes,['deleted entry']);
+  assert.equal(api.failure(),null);assert.ok(!states.some(state=>state.startsWith('error')),'no error is shown for a dropped value');
+  assert.equal(await api.settled(),true);
+}
+{ // A value cancelled after its write failed leaves no failure behind (2026-11-28:
+  // Save Today dropped a refused reflection write, and Review could not be left).
+  let fail=true;const writes=[],{api}=lane(async value=>{writes.push(value);if(fail)throw new Error('the session could not be saved');});
+  api.schedule('session');await assert.rejects(api.flush(),/session could not be saved/);
+  assert.equal(api.pending(),true,'it waits to retry');
+  api.cancel();
+  assert.equal(api.failure(),null);await api.flush();assert.equal(await api.settled(),true,'a later flush and settle succeed');
+  await clock.advance(120000);await settle();assert.deepEqual(writes,['session'],'and it is not retried');
+  fail=false;api.schedule('next');await api.flush();assert.deepEqual(writes,['session','next'],'the lane carries on');
+  fail=true;api.schedule('later');await assert.rejects(api.flush(),/session could not be saved/,'a later failure is still reported');
+  api.cancel();
 }
 { // Editors that group keystrokes publish before any lane writes.
   const order=[],{api}=lane(async value=>{order.push(`write:${value}`);});
@@ -78,4 +92,4 @@ for(const failAfter of [100,SaveLane.DELAY_MS+50]){ // A superseded failure leav
   api.schedule('typed');await api.flush();
   assert.deepEqual(order,['publish','write:published'],'the published value is written');
 }
-console.log(JSON.stringify({status:'PASS',suite:'save-lane',leadingEdgeThrottle:true,boundedStaleness:true,retryRetainsValue:true,newerValueWins:true,supersededFailureKeepsTiming:true,backoffAndCancel:true,cancelStopsRunningRetry:true,editorsPublishFirst:true}));
+console.log(JSON.stringify({status:'PASS',suite:'save-lane',leadingEdgeThrottle:true,boundedStaleness:true,retryRetainsValue:true,newerValueWins:true,supersededFailureKeepsTiming:true,backoffAndCancel:true,cancelStopsRunningRetry:true,cancelForgetsDroppedFailure:true,editorsPublishFirst:true}));

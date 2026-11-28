@@ -71,4 +71,15 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+// A reflection write queued for today's session writes nothing once that
+// session has ended (saved, discarded or closed elsewhere): writing a session
+// then would fail on every retry, or bring the closed session back.
+{
+  let studyDay=true,result={ok:true},writes=0;
+  const context={reviewHasStudyDay:()=>studyDay,writeLiveDraftNow:async()=>{writes++;return result;},freeze:Object.freeze};
+  vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function writeReflection('),review.indexOf('function reflectionLaneState('))+';globalThis.write=writeReflection;',context);
+  assert.equal(await context.write({mode:'session',date:'2026-11-26'}),result,'a running session is written');assert.equal(writes,1);
+  result=null;await assert.rejects(context.write({mode:'session',date:'2026-11-26'}),/session could not be saved/,'a refused write still fails while the session runs');
+  studyDay=false;assert.equal(await context.write({mode:'session',date:'2026-11-26'}),null,'an ended session has nothing to write');assert.equal(writes,2,'and no session write is attempted');
+}
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['ended session writes nothing','OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
