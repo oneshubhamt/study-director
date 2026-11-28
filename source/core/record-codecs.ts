@@ -891,7 +891,7 @@ function materializeDailyRecordSummary(summary:unknown){
         if(Object.keys(stableClock).length)stableActual['clock']=freeze({...stableClock});
       }
       if(record){
-        const {activeSeconds:_activeSeconds,lastEndedAt:_lastEndedAt,sessions,...stableRecord}=record;
+        const {activeSeconds:_activeSeconds,lastEndedAt:_lastEndedAt,status:_status,sessions,...stableRecord}=record;
         const stableSessions=Array.isArray(sessions)?sessions.map(entry=>{
           const {endedAt:_endedAt,activeSeconds:_activeSeconds,...stable}=entry;
           return freeze({...stable});

@@ -14,7 +14,7 @@ if(!fs.existsSync(chromium))throw new Error(`Chromium not found: ${chromium}`);
 const manifest=JSON.parse(readRuntimeSource(path.join(root,'dist/build-manifest.json')));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__StorageDebug=Object.freeze({StorageHealthController,IndexedDb,AppData,PlanDraftEditor,ReviewEditor,goTab,writeLiveDraftNow,saveDayRecord,applySchedule,StartupLifecycle,AppOwnership,readStorageHealth,inspectStorageCapability,refreshStorageFallbackWarning,dismissStorageWarning});\n`;
+const exposure=`window.__StorageDebug=Object.freeze({StorageHealthController,IndexedDb,AppData,PlanDraftEditor,ReviewEditor,NoticeCoordinator,goTab,writeLiveDraftNow,saveDayRecord,applySchedule,StartupLifecycle,AppOwnership,readStorageHealth,inspectStorageCapability,refreshStorageFallbackWarning,dismissStorageWarning});\n`;
 let main=readRuntimeSource(path.join(deployment,manifest.main));
 if(!main.includes(marker))throw new Error('Storage-health browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
@@ -214,7 +214,7 @@ try{
       // The successful final Active Session checkpoint also advances the study-data clock.
       // Compare with the clock at entry to the failing Saved-Day transaction, not before preflight.
       const emergencyResult=await d.saveDayRecord(),raw=rawFallback(),rescue=JSON.parse(raw||'[]').find(record=>record.date===date);
-      const emergency={result:emergencyResult,...summary(),priorTime:priorEmergencyTime,attempts:emergencyDailyWrites,rescue,canonical:await d.IndexedDb.get(store,date)};
+      const emergency={result:emergencyResult,...summary(),saveEvent:d.NoticeCoordinator.readEvent('review','save-study-day'),priorTime:priorEmergencyTime,attempts:emergencyDailyWrites,rescue,canonical:await d.IndexedDb.get(store,date)};
       return {date,before,priorTime,preflight,emergency};
     }finally{IDBDatabase.prototype.transaction=original;d.IndexedDb.clearConnection();}
   })()`);
@@ -227,7 +227,9 @@ try{
   assert.ok(preflight.issues.includes('indexedDB'),'preflight fault surfaces the unavailable database');
   assert.equal(emergency.result,false,'an admitted emergency-only Saved Day is not acknowledged as a canonical save');
   assert.ok(emergency.attempts>0,'the selective fault reaches the real Saved-Day transaction');
-  assert.match(emergency.status,/recovery copy remains available/u,'emergency storage is distinguished from a canonical save');
+  assert.equal(emergency.saveEvent?.outcome,'local-save-failed','emergency recovery storage must not publish a canonical-save outcome');
+  assert.equal(emergency.saveEvent?.persistent,true,'an emergency-only Study Day failure remains visible until the user resolves it');
+  assert.match(emergency.saveEvent?.message||'',/emergency recovery storage[\s\S]*recovery copy remains available/u,'the save outcome must explicitly distinguish the emergency recovery copy from a canonical save');
   assert.ok(emergency.priorTime,'the attempted Saved-Day write records its pre-write study-data timestamp');
   assert.equal(emergency.savedAt,emergency.priorTime,'emergency-only storage does not advance canonical study-save time');
   assert.equal(emergency.rescue?.reflection,'New reflection preserved by emergency recovery','the newly edited reflection is actually present in rescue bytes');
