@@ -8,7 +8,8 @@ import {runSession} from '../../helpers/sync-journey-world.mjs';
 // writes, so that write is refused; the save then drops it (the reflection is
 // in the Saved Day). Its failure stayed behind: "the session could not be
 // saved", Save Reflection failed, and Review could not be left. Now the
-// dropped write's failure goes with it.
+// dropped write's failure goes with it, and since F35 that write waits for
+// the save instead of failing at all.
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'sd-finish-save-'});
 const status=page=>page.evaluate(`document.getElementById('save-status')?.textContent||''`);
 try{
@@ -24,6 +25,8 @@ try{
   await page.send('Input.insertText',{text:'Mock done'});
   // A pause, so the save's own reflection write runs while it holds the session.
   await sleep(3000);
+  // Every state the reflection's status shows from here on.
+  await page.evaluate(`(()=>{const box=document.getElementById('daily-reflection');window.__reflectionStates=[];new MutationObserver(()=>window.__reflectionStates.push(box.dataset.richSyncState)).observe(box,{attributes:true,attributeFilter:['data-rich-sync-state']});})()`);
   await page.click('.pane.on [data-action="save-day"]');
   await waitFor(async()=>/^✓ Saved /u.test(await status(page)),{label:'the day is saved',timeout:20000});
   const day=await page.evaluate(`__PWA6.todayISO()`);
@@ -32,11 +35,15 @@ try{
   assert.equal(await page.evaluate(`__PWA6.ReviewEditor.settled().then(()=>'settled',e=>e.message)`),'settled','no reflection write is left failing');
   await sleep(2500);
   assert.match(await status(page),/^✓ Saved /u,'the save’s message stays');
+  // The reflection write that came during the save waited for it, instead of
+  // failing: no "Save failed" on the field, and nothing logged.
+  assert.deepEqual((await page.evaluate(`window.__reflectionStates`)).filter(state=>state==='error'||state==='conflict'),[],'the reflection never shows Save failed during the save');
+  assert.deepEqual(page.warnings.filter(text=>/review\.reflection-save|session could not be saved/u.test(text)),[],'and no reflection-save warning is logged');
   await page.evaluate(`__PWA6.goTab('plan')`);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-plan').classList.contains('on')`),{label:'Review can be left',timeout:5000});
   await page.evaluate(`__PWA6.goTab('review')`);
   await waitFor(()=>page.evaluate(`!document.getElementById('daily-reflection').disabled`),{label:'Today Reflection loads'});
   await page.evaluate(`__PWA6.saveDayRecord()`);
   await waitFor(async()=>/Reflection saved in Diary/u.test(await status(page)),{label:'Save Reflection saves',timeout:5000});
-  console.log(JSON.stringify({status:'PASS',suite:'finish-today-save',checks:['reflection in the Saved Day','session closed','nothing left failing','Review can be left','Save Reflection saves']}));
+  console.log(JSON.stringify({status:'PASS',suite:'finish-today-save',checks:['reflection in the Saved Day','session closed','nothing left failing','no Save failed or warning during the save','Review can be left','Save Reflection saves']}));
 }finally{await browser.close();await server.close();}

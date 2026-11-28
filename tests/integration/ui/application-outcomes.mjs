@@ -31,7 +31,7 @@ const noop=()=>{};
 // locally committed record was not saved, or emit a success followed by failure.
 {
   const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true,failAck=false,failClear=false,acknowledged=0,clears=0;
-  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,flushLiveDraft:async()=>{},ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,writeLiveDraftNow:async()=>{},refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop,reflectionLane:{cancel:noop},setReflectionRichSync:noop,resetRuntimeSessionState:noop,setSessionPanelMode:noop,refreshPlanAfterSessionReset:noop,setPlanStatus:noop};
+  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,holdSessionWrites:noop,releaseSessionWrites:noop,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,flushLiveDraft:async()=>{},ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,writeLiveDraftNow:async()=>{},refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop,reflectionLane:{cancel:noop},setReflectionRichSync:noop,resetRuntimeSessionState:noop,setSessionPanelMode:noop,refreshPlanAfterSessionReset:noop,setPlanStatus:noop};
   vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function saveDayRecord(options={}){'),review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */')),context);
   assert.equal(await context.saveDayRecord(),false);
   let event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/saved locally.*follow-up/i);assert.equal(coordinator.eventStatus().toasts.length,1);
@@ -75,11 +75,22 @@ const noop=()=>{};
 // session has ended (saved, discarded or closed elsewhere): writing a session
 // then would fail on every retry, or bring the closed session back.
 {
-  let studyDay=true,result={ok:true},writes=0;
-  const context={reviewHasStudyDay:()=>studyDay,writeLiveDraftNow:async()=>{writes++;return result;},freeze:Object.freeze};
+  let studyDay=true,result={ok:true},writes=0,held=null;
+  const context={reviewHasStudyDay:()=>studyDay,writeLiveDraftNow:async()=>{writes++;return result;},sessionWritesHeld:()=>held,freeze:Object.freeze};
   vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function writeReflection('),review.indexOf('function reflectionLaneState('))+';globalThis.write=writeReflection;',context);
   assert.equal(await context.write({mode:'session',date:'2026-11-26'}),result,'a running session is written');assert.equal(writes,1);
   result=null;await assert.rejects(context.write({mode:'session',date:'2026-11-26'}),/session could not be saved/,'a refused write still fails while the session runs');
   studyDay=false;assert.equal(await context.write({mode:'session',date:'2026-11-26'}),null,'an ended session has nothing to write');assert.equal(writes,2,'and no session write is attempted');
+  // While Save Today (or the day's rollover) holds the session's writes, a
+  // reflection write waits for it instead of failing.
+  const hold=()=>{let release;held=new Promise(resolve=>{release=()=>{held=null;resolve();};});return release;};
+  let release=hold(),settled=false;studyDay=true;result={ok:true};
+  const afterFailedSave=context.write({mode:'session',date:'2026-11-26'}).then(value=>{settled=true;return value;});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(settled,false,'a held write waits');assert.equal(writes,2,'and writes nothing meanwhile');
+  release();assert.equal(await afterFailedSave,result,'the save failed, so the session is still there: the reflection is written');assert.equal(writes,3);
+  release=hold();const afterClosingSave=context.write({mode:'session',date:'2026-11-26'});
+  studyDay=false;release();
+  assert.equal(await afterClosingSave,null,'the save closed the session: nothing to write, and no failure');assert.equal(writes,3,'no session write is attempted');
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['ended session writes nothing','OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['ended session writes nothing','a held session write waits','OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
