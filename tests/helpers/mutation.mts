@@ -10,6 +10,8 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 type Mutation={id:string;file:string;find:string;replace:string;tests:readonly string[]};
 const mutations:readonly Mutation[]=Object.freeze([
+  Object.freeze({"id":"attachment-archive-verifies-manifest-digest","file":"source/core/attachments.ts","find":"if(digest.some((v,i)=>v!==header[12+i]))throw new Error('Attachment archive manifest failed verification.');","replace":"if(false)throw new Error('Attachment archive manifest failed verification.');","tests":["tests/integration/attachments/attachment-archive.mjs"]}),
+  Object.freeze({"id":"attachment-archive-rejects-trailing-bytes","file":"source/core/attachments.ts","find":"if(offset!==file.size)throw new Error('Attachment archive is truncated or contains unexpected data.');","replace":"if(false)throw new Error('Attachment archive is truncated or contains unexpected data.');","tests":["tests/integration/attachments/attachment-archive.mjs"]}),
   Object.freeze({"id":"retention-keeps-safety-per-device","file":"source/core/managed-repository.ts","find":"const device=repositoryRowDevice(row);byDevice.set","replace":"const device='';byDevice.set","tests":["tests/unit/backup/repository-retention.mjs"]}),
   Object.freeze({"id":"retention-expires-safety","file":"source/core/managed-repository.ts","find":"Date.parse(row.manifest.retention.protectedUntil)>nowMs","replace":"true","tests":["tests/unit/backup/repository-retention.mjs"]}),
   Object.freeze({"id":"active-session-autosave-stays-normal","file":"source/core/repositories.ts","find":"(strictDurability?idbStrictTransaction:idbTransaction)<void>","replace":"idbStrictTransaction<void>","tests":["tests/integration/storage/strict-durability-boundaries.mjs"]}),
@@ -166,6 +168,8 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "attachment-archive-verifies-manifest-digest": ["await assert.rejects(()=>module.inspect(new Blob([tampered])),/manifest failed verification/u);"],
+  "attachment-archive-rejects-trailing-bytes": ["await assert.rejects(()=>module.inspect(new Blob([archive,new Uint8Array([9])])),/truncated or contains unexpected data/u);"],
   "retention-keeps-safety-per-device": ["assert.deepEqual(perDevice.retained.filter(row=>perDevice.tiers[row.id]==='before-restore')"],
   "retention-expires-safety": ["assert.equal(expiredProtected.activeProtected,null"],
   "active-session-autosave-stays-normal": ["assert.equal(strictCount(),0,'Review autosaves"],

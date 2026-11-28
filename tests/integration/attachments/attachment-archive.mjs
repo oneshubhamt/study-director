@@ -31,7 +31,11 @@ for(const patch of [{size:'4'},{hash:{toString:()=>hash}},{size:NaN}]){
   assert.throws(()=>module.checkManifest({...manifest,files:[{...manifest.files[0],...patch}]}),/Invalid archived content/);
 }
 
-const tampered=new Uint8Array(await archive.arrayBuffer());tampered[44]^=1;
+// Keep the altered manifest valid JSON and the same length, so the digest
+// check alone distinguishes the wrong historical metadata from valid input.
+const wrongMetadata=new TextEncoder().encode(JSON.stringify({...manifest,entries:[{...manifest.entries[0],name:'qb.png'}]}));
+assert.equal(wrongMetadata.length,metadata.length);
+const tampered=new Uint8Array(await archive.arrayBuffer());tampered.set(wrongMetadata,44);
 await assert.rejects(()=>module.inspect(new Blob([tampered])),/manifest failed verification/u);
 await assert.rejects(()=>module.inspect(new Blob([archive,new Uint8Array([9])])),/truncated or contains unexpected data/u);
 

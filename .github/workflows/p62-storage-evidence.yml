@@ -12,6 +12,9 @@ on:
       - 'tests/integration/backup/repository-checkpoint.mjs'
       - 'tests/helpers/coverage-risk.mts'
       - 'tests/integration/attachments/attachment-deletion.mjs'
+      - 'tests/integration/attachments/attachment-archive.mjs'
+      - 'tests/helpers/backup-fixture-choices.mts'
+      - 'tests/helpers/memory-directory.mts'
       - 'tests/integration/backup/repository-restore.mjs'
       - 'tests/integration/backup/sync-shared-base.mjs'
       - 'tests/browser/exports/exports.mjs'
@@ -39,6 +42,8 @@ jobs:
             mutants: exact-restore-does-not-owe-publication shared-restore-owes-publication bring-in-owes-publication
           - area: restore-immutability
             mutants: restore-preserves-selected-manifest restore-safety-copy-preserves-displaced-records
+          - area: attachment-archive
+            mutants: attachment-archive-verifies-manifest-digest attachment-archive-rejects-trailing-bytes
           - area: note-readback
             mutants: note-reference-removal-verifies-persisted-text note-reference-removal-verifies-whole-record note-reference-removal-verifies-links
           - area: restore-convergence
@@ -226,3 +231,27 @@ jobs:
             echo "Storage cost sample $attempt (one job, fresh child per suite)"
             node tests/helpers/run-category.mjs --jobs 1 targeted tests/integration/backup/repository-checkpoint.mjs tests/integration/backup/repository-restore.mjs tests/unit/backup/repository-retention.mjs
           done
+
+  typed-storage-fixtures:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Exercise stable entry points and directory consumers
+        run: >-
+          node tests/helpers/run-category.mjs --jobs 1 targeted
+          tests/architecture/exports/export-hash-boundary.mjs
+          tests/architecture/exports/file-worker-bundle.mjs
+          tests/integration/backup/device-folder-layout.mjs
+          tests/integration/backup/device-folder-storage.mjs
+          tests/integration/backup/folder-encryption.mjs
+          tests/integration/attachments/attachment-archive.mjs
+          tests/integration/attachments/attachment-storage-dedup.mjs
+          tests/integration/storage/attachment-integrity-audit.mjs
+          tests/integration/storage/attachment-reference-recovery.mjs
+          tests/integration/backup/restore-assets.mjs
