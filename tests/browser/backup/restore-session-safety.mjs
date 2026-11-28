@@ -139,7 +139,7 @@ try{
       const dialog=document.getElementById('sd-interaction-dialog');
       if(dialog?.open&&!firstHandled){
         firstHandled=true;
-        const loaded=await d.AppData.activeSession.load(),current=loaded.value,now=new Date().toISOString();if(!current)throw new Error('Material-race Active Session is unavailable');const changed=d.ActiveSessionCodec.canonicalize({...current,revision:d.AppData.activeSession.nextRevision(current.revision),updatedAt:now,snapshot:{...current.snapshot,review:{reflection:'MATERIAL CONCURRENT EDIT',studyQuality:5},updatedAt:now}});if(!changed)throw new Error('Material-race Active Session is invalid');const saved=await d.AppData.activeSession.save(changed,{strictDurability:true});if(!saved?.ok||saved.error||saved.storage?.idb!==true)throw saved?.error||new Error('Material-race Active Session did not reach canonical storage');
+        d.setStudyQuality(5,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
         const group=[...dialog.querySelectorAll('.interaction-group')].find(node=>node.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session'));
         const local=group&&[...group.querySelectorAll('.interaction-option')].find(button=>String(button.dataset.value||'').endsWith('_local'));
         if(!local)throw new Error('Material-race restore did not expose the local Active Session decision.');
@@ -152,12 +152,12 @@ try{
     }
     if(!done)throw new Error('Material-race restore did not settle after cancelling the rebuilt comparison.');if(error)throw error;
     const final=await d.AppData.activeSession.load();
-    return {firstHandled,rebuilt,cancelled:value?.cancelled===true,review:final.value?.snapshot?.review?.reflection||''};
+    return {firstHandled,rebuilt,cancelled:value?.cancelled===true,review:StudyDirectorRichText.toPlainText(final.value?.snapshot?.review?.reflection||''),quality:final.value?.snapshot?.review?.studyQuality??null};
   })()`);
   assert.equal(materialRace.firstHandled,true,'material-race restore never reached the original decision');
   assert.equal(materialRace.rebuilt,true,'material Active Session edit did not invalidate and rebuild the stale restore decision');
   assert.equal(materialRace.cancelled,true,'rebuilt material-race comparison was not cancellable');
-  assert.equal(materialRace.review,'MATERIAL CONCURRENT EDIT','stale restore decision overwrote the newer material Active Session edit');
+  assert.deepEqual({review:materialRace.review,quality:materialRace.quality},{review:'LOCAL DECISION BASE',quality:5},'stale restore decision overwrote the newer material Review edit');
   const blockedRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA;try{await d.BackupController.inspect(new Blob([JSON.stringify({version:6,records:[]})],{type:'application/json'}),{filename:'legacy.json'});return {ok:true};}catch(error){return {ok:false,message:error.message};}})()`);
   assert.equal(blockedRestore.ok,false,'unsupported historical import must fail before restore');
   assert.match(blockedRestore.message,/retired|unsupported/u);
