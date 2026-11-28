@@ -69,7 +69,7 @@ assert.equal((await store.list()).length,1);assert.equal((await store.rename(A,'
     /injected strict attachment metadata commit failure/u);
   assert.equal(metadata.has(key),false,'failed metadata commit cannot expose an attachment');
   assert.deepEqual([...files.keys()].filter(name=>!before.has(name)),[],'failed metadata commit reclaims the staged OPFS blob');
-  assert.deepEqual(metadata,beforeMetadata,'failure preserves every previously published row');
+  assert.deepEqual(structuredClone(metadata),beforeMetadata,'failure preserves every previously published row');
   const reopened=assetStoragePort(method(mod,'create')(ports));
   assert.equal(await (await reopened.get(A)).text(),await pdf.text(),'previously acknowledged bytes survive failure and a new storage owner');
 }
@@ -127,7 +127,7 @@ assert.equal((await store.collect(async gc=>gc.sweep(),{maxEntries:8})),1,'the i
  let completedEnumerations=0;
  for(let n=0;n<16&&completedEnumerations<2;n++){
    const item=await store.collectReport(async gc=>({removed:await gc.sweep(),pending:gc.status()['sweepPending']}),{maxEntries:2});
-   assert.equal(item['status'],undefined,`resume batch ${n} must run, not be ${item.status} (${item['reason']})`);
+   assert.equal(item['status'],undefined,`resume batch ${n} must run, not be ${item['status']} (${item['reason']})`);
    if(item['pending']===false)completedEnumerations++;
  }
  assert.equal(completedEnumerations,2,'two complete bounded enumerations must finish after a mid-sweep mutation');

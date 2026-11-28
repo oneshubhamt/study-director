@@ -20,6 +20,8 @@ on:
       - 'tests/helpers/verification/data-maintenance.mts'
       - 'tests/helpers/asset-storage-port.mts'
       - 'tests/helpers/verification/asset-storage-contract.mts'
+      - 'tests/helpers/verification/attachment-reference-recovery.mts'
+      - 'tests/integration/storage/attachment-reference-recovery.mjs'
       - 'tests/integration/storage/asset-storage-contract.mjs'
       - 'tests/helpers/verification/study-data-mark.mts'
       - 'tests/integration/storage/study-data-mark.mjs'
