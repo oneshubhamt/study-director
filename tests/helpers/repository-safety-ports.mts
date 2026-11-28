@@ -1,12 +1,11 @@
-import type {MaintenanceOptions,ImportOptions} from '../../types/repositories.ts';
 import {createHarness} from './repository-harness.mts';
 import {method} from './registered-exports.mts';
 import {notesPort,required} from './repository-note-ports.mts';
 import {jsonArray,jsonObject,jsonString} from './verification/read-verification.mts';
 
 export function field(value:unknown,key:string):unknown{
-  if(value===null||value===undefined)return undefined;
-  return jsonObject(value)[key];
+  if(value===null||(typeof value!=='object'&&typeof value!=='function'))return undefined;
+  const result:unknown=Reflect.get(value,key);return result;
 }
 export function bool(value:unknown):boolean{if(typeof value!=='boolean')throw new TypeError('Expected boolean repository result');return value;}
 export function records(value:unknown){return Array.from(jsonArray(value),jsonObject);}
@@ -16,6 +15,10 @@ export function errorMessage(value:unknown):string{
   if(value instanceof Error)return value.message;
   return jsonString(field(value,'message'));
 }
+// Only the options crossing this Node fixture boundary; do not import the
+// browser-only IndexedDB/DOM type graph into the Node project.
+type MaintenanceOptions={force?:boolean;check?:()=>void;workBudget?:{check():void;advance():void}};
+type ImportOptions={signal?:AbortSignal|null;onProgress?:(value:Readonly<{committed:number;total:number;batches:number}>)=>void;yieldControl?:()=>Promise<void>;backupCapture?:boolean};
 type DailyOptions={strict?:boolean;backupCapture?:boolean;expectedCanonical?:unknown;assertOrigin?:()=>void};
 type SessionOptions={emergency?:boolean;strictDurability?:boolean;backupCapture?:boolean;expectedCanonical?:unknown;recoveryFallback?:boolean;assertOrigin?:()=>void};
 function sessionResult(value:unknown){
@@ -58,7 +61,7 @@ export function checkedRepository(...args:Parameters<typeof createHarness>){
       flush:async(options?:MaintenanceOptions)=>call('deletionRecovery','flush',options)
     },
     maintenance:{run:async(options?:MaintenanceOptions)=>{const row=jsonObject(await call('maintenance','run',options));const report:Record<string,unknown>&{status:string}={...row,status:jsonString(row['status'])};return report;}},
-    mutationEpoch:{reseed:async()=>jsonObject(await call('mutationEpoch','reseed')())},
+    mutationEpoch:{reseed:async()=>jsonObject(await call('mutationEpoch','reseed'))},
     planData:{
       read:async()=>jsonObject(await call('planData','read')),
       writeDraft:async(value:string,options?:{strictDurability?:boolean;backupCapture?:boolean;assertOrigin?:()=>void})=>call('planData','writeDraft',value,options),
