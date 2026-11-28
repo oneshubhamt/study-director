@@ -6,7 +6,7 @@ import {dailyRecordCodec,dataContract} from '../../helpers/current-codec-fixture
 const stamp='2026-09-10T10:00:00.000Z',current=dailyRecordCodec.createDiaryRecord('2026-09-09','Canonical reflection',{savedAt:stamp,updatedAt:stamp});
 assert.ok(current);assert.deepEqual(dailyRecordCodec.sanitizeCurrentDailyRecord(current),current);
 for(const version of [0,1,dataContract.schemas.DailyRecord.version-1,dataContract.schemas.DailyRecord.version+1]){
- const unsupported={...current,version},before=structuredClone(unsupported);
+ const unsupported:Record<string,unknown>={...current,version},before=structuredClone(unsupported);
  assert.equal(dailyRecordCodec.sanitizeCurrentDailyRecord(unsupported),null);assert.deepEqual(unsupported,before);
 }
 assert.equal(dailyRecordCodec.sanitizeCurrentNote({version:2,key:'Old name',label:'Old name',text:'Keep bytes',updatedAt:stamp}),null);
