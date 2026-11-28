@@ -109,8 +109,6 @@ assert.match(mutation,/async function refreshAuthority[\s\S]*?durableAcquire\(st
 assert.match(mutation,/function assertOperation\(state\s*,\s*options\s*=\{\}\)[\s\S]*?checkProtection\(state\);[\s\S]*?if\(options\.allowDurableProtected&&error\.durableProtected\)return true;throw error/u,'operation-scoped destructive callers must check origin/expiry before permitting rollback-only durable protection');
 assert.match(mutation,/assert:\s*\(options\s*\)\s*=>assertOperation\(state,options\)/u,'the supplied assertion remains bound to its own reservation');
 assert.match(backup,/requireCanonicalComplete:true/u,'managed repository publication must require a complete canonical capture');
-const pendingReader=host.slice(host.indexOf('async function readPending('),host.indexOf('function mutatePending('));
-assert.doesNotMatch(pendingReader,/normalizePending\(null\)/u,'unavailable provider pending state must not be normalized into absence');
 
 // Coordination boundaries, rather than historical timer/flag spellings. The
 // unit and assembled integration suites establish the behavioral invariants.

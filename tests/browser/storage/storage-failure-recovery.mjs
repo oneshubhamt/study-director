@@ -93,7 +93,10 @@ try{
     const originalPut=IDBObjectStore.prototype.put;__storageFaults.plan=true;
     IDBObjectStore.prototype.put=function(value,...args){if(this.name==='appMeta'&&value?.key==='planDraft'&&__storageFaults.plan)throw new DOMException('forced Plan metadata quota failure','QuotaExceededError');return originalPut.call(this,value,...args);};
     __storageFaults.quota=true;d.AppData.local.setText('probe','quota');
-    d.PlanDraftEditor.composerInput();await wait(420);
+    d.PlanDraftEditor.composerInput();
+    // Observe the actual debounced write result, not a fixed wall-time guess.
+    const deadline=performance.now()+5000;
+    while(!d.readStorageHealth().issues.some(row=>row.source==='planDraft.write')&&performance.now()<deadline)await wait(25);
     const failed=d.readStorageHealth();
     const failedView={issues:failed.issues.map(row=>row.source),warning:warningVisible(),status:document.getElementById('plan-status').textContent,board:document.getElementById('plan-board-state').textContent};
     await d.inspectStorageCapability();
