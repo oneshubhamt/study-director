@@ -51,7 +51,11 @@ export async function settleMotion(page:CdpPage,{timeout=5000}={}){
 }
 
 function readBuildManifest(){
-  const manifest=row(JSON.parse(readRuntimeSource(path.join(root,'dist','build-manifest.json'))) as unknown);if(typeof manifest['main']!=='string'||!manifest['main'])throw new Error('Invalid build manifest main.');return {...manifest,main:manifest['main']};
+  const manifest=row(JSON.parse(readRuntimeSource(path.join(root,'dist','build-manifest.json'))) as unknown);
+  const main=manifest['main'],release=manifest['release'];
+  if(typeof main!=='string'||!main)throw new Error('Invalid build manifest main.');
+  if(typeof release!=='string'||!release)throw new Error('Invalid build manifest release.');
+  return {...manifest,main,release};
 }
 
 function contentType(name:string){

@@ -117,6 +117,8 @@
     "tests/helpers/verification/save-lane.mts",
     "tests/helpers/verification/backup-operation-diagnostics.mts",
     "tests/helpers/verification/canonical-baseline.mts",
-    "tests/helpers/verification/installation-identity.mts"
+    "tests/helpers/verification/installation-identity.mts",
+    "tests/helpers/verification/capacity.mts",
+    "tests/helpers/verification/multi-tab.mts"
   ]
 }

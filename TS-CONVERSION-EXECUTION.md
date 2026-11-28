@@ -15,6 +15,8 @@
 
 - Interleaved Drive fixture clients reproduced a collision (two IDs for three writes). Sharing the simulated server allocator preserves every file, folder and revision across pages. Drive security and repository checkpoint pass. The unsupported-data Chromium suite now checks the exact seeded readable note and the opaque record retained in a newer database. All seven cases passed after rebuilding the app.
 
+- Strictly converted the capacity and multi-tab browser drivers (37/124 primary paths). Both maximum-count modes (500 Saved Days, 2,000 notes) passed restore, re-export, reload and fault rollback in Chromium. Rollback now compares the retained dates and reads an exact note. Multi-tab passed protected actions, takeover, stale-write rejection and return hydration. CDP page programs execute in the built app.
+
 ## P6.1 · Closed
 
 - All 80 P6.1-assigned paths were reconciled against the frozen P6.0 inventory. Each of the 61 JavaScript implementation entries has a strictly checked TypeScript owner; stable `.mjs` entry names and the CJS worker preload remain forwarding boundaries. Native launchers, Python and declarative configuration remain native.
