@@ -175,10 +175,7 @@ function renderOwnershipBanner(){
 }
 function renderOwnershipUi(){
   if(!appCanMutate())NoticeCoordinator.stopSound();
-  // Plan access must project even while startup is fail-closed. The Plan host
-  // combines ownership with canonical Plan hydration, so an unready surface
-  // remains disabled instead of retaining controls from the HTML fallback.
-  ports.syncPlanAccess();
+  if(ports.ready())ports.syncPlanAccess();
   ports.projectOwnership();
   renderOwnershipBanner();
   ports.wakeBackground('ownership');

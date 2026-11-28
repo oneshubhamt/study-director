@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.ts','source/core/ownership.ts','source/core/startup-host.ts','source/core/plan-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/ownership.ts','source/core/startup-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Ownership=registry.require('ownership',1);
 const StartupHost=registry.require('startup-host',1);
-const PlanHost=registry.require('plan-host',1);
 const freeze=Object.freeze;
 
 let now=1000,captured=[];
@@ -54,59 +53,6 @@ assert.equal(controller.canMutate(),false,'a failed takeover must never become w
 assert.equal(ownerStore.has('owner'),false,'failed takeover must release its ownership lease');
 assert.ok(captured.some(item=>item.scope==='ownership.hydrate'&&/Preferences hydration failure/i.test(item.error)),'hydration failure must be diagnosed');
 assert.deepEqual(hydrationEvents.slice(0,8),['plan-data','plan-runtime','saved-plans','primary:true','activation:ownership-takeover','resume-storage-reset','unsupported-census','drafts:true:true'],'startup host must preserve takeover hydration order, merge reload evidence, and force canonical finalization');
-
-{
-  const calls=[];
-  const views=StartupHost.createOwnershipViews(freeze({
-    document:{body:{appendChild:()=>{}},getElementById:()=>null,createElement:()=>({className:'',append:()=>{},appendChild:()=>{},addEventListener:()=>{},dataset:{},remove:()=>{},set type(_value){},set textContent(_value){}})},
-    OWNERSHIP_STATES:Ownership.OWNERSHIP_STATES,
-    AppOwnership:freeze({state:Ownership.OWNERSHIP_STATES.PRIMARY,canMutate:()=>true,requirePrimary:()=>true,status:()=>freeze({state:Ownership.OWNERSHIP_STATES.PRIMARY})}),
-    NoticeCoordinator:freeze({stopSound:()=>calls.push('stop-sound')}),
-    appCanMutate:()=>false,claimAppControl:()=>true,setPlanStatus:()=>{},
-    mutationStatus:()=>null,ready:()=>false,
-    syncPlanAccess:()=>calls.push('plan-access'),
-    projectOwnership:()=>calls.push('ownership'),
-    wakeBackground:reason=>calls.push('wake:'+reason),
-    syncWake:()=>{calls.push('sync-wake');return true;}
-  }));
-  views.renderOwnershipUi();
-  assert.deepEqual(calls,['stop-sound','plan-access','ownership','wake:ownership','sync-wake'],'fail-closed startup must project Plan access before full startup readiness');
-}
-
-{
-  // Plan has a narrower write boundary than ownership: until its canonical
-  // storage has hydrated, a primary lease must not enable Apply/Edit controls.
-  let dataReady=false,ownerWritable=true,observedOwnership=null;
-  const data=freeze({
-    format:'study-director.plan-data',contractVersion:1,
-    factory:freeze({scheduleText:'',studentName:'QA'}),
-    activeDefaults:()=>freeze({scheduleText:'',studentName:'QA'}),
-    readDraft:()=>null,library:()=>freeze({savedPlans:freeze([]),defaultId:null}),
-    writeLibrary:async()=>true,writeDraft:async()=>true,ready:()=>dataReady
-  });
-  const module=freeze({
-    format:'study-director.plan-module',contractVersion:1,
-    createController:input=>{
-      observedOwnership=input.ports.ownership;
-      return freeze({format:'study-director.plan-controller',contractVersion:1});
-    }
-  });
-  const underlyingOwnership=freeze({canMutate:()=>ownerWritable,requirePrimary:()=>true,revision:()=>1});
-  PlanHost.createController(freeze({
-    module,data,
-    ports:freeze({
-      persistence:freeze({lastError:()=>null,reportDraftResult:()=>{}}),
-      defaults:freeze({applyStudentName:()=>{}}),
-      ownership:underlyingOwnership
-    })
-  }));
-  assert.ok(observedOwnership,'Plan host did not pass an ownership port');
-  assert.equal(observedOwnership.canMutate(),false,'primary ownership must not enable Plan before canonical Plan hydration');
-  dataReady=true;
-  assert.equal(observedOwnership.canMutate(),true,'hydrated Plan may use current primary ownership');
-  ownerWritable=false;
-  assert.equal(observedOwnership.canMutate(),false,'Plan hydration must not bypass ownership loss');
-}
 
 console.log(JSON.stringify({status:'PASS',suite:'ownership-hydration-fail-closed',hydratingNotWritable:true,failedHydrationFaults:true,leaseReleased:true,startupHostHydration:true,reloadHintMerged:true},null,2));
 

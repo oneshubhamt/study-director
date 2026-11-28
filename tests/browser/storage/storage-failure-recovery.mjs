@@ -248,15 +248,15 @@ try{
   for(const mode of ['absent','malformed','throwing','blocked','timeout']){
     const faultPage=await createPage({idbMode:mode,waitForStartup:false});pages.push(faultPage);
     await waitFor(()=>faultPage.evaluate(`(()=>{const state=__StorageDebug.StartupLifecycle.status();return state.startRequested&&!state.initializing})()`),{timeout:60000,label:`${mode} fail-closed startup`});
-    const state=await faultPage.evaluate(`(()=>({available:__StorageDebug.IndexedDb.isAvailable(),issues:__StorageDebug.readStorageHealth().issues.map(row=>row.source),warning:!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden,startup:__StorageDebug.StartupLifecycle.status(),planReadOnly:document.getElementById('plan-input').readOnly,applyDisabled:document.querySelector('[data-action="apply-schedule"]').disabled}))()`);
+    const state=await faultPage.evaluate(`(()=>{const apply=document.querySelector('[data-action="apply-schedule"]');return {available:__StorageDebug.IndexedDb.isAvailable(),issues:__StorageDebug.readStorageHealth().issues.map(row=>row.source),warning:!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden,startup:__StorageDebug.StartupLifecycle.status(),planReadOnly:document.getElementById('plan-input').readOnly,applyInert:apply.inert,applyProjection:apply.dataset.ownershipUi,applyReason:apply.dataset.ownershipUiReason};})()`);
     assert.equal(state.available,!['absent','malformed'].includes(mode),`${mode} IndexedDB capability detection was incorrect`);
     assert.ok(state.issues.includes('indexedDB'),`${mode} IndexedDB failure was not source-owned`);
     assert.equal(state.warning,true,`${mode} IndexedDB failure was not globally visible`);
     assert.equal(state.startup.fullyInitialized,false,`${mode} IndexedDB failure allowed writable startup`);
     assert.equal(state.planReadOnly,true,`${mode} IndexedDB failure left Plan writable`);
-    assert.equal(state.applyDisabled,true,`${mode} IndexedDB failure left Apply enabled before canonical Plan hydration`);
-    // This assertion is intentionally a rendered-surface witness: startup may
-    // retain ownership while canonical Plan hydration has failed.
+    assert.equal(state.applyInert,true,`${mode} IndexedDB failure left Apply interactive before canonical Plan hydration`);
+    assert.equal(state.applyProjection,'startup-inert',`${mode} IndexedDB failure lost the startup-inert ownership projection`);
+    assert.equal(state.applyReason,'ownership',`${mode} IndexedDB failure did not identify ownership/startup admission as the Apply barrier`);
     results.indexedDB[mode]=true;
   }
 

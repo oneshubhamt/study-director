@@ -283,11 +283,7 @@ function createController(input:Readonly<PlanControllerHostInput>){
     reportDraftResult:input.ports.persistence.reportDraftResult
   });
   const defaults=freeze({active:input.data.activeDefaults,applyStudentName:input.ports.defaults.applyStudentName,factory:input.data.factory});
-  // A primary lease is not enough to make Plan writable: canonical Plan data
-  // must also have completed hydration. This keeps controls fail-closed when
-  // startup faults after ownership is acquired but before Plan storage is ready.
-  const ownership=freeze({...input.ports.ownership,canMutate:()=>input.data.ready()&&input.ports.ownership.canMutate()});
-  const controller=input.module.createController(freeze({ports:freeze({...input.ports,persistence,defaults,ownership})}));
+  const controller=input.module.createController(freeze({ports:freeze({...input.ports,persistence,defaults})}));
   if(!Object.isFrozen(controller)||controller.format!=='study-director.plan-controller'||controller.contractVersion!==1)throw new TypeError('Study Director Plan controller is unavailable or incompatible.');
   return controller;
 }
