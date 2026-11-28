@@ -119,6 +119,8 @@
     "tests/helpers/verification/canonical-baseline.mts",
     "tests/helpers/verification/installation-identity.mts",
     "tests/helpers/verification/capacity.mts",
-    "tests/helpers/verification/multi-tab.mts"
+    "tests/helpers/verification/multi-tab.mts",
+    "tests/helpers/note-ids.mts",
+    "tests/helpers/verification/pending-review-codec.mts"
   ]
 }

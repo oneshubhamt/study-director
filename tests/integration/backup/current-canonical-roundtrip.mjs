@@ -4,13 +4,9 @@ import vm from 'node:vm';
 import {createProcessingEngine} from '../../../portable/processing.ts';
 import {passwordKey,transformEncrypted} from '../../../portable/stream-encryption.ts';
 import {noteId} from '../../helpers/note-ids.mjs';
-import {registry,Domain,RecordCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec} from '../../helpers/current-codec-fixture.mjs';
+import {registry,activeSessionCodec,personalDataCodec,pendingReviewCodec,freeze,boundedInt,helpers,limits,dataContract,dailyRecordCodec} from '../../helpers/current-codec-fixture.mjs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
-const activeSessionCodec=RecordCodecs.createActiveSessionCodec(freeze({limits,dataContract,activeSessionId:'current',domain:Domain,keyedRecord:freeze({create:()=>Object.create(null)}),dailyRecordCodec,
-  helpers:freeze({boundedInt,boundedNumber,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),sameDataValue,activeSessionScheduleFingerprint:()=> 'fp',isCanonicalScheduleText:v=>!!v,isValidIsoDate:Domain.TimeModel.isValidIsoDate,normalizeStudyQuality:helpers.normalizeStudyQuality,parseProgressNumber:Domain.CompletionModel.parseProgressNumber,sanitizePracticeState:()=>({active:false,runs:[]})}),
-  timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(v,f=null)=>Number.isFinite(Number(v))?Number(v):f})}));
-const processing=freeze({...createProcessingEngine(),scope:fn=>fn()}),personalDataCodec=RecordCodecs.createPersonalDataCodec(limits),attachments=registry.require('attachments',1);
-const pendingReviewCodec=RecordCodecs.createPendingReviewCodec(freeze({dataContract,dailyRecordCodec,activeSessionCodec,personalDataCodec,helpers:freeze({sameDataValue,randomBytes:length=>crypto.getRandomValues(new Uint8Array(length))})}));
+const processing=freeze({...createProcessingEngine(),scope:fn=>fn()}),attachments=registry.require('attachments',1);
 const defs=freeze({dailyRecord:{idField:'date',backupLimit:limits.maxImportRecords},note:{idField:'key',backupLimit:limits.maxNotes},activeSession:{idField:'id',backupLimit:1}});
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox);
 const rich=richSandbox.StudyDirectorRichText;

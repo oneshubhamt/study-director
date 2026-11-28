@@ -1089,7 +1089,9 @@ function materializeDailyRecordSummary(summary:unknown){
       const open=[...byId.values()].filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),bySubject=new Map<string,PendingReview[]>();
       for(const review of open){
         const key=review.subject+':'+review.ref,peers=bySubject.get(key)||[];
-        if(peers.some((previous:PendingReview)=>sameOpen(previous,review)))byId.set(review.id,resolved(review)!);
+        // The later duplicate was redundant as soon as it was kept. Restore
+        // planning and storage must derive identical bytes from these inputs.
+        if(peers.some(previous=>sameOpen(previous,review)))byId.set(review.id,resolved(review,review.keptAt)!);
         else{peers.push(review);bySubject.set(key,peers);}
       }
       const all=[...byId.values()],remaining=all.filter(review=>!review.resolvedAt),done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));

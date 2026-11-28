@@ -19,6 +19,8 @@
 
 - Replaying repository-checkpoint exposed a six-billion-ms popup timer that Node truncated to 1 ms. A targeted lifecycle test reproduced a saved notification staying visible past its remaining duration after a clock rollback. Popup expiry now uses elapsed time, with calendar time retained for Recent. The lifecycle test and checkpoint passed without the overflow, and strict checks passed on 357 files.
 
+- Pending-review deduplication used the wall clock. Restore planning and independent storage merge could disagree on canonical bytes. Automatic duplicates now retire at their own kept time. The strict codec test checks permutation and replay, and the repository test reads the exact planned rows back and verifies a replay writes nothing. Canonical roundtrip, pending reviews, sync and repository restore passed (five hermetic entries, 16.2 s), plus the extended storage witness. 38/124 owners converted. Shared note IDs are also checked ahead of their P6.4 assignment.
+
 ## P6.1 · Closed
 
 - All 80 P6.1-assigned paths were reconciled against the frozen P6.0 inventory. Each of the 61 JavaScript implementation entries has a strictly checked TypeScript owner; stable `.mjs` entry names and the CJS worker preload remain forwarding boundaries. Native launchers, Python and declarative configuration remain native.

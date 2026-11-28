@@ -46,6 +46,22 @@ const dailyRecordCodec=RecordCodecs.createDailyRecordCodec(freeze({
 }));
 
 
+export const activeSessionCodec=RecordCodecs.createActiveSessionCodec(freeze({
+  limits,dataContract,activeSessionId:'current',domain:Domain,keyedRecord,dailyRecordCodec,timestamps,
+  helpers:freeze({
+    boundedInt,boundedNumber,clampText,clampEditorContent:clampText,editorContentWithinLimits:helpers.editorContentWithinLimits,
+    sameDataValue,normalizeStudyQuality:helpers.normalizeStudyQuality,cleanDayRevision:(value:unknown)=>Math.max(0,Math.round(Number(value)||0)),
+    activeSessionScheduleFingerprint:()=> 'fp',isCanonicalScheduleText:(value:unknown)=>!!value,
+    isValidIsoDate:Domain.TimeModel.isValidIsoDate,parseProgressNumber:Domain.CompletionModel.parseProgressNumber,
+    sanitizePracticeState:()=>({active:null,runs:[]})
+  })
+}));
+export const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
+export const pendingReviewCodec=RecordCodecs.createPendingReviewCodec(freeze({
+  dataContract,dailyRecordCodec,activeSessionCodec,personalDataCodec,
+  helpers:freeze({sameDataValue,randomBytes:(length:number)=>crypto.getRandomValues(new Uint8Array(length))})
+}));
+
 // Practice-run sanitization above deliberately retains the original permissive
 // fixture port; the record codec, not a replacement practice codec, is under test.
 export {keyedRecord,timestamps,registry,Domain,RecordCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec};

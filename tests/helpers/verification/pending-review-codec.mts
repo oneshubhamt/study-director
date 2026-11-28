@@ -1,0 +1,66 @@
+import {method} from '../registered-exports.mts';
+import assert from 'node:assert/strict';
+import {activeSessionCodec,pendingReviewCodec as codec,dataContract} from '../../helpers/current-codec-fixture.mts';
+import {noteId} from '../../helpers/note-ids.mts';
+
+// PendingReview.v2: a version a sync kept for review, naming the device whose
+// copy held it and when that copy changed it. Only canonical records pass; a
+// resolved one keeps only its id and wins every merge; resolved ones are
+// bounded, open ones never dropped.
+assert.equal(codec.version,dataContract.schemas.PendingReview.version);
+
+const id=noteId('ethics'),keptAt='2026-10-18T09:00:00.000Z',device='inst_ipad_safari_mgx2k3a0_1a2b3c4d',changedAt='2026-10-17T21:40:00.000Z';
+const note=codec.create({subject:'note',ref:id,kept:{text:'their paragraph'},base:{text:'shared paragraph'},keptAt,origin:{device,changedAt:'2026-10-17T21:40:00Z'}});
+assert.match(note.id,/^pr_[a-f0-9]{32}$/u);assert.deepEqual(Object.keys(note).sort(),['base','id','kept','keptAt','keptChangedAt','keptFrom','ref','resolvedAt','subject','version']);
+assert.deepEqual({...note,id:''},{version:2,id:'',subject:'note',ref:id,keptAt,keptFrom:device,keptChangedAt:changedAt,kept:{text:'their paragraph'},base:{text:'shared paragraph'},resolvedAt:''},'the device and a canonical time are recorded');
+const unknown=codec.create({subject:'note',ref:id,kept:{text:'x'},origin:{device:'not a device',changedAt:'yesterday'}});
+assert.deepEqual([unknown.keptFrom,unknown.keptChangedAt],['',''],'what is not known is recorded as not known');
+assert.deepEqual([codec.create({subject:'note',ref:id,kept:{text:'x'}}).keptFrom],[''],'no origin given, none recorded');
+assert.equal(codec.normalize({...note,keptFrom:'ipad'}),null,'a device is an installation ID');
+assert.equal(codec.normalize({...note,keptChangedAt:'17 Oct'}),null,'a change time is canonical');
+const {keptFrom:_from,keptChangedAt:_changed,...v1}=note;
+assert.equal(codec.normalize({...v1,version:1}),null,'the current codec reads only v2; v1 goes through the compatibility layer');
+assert.deepEqual(codec.normalize(note),note,'a stored review reads back unchanged');
+assert.ok(codec.create({subject:'note',ref:id,kept:null}),'a note deleted on the other side keeps null');
+assert.throws(()=>codec.create({subject:'note',ref:'Ethics',kept:{text:'x'}}),/invalid/u,'notes are named by id');
+assert.throws(()=>codec.create({subject:'note',ref:id,kept:{text:'x'},base:{label:'y'}}),/invalid/u,'a base holds only the fields kept');
+assert.throws(()=>codec.create({subject:'personal',ref:'personal',kept:null}),/invalid/u,'plans and settings are never kept as a deletion');
+assert.throws(()=>method(codec,'create')({subject:'savedDay',ref:'2026-10-17',kept:{version:16,date:'2026-10-16'}}),/invalid/u,'a Saved Day is kept under its own date');
+assert.equal(codec.normalize({...note,extra:true}),null,'unknown fields are refused');
+assert.equal(codec.normalize({...note,keptAt:'18 Oct 2026'}),null,'times are canonical');
+
+const resolved=codec.resolved(note,'2026-10-18T10:00:00.000Z');
+assert.ok(resolved);
+assert.deepEqual(resolved,{...note,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt:'2026-10-18T10:00:00.000Z'},'a resolved review keeps only its id');
+assert.equal(codec.normalize({...resolved,keptFrom:device}),null,'a resolved review carries no device');
+assert.deepEqual(codec.richTexts(note),['their paragraph','shared paragraph'],'kept texts may use attachments');assert.deepEqual(codec.richTexts(resolved),[]);
+
+const date='2026-10-18';
+const kept=activeSessionCodec.canonicalize({
+  id:'current',type:'activeSession',version:10,revision:1,date,status:'suspended',runningOn:device,
+  scheduleText:'07:00 | 60 | Study | work | Ethics | pages | 10',
+  snapshot:{version:6,date,fingerprint:'fp',review:{reflection:'kept reflection',studyQuality:4},updatedAt:keptAt},
+  suspendedAt:keptAt,updatedAt:keptAt
+});
+assert.ok(kept);
+const session=codec.create({subject:'session',ref:'session',kept});
+assert.deepEqual(codec.richTexts(session),['kept reflection']);
+const other=codec.create({subject:'note',ref:id,kept:{label:'Ethics II'},keptAt});
+// The same kept content from two devices is one review, whichever device recorded it.
+const twin=codec.create({subject:'note',ref:id,kept:{text:'their paragraph'},base:{text:'shared paragraph'},keptAt:'2026-10-18T09:05:00.000Z',origin:{device:'inst_android_chrome_mgx2k3a1_5e6f7a8b',changedAt}});
+assert.equal(codec.merge([[note],[twin]],10).filter(review=>!review.resolvedAt).length,1,'duplicates merge whatever device they name');
+// Restore computes an intended set and then storage merges the same inputs again.
+const planned=codec.merge([[note],[twin]],10);
+const duplicate=planned.find(review=>review.id===twin.id);
+assert.equal(duplicate?.resolvedAt,twin.keptAt,'automatic deduplication must produce the same retirement on every device');
+assert.deepEqual(codec.merge([[twin],[note]],10),planned,'swapping the two providers preserves every canonical field');
+assert.deepEqual(codec.merge([planned,[note,twin]],10),planned,'replaying the input cannot rewrite the retirement');
+// A resolved review wins on every device; open ones are never dropped, and
+// only the newest resolved ones are kept, as many as may wait.
+assert.deepEqual(codec.merge([[note,other],[resolved]],10).map(review=>review.id),[note.id,other.id].sort());
+assert.equal(codec.merge([[resolved],[note]],10).find(review=>review.id===note.id)?.resolvedAt,resolved.resolvedAt,'a resolved review wins');
+assert.equal(codec.merge([[note],[resolved]],0).length,0,'resolved ones beyond the limit go');
+assert.equal(codec.merge([[note,other]],0).length,2,'open ones always stay');
+assert.throws(()=>codec.merge([[{...note,kept:'x'}]],10),/invalid/u,'an invalid review stops the merge');
+
+console.log(JSON.stringify({status:'PASS',suite:'pending-review-codec',canonicalOnly:true,origin:true,resolvedWins:true,openNeverDropped:true}));

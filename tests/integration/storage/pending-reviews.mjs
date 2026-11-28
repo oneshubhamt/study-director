@@ -39,4 +39,12 @@ await assert.rejects(h.app.pendingReviews.merge([{...second,keptAt:'18 Oct'}]),/
 assert.deepEqual([...await h.app.pendingReviews.replace([second])],[first.id]);
 assert.deepEqual([...(await h.app.pendingReviews.list()).map(item=>item.id)],[second.id]);
 
+// Restore plans in advance and verifies the subsequent independent storage merge.
+const {pendingReviewCodec}=await import('../../helpers/current-codec-fixture.mts');
+const duplicate={...second,id:review(3).id,keptAt:'2026-10-19T09:00:00.000Z'};
+const intended=pendingReviewCodec.merge([[second],[duplicate]],PRODUCTION_LIMITS.maxPendingReviews);
+assert.deepEqual([...await h.app.pendingReviews.merge([duplicate])],[duplicate.id]);
+assert.deepEqual([...await h.app.pendingReviews.list()],intended,'committed review bytes match the independently planned merge');
+assert.deepEqual([...await h.app.pendingReviews.merge([duplicate])],[],'duplicate replay requires no durable write');
+
 console.log(JSON.stringify({status:'PASS',suite:'pending-reviews',resolvedWins:true,backupUnits:true,openNeverDropped:true}));
