@@ -93,6 +93,10 @@
     "tests/helpers/verification/backup-recovery-ux-contract.mts",
     "tests/helpers/verification/managed-recovery-contract.mts",
     "tests/helpers/verification/cleer-integration.mts",
-    "tests/helpers/verification/host-export-port.mts"
+    "tests/helpers/verification/host-export-port.mts",
+    "tests/helpers/verification/export-hash-boundary.mts",
+    "tests/helpers/verification/file-worker-bundle.mts",
+    "tests/helpers/backup-fixture-choices.mts",
+    "tests/helpers/memory-directory.mts"
   ]
 }
