@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "files": [
+    "tests/helpers/file-processing.mts",
+    "tests/helpers/verification/processing-contracts.mts"
+  ]
+}

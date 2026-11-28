@@ -11,6 +11,8 @@
 
 - Independent restore audit reproduced a stale scratch decision when only a note's links changed at the same timestamp. The unmodified provider/controller witness ran once and accepted it. The corrected comparison includes the ordered links. Targeted sync and canonical suites pass (5.3 s) and the new witness observes two decisions, the original text and the successor link. No stored format change.
 
+- Converted the disk-backed worker fixture and processing contract tests to strict TypeScript (35/124 primary paths). Node supplies the filesystem adapter and the worker supplies the actual operation types. All 172 fast entries passed dependency-free in 73.8 s. Strict types and typed lint passed on 355 files, and the 64 MiB binary capacity and processing contracts passed through their stable entries.
+
 ## P6.1 · Closed
 
 - All 80 P6.1-assigned paths were reconciled against the frozen P6.0 inventory. Each of the 61 JavaScript implementation entries has a strictly checked TypeScript owner; stable `.mjs` entry names and the CJS worker preload remain forwarding boundaries. Native launchers, Python and declarative configuration remain native.
