@@ -10,6 +10,11 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 type Mutation={id:string;file:string;find:string;replace:string;tests:readonly string[]};
 const mutations:readonly Mutation[]=Object.freeze([
+  Object.freeze({"id":"retention-keeps-safety-per-device","file":"source/core/managed-repository.ts","find":"const device=repositoryRowDevice(row);byDevice.set","replace":"const device='';byDevice.set","tests":["tests/unit/backup/repository-retention.mjs"]}),
+  Object.freeze({"id":"retention-expires-safety","file":"source/core/managed-repository.ts","find":"Date.parse(row.manifest.retention.protectedUntil)>nowMs","replace":"true","tests":["tests/unit/backup/repository-retention.mjs"]}),
+  Object.freeze({"id":"active-session-autosave-stays-normal","file":"source/core/repositories.ts","find":"(strictDurability?idbStrictTransaction:idbTransaction)<void>","replace":"idbStrictTransaction<void>","tests":["tests/integration/storage/strict-durability-boundaries.mjs"]}),
+  Object.freeze({"id":"canonical-note-port-is-strict","file":"source/core/repositories.ts","find":"idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets","replace":"idbGetAll,idbStoreTransaction,idbStrictTransaction:idbTransaction,storageResets:()=>IndexedDb.lifecycle().resets","tests":["tests/integration/storage/strict-durability-boundaries.mjs"]}),
+  Object.freeze({"id":"canonical-daily-batch-is-strict","file":"source/core/repositories.ts","find":"return idbStrictTransaction<{ok:true}>(stores,","replace":"return idbTransaction<{ok:true}>(stores,","tests":["tests/integration/storage/strict-durability-boundaries.mjs"]}),
   Object.freeze({id:'canonical-sorts-object-keys',file:'source/core/canonical.ts',find:'Object.keys(input).sort()',replace:'Object.keys(input)',tests:Object.freeze(['tests/unit/app/canonical.mts'])}),
   Object.freeze({id:'save-lane-retries-only-current-value',file:'source/core/save-lane.ts',find:'if(sequence===taken)',replace:'if(true)',tests:Object.freeze(['tests/integration/storage/save-lane.mjs'])}),
   Object.freeze({
@@ -161,6 +166,11 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "retention-keeps-safety-per-device": ["assert.deepEqual(perDevice.retained.filter(row=>perDevice.tiers[row.id]==='before-restore')"],
+  "retention-expires-safety": ["assert.equal(expiredProtected.activeProtected,null"],
+  "active-session-autosave-stays-normal": ["assert.equal(strictCount(),0,'Review autosaves"],
+  "canonical-note-port-is-strict": ["assert.ok(strictCount()>beforeNoteFlush"],
+  "canonical-daily-batch-is-strict": ["assert.ok(strictCount()>beforeDaily"],
   "restore-journal-retirement-is-strict": ["assert.equal(idbDurability.strict,restoreStrictBefore+1,'restore journal retirement must use strict durability');"],
   "library-journal-retirement-is-strict": ["assert.equal(idbDurability.strict,libraryStrictBefore+1,'library-clear journal retirement must use strict durability');"],
   "library-journal-verifies-plan-signature": ["await assert.rejects(journal().read(),/plan signature does not verify/u,'a valid payload digest cannot authorize a mismatched plan signature');"],

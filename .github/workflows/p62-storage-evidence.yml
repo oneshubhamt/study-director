@@ -51,6 +51,8 @@ jobs:
             mutants: recovery-hold-awaits-provider-drain recovery-release-resumes-every-provider recovery-failure-still-resumes recovery-host-waits-for-settlement retry-clear-failure-preserves-obligation forget-retires-pending-obligation
           - area: stale-intent-and-receipt
             mutants: exact-restore-retires-superseded-intent unavailable-pending-read-fails-closed pending-receipt-requires-source-revision
+          - area: retention-and-persistence
+            mutants: retention-keeps-safety-per-device retention-expires-safety active-session-autosave-stays-normal canonical-note-port-is-strict canonical-daily-batch-is-strict
           - area: journal-durability-and-integrity
             mutants: restore-journal-prepare-is-strict library-journal-prepare-is-strict restore-journal-phase-is-strict library-journal-phase-is-strict library-journal-verifies-chunk-digest restore-journal-retirement-is-strict library-journal-retirement-is-strict library-journal-verifies-plan-signature
           - area: scheduler-deadline-and-intent-order
