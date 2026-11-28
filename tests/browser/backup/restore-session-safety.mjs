@@ -106,7 +106,12 @@ try{
   const reflectionEditor='.pane.on .sd-rte[data-sd-rich-surface="reflection"] [contenteditable="true"]';
   await page1.evaluate(`__RestoreSafetyQA.goTab('review')`);
   await waitFor(()=>page1.evaluate(`!!document.querySelector(${JSON.stringify(reflectionEditor)})`),{label:'running restore reflection editor'});
-  await page1.evaluate(`(()=>{const editor=document.querySelector(${JSON.stringify(reflectionEditor)});if(!editor)throw new Error('Reflection editor is unavailable');const range=document.createRange(),selection=getSelection();range.selectNodeContents(editor);selection.removeAllRanges();selection.addRange(range);editor.focus();})()`);
+  await page1.send('Emulation.setFocusEmulationEnabled',{enabled:true});
+  const reflectionPoint=await page1.evaluate(`(()=>{const editor=document.querySelector(${JSON.stringify(reflectionEditor)});if(!editor)throw new Error('Reflection editor is unavailable');const rect=editor.getBoundingClientRect();return {x:rect.left+Math.min(40,rect.width/2),y:rect.top+Math.min(24,rect.height/2)};})()`);
+  await page1.send('Input.dispatchMouseEvent',{type:'mousePressed',x:reflectionPoint.x,y:reflectionPoint.y,button:'left',buttons:1,clickCount:1});
+  await page1.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:reflectionPoint.x,y:reflectionPoint.y,button:'left',buttons:0,clickCount:1});
+  await page1.send('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:2,commands:['selectAll']});
+  await page1.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:2});
   await page1.send('Input.insertText',{text:'LOCAL DECISION BASE'});
   await waitFor(()=>page1.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection').value)==='LOCAL DECISION BASE'`),{label:'running restore reflection input'});
   await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA;d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();})()`);
