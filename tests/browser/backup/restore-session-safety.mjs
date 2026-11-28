@@ -1,4 +1,4 @@
-import {withoutPwaChecks,studyTimezone,launchChromium} from '../../helpers/browser-harness.mjs';
+import {withoutPwaChecks,studyTimezone,launchChromium,skipFirstStart} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -41,6 +41,7 @@ const browser=await launchChromium({profilePrefix:'qa-safety-'});
 async function createPage(){
   const page=await browser.createPage(appUrl,{timezoneId:studyTimezone()});
   await waitFor(()=>page.evaluate(`!!(window.__RestoreSafetyQA&&__RestoreSafetyQA.StartupLifecycle.status().fullyInitialized)`),{timeout:45000,label:'Study Director startup'});
+  await skipFirstStart(page);
   await sleep(250);return page;
 }
 
