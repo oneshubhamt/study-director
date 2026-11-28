@@ -139,6 +139,7 @@
     "tests/helpers/verification/indexeddb-topology-retirement.mts",
     "tests/helpers/asset-storage-port.mts",
     "tests/helpers/verification/asset-storage-contract.mts",
-    "tests/helpers/verification/attachment-reference-recovery.mts"
+    "tests/helpers/verification/attachment-reference-recovery.mts",
+    "tests/helpers/verification/attachment-integrity-audit.mts"
   ]
 }
