@@ -13,7 +13,7 @@ import {method,registeredExports} from '../registered-exports.mts';
 import {field} from '../repository-safety-ports.mts';
 import {required} from '../repository-note-ports.mts';
 import {jsonObject,jsonString} from './read-verification.mts';
-import {deviceControllerPort,deviceRuntimePort} from '../device-folder-ports.mts';
+import {deviceControllerPort,deviceRuntimePort,folderStoragePort} from '../device-folder-ports.mts';
 const lifecycle=registeredExports(globalThis,'operation-lifecycle'),exportsModule=registeredExports(globalThis,'exports',Object.freeze({lifecycle})),engine=createProcessingEngine(),settings=new Map<string,unknown>();
 let unlockPrompts=0;
 const processing={...engine,check:()=>{},job:<T,>(fn:()=>T)=>fn()},storage={read:async (key:string)=>settings.get(key)||null,write:async(key:string,value:unknown)=>settings.set(key,value),remove:async (key:string)=>settings.delete(key)};
@@ -65,8 +65,12 @@ await w.controller.install();w.choose(folder);await w.controller.connect();await
   assert.equal(await commits(),3,'a write that reads back wrong never becomes a version');assert.deepEqual(await snapshot(),prior,'failed encrypted backup preserves all previously committed manifests byte for byte');assert.match(w.note(),/failed verification/u);
   const root=await folder.getDirectoryHandle(IDENTITIES.root),objects=(await root.getDirectoryHandle(IDENTITIES.objects)).names();assert.ok(!objects.includes(await w.nextObjectName()),'the bad file is removed');
   assert.equal(await w.controller.backupNow(),true,'the next attempt succeeds');assert.equal(await commits(),4);
-  const fresh=world({protection:sealed});await fresh.controller.install();fresh.choose(folder);await fresh.controller.connect();await fresh.settle();
-  const reopened=await fresh.runtime.history('device-folder',{interactive:false});assert.equal(reopened.entries.length,4,'fresh owner lists every committed encrypted version after retry');
+  const fresh=world({protection:sealed,start:new Date(w.clock.now()).toISOString()});await fresh.controller.install();fresh.choose(folder);await fresh.controller.connect();await fresh.settle();
+  const inventory=folderStoragePort(fresh.storageFor(()=>folder));
+  const expected=(await w.commits(folder)).map(name=>name.replace(/\.sdcommit$/u,'')).sort();
+  const [manifests,markers]=await Promise.all([inventory.list({kind:'checkpoint',freshDigests:true}),inventory.list({kind:'commit',freshDigests:true})]);
+  assert.equal(expected.length,4);assert.deepEqual(manifests.items.map(item=>item.id).sort(),expected,'fresh owner sees every physical encrypted checkpoint');assert.deepEqual(markers.items.map(item=>item.id).sort(),expected,'fresh owner sees every matching commit marker');
+  const reopened=await fresh.runtime.history('device-folder',{interactive:false});assert.equal(reopened.available,true);const latest=required(reopened.entries[0]);assert.equal(latest.location['checkpointId'],required(w.published.at(-1)).checkpointId,'retention-filtered history shows the latest committed retry');assert.equal(latest.location['encrypted'],true);
   const retained=await snapshot();assert.deepEqual(retained.filter(row=>prior.some(old=>old[0]===row[0])),prior,'retry and reopening preserve the predecessor encrypted manifests');
   cases.push('a corrupt read-back fails the backup and leaves nothing behind');
 }

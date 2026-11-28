@@ -371,7 +371,7 @@ for(const kind of ['list','download','disconnect','refused binding']){
   // its turn for a marker an earlier page of its own left behind.
   let device='inst_qa_laptop_mve00000_aaaaaaaa';const {state,provider}=createHarness({device:()=>device});await provider.prepare();await provider.authorize();
   const mine=await provider.repository.beginPublication();device='inst_qa_phone_mve00000_bbbbbbbb';const theirs=await provider.repository.beginPublication();
-  const older=required([...state.files.values()].find(file=>file.appProperties['studyDirectorRepositoryId']===theirs.id));const legacy={...older,id:'repo-legacy-marker',appProperties:{...older.appProperties,studyDirectorRepositoryId:'pub_'+'c'.repeat(32)}};delete legacy.appProperties['sdPublicationDevice'];legacy.name='pub_'+'c'.repeat(32)+older.name.slice(older.name.indexOf('.'));state.files.set(legacy.id,legacy);
+  const older=required([...state.files.values()].find(file=>file.appProperties['studyDirectorRepositoryId']===theirs.id));const properties={...older.appProperties};properties['studyDirectorRepositoryId']='pub_'+'c'.repeat(32);delete properties['sdPublicationDevice'];const legacy={...older,id:'repo-legacy-marker',appProperties:properties};legacy.name='pub_'+'c'.repeat(32)+older.name.slice(older.name.indexOf('.'));state.files.set(legacy.id,legacy);
   device='inst_qa_laptop_mve00000_aaaaaaaa';const listed=new Map((await provider.repository.listPublications()).items.map(row=>[row.id,row.sameDevice]));
   assert.equal(listed.get(mine.id),true,'a marker this device started reads as its own');assert.equal(listed.get(theirs.id),false,'another device\'s marker does not');assert.equal(listed.get('pub_'+'c'.repeat(32)),false,'a marker from an older build, with no device, counts as another device\'s');
   device='';assert.equal((await provider.repository.listPublications()).items.every(row=>row.sameDevice===false),true,'without a known device nothing reads as its own');
@@ -551,7 +551,7 @@ for(const chunkDelay of [9000,35000,90000]){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  const file=await makeRepositoryFile('object','obj_'+'c'.repeat(32),'x'.repeat(1048576)),ref=await h.provider.repository.upload(file);
  h.state.rangeChunkDelayMs=chunkDelay;const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
- assert.equal(read.ok,true,read.error?.message);assert.equal(await digest(read.value.blob),file.digest);assert.equal(required(required(h.state.rangeTransfers)[0]).loaded,file.size);
+ assert.equal(read.ok,true,read.error?.message??'expected successful transfer');assert.equal(await digest(read.value.blob),file.digest);assert.equal(required(required(h.state.rangeTransfers)[0]).loaded,file.size);
  await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('verified range completes with '+chunkDelay+'ms between chunks');
 }
 for(const mode of ['no-bytes','empty-progress']){
@@ -566,7 +566,7 @@ for(const size of [4096,5*1048576+1]){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  h.state.uploadProgressSteps=4;h.state.uploadProgressStepMs=90000;const file=await makeRepositoryFile('object','obj_'+size.toString(16).padStart(32,'0'),'u'.repeat(size));
  const started=clock.now(),upload=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
- assert.equal(upload.ok,true,upload.error?.message);assert.equal(upload.value.serverDigest,file.digest);assert.ok(clock.now()-started>=360000);assert.ok((h.state.uploadProgressStarted??0)>0);assert.equal(h.state.uploadAborts||0,0);
+ assert.equal(upload.ok,true,upload.error?.message??'expected successful transfer');assert.equal(upload.value.serverDigest,file.digest);assert.ok(clock.now()-started>=360000);assert.ok((h.state.uploadProgressStarted??0)>0);assert.equal(h.state.uploadAborts||0,0);
  await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('byte-progress watchdog permits slow '+(size>5000000?'resumable':'multipart')+' upload');
 }
 for(const repeated of [false,true]){
@@ -616,7 +616,7 @@ for(const bytes of [6*1048576,18*1048576]){
   assert.equal(h.state.uploads.size,1,'reauthorization must retain one session for the same immutable payload');assert.equal(bg.status().active.length,0);
   previous=acknowledged;if(required(observed.current).ok)break;assert.equal(h.provider.connected(),false);assert.equal(h.state.files.size,0,'partial progress is not a completed repository object');
  }
- const outcome=required(observed.current);assert.equal(outcome.ok,true,outcome.error?.message);assert.equal(previous,bytes);assert.equal(outcome.value.serverDigest,file.digest);assert.equal(h.state.files.size,1);assert.ok(attempts>=2);
+ const outcome=required(observed.current);assert.equal(outcome.ok,true,outcome.error?.message??'expected successful transfer');assert.equal(previous,bytes);assert.equal(outcome.value.serverDigest,file.digest);assert.equal(h.state.files.size,1);assert.ok(attempts>=2);
  unsubscribe();bg.clearAllScheduled();await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push({bytes,attempts,confirmedPrefixMonotone:true,oneSession:true});
 }
 for(const boundary of ['payload-change','repository-change','expired-session','regressed-offset','explicit-discard','foreground','partial-prefix','partial-regression']){
@@ -633,7 +633,7 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
    const resumed=h.provider.repository.upload(file,{signal:second.signal}),rejected=assert.rejects(resumed,{name:'AbortError'});await waitFor(()=>(h.state.uploadProgressStarted??0)>started&&(h.state.awaitingUploadProgress??0)>0,'resume must poll the newer partial acknowledgement before sending');second.abort(Object.assign(new Error('preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));await rejected;
    row.parts=required(row.parts).slice(0,1);row.received=2*1048576;await assert.rejects(()=>h.provider.repository.upload(file),/regressed upload position/u);assert.equal(h.state.files.size,0);
   }else{
-   const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+   const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message??'expected successful transfer');assert.equal(result.value.serverDigest,file.digest);
    assert.ok(h.state.requests.slice(before).some(value=>value.contentRange.startsWith('bytes '+3*1048576+'-')),'resume uses an extra server-confirmed partial chunk prefix');
   }
  }else if(boundary==='payload-change'){
@@ -645,7 +645,7 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
   if(boundary==='repository-change')h.state.trashedFolders.add('folder-1');
   if(boundary==='expired-session')h.state.uploads.delete(oldSession);
   if(boundary==='explicit-discard')h.provider.repository.discardUploads();
-  const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+  const result=await settleUpload(h.provider.repository.upload(file),h);assert.equal(result.ok,true,result.error?.message??'expected successful transfer');assert.equal(result.value.serverDigest,file.digest);
   const resumed=h.state.requests.slice(before).filter(row=>row.method==='PUT'&&/^bytes \d+-/u.test(row.contentRange));assert.ok(resumed.length);
   assert.equal(Number(required(required(resumed[0]).contentRange.match(/^bytes (\d+)-/u))[1]),boundary==='foreground'?2*1048576:0);
   if(boundary==='repository-change')assert.notEqual(result.value.verificationScope,'drive-repository:1:1:folder-1');
@@ -707,7 +707,7 @@ const restartCases:string[]=[];
  const second={...createHarness({clock,remoteState:first.state}),clock};await second.provider.prepare();await second.provider.authorize();
  second.state.uploadProgressSteps=1;second.state.uploadProgressStepMs=0;
  const result=await settleUpload(second.provider.repository.upload({...file,knownAbsent:true}),second);
- assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+ assert.equal(result.ok,true,result.error?.message??'expected successful transfer');assert.equal(result.value.serverDigest,file.digest);
  assert.equal(second.state.files.size,1,'restart creates one verified committed remote object');
  assert.equal(await digest(required(second.state.files.get(result.value.remoteId)).content),file.digest,'restart after partial upload preserves exact immutable payload bytes');
  assert.equal(second.state.uploads.size,2,'page-local upload URL is not falsely reconstructed from the remote orphan session');
