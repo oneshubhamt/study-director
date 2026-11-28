@@ -1,4 +1,4 @@
-import type {LaneInput,SaveLaneModule} from '../../../types/pilot.ts';
+import type {LaneInput,SaveLaneModule,SaveState} from '../../../types/pilot.ts';
 import {registeredExports} from '../registered-exports.mts';
 import {readRuntimeSource} from '../../helpers/runtime-source.mts';
 import {readScript} from '../../../build/source-script.mts';
@@ -18,7 +18,7 @@ const SaveLane=registeredExports(context,'save-lane') as SaveLaneModule;
 const settle=()=>clock.drainMicrotasks(32);
 function lane<T>(write:LaneInput<T,void>['write']){
   const states:string[]=[];
-  const api=SaveLane.createLane<T,void>(Object.freeze({label:'Diary reflection',write,onState:(state,error)=>states.push(error?`${state}:${error instanceof Error?error.message:String(error)}`:state),environment:Object.freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
+  const api=SaveLane.createLane<T,void>(Object.freeze({label:'Diary reflection',write,onState:(state:SaveState,error:unknown)=>states.push(error?`${state}:${error instanceof Error?error.message:String(error)}`:state),environment:Object.freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout})}));
   return {api,states};
 }
 

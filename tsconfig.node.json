@@ -115,6 +115,8 @@
     "tests/helpers/verification/profile-scope.mts",
     "tests/helpers/verification/portable-preferences.mts",
     "tests/helpers/verification/save-lane.mts",
-    "tests/helpers/verification/backup-operation-diagnostics.mts"
+    "tests/helpers/verification/backup-operation-diagnostics.mts",
+    "tests/helpers/verification/canonical-baseline.mts",
+    "tests/helpers/verification/installation-identity.mts"
   ]
 }

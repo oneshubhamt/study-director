@@ -27,6 +27,8 @@ on:
       - 'tests/helpers/verification/portable-preferences.mts'
       - 'tests/helpers/verification/save-lane.mts'
       - 'tests/helpers/verification/backup-operation-diagnostics.mts'
+      - 'tests/helpers/verification/canonical-baseline.mts'
+      - 'tests/helpers/verification/installation-identity.mts'
       - 'tests/helpers/verification/generated-runtime.mts'
       - 'tests/helpers/verification/data-architecture.mts'
       - 'tests/helpers/verification/background-work-contract.mts'
@@ -277,6 +279,8 @@ jobs:
           tests/unit/storage/portable-preferences.mjs
           tests/integration/storage/save-lane.mjs
           tests/unit/backup/backup-operation-diagnostics.mjs
+          tests/integration/storage/canonical-baseline.mjs
+          tests/integration/storage/installation-identity.mjs
           tests/integration/storage/note-text-checked-once.mjs
           tests/unit/storage/pending-review-codec.mjs
           tests/integration/storage/pending-reviews.mjs
