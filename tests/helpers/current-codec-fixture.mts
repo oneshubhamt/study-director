@@ -38,8 +38,9 @@ const helpers=freeze({
   todayISO:()=> '2026-09-17',dateInsightsMeta:()=>freeze({dayOfWeek:4,dayName:'Thursday'}),sanitizePracticeRun:(value:unknown)=>value&&typeof value==='object'?structuredClone(value) as PracticeRun:null
 });
 const limits=PRODUCTION_LIMITS,dataContract=RUNTIME_DATA_CONTRACT;
+const keyedRecord=freeze({create:<T,>():Record<string,T>=>Object.create(null) as Record<string,T>});
 const dailyRecordCodec=RecordCodecs.createDailyRecordCodec(freeze({
-  limits,dataContract,domain:Domain,keyedRecord:freeze({create:<T,>():Record<string,T>=>Object.create(null)}),helpers,
+  limits,dataContract,domain:Domain,keyedRecord,helpers,
   timestamps,
   timer:freeze({modes:freeze({PAUSED:'paused',RUNNING:'running'}),defaultBreakSeconds:()=>300})
 }));
@@ -47,4 +48,4 @@ const dailyRecordCodec=RecordCodecs.createDailyRecordCodec(freeze({
 
 // Practice-run sanitization above deliberately retains the original permissive
 // fixture port; the record codec, not a replacement practice codec, is under test.
-export {timestamps,registry,Domain,RecordCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec};
+export {keyedRecord,timestamps,registry,Domain,RecordCodecs,freeze,boundedNumber,boundedInt,clampText,optionalText,optionalBoundedNumber,normalizeTimestamp,sameDataValue,helpers,limits,dataContract,dailyRecordCodec};

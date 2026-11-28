@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import type {DailyInput} from '../../../types/record-models.ts';
 import {method} from '../registered-exports.mts';
-import {RecordCodecs,Domain,helpers,limits,dataContract,freeze,timestamps} from '../../helpers/current-codec-fixture.mts';
+import {RecordCodecs,Domain,helpers,limits,dataContract,freeze,timestamps,keyedRecord} from '../../helpers/current-codec-fixture.mts';
 
 // A note's text is checked against the rich-text limits once. Reading the
 // same notes again (at start-up, for backups and upkeep) compares the text
@@ -11,7 +11,7 @@ let checks=0;
 // Deliberately reduce the cache limit to three for this bounded test. Only
 // that fixture field differs from the literal production-limit contract.
 const input=freeze({
-  limits:freeze({...limits,maxNotes:3}),dataContract,domain:Domain,keyedRecord:freeze({create:<T,>():Record<string,T>=>Object.create(null)}),
+  limits:freeze({...limits,maxNotes:3}),dataContract,domain:Domain,keyedRecord,
   helpers:freeze({...helpers,editorContentWithinLimits:(value:unknown)=>{checks++;return !String(value).includes('over the limit');}}),
   timestamps,
   timer:freeze({modes:freeze({PAUSED:'paused',RUNNING:'running'}),defaultBreakSeconds:()=>300})

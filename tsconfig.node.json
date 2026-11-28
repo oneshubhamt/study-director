@@ -108,6 +108,8 @@
     "tests/helpers/pending-review-codec.mts",
     "tests/helpers/backup-presentation.mts",
     "tests/helpers/verification/note-text-checked-once.mts",
-    "tests/helpers/verification/saved-day-evidence.mts"
+    "tests/helpers/verification/saved-day-evidence.mts",
+    "tests/helpers/verification/canonical-storage.mts",
+    "tests/helpers/verification/generated-runtime.mts"
   ]
 }
