@@ -3,6 +3,7 @@
 // listing and removal. Each file's lastModified comes from the given clock.
 // `faults` lets a test corrupt the next read-back of a named file or remove a
 // folder from under its handle.
+type BlobPart=NonNullable<ConstructorParameters<typeof Blob>[0]>[number];
 type Clock=()=>number;
 type FileEntry={
   kind:'file';name:string;
