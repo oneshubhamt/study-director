@@ -10,6 +10,26 @@ const {app,idbDurability,stores,dataContract}=h;
 const strictCount=()=>idbDurability.strict;
 const normalCount=()=>idbDurability.normal;
 
+// Calibrate the storage fixture used by all of the fault-injection cases below.
+{
+ const fixture=createHarness(),key='ordered';
+ fixture.stores.meta.set(key,{key,value:'before'});
+ let observed;
+ await fixture.indexedDb.strictStoreTransaction('meta','readwrite',(store,tx,finish)=>{
+   const read=store.get(key);
+   read.onsuccess=()=>{observed=read.result.value;};
+   const next={key,value:'after'};
+   store.put(next);next.value='changed after submission';
+   tx.oncomplete=()=>finish(true);
+ });
+ assert.equal(observed,'before','an earlier read cannot see a later queued write');
+ assert.equal(fixture.stores.meta.get(key).value,'after','submission takes a clone of the record');
+ await assert.rejects(fixture.indexedDb.strictStoreTransaction('meta','readwrite',(store,tx,finish)=>{
+   store.put({key,value:'must roll back'});store.add({key,value:'duplicate'});tx.oncomplete=()=>finish(true);
+ }),/constraint|abort/i,'an unhandled duplicate aborts the transaction');
+ assert.equal(fixture.stores.meta.get(key).value,'after','aborting the duplicate also undoes the preceding successful put');
+}
+
 // High-frequency Review/Active Session checkpoints stay on normal/default durability.
 await app.activeSession.save({id:'active',version:dataContract.schemas.ActiveSession.version,revision:1,date:'2026-09-15',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-15T12:00:00.000Z'});
 assert.equal(strictCount(),0,'Review autosaves through Active Session must not force a storage flush');

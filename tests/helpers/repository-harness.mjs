@@ -1,3 +1,4 @@
+import {repositoryStorage} from './repository-storage.mts';
 import {readRuntimeSource} from './runtime-source.mjs';
 import {readScript} from '../../build/source-script.mts';
 import fs from 'node:fs';
@@ -18,70 +19,8 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const ClockDate=controls.clock?.Date||Date;
   const timerSet=controls.clock?.setTimeout||setTimeout;
   const timerClear=controls.clock?.clearTimeout||clearTimeout;
-  const localWrites={pending:0,all:0,sessionBytes:0},idbWrites={recovery:0},idbReads={metaGetAll:0,boundedMetaGetAll:0,unboundedMetaGetAll:0},idbDurability={strict:0,normal:0,strictStores:[],normalStores:[]},validationCalls={within:0,clamp:0};
-  const stores=sharedStores||{area:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-  const localStorage={
-    getItem(key){if(controls.failLocalGetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery read failure');return sharedLocal.has(key)?JSON.stringify(sharedLocal.get(key)):null;},
-    setItem(key,text){if(controls.failLocal||controls.failLocalSetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery write failure');if(key==='recovery')localWrites.sessionBytes+=Buffer.byteLength(text);localWrites.all++;if(key==='pending')localWrites.pending++;sharedLocal.set(key,JSON.parse(text));},
-    removeItem(key){if(controls.failLocalRemove||controls.failLocalRemoveKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery removal failure');sharedLocal.delete(key);}
-  };
-  const storeMap=name=>{const map=({area:stores.area,daily:stores.daily,summary:stores.summary,session:stores.session,meta:stores.meta})[name];if(!map)throw new Error('Unknown test store: '+name);return map;};
-  const runTransaction=(names,mode,operation,durability='normal')=>new Promise((resolve,reject)=>{
-    idbDurability[durability]++;
-    idbDurability[`${durability}Stores`].push(Array.isArray(names)?[...names]:[names]);
-    if(controls.failSessionWrite&&((Array.isArray(names)&&names.includes('session'))||names==='session')){reject(new Error('Injected session write failure'));return;}
-    if(mode==='readwrite'&&((Array.isArray(names)&&names.includes('area'))||names==='area')&&controls.failNextAreaWrite){controls.failNextAreaWrite=false;reject(new Error('QA_FIXTURE injected note write failure'));return;}
-    if(mode==='readwrite'&&((Array.isArray(names)&&names.includes('daily'))||names==='daily')&&controls.failNextDailyWrite){controls.failNextDailyWrite=false;reject(new Error('QA_FIXTURE injected daily-record write failure'));return;}
-    if(mode==='readwrite'&&names==='meta'&&controls.failNextMetaOnlyWrite){controls.failNextMetaOnlyWrite=false;reject(new Error('QA_FIXTURE injected appMeta-only write failure'));return;}
-    if(mode==='readwrite'&&((Array.isArray(names)&&names.includes('meta'))||names==='meta')&&controls.failNextMetaWrite){controls.failNextMetaWrite=false;reject(new Error('QA_FIXTURE injected appMeta write failure'));return;}
-    let settled=false,outstanding=0,completed=false,aborted=false;
-    // This harness models request completion and explicit abort, not IndexedDB's
-    // cross-connection transaction scheduler. Remember only rows this transaction changes.
-    const undo=new Map();
-    const remember=(map,key)=>{let rows=undo.get(map);if(!rows){rows=new Map();undo.set(map,rows);}if(!rows.has(key))rows.set(key,{present:Map.prototype.has.call(map,key),value:Map.prototype.get.call(map,key)});};
-    const write=(map,key,value)=>{remember(map,key);map.set(key,structuredClone(value));};
-    const remove=(map,key)=>{remember(map,key);map.delete(key);};
-    const finish=(ok,value)=>{if(settled)return;settled=true;ok?resolve(value):reject(value instanceof Error?value:new Error(String(value||'transaction failed')))};
-    // Like IndexedDB, the transaction completes once no request is outstanding,
-    // so requests issued from a callback still belong to it.
-    const complete=()=>queueMicrotask(()=>{if(!aborted&&!completed&&outstanding===0){completed=true;undo.clear();controls.onTransactionComplete?.({stores:names,mode});tx.oncomplete?.();}});
-    const request=run=>{const req={result:undefined,error:null,onsuccess:null,onerror:null};outstanding++;queueMicrotask(()=>{try{if(!aborted)run(req);}finally{outstanding--;complete();}});return req;};
-    // Simulate the IndexedDB default action of aborting the whole transaction
-    // after a request error (including preceding writes/deletes).
-    const failedMetaRequest=(name,operation,key)=>{
-      const fault=controls.failNextMetaRequest;
-      if(name!=='meta'||fault?.operation!==operation||fault.key!==key)return null;
-      delete controls.failNextMetaRequest;
-      return request(req=>{req.error=new Error('QA_FIXTURE injected appMeta request failure');try{req.onerror?.();}finally{if(!aborted&&!completed)tx.abort();}});
-    };
-    const tx={oncomplete:null,onabort:null,onerror:null,abort(){if(completed||aborted)throw new Error('QA_FIXTURE transaction inactive');aborted=true;for(const [map,rows] of undo)for(const [key,before] of rows){if(before.present)map.set(key,before.value);else map.delete(key);}undo.clear();queueMicrotask(()=>{tx.onabort?.();finish(false,new Error('QA_FIXTURE transaction aborted'));});},objectStore(name){
-      const map=storeMap(name);
-      const inRange=(key,range)=>!range||(String(key)>=range.lower&&String(key)<=range.upper);
-      return {
-        get(key){return failedMetaRequest(name,'get',key)||request(req=>{req.result=map.get(key);controls.onTransactionRead?.({store:name,key,mode});req.onsuccess?.();});},
-        add(value,key){const resolved=key===undefined?(value.key??value.date??value.id):key;return request(req=>{if(map.has(resolved)){req.error=new Error('QA_FIXTURE ConstraintError: key already exists');req.onerror?.();return;}write(map,resolved,value);req.onsuccess?.();});},
-        count(){return request(req=>{req.result=map.size;req.onsuccess?.();});},
-        put(value,key){if(name==='meta'&&value.key==='dataMaintenance'&&value.value?.status==='completed'&&controls.failNextMaintenanceCompletion){controls.failNextMaintenanceCompletion=false;const req={error:new Error('QA_FIXTURE maintenance completion write failure'),onerror:null};queueMicrotask(()=>req.onerror?.());return req;}const resolved=key===undefined?(name==='session'?value.id:(value.key??value.date??value.id)):key;const failed=failedMetaRequest(name,'put',resolved);if(failed)return failed;if(name==='meta'&&value?.value?.format==='study-director.area-note-recovery')idbWrites.recovery++;write(map,resolved,value);return request(req=>{req.result=resolved;req.onsuccess?.();});},
-        getAll(range=null){if(name==='meta'){idbReads.metaGetAll++;range?idbReads.boundedMetaGetAll++:idbReads.unboundedMetaGetAll++;}return request(req=>{req.result=[...map.entries()].filter(([key])=>inRange(key,range)).map(([,value])=>structuredClone(value));controls.onTransactionRead?.({store:name,key:'*',mode});req.onsuccess?.();});},
-        getAllKeys:name==='daily'&&controls.dailyKeyEnumeration!==true?undefined:function(range=null,count=Infinity){return request(req=>{req.result=[...map.keys()].filter(key=>inRange(key,range)).sort().slice(0,count);req.onsuccess?.();});},
-        openCursor(){const entries=[...map.entries()];let index=0;const req={result:undefined,error:null,onsuccess:null,onerror:null};const pump=()=>{if(aborted)return;if(index>=entries.length){req.result=null;req.onsuccess?.({target:req});return;}const [key,value]=entries[index];req.result={key,value:structuredClone(value),update(next){write(map,key,next);return request(req=>{req.onsuccess?.();});},delete(){remove(map,key);return request(req=>{req.onsuccess?.();});},continue(){index++;pump();}};req.onsuccess?.({target:req});};queueMicrotask(pump);return req;},
-        delete:key=>{const failed=failedMetaRequest(name,'delete',key);if(failed)return failed;if(key&&typeof key==='object'&&'lower' in key&&'upper' in key){for(const candidate of [...map.keys()])if(String(candidate)>=String(key.lower)&&String(candidate)<=String(key.upper))remove(map,candidate);}else remove(map,key);return request(req=>{req.onsuccess?.();});},clear:()=>{for(const key of map.keys())remove(map,key);return request(req=>{req.onsuccess?.();});}
-      };
-    }};
-    try{operation(tx,(ok=true,value=true)=>finish(ok,value));complete();}catch(error){finish(false,error)}
-  });
-  const transaction=(names,mode,operation)=>runTransaction(names,mode,operation,'normal');
-  const strictTransaction=(names,mode,operation)=>runTransaction(names,mode,operation,'strict');
-  const storeTransaction=(name,mode,operation)=>transaction(name,mode,(tx,finish)=>operation(tx.objectStore(name),tx,finish));
-  const strictStoreTransaction=(name,mode,operation)=>strictTransaction(name,mode,(tx,finish)=>operation(tx.objectStore(name),tx,finish));
-  const indexedDb=freeze({
-    transaction,strictTransaction,storeTransaction,strictStoreTransaction,isAvailable:()=>true,lifecycle:()=>freeze({startedFresh:false,resets:Number(controls.storageResets)||0,lastResetAt:''}),
-    get:async(name,key)=>{await controls.onStorageRead?.({store:name,kind:'get',key});const value=structuredClone(storeMap(name).get(key)||null);if(name==='session')await controls.onSessionRead?.();return value;},
-    getAll:async name=>{await controls.onStorageRead?.({store:name,kind:'list'});if(name==='area')await controls.onAreaRead?.();return [...storeMap(name).values()].map(value=>structuredClone(value));},
-    getAllIfPresent:async name=>[...storeMap(name).values()].map(value=>structuredClone(value)),
-    hasStore:async name=>Object.hasOwn(stores,name),
-    topology:async()=>freeze({version:9,stores:freeze(Object.keys(stores)),current:true,newer:false,usable:true})
-  });
+  const {stores,localStorage,localWrites,idbReads,idbWrites,idbDurability,indexedDb}=repositoryStorage(sharedLocal,sharedStores,controls);
+  const validationCalls={within:0,clamp:0};
   const normalizeTs=(value,fallback='')=>{const parsed=Date.parse(String(value||''));return Number.isFinite(parsed)?new Date(parsed).toISOString():fallback};
   const installationIdentity=freeze({format:'study-director.installation-identity',contractVersion:4,getId:()=> 'inst_test'});
   const KeyedRecord=freeze({create:()=>Object.create(null),clone:value=>Object.assign(Object.create(null),structuredClone(value||{}))});

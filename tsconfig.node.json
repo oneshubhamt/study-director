@@ -121,6 +121,7 @@
     "tests/helpers/verification/capacity.mts",
     "tests/helpers/verification/multi-tab.mts",
     "tests/helpers/note-ids.mts",
-    "tests/helpers/verification/pending-review-codec.mts"
+    "tests/helpers/verification/pending-review-codec.mts",
+    "tests/helpers/repository-storage.mts"
   ]
 }
