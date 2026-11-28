@@ -39,7 +39,7 @@ const helpers=freeze({
 });
 const limits=PRODUCTION_LIMITS,dataContract=RUNTIME_DATA_CONTRACT;
 const dailyRecordCodec=RecordCodecs.createDailyRecordCodec(freeze({
-  limits,dataContract,domain:Domain,keyedRecord:freeze({create:<T>():Record<string,T>=>Object.create(null)}),helpers,
+  limits,dataContract,domain:Domain,keyedRecord:freeze({create:<T,>():Record<string,T>=>Object.create(null)}),helpers,
   timestamps,
   timer:freeze({modes:freeze({PAUSED:'paused',RUNNING:'running'}),defaultBreakSeconds:()=>300})
 }));
