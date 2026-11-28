@@ -1,13 +1,10 @@
-import {withoutPwaChecks,studyTimezone,devToolsPort} from '../../helpers/browser-harness.mjs';
+import {withoutPwaChecks,studyTimezone,launchChromium} from '../../helpers/browser-harness.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
 
 const root=process.cwd();
-const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.json'),'utf8'));
 const deployment=path.join(root,'dist/deployment');
 const mainPath=path.join(deployment,manifest.main);
@@ -40,28 +37,9 @@ const server=http.createServer((req,res)=>{
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
 const appUrl=`http://127.0.0.1:${server.address().port}/${manifest.main}`;
 
-class CdpPage{
-  constructor(ws){this.ws=ws;this.nextId=0;this.pending=new Map();this.events=[];ws.onmessage=event=>{const msg=JSON.parse(event.data);if(msg.id){const pending=this.pending.get(msg.id);if(!pending)return;this.pending.delete(msg.id);msg.error?pending.reject(new Error(JSON.stringify(msg.error))):pending.resolve(msg.result);return;}if(msg.method==='Runtime.exceptionThrown')this.events.push(msg.params.exceptionDetails.exception?.description||msg.params.exceptionDetails.text||'runtime exception');};}
-  static async connect(url){const ws=new WebSocket(url);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});return new CdpPage(ws);}
-  send(method,params={}){return new Promise((resolve,reject)=>{const id=++this.nextId;this.pending.set(id,{resolve,reject});this.ws.send(JSON.stringify({id,method,params}));});}
-  async evaluate(expression){const result=await this.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text||'evaluation failed');return result.result.value;}
-  close(){this.ws.close();}
-}
-
-const profile=fs.mkdtempSync(path.join(os.tmpdir(),'qa-safety-'));
-const proc=spawn(chromium,['--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
-let stderr='';proc.stderr.on('data',chunk=>{stderr+=chunk;});
-const browserPort=await devToolsPort(profile);
-await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${browserPort}/json/version`)).ok;}catch{return false;}},{label:'CDP endpoint'});
-
+const browser=await launchChromium({profilePrefix:'qa-safety-'});
 async function createPage(){
-  const target=await (await fetch(`http://127.0.0.1:${browserPort}/json/new?about:blank`,{method:'PUT'})).json();
-  const page=await CdpPage.connect(target.webSocketDebuggerUrl);
-  await page.send('Runtime.enable');await page.send('Page.enable');await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
-  await page.send('Page.navigate',{url:appUrl});
-  await waitFor(()=>page.evaluate(`document.readyState==='complete'`),{label:'Study Director page load'});
-  const loadedUrl=await page.evaluate(`location.href`);
-  if(String(loadedUrl||'').startsWith('chrome-error://'))throw new Error('Chromium blocked the local RestoreSafetyQA QA origin before Study Director could load.');
+  const page=await browser.createPage(appUrl,{timezoneId:studyTimezone()});
   await waitFor(()=>page.evaluate(`!!(window.__RestoreSafetyQA&&__RestoreSafetyQA.StartupLifecycle.status().fullyInitialized)`),{timeout:45000,label:'Study Director startup'});
   await sleep(250);return page;
 }
@@ -106,10 +84,7 @@ try{
   const reflectionEditor='.pane.on .sd-rte[data-sd-rich-surface="reflection"] [contenteditable="true"]';
   await page1.evaluate(`__RestoreSafetyQA.goTab('review')`);
   await waitFor(()=>page1.evaluate(`!!document.querySelector(${JSON.stringify(reflectionEditor)})`),{label:'running restore reflection editor'});
-  await page1.send('Emulation.setFocusEmulationEnabled',{enabled:true});
-  const reflectionPoint=await page1.evaluate(`(()=>{const editor=document.querySelector(${JSON.stringify(reflectionEditor)});if(!editor)throw new Error('Reflection editor is unavailable');const rect=editor.getBoundingClientRect();return {x:rect.left+Math.min(40,rect.width/2),y:rect.top+Math.min(24,rect.height/2)};})()`);
-  await page1.send('Input.dispatchMouseEvent',{type:'mousePressed',x:reflectionPoint.x,y:reflectionPoint.y,button:'left',buttons:1,clickCount:1});
-  await page1.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:reflectionPoint.x,y:reflectionPoint.y,button:'left',buttons:0,clickCount:1});
+  await page1.click(reflectionEditor);await page1.settle();
   await page1.send('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:2,commands:['selectAll']});
   await page1.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:2});
   await page1.send('Input.insertText',{text:'LOCAL DECISION BASE'});
@@ -227,12 +202,9 @@ try{
   assert.match(secondary.body,/Another live tab controls Study Director writes/u);
 
   const runtimeErrors=[...(page1?.events||[]),...(page2?.events||[])];
-  assert.deepEqual(runtimeErrors,[],'runtime errors occurred: '+runtimeErrors.join('\n'));
+  assert.deepEqual(runtimeErrors,[],'runtime errors occurred: '+runtimeErrors.map(event=>event?.text||JSON.stringify(event)).join('\n'));
   console.log(JSON.stringify({status:'PASS',release:manifest.release||'RestoreSafetyQA',checks:{activeAndPausedUiBlocked:true,exportPreserved:true,internalRestoreGuard:true,internalClearGuard:true,suspendedAllowed:true,restoredSessionRevisionStable:true,activeSessionReviewStable:true,runningSessionHandoffOperational:true,recoveryBannerTruthful:true,secondaryTakeControlPreserved:true,noRuntimeErrors:true}},null,2));
 }finally{
-  try{page1?.close();}catch{}try{page2?.close();}catch{}
-  try{proc.kill('SIGTERM');}catch{}server.close();
-  if(proc.exitCode===null)await Promise.race([new Promise(resolve=>proc.once('exit',resolve)),sleep(1500)]);
-  try{fs.rmSync(profile,{recursive:true,force:true});}catch{}
-  if(stderr&&/FATAL|ERROR:.*zygote/i.test(stderr))process.stderr.write(stderr);
+  try{await browser.close();}catch{}
+  server.close();
 }
