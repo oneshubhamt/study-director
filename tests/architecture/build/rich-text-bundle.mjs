@@ -44,7 +44,20 @@ for(const unused of ['editor/dialog.ts','editor/menubar.ts','editor/panel.ts','e
 assert.ok(!generated.inputs.some(name=>/vendor\/wordgard\/dist\//.test(name)),'Rich runtime fell back to flattened Wordgard dist modules.');
 assert.ok(generated.inputs.some(name=>/node_modules\/style-mod\//.test(name)));
 assert.doesNotMatch(generated.source,/SDRTE1:|study-director-rich-text-v1/);
-assert.doesNotMatch(generated.source,/data:image|readAsDataURL|toDataURL|FileReader|indexedDB/i);
+// The editor never inlines images as data: URLs or reads files itself; its
+// images live in the asset store. One exception (owner, 2026-11-28): putting
+// a copied note's pictures on the clipboard, so other apps get them. That is
+// blobDataUrl in rich-text/editor.ts, called by copyWithPictures alone.
+assert.doesNotMatch(generated.source,/data:image|toDataURL|indexedDB/i);
+for(const name of ['FileReader','readAsDataURL'])assert.equal(generated.source.split(name).length-1,1,`${name} is used once, for the clipboard copy only.`);
+{
+  const editorSource=fs.readFileSync(path.join(root,'rich-text/editor.ts'),'utf8'),at=(text,start,end)=>text.slice(text.indexOf(start),text.indexOf(end,text.indexOf(start)));
+  const reader=at(editorSource,'function blobDataUrl(','async function pngBlob('),copy=at(editorSource,'function copyWithPictures(','function noteOwnCopy(');
+  assert.match(reader,/new FileReader\(\)[\s\S]*\.readAsDataURL\(/u,'blobDataUrl reads the picture for the clipboard.');
+  assert.equal(editorSource.split(/FileReader|readAsDataURL/u).length,reader.split(/FileReader|readAsDataURL/u).length,'No other editor code reads files.');
+  assert.deepEqual([editorSource.split('blobDataUrl(').length-1,copy.split('blobDataUrl(').length-1],[2,1],'blobDataUrl is defined once and called only by copyWithPictures.');
+  assert.match(copy,/navigator\.clipboard\.write\(/u,'and copyWithPictures sends what it makes to the clipboard.');
+}
 assert.doesNotMatch(generated.source,/\bexport\s*\{/);
 assert.ok(generatedSearchWorker.inputs.some(name=>/rich-text\/wg1-codec\.ts$/.test(name)));
 assert.doesNotMatch(generatedSearchWorker.source,/GardState|Wordgard|indexedDB|localStorage|querySelector|createElement|window\./i);
