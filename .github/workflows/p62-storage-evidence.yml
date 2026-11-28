@@ -5,6 +5,11 @@ on:
     branches: [ts-exp]
     paths:
       - '.github/workflows/p62-storage-evidence.yml'
+      - 'tests/helpers/mutation.mts'
+      - 'tests/integration/attachments/attachment-deletion.mjs'
+      - 'tests/integration/backup/repository-restore.mjs'
+      - 'tests/integration/backup/sync-shared-base.mjs'
+      - 'tests/browser/exports/exports.mjs'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +27,9 @@ jobs:
           - area: restore-publication
             mutants: exact-restore-does-not-owe-publication shared-restore-owes-publication bring-in-owes-publication
           - area: note-readback
-            mutants: note-reference-removal-verifies-persisted-text note-reference-removal-verifies-whole-record
+            mutants: note-reference-removal-verifies-persisted-text note-reference-removal-verifies-whole-record note-reference-removal-verifies-links
+          - area: restore-convergence
+            mutants: exact-restore-identifies-selected-checkpoint restore-queues-newer-source-state restore-queues-disconnected-configured-peer
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -36,3 +43,28 @@ jobs:
       - name: Verify checkout unchanged
         if: always()
         run: git diff --exit-code && test -z "$(git status --porcelain)"
+
+  export-picker:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Five isolated file-picker journeys
+        run: |
+          for attempt in 1 2 3 4 5; do
+            echo "Exports replay $attempt"
+            time node tests/browser/exports/exports.mjs
+          done

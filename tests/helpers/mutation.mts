@@ -85,6 +85,26 @@ const mutations:readonly Mutation[]=Object.freeze([
     find:"String(verified[key]?.text||'')!==value||postimages.has(key)&&!same(verified[key],postimages.get(key))",replace:"String(verified[key]?.text||'')!==value",
     tests:Object.freeze(["tests/integration/attachments/attachment-deletion.mjs"])
   }),
+  Object.freeze({
+    id:"note-reference-removal-verifies-links",file:"source/core/library-clear.ts",
+    find:"String(verified[key]?.text||'')!==value||postimages.has(key)&&!same(verified[key],postimages.get(key))",replace:"String(verified[key]?.text||'')!==value||postimages.has(key)&&!same({...verified[key],links:postimages.get(key)?.links},postimages.get(key))",
+    tests:Object.freeze(["tests/integration/attachments/attachment-deletion.mjs"])
+  }),
+  Object.freeze({
+    id:"exact-restore-identifies-selected-checkpoint",file:"source/core/backup-provider.ts",
+    find:"sourceCheckpoint:mode==='restore-version'?row.item.id:''",replace:"sourceCheckpoint:''",
+    tests:Object.freeze(["tests/integration/backup/repository-restore.mjs"])
+  }),
+  Object.freeze({
+    id:"restore-queues-newer-source-state",file:"source/core/backup-provider.ts",
+    find:"await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){",replace:"await clearPendingRetry(selected);\n      if(false){",
+    tests:Object.freeze(["tests/integration/backup/repository-restore.mjs"])
+  }),
+  Object.freeze({
+    id:"restore-queues-disconnected-configured-peer",file:"source/core/backup-provider.ts",
+    find:"other.id===selected.id||!automaticRecoveryDestination(other)",replace:"other.id===selected.id||!providerConnected(other)||!automaticRecoveryDestination(other)",
+    tests:Object.freeze(["tests/integration/backup/repository-restore.mjs"])
+  }),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -147,8 +167,12 @@ const witnesses:Readonly<Record<string,readonly string[]>>={
   "exact-restore-does-not-owe-publication": ["assert.equal(await pendingStore().read('repository-version-qa'),null,'a current non-shared source owes no duplicate publication');"],
   "shared-restore-owes-publication": ["assert.equal(restoreIntent?.providerId,'drive','shared restore persists the owed publication before returning');"],
   "bring-in-owes-publication": ["assert.equal((await pendingStore().read('repository-version-qa'))?.providerId,'repository-version-qa','a non-shared bring-in records the source publication it owes');"],
-  "note-reference-removal-verifies-persisted-text": ["await assert.rejects(()=>deletion.library.remove(ID),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
-  "note-reference-removal-verifies-whole-record": ["await assert.rejects(()=>deletion.library.remove(ID),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
+  "note-reference-removal-verifies-persisted-text": ["assert.match(String(rejection?.message||''),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
+  "note-reference-removal-verifies-whole-record": ["assert.match(String(rejection?.message||''),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
+  "note-reference-removal-verifies-links": ["assert.match(String(rejection?.message||''),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');"],
+  "exact-restore-identifies-selected-checkpoint": ["assert.deepEqual([providerRestore.convergence.source.status,providerRestore.convergence.source.unchanged,providerRestore.convergence.source.checkpoint],['completed',true,checkpointId]);"],
+  "restore-queues-newer-source-state": ["assert.deepEqual([restored.convergence.source.status,restored.convergence.source.retryQueued,restored.convergence.source.scheduled],['pending',true,true],'the restored location owes a backup of the result and has one scheduled');"],
+  "restore-queues-disconnected-configured-peer": ["assert.deepEqual(restored.convergence.others.map(row=>[row.id,row.status,row.queued,row.scheduled]),[['peer-qa','pending',true,true]],'the other location is recorded and scheduled too');"],
   "sync-keeps-the-other-edit": [
     "assert.equal(keptNote.kept.text,'one, A again",
     "assert.equal(held[0].kept.text,older.text,label);"

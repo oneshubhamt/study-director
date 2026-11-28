@@ -170,7 +170,9 @@ for(const [fault,patch] of [
     t.notes.n=structuredClone(persisted);
     return true;
   };
-  await assert.rejects(()=>deletion.library.remove(ID),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');
+  let rejection;
+  try{await deletion.library.remove(ID);}catch(error){rejection=error;}
+  assert.match(String(rejection?.message||''),/Note reference removal verification failed/u,fault+' readback must refuse attachment deletion');
   assert.ok(persisted,'the fault ran after strict flush');
   assert.deepEqual(t.notes.n,persisted,fault+' readback must preserve the observed note rather than adopting it for compensation');
   assert.deepEqual(t.writes(),{noteWrites:1,dayWrites:0,sessionWrites:0},'refusal must not rewrite the successor or untouched surfaces');

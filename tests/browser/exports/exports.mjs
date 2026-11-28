@@ -85,21 +85,34 @@ try{
   })()`);
   assert.equal(restored.restored,true);assert.equal(restored.workersRemaining,0);result.checks.repositoryRestore=restored;
   // Choosing a backup file asks how to use it: the three ways to apply it, or Keep current, which changes nothing.
-  const fileDialog=await page.evaluate(`(async()=>{
-    const d=__PWA6,before=d.AppData.notes.get('History').text,file=new File([fixtureBackup.blob],fixtureBackup.filename);
-    const pending=d.BackupController.importLocal({target:{files:[file],value:file.name}});
-    let dialog=null;for(let i=0;i<400&&!dialog;i++){await new Promise(resolve=>setTimeout(resolve,25));dialog=[...document.querySelectorAll('dialog[open]')].find(node=>node.textContent.includes('Use this backup'))||null;}
-    if(!dialog)return {opened:false,outcome:await Promise.race([pending,new Promise(resolve=>setTimeout(()=>resolve('pending'),100))])};
-    const choices=[...dialog.querySelectorAll('.interaction-choice')].map(node=>node.textContent),cancel=dialog.querySelector('[data-interaction-cancel]');
-    const cancelLabel=cancel.textContent;cancel.click();const outcome=await pending;
-    return {opened:true,choices,cancelLabel,outcome,unchanged:d.AppData.notes.get('History').text===before};
+  // Use the delegated restore-from-file action so the picker captures real
+  // authority. A different local note proves cancellation is not a no-op
+  // merely because the selected backup already matches local state.
+  const before=await page.evaluate(`(async()=>{
+    const d=__PWA6;
+    d.AppData.notes.update('History','History','Local edit to preserve on cancel');
+    await d.AppData.notes.flush({strict:true});
+    window.openFixtureCalls=0;
+    window.showOpenFilePicker=async()=>{window.openFixtureCalls++;return [{getFile:async()=>new File([fixtureBackup.blob],fixtureBackup.filename)}];};
+    return {text:d.AppData.notes.get('History').text,payload:await d.AppData.notes.readFreshPayload()};
   })()`);
-  assert.equal(fileDialog.opened,true,`choosing a backup file opens "Use this backup" (${JSON.stringify(fileDialog.outcome)})`);
+  await page.evaluate(`__PWA6.goTab('library');__PWA6.LibraryView.showSection('data');document.querySelectorAll('details').forEach(el=>el.open=true);document.querySelector('[data-action="pick-import-file"]').scrollIntoView()`);
+  await page.settle();await page.click('[data-action="pick-import-file"]');
+  await waitFor(()=>page.evaluate(`[...document.querySelectorAll('dialog[open]')].some(node=>node.textContent.includes('Use this backup'))`),{timeout:15000,label:'real file-picker restore decision'});
+  assert.equal(await page.evaluate('window.openFixtureCalls'),1,'the delegated action opens the picker once');
+  const fileDialog=await page.evaluate(`(()=>{
+    const dialog=[...document.querySelectorAll('dialog[open]')].find(node=>node.textContent.includes('Use this backup'));
+    const choices=[...dialog.querySelectorAll('.interaction-choice')].map(node=>node.textContent),cancel=dialog.querySelector('[data-interaction-cancel]');
+    return {choices,cancelLabel:cancel.textContent};
+  })()`);
   assert.equal(fileDialog.cancelLabel,'Keep current');
   const expectedChoices=[['Add only what’s missing','Nothing you have now changes.'],['Combine with current data','changed on one side only since your last sync are taken for you; you choose the rest'],['Replace current data','Make your data match this backup. You choose whether to keep what isn’t in it']];
   assert.equal(fileDialog.choices.length,expectedChoices.length,`a complete backup offers every choice: ${JSON.stringify(fileDialog.choices)}`);
   expectedChoices.forEach(([label,description],index)=>{assert.ok(fileDialog.choices[index].startsWith(label),`choice ${index+1} is ${label}`);assert.ok(fileDialog.choices[index].includes(description),`${label} says what it does`);});
-  assert.equal(fileDialog.outcome.cancelled,true);assert.equal(fileDialog.unchanged,true,'Keep current changes nothing');result.checks.fileDecisionDialog=true;
+  await page.click('dialog[open] [data-interaction-cancel]');
+  await waitFor(()=>page.evaluate(`!__PWA6.BackupController.status().importHoldsBackground&&__PWA6.BackupPresentation.current('file')?.lifecycle==='cancelled'`),{timeout:15000,label:'cancelled import and released background hold'});
+  const after=await page.evaluate(`(async()=>({text:__PWA6.AppData.notes.get('History').text,payload:await __PWA6.AppData.notes.readFreshPayload()}))()`);
+  assert.deepEqual(after,before,'Keep current preserves the exact local note payload');result.checks.fileDecisionDialog=true;
   // The optional safety copy is a checkbox on the review, off by default; ticking it downloads one standalone backup before anything is applied.
   const safetyCopy=await page.evaluate(`(async()=>{
     const d=__PWA6,runs=[];const click=HTMLAnchorElement.prototype.click;let downloads=[];HTMLAnchorElement.prototype.click=function(){downloads.push(String(this.download||''));};
