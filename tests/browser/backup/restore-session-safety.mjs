@@ -12,7 +12,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.js
 const deployment=path.join(root,'dist/deployment');
 const mainPath=path.join(deployment,manifest.main);
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec:RuntimeBackupCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
+const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec:RuntimeBackupCodec,ActiveSessionCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
 let main=fs.readFileSync(mainPath,'utf8');
 if(!main.includes(marker))throw new Error('Restore-safety browser harness hook is unavailable.');
 main=withoutPwaChecks(main.replace(marker,exposure+marker));
@@ -112,15 +112,15 @@ try{
     d.TimerState.paused=false;d.setTimerMode(d.TIMER_MODES.RUNNING,'qa-running-restore');d.goTab('review');await wait(40);
     const box=document.getElementById('daily-reflection');box.value='LOCAL DECISION BASE';d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();
     const candidate=await d.BackupController.inspect(window.__RestoreSafetyQAFile.blob,{filename:window.__RestoreSafetyQAFile.filename});
-    let done=false,value,error,reopened=false,advanced=false,beforeSeconds=0,afterSeconds=0;
+    let done=false,value,error,reopened=false,advanced=false,beforeSeconds=0,afterSeconds=0,stableBefore='',stableAfter='';
     d.BackupController.restore(candidate).then(v=>{value=v;done=true},e=>{error=e;done=true});
     const deadline=Date.now()+45000;
     while(!done&&Date.now()<deadline){
       const dialog=document.getElementById('sd-interaction-dialog');
       if(dialog?.open&&!advanced){
-        const before=await d.AppData.activeSession.load();beforeSeconds=elapsed(before.value);
+        const before=await d.AppData.activeSession.load();beforeSeconds=elapsed(before.value);stableBefore=JSON.stringify(d.ActiveSessionCodec.restoreStabilityValue(before.value));
         await wait(1200);await d.flushLiveDraft();
-        const after=await d.AppData.activeSession.load();afterSeconds=elapsed(after.value);advanced=true;
+        const after=await d.AppData.activeSession.load();afterSeconds=elapsed(after.value);stableAfter=JSON.stringify(d.ActiveSessionCodec.restoreStabilityValue(after.value));advanced=true;
         const group=[...dialog.querySelectorAll('.interaction-group')].find(node=>node.querySelector('.interaction-group-title')?.textContent.includes('Active / suspended session'));
         const local=group&&[...group.querySelectorAll('.interaction-option')].find(button=>String(button.dataset.value||'').endsWith('_local'));
         if(!local)throw new Error('Running restore did not expose the local Active Session decision.');
@@ -133,11 +133,11 @@ try{
     }
     if(!done)throw new Error('Running timer restore did not settle.');if(error)throw error;
     const final=await d.AppData.activeSession.load();
-    return {advanced,beforeSeconds,afterSeconds,reopened,review:final.value?.snapshot?.review?.reflection||'',cancelled:value?.cancelled===true};
+    return {advanced,beforeSeconds,afterSeconds,reopened,stableEqual:stableBefore===stableAfter,stableBefore,stableAfter,review:final.value?.snapshot?.review?.reflection||'',cancelled:value?.cancelled===true};
   })()`);
   assert.equal(timerOnlyRestore.advanced,true,'running-session restore never reached a real reconciliation decision');
   assert.ok(timerOnlyRestore.afterSeconds>timerOnlyRestore.beforeSeconds,'running-session fixture did not persist elapsed timer advancement while the decision was open');
-  assert.equal(timerOnlyRestore.reopened,false,'timer-only checkpoint advancement incorrectly invalidated restore reconciliation');
+  assert.equal(timerOnlyRestore.reopened,false,`timer-only checkpoint advancement incorrectly invalidated restore reconciliation; stableEqual=${timerOnlyRestore.stableEqual}\nbefore=${timerOnlyRestore.stableBefore}\nafter=${timerOnlyRestore.stableAfter}`);
   assert.equal(timerOnlyRestore.review,'LOCAL DECISION BASE','timer-only restore lost the selected local Active Session');
   assert.equal(timerOnlyRestore.cancelled,false,'timer-only restore was cancelled instead of reconciling');
 
