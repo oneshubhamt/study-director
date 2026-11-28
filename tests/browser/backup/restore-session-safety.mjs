@@ -106,7 +106,6 @@ try{
   const reflectionEditor='.pane.on .sd-rte[data-sd-rich-surface="reflection"] [contenteditable="true"]';
   await page1.evaluate(`__RestoreSafetyQA.goTab('review')`);
   await waitFor(()=>page1.evaluate(`!!document.querySelector(${JSON.stringify(reflectionEditor)})`),{label:'running restore reflection editor'});
-  await page1.click(reflectionEditor);
   await page1.evaluate(`(()=>{const editor=document.querySelector(${JSON.stringify(reflectionEditor)});if(!editor)throw new Error('Reflection editor is unavailable');const range=document.createRange(),selection=getSelection();range.selectNodeContents(editor);selection.removeAllRanges();selection.addRange(range);editor.focus();})()`);
   await page1.send('Input.insertText',{text:'LOCAL DECISION BASE'});
   await waitFor(()=>page1.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('daily-reflection').value)==='LOCAL DECISION BASE'`),{label:'running restore reflection input'});
