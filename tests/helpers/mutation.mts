@@ -126,6 +126,9 @@ const mutations:readonly Mutation[]=Object.freeze([
   Object.freeze({id:"recovery-host-waits-for-settlement",file:"source/core/backup-recovery-host.ts",find:"await held.settled;",replace:"void held.settled;",tests:Object.freeze(["tests/unit/backup/backup-recovery-host.mjs"])}),
   Object.freeze({id:"retry-clear-failure-preserves-obligation",file:"source/core/backup-provider.ts",find:"AppDiagnostics.capture('backup-provider.pending-retry-clear',error,'warn');return false;",replace:"AppDiagnostics.capture('backup-provider.pending-retry-clear',error,'warn');return true;",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
   Object.freeze({id:"forget-retires-pending-obligation",file:"source/core/backup-provider.ts",find:"handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();",replace:"handoffSessions.delete(selected.id);providerBackground(selected).clearAllScheduled();",tests:Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
+  Object.freeze({"id":"exact-restore-retires-superseded-intent","file":"source/core/backup-provider.ts","find":"await clearPendingRetry(selected);\n      if(automaticNeeded(selected)){","replace":"await Promise.resolve();\n      if(automaticNeeded(selected)){","tests":Object.freeze(["tests/integration/backup/repository-restore.mjs"])}),
+  Object.freeze({"id":"unavailable-pending-read-fails-closed","file":"source/core/backup-recovery-host.ts","find":"catch(error){input.diagnostics.capture('backup.pending-provider-read',error,'error');throw error;}","replace":"catch(error){input.diagnostics.capture('backup.pending-provider-read',error,'error');return normalizePending(null);}","tests":Object.freeze(["tests/unit/backup/backup-recovery-host.mjs"])}),
+  Object.freeze({"id":"pending-receipt-requires-source-revision","file":"source/core/backup-provider.ts","find":"return !Number.isFinite(required)||Number.isFinite(completed)&&completed>=required;","replace":"return true;","tests":Object.freeze(["tests/integration/backup/pending-provider-recovery.mjs"])}),
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
@@ -146,6 +149,9 @@ const mutations:readonly Mutation[]=Object.freeze([
 ]);
 
 const witnesses:Readonly<Record<string,readonly string[]>>={
+  "exact-restore-retires-superseded-intent": ["assert.equal(await pendingStore().read('repository-version-qa'),null,'exact restore retires the superseded source intent');"],
+  "unavailable-pending-read-fails-closed": ["assert.match(String(unavailablePending?.message||''),/temporary appMeta read failure/u,'unavailable pending metadata must reject, not become confirmed absence');"],
+  "pending-receipt-requires-source-revision": ["assert.deepEqual(t.stats().durable,original,'an older source revision receipt must not retire the durable obligation');"],
   "recovery-hold-awaits-provider-drain": ["assert.equal(settled,false,'a recovery hold must await actual publication release, not merely abort it');"],
   "recovery-release-resumes-every-provider": ["assert.equal(t.stats().writes,2,'release permits each owed destination to publish once');"],
   "recovery-failure-still-resumes": ["assert.deepEqual(h.state(),{suspended:0,activeLock:false},'a failed safety publication releases the hold');"],

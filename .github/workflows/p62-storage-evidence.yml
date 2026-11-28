@@ -45,6 +45,8 @@ jobs:
             mutants: recovery-resumes-after-unwind recovery-publication-failure-stays-pending mutation-denies-foreign-writer mutation-rejects-stale-claim-revision device-claim-rejects-stale-head
           - area: recovery-settlement-and-retirement
             mutants: recovery-hold-awaits-provider-drain recovery-release-resumes-every-provider recovery-failure-still-resumes recovery-host-waits-for-settlement retry-clear-failure-preserves-obligation forget-retires-pending-obligation
+          - area: stale-intent-and-receipt
+            mutants: exact-restore-retires-superseded-intent unavailable-pending-read-fails-closed pending-receipt-requires-source-revision
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -169,3 +171,28 @@ jobs:
         run: |
           time node tests/browser/storage/capacity.mjs
           time env SD_CAPACITY_INACTIVE=1 node tests/browser/storage/capacity.mjs
+
+  ownership-restart:
+    if: github.ref == 'refs/heads/ts-exp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: Journal takeover and restart
+        run: time node tests/browser/backup/recovery-takeover.mjs
+      - name: Session plan ownership and stale authority
+        run: time node tests/browser/backup/session-plan-sync.mjs
+      - name: Cold start Drive recovery
+        run: time node tests/browser/backup/cold-start-drive-recovery.mjs

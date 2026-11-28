@@ -399,7 +399,10 @@ assert.equal(nestedFileJobReentries,0,'safety publication stays inside the ownin
 assert.deepEqual(managedProviderRecoveryEvents,['mutation-enter','suspend:restore-version','quiesce-enter','settle:restore-version','quiesce-exit','quiesce-enter','settle:restore-version','rebuild:restore-version','quiesce-exit','mutation-exit','resume:provider-qa'],'slow external safety I/O stays outside both short quiescence windows');
 
 // Recover the displaced Saved Days via the same picker entry, from the published commit and objects.
+await pendingStore().mark('repository-version-qa');
+assert.ok(await pendingStore().read('repository-version-qa'),'a superseded source obligation exists before restore');
 await restoreFromProvider(protectedVersion.checkpoint.checkpointId);
+assert.equal(await pendingStore().read('repository-version-qa'),null,'exact restore retires the superseded source intent');
 assert.deepEqual(records,displacedDays,'restoring the protected version recovers the exact displaced Saved Days');
 // A manifest or uploaded objects alone cannot authorize replacing the local data.
 const committedIds=()=>[...remoteFiles.values()].filter(file=>file.kind==='commit').map(file=>file.id).sort();

@@ -83,7 +83,8 @@ assert.ok(providerHooks.recovery&&providerHooks.pending,'provider hooks must be 
 await providerHooks.pending.mark('google-drive');assert.equal(storedPending.entries[0].providerId,'google-drive');await providerHooks.pending.clear('google-drive');assert.equal(storedPending,null);
 const preservedPending=freeze({format:'study-director.managed-provider-backup-pending',version:1,entries:freeze([freeze({providerId:'other-provider',requestedAt:'2026-09-20T12:00:00.000Z',sourceRevision:'2026-09-20T11:59:59.000Z'})])});
 storedPending=preservedPending;storageReadError=new Error('temporary appMeta read failure');
-await assert.rejects(()=>providerHooks.pending.read('google-drive'),/temporary appMeta read failure/,'an unavailable pending-marker read must not become confirmed absence');
+let unavailablePending;try{await providerHooks.pending.read('google-drive');}catch(error){unavailablePending=error;}
+assert.match(String(unavailablePending?.message||''),/temporary appMeta read failure/u,'unavailable pending metadata must reject, not become confirmed absence');
 await assert.rejects(()=>providerHooks.pending.mark('google-drive'),/temporary appMeta read failure/,'pending-marker mutation must fail closed when the durable state cannot be read');
 assert.equal(storedPending,preservedPending,'failed strict pending-marker mutation must not overwrite or remove unread durable state');
 storageReadError=null;assert.equal(await providerHooks.pending.read('google-drive'),null,'a successfully read marker without this provider is confirmed absence');storedPending=null;diagnostics.length=0;
