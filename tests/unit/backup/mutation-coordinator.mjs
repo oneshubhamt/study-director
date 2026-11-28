@@ -20,7 +20,7 @@ function fixture({durableHeartbeatFailure=false,localHeartbeatFailure=false}={})
     identity:freeze({canMutate:()=>true,status:()=>freeze({tabId:'tabqa123',pageId:'pageqa123',claimId:'claimqa123'})}),
     local:freeze({getJson:()=>localValue,remove:()=>{localValue=null;return true;},setJson:(_key,value)=>{assertOperationalFormat('mutationLock',value);localWrites++;if(localHeartbeatFailure&&localWrites>1)return false;localValue=value;return true;}})
   }));
-  return {coordinator,heartbeat:async()=>{assert.equal(typeof intervalCallback,'function');intervalCallback();for(let i=0;i<20&&acquires<2;i++)await new Promise(r=>setTimeout(r,1));await new Promise(r=>setTimeout(r,1));},stats:()=>({releases,acquires,localWrites})};
+  return {coordinator,lease:()=>localValue,heartbeating:()=>typeof intervalCallback==='function',heartbeat:async()=>{assert.equal(typeof intervalCallback,'function');intervalCallback();for(let i=0;i<20&&acquires<2;i++)await new Promise(r=>setTimeout(r,1));await new Promise(r=>setTimeout(r,1));},stats:()=>({releases,acquires,localWrites})};
 }
 
 {
@@ -82,4 +82,24 @@ function fixture({durableHeartbeatFailure=false,localHeartbeatFailure=false}={})
   assert.equal(released,1,'the work that waited is woken once');assert.ok(refreshed>=1,'and the screen is redrawn');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'mutation-coordinator',localMirrorFailClosed:true,durableLeaseFailClosed:true,rollbackRequiresDurableAuthority:true,localMirrorDoesNotBrickApp:true,closedTabLeaseWakes:true},null,2));
+// An update keeps its lease until the page reloads, and its release waits on
+// the database, which a page being unloaded does not finish (owner,
+// 2026-11-28: the reloaded app started read-only, without today's session).
+// Leaving the page drops the lease there and then, and only for that update.
+{
+  const f=fixture(),gate=deferred(),entered=deferred();
+  const task=f.coordinator.runExclusive('pwa-update',async()=>{entered.resolve();await gate.promise;});
+  await entered.promise;
+  assert.equal(f.lease()?.kind,'pwa-update','the update holds the lease while it waits for the reload');
+  assert.equal(f.coordinator.leavePage('restore-backup'),false,'another operation’s name drops nothing');
+  assert.equal(f.lease()?.kind,'pwa-update');
+  assert.equal(f.coordinator.leavePage('pwa-update'),true);
+  assert.equal(f.lease(),null,'leaving the page drops its lease at once');
+  assert.equal(f.heartbeating(),false,'and nothing renews it');
+  assert.equal(f.stats().releases,0,'the database copy is left to run out, not awaited');
+  gate.resolve();await task;
+  assert.equal(f.stats().releases,1,'a page that stays (back from the cache) still finishes the release');
+  assert.equal(f.coordinator.leavePage('pwa-update'),false,'with no update running there is nothing to drop');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'mutation-coordinator',localMirrorFailClosed:true,durableLeaseFailClosed:true,rollbackRequiresDurableAuthority:true,localMirrorDoesNotBrickApp:true,closedTabLeaseWakes:true,updateLeaseLeavesWithPage:true},null,2));

@@ -121,10 +121,21 @@ registry.define('mutation-coordinator',1,()=>{
         return execute(operationKind,id,operation);
       })();activePromise=task.catch(()=>{});return task;
     }
+    // The page is going away while one of its operations waits only for that
+    // (an update keeps its lease until the reload). Its release waits on the
+    // database, which a page being unloaded does not finish, so the lease
+    // outlived the page and the reloaded app started read-only, without
+    // today's session (owner, 2026-11-28). The lease goes with the page now;
+    // the database copy runs out by itself.
+    function leavePage(kind){
+      if(!active||active.kind!==String(kind||''))return false;
+      if(heartbeat){input.environment.clearInterval(heartbeat);heartbeat=null;}
+      clearLease(active.id);return true;
+    }
     function failClosed(message,kind='restore'){recoveryFault=String(message||'Interrupted recovery must finish before data can be changed.');recoveryKind=String(kind||'data');refreshUi();return false;}
     function clearFault(){recoveryFault='';recoveryKind='';refreshUi();return true;}
     input.environment.addStorageListener(event=>{if(event&&event.key===STORAGE_KEY)refreshUi();});
-    return freeze({format:'study-director.mutation-coordinator',contractVersion:1,runExclusive,assertAuthority,signal:()=>active&&active.controller.signal||null,settled:()=>activePromise,foreignActive,writesBlocked,blocksUi,failClosed,clearFault,status:()=>freeze({active:active&&active.kind||'',foreign:foreignActive(),recoveryFault,recoveryKind,authorityHealthy:!(active&&active.authorityError),authorityDurableProtected:active&&active.authorityError?active.authorityError.durableProtected===true:true})});
+    return freeze({format:'study-director.mutation-coordinator',contractVersion:1,runExclusive,leavePage,assertAuthority,signal:()=>active&&active.controller.signal||null,settled:()=>activePromise,foreignActive,writesBlocked,blocksUi,failClosed,clearFault,status:()=>freeze({active:active&&active.kind||'',foreign:foreignActive(),recoveryFault,recoveryKind,authorityHealthy:!(active&&active.authorityError),authorityDurableProtected:active&&active.authorityError?active.authorityError.durableProtected===true:true})});
   }
   return freeze({format:'study-director.mutation-coordinator-module',contractVersion:1,createCoordinator});
 });

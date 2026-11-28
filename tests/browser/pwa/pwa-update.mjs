@@ -187,6 +187,13 @@ try{
   assert.equal(page2.loadCount-loadsBefore.page2,1,'hidden secondary tab did not reload immediately after controller change');
   await waitFor(()=>page1.evaluate(`!!window.StudyDirector`),{label:'primary shell after update'});
   await waitFor(()=>page2.evaluate(`!!window.StudyDirector`),{label:'secondary shell after update'});
+  // The day's session comes back with the update, and the app can be used at
+  // once (owner, 2026-11-28: after Pause & Update the page came back
+  // read-only and said "No session" until it was reloaded again; the update's
+  // write lease outlived the old page).
+  const restoredState=`(()=>{const root=document.documentElement;return {ready:root.dataset.studyDirectorReady==='true',state:root.dataset.studyDirectorUiState,mutable:root.dataset.studyDirectorUiMutable==='1',session:document.getElementById('status-session')?.dataset.sessionState||''};})()`;
+  await waitFor(async()=>{const states=await Promise.all([page1,page2].map(page=>page.evaluate(restoredState)));return states.some(row=>row.ready&&row.state==='primary'&&row.mutable&&row.session&&row.session!=='empty');},
+    {timeout:10000,label:'the session is back and the app writable straight after the update',describe:()=>Promise.all([page1,page2].map(page=>page.evaluate(restoredState)))});
   const markers=await Promise.all([page1,page2].map(page=>page.evaluate(`sessionStorage.getItem('studyDirector.pwaReload.v1')`)));
   await waitFor(async()=>(await Promise.all([page1,page2].map(page=>page.evaluate(`sessionStorage.getItem('studyDirector.pwaReload.v1')`)))).every(value=>value===null),{label:'intended release boot confirmation'});
   assert.ok(markers.every(value=>value===null||JSON.parse(value).releaseId===next.releaseId));
