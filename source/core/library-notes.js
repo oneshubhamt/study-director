@@ -1198,6 +1198,18 @@ registry.define('library-notes',1,modules=>{
       if(clearSelection)clearSelection.addEventListener('click',clearNoteSelection);
       if(exportButton)exportButton.addEventListener('click',()=>{void exportSelectedNotes();});
       if(cancel)cancel.addEventListener('click',cancelNoteSelection);
+      // Ctrl+P / Cmd+P with a note open prints the note, as ⋯ → Print or save
+      // as PDF does (owner, 2026-11-28). Elsewhere it is the browser's print.
+      // The browser's own File → Print stays the page's: it prints at once,
+      // before a note's images could load, so it cannot print the note well.
+      document.addEventListener('keydown',event=>{
+        if(!(event.ctrlKey||event.metaKey)||event.altKey||event.shiftKey||event.code!=='KeyP'&&String(event.key).toLowerCase()!=='p')return;
+        if(!notesShown()||!selectedNoteKey||selectedTrashKey||noteSelectionMode||document.querySelector('dialog[open]'))return;
+        const entry=noteEntries().find(candidate=>candidate.key===selectedNoteKey);if(!entry)return;
+        event.preventDefault();if(event.repeat)return;
+        if(entry.ephemeral||!entry.hasNote){setNotesStatus('Write something in this note before printing it.');return;}
+        void printNoteEntry(entry);
+      },true);
       refreshNotes();
     }
     function noteListGrid(){return document.querySelector('#library-notes .library-notes-grid');}

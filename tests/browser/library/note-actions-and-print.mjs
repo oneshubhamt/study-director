@@ -40,6 +40,20 @@ try{
   assert.deepEqual(printed,{title:'Fresh note',text:true,pdfName:'Fresh note'},'Print… prints the new note, and Save as PDF names it after the note');
   assert.equal(await page.evaluate(`document.title`),appTitle,'the page’s title comes back after printing');
 
+  // Ctrl+P (Cmd+P on a Mac) with the note open prints the note, not the app;
+  // elsewhere it stays the browser's print (owner, 2026-11-28).
+  const ctrlP=async()=>{for(const type of ['rawKeyDown','keyUp'])await page.send('Input.dispatchKeyEvent',{type,key:'p',code:'KeyP',windowsVirtualKeyCode:80,modifiers:2});};
+  await page.evaluate(`(()=>{window.__shortcut=[];window.addEventListener('keydown',event=>{if(event.code==='KeyP')window.__shortcut.push(event.defaultPrevented);});window.__seen=null;window.__realPrint=window.print;window.print=()=>{const sheet=document.querySelector('.note-print');window.__seen={title:sheet?.querySelector('h1')?.textContent||'',text:/First words/u.test(sheet?.innerText||''),pdfName:document.title};};})()`);
+  await page.click(editable);await ctrlP();
+  await waitFor(()=>page.evaluate(`!!window.__seen`),{label:'Ctrl+P prints the open note',timeout:5000});
+  assert.deepEqual(await page.evaluate(`window.__seen`),{title:'Fresh note',text:true,pdfName:'Fresh note'},'Ctrl+P prints only the note, named after it');
+  await page.evaluate(`window.dispatchEvent(new Event('afterprint'))`);
+  assert.deepEqual(await page.evaluate(`window.__shortcut`),[true],'and the browser’s own print of the page does not run');
+  await page.evaluate(`(async()=>{window.__seen=null;window.__shortcut=[];await __PWA6.goTab('plan');})()`);await sleep(300);
+  await ctrlP();await sleep(800);
+  assert.deepEqual(await page.evaluate(`({shortcut:window.__shortcut,seen:window.__seen})`),{shortcut:[false],seen:null},'outside the notes, Ctrl+P is the browser’s print');
+  await page.evaluate(`(async()=>{await __PWA6.goTab('library');__PWA6.LibraryView.showSection('notes');window.print=window.__realPrint;})()`);
+
   // A long note: its print runs past the first page.
   const long=Array.from({length:300},(_,index)=>`Paragraph ${index+1}: a line long enough to wrap once on a printed page, about deposits, withdrawals and the dates they were made.`).join('\n\n');
   const updated=await page.evaluate(`(async()=>{const notes=__PWA6.AppData.notes;const result=notes.update('long note','Long note',${JSON.stringify(long)},'');await notes.flush({strict:true});return JSON.stringify(result);})()`);
@@ -57,5 +71,5 @@ try{
   await page.evaluate(`(()=>{window.dispatchEvent(new Event('afterprint'));window.print=window.__realPrint;})()`);
   const pages=(pdf.match(/\/Type\s*\/Page[^s]/gu)||[]).length;
   assert.ok(pages>=3,`the long note prints over several pages (${pages})`);
-  console.log(JSON.stringify({status:'PASS',suite:'note-actions-and-print',checks:['top line follows the first words','⋯ offers Print, Export and Earlier versions','Print prints it, PDF named after the note','headings keep with what follows',`a long note prints over ${pages} pages`]}));
+  console.log(JSON.stringify({status:'PASS',suite:'note-actions-and-print',checks:['top line follows the first words','⋯ offers Print, Export and Earlier versions','Print prints it, PDF named after the note','Ctrl+P prints the open note, elsewhere the browser’s print','headings keep with what follows',`a long note prints over ${pages} pages`]}));
 }finally{await browser.close();await server.close();}
