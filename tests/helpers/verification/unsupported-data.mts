@@ -18,7 +18,7 @@ const idb=`const req=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r
   const open=(version=0,upgrade=null)=>new Promise((resolve,reject)=>{const r=version?indexedDB.open(${JSON.stringify(INDEXED_DB.name)},version):indexedDB.open(${JSON.stringify(INDEXED_DB.name)});r.onupgradeneeded=()=>upgrade&&upgrade(r.result);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('blocked'));});
   const dump=async()=>{const db=await open(),out={version:db.version,stores:{}};for(const store of [...db.objectStoreNames].sort()){const tx=db.transaction(store,'readonly'),os=tx.objectStore(store);out.stores[store]={keys:await req(os.getAllKeys()),values:await req(os.getAll())};}db.close();return out;};`;
 const raw=`(async()=>{${idb}return dump();})()`;
-const prefsKey=APP_META_KEYS.personalPreferences;
+const prefsKey=APP_META_KEYS['personalPreferences'];
 type StoreDump={keys:unknown[];values:unknown[]};
 type DatabaseDump={version:number;stores:Record<string,StoreDump>};
 function databaseDump(value:unknown):DatabaseDump{
