@@ -27,7 +27,7 @@ function createPrimitiveHarness({strictUnsupported=false}={}){
   };
   const indexedDB={open(){const request:{result:typeof db;error:Error|null;onupgradeneeded:(()=>void)|null;onsuccess:(()=>void)|null;onerror:(()=>void)|null;onblocked:(()=>void)|null}={result:db,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};queueMicrotask(()=>request.onsuccess?.());return request;}};
   const context=vm.createContext({console,queueMicrotask,setTimeout,clearTimeout,Date,Promise,Object,Array,String,Number,Math,JSON,RegExp,Error,TypeError,Uint8Array,TextEncoder,indexedDB,globalThis:null});
-  context.globalThis=context;
+  context['globalThis']=context;
   vm.runInContext(internal,context,{filename:'source/core/internal.ts'});
   vm.runInContext(persistence,context,{filename:'source/core/persistence.ts'});
   const module=registeredExports(context,'persistence');

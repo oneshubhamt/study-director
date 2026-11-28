@@ -155,7 +155,7 @@ function claimHarness(){
    checkClaim:async()=>{checks.push('check');return true;},
    wakeClaim:(slack:number)=>{wakes.push(Number(slack)||0);return Promise.resolve(true);}
   },
-  BackupProviderRuntime:{syncing:()=>syncing,wakeBackground:reason=>wakes.push(reason)},
+  BackupProviderRuntime:{syncing:()=>syncing,wakeBackground:(reason:string)=>wakes.push(reason)},
   AppDiagnostics:{capture:()=>{}},SESSION_CLAIM_WATCH_MS:15000,SESSION_WATCH_MS:120000,
   setInterval:(fn:()=>void,ms:number)=>{intervals.push({fn,ms});return intervals.length;}
  });
