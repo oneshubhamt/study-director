@@ -122,6 +122,8 @@
     "tests/helpers/verification/multi-tab.mts",
     "tests/helpers/note-ids.mts",
     "tests/helpers/verification/pending-review-codec.mts",
-    "tests/helpers/repository-storage.mts"
+    "tests/helpers/repository-storage.mts",
+    "tests/helpers/repository-harness.mts",
+    "tests/helpers/verification/pending-reviews.mts"
   ]
 }
